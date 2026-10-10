@@ -51,6 +51,9 @@ enum Dialog {
         path: String,
         chord: String,
     },
+    ExportStep {
+        path: String,
+    },
 }
 
 impl Dialog {
@@ -63,6 +66,7 @@ impl Dialog {
             Dialog::SaveAs { .. } => "Save document as",
             Dialog::Open { .. } => "Open document",
             Dialog::ExportStl { .. } => "Export STL",
+            Dialog::ExportStep { .. } => "Export STEP",
         }
     }
 }
@@ -598,6 +602,14 @@ impl F420App {
                     chord: "0.01".into(),
                 });
             }
+            if ui
+                .add_enabled(idle && open, egui::Button::new("Export STEP…"))
+                .clicked()
+            {
+                self.dialog = Some(Dialog::ExportStep {
+                    path: self.default_path("step"),
+                });
+            }
             if ui.button("Fit view").clicked()
                 && let Some(vp) = self.viewport.as_mut()
             {
@@ -907,6 +919,12 @@ impl F420App {
                             ));
                         }
                     }
+                    Dialog::ExportStep { path } => {
+                        text_field(ui, "STEP path", path);
+                        ui.label(
+                            "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
+                        );
+                    }
                 }
                 ui.horizontal(|ui| {
                     ok = ui.add_enabled(!busy, egui::Button::new("OK")).clicked();
@@ -979,6 +997,9 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::ExportStl { path, chord } => Command::ExportStl {
             path: nonempty_path(path)?,
             chord: Some(parse_num("chord", chord)?),
+        },
+        Dialog::ExportStep { path } => Command::ExportStep {
+            path: nonempty_path(path)?,
         },
     })
 }
