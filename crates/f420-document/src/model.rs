@@ -120,7 +120,12 @@ impl Feature {
             )));
         }
         match &mut self.kind {
-            FeatureKind::Sketch { sketch, .. } if name == "center_x" || name == "center_y" => {
+            // Only template sketches (exactly one fixed anchor, no origin) expose
+            // center_x / center_y; on editor sketches the only FixedPoint is the
+            // origin, which must never move.
+            FeatureKind::Sketch { sketch, .. }
+                if (name == "center_x" || name == "center_y") && anchor(sketch).is_some() =>
+            {
                 let Some(f420_sketch::Constraint::FixedPoint { x, y, .. }) = sketch
                     .constraints
                     .iter_mut()
