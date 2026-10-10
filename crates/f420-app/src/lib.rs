@@ -7,6 +7,7 @@
 pub mod app;
 pub mod engine;
 pub mod place;
+pub mod sketch_edit;
 
 pub use app::{Diagnostic, F420App};
 pub use engine::{ExecMode, Reply};
