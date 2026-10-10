@@ -36,8 +36,19 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
 - Coplanar boolean faces fail (handled by overshoot for through-all; blind cuts flush with faces would fail).
 - `IntersectionCurve::subs` unwraps internally; adapter evaluates with `search_triple` and wraps every
   Truck call in `catch_unwind` (`guarded`) so a kernel panic becomes `KernelError::Internal`.
-- Boolean results carry IntersectionCurve edges; truck-stepio 0.3 STEP export of these is untested
-  -> STEP deferred.
+- Boolean results carry IntersectionCurve edges. **truck-stepio 0.3 writes INTERSECTION_CURVE with
+  the second surface at the first surface's entity index** (`out/geometry.rs`, `DisplayByStep for
+  IntersectionCurve`: `self.surface1().fmt(surface0_idx, f)`), giving duplicate ids. Observed: the
+  cut plate exported as-is imports in FreeCAD with volume 39194.58 (expected 39214.60) and z bounds
+  [-1, 11] (`spikes/truck_spike/src/bin/step.rs`, artifacts/step_probe_cut.step).
+  Mitigation in `f420-kernel/src/step.rs`: before writing, every plane ∩ Z-extruded-NURBS intersection
+  edge is rebuilt as the exact rational B-spline generating curve at the plane's z, trimmed between
+  the edge vertices, and verified to lie on both surfaces (1e-7 mm) and on the same branch as Truck's
+  edge; any other intersection type is refused. Output is checked for unique entity ids.
+  Independent check: FreeCAD 1.1.4 (OpenCascade) imports 1 valid solid, 9 faces, volume
+  49214.6018371 (err 5e-7 mm³) for the 100x50x10 plate (`tools/external_validation.sh`).
+  Cylinder faces are exported as rational B-spline surfaces (exact circle representation), not
+  CYLINDRICAL_SURFACE.
 - No persistent topological naming in Truck; the document layer resolves semantic references
   from feature parameters and validates them against the B-rep (see docs/behavior/plate-workflow.md).
 
