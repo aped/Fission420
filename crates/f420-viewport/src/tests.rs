@@ -229,13 +229,177 @@ fn expand_mesh_falls_back_to_flat_normals() {
 }
 
 #[test]
-fn grid_spacing_scales_with_model() {
-    let small = Aabb::from_points([[0.0; 3], [10.0; 3]]);
-    let big = Aabb::from_points([[0.0; 3], [1000.0; 3]]);
-    let (_, bs) = grid_lines(small);
-    let (_, bb) = grid_lines(big);
-    assert!(bs.max[0] >= 10.0 && bs.max[0] < 100.0);
-    assert!(bb.max[0] >= 1000.0 && bb.max[0] < 10000.0);
+fn grid_spacing_scales_with_view() {
+    // Replaces the old mesh-sized grid test: the grid now adapts to zoom.
+    let c = Camera::default();
+    let near = GridSpec::new(None, &c, 600.0, 1.5);
+    let far = GridSpec::new(
+        None,
+        &Camera {
+            distance: c.distance * 100.0,
+            ..c.clone()
+        },
+        600.0,
+        1.5,
+    );
+    assert!(far.spacing >= near.spacing * 50.0);
+    assert!(near.spacing * pixels_per_mm(&c, 600.0) >= MIN_CELL_PX);
+}
+
+/// Screen position of `p` relative to the target's (the screen centre).
+fn screen_offset(c: &Camera, p: Vec3) -> [f32; 2] {
+    let (w, h) = (800.0, 600.0);
+    let [x, y] = c.project(p, w, h).expect("visible");
+    [x - w / 2.0, y - h / 2.0]
+}
+
+/// Assert that world direction `d` (from the target) goes right (+x) or up
+/// (-y on screen) and is near-perpendicular to the other screen axis.
+fn assert_screen_dir(c: &Camera, d: Vec3, expect: [f32; 2], what: &str) {
+    let p = math::add(c.target, math::scale(d, 10.0));
+    let [x, y] = screen_offset(c, p);
+    let len = (x * x + y * y).sqrt();
+    assert!(len > 1.0, "{what}: projects to a point");
+    let (ux, uy) = (x / len, y / len);
+    assert!(
+        approx(ux, expect[0], 0.01) && approx(uy, expect[1], 0.01),
+        "{what}: screen dir ({ux}, {uy}), expected {expect:?}"
+    );
+}
+
+const RIGHT: [f32; 2] = [1.0, 0.0];
+const LEFT: [f32; 2] = [-1.0, 0.0];
+const UP: [f32; 2] = [0.0, -1.0];
+const DOWN: [f32; 2] = [0.0, 1.0];
+
+#[test]
+fn view_presets_have_documented_screen_axes() {
+    let x = [1.0, 0.0, 0.0];
+    let y = [0.0, 1.0, 0.0];
+    let z = [0.0, 0.0, 1.0];
+    // preset, axis A, A's screen dir, axis B, B's screen dir, view dir
+    type Case = (ViewPreset, Vec3, [f32; 2], Vec3, [f32; 2], Vec3);
+    let cases: [Case; 6] = [
+        (ViewPreset::Top, x, RIGHT, y, UP, [0.0, 0.0, -1.0]),
+        (ViewPreset::Bottom, x, RIGHT, y, DOWN, [0.0, 0.0, 1.0]),
+        (ViewPreset::Front, x, RIGHT, z, UP, [0.0, 1.0, 0.0]),
+        (ViewPreset::Back, x, LEFT, z, UP, [0.0, -1.0, 0.0]),
+        (ViewPreset::Right, y, RIGHT, z, UP, [-1.0, 0.0, 0.0]),
+        (ViewPreset::Left, y, LEFT, z, UP, [1.0, 0.0, 0.0]),
+    ];
+    for (preset, a, ad, b, bd, view) in cases {
+        let mut c = cam(1.234, -0.4);
+        let (t0, d0) = (c.target, c.distance);
+        c.set_view(preset);
+        assert_eq!(c.target, t0);
+        assert_eq!(c.distance, d0);
+        let name = preset.label();
+        assert_screen_dir(&c, a, ad, name);
+        assert_screen_dir(&c, b, bd, name);
+        let (_, _, f) = c.basis();
+        assert!(math::dot(f, view) > 0.9999, "{name}: forward {f:?}");
+    }
+    let mut c = cam(0.0, 0.0);
+    c.set_view(ViewPreset::Iso);
+    let d = Camera::default();
+    assert!(approx(c.pitch, d.pitch, 1e-6));
+    assert!(approx(c.basis().0[0], d.basis().0[0], 1e-6));
+    assert_eq!(ViewPreset::ALL.len(), 7);
+}
+
+#[test]
+fn look_along_normal_orients_to_plane() {
+    // XY plane seen from +Z with x = +X: same as Top.
+    let mut c = cam(2.0, 0.1);
+    c.look_along_normal([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    assert_screen_dir(&c, [1.0, 0.0, 0.0], RIGHT, "xy");
+    assert_screen_dir(&c, [0.0, 1.0, 0.0], UP, "xy");
+    // Rotated sketch x axis on a Z plane still points right.
+    let xa = [0.6, 0.8, 0.0];
+    c.look_along_normal([0.0, 0.0, 1.0], xa);
+    assert_screen_dir(&c, xa, RIGHT, "rotated xy");
+    // Plane facing -Z (sketch on a bottom face): eye below, x right.
+    c.look_along_normal([0.0, 0.0, -2.0], [1.0, 0.0, 0.0]);
+    assert!(c.eye()[2] < c.target[2]);
+    assert_screen_dir(&c, [1.0, 0.0, 0.0], RIGHT, "-z plane");
+    // XZ plane with normal -Y, x = +X: front view.
+    c.look_along_normal([0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    assert_screen_dir(&c, [1.0, 0.0, 0.0], RIGHT, "xz");
+    assert_screen_dir(&c, [0.0, 0.0, 1.0], UP, "xz");
+    // Tilted plane: view direction is exactly -normal.
+    let n = math::normalize([1.0, 2.0, 3.0]).unwrap();
+    c.look_along_normal(n, [1.0, 0.0, 0.0]);
+    assert!(math::dot(c.basis().2, n) < -0.9999);
+    // Degenerate normal leaves the camera alone.
+    let before = c.clone();
+    c.look_along_normal([0.0; 3], [1.0, 0.0, 0.0]);
+    assert_eq!(c, before);
+}
+
+#[test]
+fn zoom_at_keeps_point_under_cursor() {
+    let (w, h) = (1000.0, 700.0);
+    let mut c = cam(0.5, 0.5);
+    let (px, py) = (820.0, 130.0);
+    // Point under the cursor at target depth.
+    let ray = c.ray(px, py, w, h).unwrap();
+    let f = c.basis().2;
+    let anchor = math::add(
+        ray.origin,
+        math::scale(ray.dir, c.distance / math::dot(ray.dir, f)),
+    );
+    let d0 = c.distance;
+    c.zoom_at(300.0, px, py, w, h);
+    assert!(c.distance < d0);
+    let [x, y] = c.project(anchor, w, h).unwrap();
+    assert!(approx(x, px, 1e-2) && approx(y, py, 1e-2), "({x}, {y})");
+    c.zoom_at(-600.0, px, py, w, h);
+    assert!(c.distance > d0);
+    let [x, y] = c.project(anchor, w, h).unwrap();
+    assert!(approx(x, px, 1e-2) && approx(y, py, 1e-2), "({x}, {y})");
+    // Zooming at the centre does not move the target.
+    let t = c.target;
+    c.zoom_at(100.0, w / 2.0, h / 2.0, w, h);
+    assert!(approx3(c.target, t, 1e-3));
+    // Invalid viewport size falls back to plain zoom.
+    c.zoom_at(100.0, 0.0, 0.0, 0.0, 0.0);
+    assert!(approx3(c.target, t, 1e-3));
+}
+
+#[test]
+fn pixels_per_mm_matches_projection() {
+    let c = cam(0.3, 0.7);
+    let h = 640.0;
+    let ppm = pixels_per_mm(&c, h);
+    // A 1 mm step along screen-right at target depth spans ppm pixels.
+    let (r, _, _) = c.basis();
+    let a = c.project(c.target, 900.0, h).unwrap();
+    let b = c
+        .project(math::add(c.target, math::scale(r, 10.0)), 900.0, h)
+        .unwrap();
+    assert!(approx((b[0] - a[0]) / 10.0, ppm, 1e-3 * ppm));
+    assert_eq!(pixels_per_mm(&c, 0.0), 0.0);
+    assert_eq!(pixels_per_mm(&c, f32::NAN), 0.0);
+}
+
+#[test]
+fn selection_flags_mark_selected_groups() {
+    let m = box_mesh([0.0; 3], [1.0; 3]);
+    let v = expand_mesh(&m);
+    let groups: Vec<u32> = v.iter().map(|x| x.group).collect();
+    let f = selection_flags(&groups, &[1, 5]);
+    assert_eq!(f.len(), v.len());
+    for (g, fl) in groups.iter().zip(&f) {
+        assert_eq!(*fl == FLAG_SELECTED, *g == 1 || *g == 5);
+    }
+    assert!(selection_flags(&groups, &[]).iter().all(|&x| x == 0));
+}
+
+#[test]
+fn nav_help_mentions_all_bindings() {
+    for word in ["orbit", "pan", "zoom", "Shift"] {
+        assert!(NAV_HELP.contains(word));
+    }
 }
 
 #[test]

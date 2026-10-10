@@ -37,14 +37,24 @@ pub struct Uniforms {
     pub light_dir: [f32; 4],
     pub base_color: [f32; 4],
     pub highlight_color: [f32; 4],
+    pub selection_color: [f32; 4],
+    /// Linear RGB to fade the body toward, and the fade amount (0 = off).
+    pub fade: [f32; 4],
+    /// x = hovered group, y = 1 if hover highlight active.
     pub highlight: [u32; 4],
 }
+
+/// Per-vertex flag bits (second mesh vertex buffer).
+pub const FLAG_SELECTED: u32 = 1;
 
 struct Target {
     size: [u32; 2],
     msaa_view: Option<wgpu::TextureView>,
     depth_view: wgpu::TextureView,
     resolve_view: wgpu::TextureView,
+    /// Kept for test read-back.
+    #[cfg_attr(not(test), allow(dead_code))]
+    resolve_tex: wgpu::Texture,
 }
 
 pub struct Gpu {
@@ -55,6 +65,9 @@ pub struct Gpu {
     uniform_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     mesh_buf: Option<(wgpu::Buffer, u32)>,
+    /// One u32 of `FLAG_*` bits per mesh vertex (same count as `mesh_buf`).
+    flag_buf: Option<(wgpu::Buffer, u32)>,
+    edge_buf: Option<(wgpu::Buffer, u32)>,
     line_buf: Option<(wgpu::Buffer, u32)>,
     target: Option<Target>,
     texture_id: Option<egui::TextureId>,
@@ -115,12 +128,24 @@ impl Gpu {
             immediate_size: 0,
         });
 
-        let depth = |write: bool| wgpu::DepthStencilState {
+        let depth = |write: bool, bias| wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(write),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
+            bias,
+        };
+        // Polygon offset on the mesh so feature edges lying exactly on faces
+        // (and sketch grids on faces) win the depth test. For a float depth
+        // buffer the constant term is in units of 2^(e-23) of the primitive's
+        // max depth exponent, i.e. it scales with depth precision; the slope
+        // term (about one pixel of the face's own depth slope) covers grazing
+        // angles. WebGPU forbids depth bias on line topologies, so lines also
+        // get a tiny eye-ward nudge in `vs_line`.
+        let mesh_bias = wgpu::DepthBiasState {
+            constant: 16,
+            slope_scale: 1.0,
+            clamp: 0.0,
         };
         let multisample = wgpu::MultisampleState {
             count: sample_count,
@@ -129,6 +154,7 @@ impl Gpu {
         };
 
         let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
+        let flag_attrs = wgpu::vertex_attr_array![3 => Uint32];
         let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("f420_mesh_pipeline"),
             layout: Some(&layout),
@@ -136,18 +162,25 @@ impl Gpu {
                 module: &shader,
                 entry_point: Some("vs_mesh"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &mesh_attrs,
-                })],
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attrs,
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<u32>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &flag_attrs,
+                    }),
+                ],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 cull_mode: None,
                 ..Default::default()
             },
-            depth_stencil: Some(depth(true)),
+            depth_stencil: Some(depth(true, mesh_bias)),
             multisample,
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -183,7 +216,7 @@ impl Gpu {
             },
             // Lines test against the mesh but do not write depth, so
             // translucent grid lines never occlude each other.
-            depth_stencil: Some(depth(false)),
+            depth_stencil: Some(depth(false, wgpu::DepthBiasState::default())),
             multisample,
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -214,14 +247,32 @@ impl Gpu {
             uniform_buf,
             bind_group,
             mesh_buf: None,
+            flag_buf: None,
+            edge_buf: None,
             line_buf: None,
             target: None,
             texture_id: None,
         }
     }
 
-    pub fn set_mesh(&mut self, verts: &[MeshVertex]) {
+    /// Upload mesh vertices with their per-vertex flags (`flags.len()` must
+    /// equal `verts.len()`, otherwise flags are reset to zero).
+    pub fn set_mesh(&mut self, verts: &[MeshVertex], flags: &[u32]) {
         self.mesh_buf = upload(&self.render_state.device, "f420_mesh_vb", verts);
+        if flags.len() == verts.len() {
+            self.set_mesh_flags(flags);
+        } else {
+            self.set_mesh_flags(&vec![0; verts.len()]);
+        }
+    }
+
+    /// Replace only the per-vertex flags (e.g. on selection change).
+    pub fn set_mesh_flags(&mut self, flags: &[u32]) {
+        self.flag_buf = upload(&self.render_state.device, "f420_mesh_flags", flags);
+    }
+
+    pub fn set_edges(&mut self, verts: &[LineVertex]) {
+        self.edge_buf = upload(&self.render_state.device, "f420_edge_vb", verts);
     }
 
     pub fn set_lines(&mut self, verts: &[LineVertex]) {
@@ -241,39 +292,41 @@ impl Gpu {
             depth_or_array_layers: 1,
         };
         let make = |label, format, samples, usage| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: extent,
-                    mip_level_count: 1,
-                    sample_count: samples,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
-                })
-                .create_view(&wgpu::TextureViewDescriptor::default())
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
         };
-        let resolve_view = make(
+        let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+        let resolve_tex = make(
             "f420_viewport_color",
             COLOR_FORMAT,
             1,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
         );
+        let resolve_view = view(&resolve_tex);
         let msaa_view = (self.sample_count > 1).then(|| {
-            make(
+            view(&make(
                 "f420_viewport_msaa",
                 COLOR_FORMAT,
                 self.sample_count,
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
-            )
+            ))
         });
-        let depth_view = make(
+        let depth_view = view(&make(
             "f420_viewport_depth",
             DEPTH_FORMAT,
             self.sample_count,
             wgpu::TextureUsages::RENDER_ATTACHMENT,
-        );
+        ));
 
         let mut renderer = self.render_state.renderer.write();
         let id = match self.texture_id {
@@ -297,6 +350,7 @@ impl Gpu {
             msaa_view,
             depth_view,
             resolve_view,
+            resolve_tex,
         });
         Some(id)
     }
@@ -353,13 +407,16 @@ impl Gpu {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
-            if let Some((buf, n)) = &self.mesh_buf {
+            if let (Some((buf, n)), Some((flags, nf))) = (&self.mesh_buf, &self.flag_buf)
+                && n == nf
+            {
                 pass.set_pipeline(&self.mesh_pipeline);
                 pass.set_vertex_buffer(0, buf.slice(..));
+                pass.set_vertex_buffer(1, flags.slice(..));
                 pass.draw(0..*n, 0..1);
             }
-            if let Some((buf, n)) = &self.line_buf {
-                pass.set_pipeline(&self.line_pipeline);
+            pass.set_pipeline(&self.line_pipeline);
+            for (buf, n) in [&self.edge_buf, &self.line_buf].into_iter().flatten() {
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..*n, 0..1);
             }
@@ -368,6 +425,55 @@ impl Gpu {
         // samples the resolved texture.
         queue.submit(Some(encoder.finish()));
         Some(id)
+    }
+}
+
+#[cfg(test)]
+impl Gpu {
+    /// Copy the last rendered frame back to the CPU as tightly packed RGBA8.
+    pub fn read_back(&self) -> Option<(Vec<u8>, [u32; 2])> {
+        let t = self.target.as_ref()?;
+        let [w, h] = t.size;
+        let device = &self.render_state.device;
+        let row = (w * 4).div_ceil(256) * 256;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("f420_readback"),
+            size: u64::from(row) * u64::from(h),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &t.resolve_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.render_state.queue.submit(Some(enc.finish()));
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+        let data = buf.slice(..).get_mapped_range().ok()?.to_vec();
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h as usize {
+            let start = y * row as usize;
+            out.extend_from_slice(data.get(start..start + (w * 4) as usize)?);
+        }
+        Some((out, [w, h]))
     }
 }
 
