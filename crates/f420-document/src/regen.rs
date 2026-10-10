@@ -142,6 +142,7 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
             FeatureKind::Sketch { plane, sketch } => {
                 let (frame, resolved) = match plane {
                     SketchPlane::WorldXY => (Frame::XY, None),
+                    SketchPlane::WorldXZ => (Frame::XZ, None),
                     SketchPlane::Face(fr) => {
                         let rf = resolve_face(id, fr, &extrudes, body.as_ref())?;
                         (rf.frame, Some(rf))
@@ -166,6 +167,23 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                 r.frame = Some(frame);
                 r.resolved_face = resolved;
                 sketches.insert(id, SketchOut { frame, profile });
+            }
+            FeatureKind::Revolve { sketch, angle } => {
+                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("{sketch} is not a sketch"),
+                })?;
+                if body.is_some() {
+                    return Err(DocError::ProductLimit(
+                        "only one base body (extrude or revolve) per document is supported".into(),
+                    ));
+                }
+                let b = k::revolve(&to_kernel(&s.profile), &s.frame, *angle)
+                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let m = measure(id, &b)?;
+                r.measurements = Some(m.clone());
+                last_m = Some(m);
+                body = Some(b);
             }
             FeatureKind::Extrude { sketch, distance } => {
                 let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
@@ -212,10 +230,9 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                 })?;
                 // Product limit: every cut must lie inside the base extrusion's profile,
                 // evaluated in the base profile's own frame (not the cut sketch's frame).
-                let host = extrudes.values().next().ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: "cut has no base extrusion".into(),
-                })?;
+                let host = extrudes.values().next().ok_or(DocError::ProductLimit(
+                    "cuts are only supported on an extruded base body".into(),
+                ))?;
                 let hole = hole_in_host_frame(&s.profile, &s.frame, &host.start)?;
                 check_hole_inside(&hole, &host.profile)?;
                 let b =

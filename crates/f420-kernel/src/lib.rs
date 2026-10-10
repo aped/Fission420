@@ -10,7 +10,7 @@ mod measure;
 mod mesh;
 mod step;
 
-pub use build::{cut_through_all, extrude};
+pub use build::{cut_through_all, extrude, revolve};
 pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on,
     z_face_inner_loops,
@@ -29,6 +29,8 @@ pub mod tol {
     pub const BOOLEAN: f64 = 0.05;
     /// Coplanarity / direction tolerance for matching semantic face references.
     pub const FACE_MATCH: f64 = 1.0e-7;
+    /// Smallest accepted revolve angle (rad).
+    pub const MIN_ANGLE: f64 = 1.0e-6;
     /// Smallest accepted feature length; anything below this is rejected as degenerate.
     pub const MIN_LENGTH: f64 = 1.0e-3;
     /// Extra length a through-all cutter extends past the body on both sides, as a
@@ -68,6 +70,14 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// World XZ plane: local x = world X, local y = world Z, normal = -Y (right-handed).
+    pub const XZ: Frame = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [0.0, -1.0, 0.0],
+    };
+
     pub const XY: Frame = Frame {
         origin: [0.0, 0.0, 0.0],
         x: [1.0, 0.0, 0.0],

@@ -113,6 +113,52 @@ fn wire_area_xy(w: &Wire, n: usize) -> Option<f64> {
     Some(a / 2.0)
 }
 
+enum ZClass {
+    /// n_z == 0 everywhere: contributes nothing to the integral of z n_z dA.
+    Vertical,
+    /// Lies in the plane z = c with normal +-Z (e.g. a revolved annulus).
+    Horizontal(f64),
+}
+
+fn bound(b: std::ops::Bound<f64>) -> Option<f64> {
+    match b {
+        std::ops::Bound::Included(x) | std::ops::Bound::Excluded(x) => Some(x),
+        std::ops::Bound::Unbounded => None,
+    }
+}
+
+/// Classify a non-`Plane` surface by dense sampling of its (finite) parameter domain.
+/// Anything that is neither Z-ruled nor a horizontal plane is unsupported.
+fn classify_by_sampling(s: &Surface) -> std::result::Result<ZClass, String> {
+    let ((a0, a1), (b0, b1)) = s.parameter_range();
+    let (Some(u0), Some(u1), Some(v0), Some(v1)) = (bound(a0), bound(a1), bound(b0), bound(b1))
+    else {
+        return Err("unbounded surface parameter range".into());
+    };
+    const K: usize = 16;
+    let (mut vertical, mut horizontal) = (true, true);
+    let z0 = s.subs(u0, v0).z;
+    for i in 0..=K {
+        for j in 0..=K {
+            let (u, v) = (
+                u0 + (u1 - u0) * i as f64 / K as f64,
+                v0 + (v1 - v0) * j as f64 / K as f64,
+            );
+            let nn = s.normal(u, v);
+            if !nn.x.is_finite() || !nn.z.is_finite() {
+                continue; // degenerate point (e.g. on the axis of a revolution); judged by neighbours
+            }
+            vertical &= nn.z.abs() <= 1e-12;
+            horizontal &= nn.x.abs() + nn.y.abs() <= 1e-12 && (s.subs(u, v).z - z0).abs() <= 1e-9;
+        }
+    }
+    match (vertical, horizontal) {
+        (true, _) => Ok(ZClass::Vertical),
+        (_, true) => Ok(ZClass::Horizontal(z0)),
+        _ => Err("curved face is neither Z-ruled nor horizontal".into()),
+    }
+}
+
 fn volume_z(solid: &Solid, n: usize) -> std::result::Result<f64, String> {
     let mut v = 0.0;
     for f in solid.face_iter() {
@@ -134,25 +180,17 @@ fn volume_z(solid: &Solid, n: usize) -> std::result::Result<f64, String> {
                     return Err("planar face not parallel or perpendicular to Z".into());
                 }
             }
-            other => {
-                let ((u0, u1), (v0, v1)) = match &other {
-                    Surface::NurbsSurface(s) => s.range_tuple(),
-                    Surface::BSplineSurface(s) => s.range_tuple(),
-                    _ => return Err("unsupported surface type for Z boundary integral".into()),
-                };
-                const K: usize = 16;
-                for i in 0..=K {
-                    for j in 0..=K {
-                        let nn = other.normal(
-                            u0 + (u1 - u0) * i as f64 / K as f64,
-                            v0 + (v1 - v0) * j as f64 / K as f64,
-                        );
-                        if nn.z.abs() > 1e-12 {
-                            return Err("curved face is not Z-ruled (n_z != 0)".into());
-                        }
+            other => match classify_by_sampling(&other)? {
+                ZClass::Vertical => {}
+                ZClass::Horizontal(z) => {
+                    let mut area = 0.0;
+                    for w in f.boundaries() {
+                        area +=
+                            wire_area_xy(&w, n).ok_or("intersection curve evaluation failed")?;
                     }
+                    v += z * area;
                 }
-            }
+            },
         }
     }
     Ok(v)

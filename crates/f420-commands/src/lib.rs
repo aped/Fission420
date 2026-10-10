@@ -52,6 +52,13 @@ pub enum Command {
         sketch: FeatureId,
         distance: f64,
     },
+    /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
+    Revolve {
+        #[serde(default)]
+        name: Option<String>,
+        sketch: FeatureId,
+        angle_deg: f64,
+    },
     CutThroughAll {
         #[serde(default)]
         name: Option<String>,
@@ -92,6 +99,7 @@ impl Command {
             Command::CreateSketch { .. } => "create_sketch",
             Command::Extrude { .. } => "extrude",
             Command::CutThroughAll { .. } => "cut_through_all",
+            Command::Revolve { .. } => "revolve",
             Command::SetParameter { .. } => "set_parameter",
             Command::Undo => "undo",
             Command::Redo => "redo",
@@ -269,6 +277,29 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Revolve {
+                name,
+                sketch,
+                angle_deg,
+            } => {
+                let (name, sketch, a) = (name.clone(), *sketch, *angle_deg);
+                if !a.is_finite() || a <= 0.0 || a > 360.0 {
+                    return Err(DocError::Validation(format!(
+                        "revolve angle must be in (0, 360] degrees, got {a}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Revolve", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Revolve"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Revolve {
+                            sketch,
+                            angle: a.to_radians(),
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::CutThroughAll { name, sketch } => {
                 let (name, sketch) = (name.clone(), *sketch);
                 let id = self.model_mut()?.transact("Cut", |d| {
@@ -396,6 +427,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
             let (kind, plane) = match &f.kind {
                 FeatureKind::Sketch { plane, .. } => ("sketch", Some(*plane)),
                 FeatureKind::Extrude { .. } => ("extrude", None),
+                FeatureKind::Revolve { .. } => ("revolve", None),
                 FeatureKind::Cut { .. } => ("cut_through_all", None),
             };
             FeatureSummary {

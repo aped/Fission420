@@ -122,3 +122,48 @@ fn check_single_closed(body: &Body, what: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Revolve a closed profile about the frame's local Y axis (through the frame origin) by
+/// `angle` radians, 0 < angle <= 2*pi. The profile must lie strictly on the +X side
+/// of the axis (no self-intersection, no degenerate apex).
+pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
+    frame.validate()?;
+    profile.validate()?;
+    if !angle.is_finite() || angle < tol::MIN_ANGLE || angle > 2.0 * std::f64::consts::PI + 1e-12 {
+        return Err(KernelError::InvalidInput(format!(
+            "revolve angle must be in [{}, 2*pi] rad, got {angle}",
+            tol::MIN_ANGLE
+        )));
+    }
+    let min_x = match profile {
+        Profile::Polygon(pts) => pts.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min),
+        Profile::Circle { center, radius } => center[0] - radius,
+    };
+    if min_x < tol::MIN_LENGTH {
+        return Err(KernelError::InvalidInput(format!(
+            "profile must lie strictly on the +X side of the revolve axis (min x = {min_x} mm)"
+        )));
+    }
+    // Truck treats >= 2*pi as a closed sweep; clamp tiny overshoot to exactly 2*pi.
+    let angle = angle.min(2.0 * std::f64::consts::PI);
+    let solid = guarded("revolve", || -> Result<Solid> {
+        let face = profile_face(profile, frame)?;
+        Ok(builder::rsweep(
+            &face,
+            p3(frame.origin),
+            v3(frame.y),
+            Rad(angle),
+        ))
+    })??;
+    let mut body = Body { solid };
+    check_single_closed(&body, "revolve")?;
+    // Sweep orientation depends on the profile normal vs. the rotation sense; make the
+    // shell outward-oriented (positive enclosed volume).
+    if let Ok(m) = measure::measure(&body)
+        && let measure::VolumeResult::Value { volume, .. } = m.volume
+        && volume < 0.0
+    {
+        body.solid.not();
+    }
+    Ok(body)
+}

@@ -145,3 +145,112 @@ fn off_center_hole_is_placed_editable_and_contained() {
         .ok
     );
 }
+
+/// Revolve stretch feature: washer from an off-axis rectangle on WorldXZ.
+/// Expected values by Pappus' theorem (V = A * angle * x_centroid), not the kernel.
+#[test]
+fn revolve_washer_edit_undo_and_limits() {
+    use f420_commands::{Command, Session, SketchTemplate};
+    use f420_document::{DocError, FeatureId, SketchPlane};
+    use std::f64::consts::PI;
+    let mut s = Session::new();
+    let vol = |s: &Session| match s
+        .model()
+        .unwrap()
+        .evaluation()
+        .measurements
+        .as_ref()
+        .unwrap()
+        .volume
+    {
+        f420_kernel::VolumeResult::Value { volume, .. } => volume,
+        ref v => panic!("{v:?}"),
+    };
+    assert!(s.execute(&Command::NewDocument).ok);
+    let rect = SketchTemplate::CenteredRectangle {
+        width: 20.0,
+        height: 10.0,
+        center: Some([30.0, 5.0]),
+    };
+    assert!(
+        s.execute(&Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXZ,
+            template: rect
+        })
+        .ok
+    );
+    let r = s.execute(&Command::Revolve {
+        name: None,
+        sketch: FeatureId(1),
+        angle_deg: 360.0,
+    });
+    assert!(r.ok, "{:?}", r.error);
+    assert!(
+        (vol(&s) - 200.0 * 2.0 * PI * 30.0).abs() < 0.004,
+        "{}",
+        vol(&s)
+    );
+    assert!(
+        s.execute(&Command::SetParameter {
+            feature: FeatureId(2),
+            name: "angle_deg".into(),
+            value: 90.0
+        })
+        .ok
+    );
+    assert!(
+        (vol(&s) - 200.0 * PI / 2.0 * 30.0).abs() < 0.001,
+        "{}",
+        vol(&s)
+    );
+    // Moving the profile across the axis is rejected and rolled back.
+    let r = s.execute(&Command::SetParameter {
+        feature: FeatureId(1),
+        name: "center_x".into(),
+        value: 5.0,
+    });
+    assert!(
+        !r.ok && matches!(r.error, Some(DocError::Validation(_))),
+        "{r:?}"
+    );
+    assert!((vol(&s) - 200.0 * PI / 2.0 * 30.0).abs() < 0.001);
+    assert!(
+        !s.execute(&Command::SetParameter {
+            feature: FeatureId(2),
+            name: "angle_deg".into(),
+            value: 400.0
+        })
+        .ok
+    );
+    assert!(s.execute(&Command::Undo).ok);
+    assert!((vol(&s) - 200.0 * 2.0 * PI * 30.0).abs() < 0.004);
+    // Cuts on revolved bodies are outside the product scope.
+    let circle = SketchTemplate::CenteredCircle {
+        diameter: 2.0,
+        center: Some([30.0, 0.0]),
+    };
+    assert!(
+        s.execute(&Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: circle
+        })
+        .ok
+    );
+    let r = s.execute(&Command::CutThroughAll {
+        name: None,
+        sketch: FeatureId(3),
+    });
+    assert!(
+        !r.ok && matches!(r.error, Some(DocError::ProductLimit(_))),
+        "{r:?}"
+    );
+    // STL of the washer is watertight.
+    let dir = tempfile::tempdir().unwrap();
+    let r = s.execute(&Command::ExportStl {
+        path: dir.path().join("w.stl"),
+        chord: Some(0.01),
+    });
+    assert!(r.ok && r.mesh_check.unwrap().watertight);
+}

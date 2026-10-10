@@ -161,3 +161,45 @@ fn review_chord_bounds() {
     let m = tessellate(&body, 2e-3).unwrap();
     assert!(check_mesh(&m).watertight, "{:?}", check_mesh(&m));
 }
+
+/// Pappus: V = A * angle * x_centroid, independent of the kernel.
+#[test]
+fn revolve_washer_matches_pappus() {
+    // Rectangle in XZ: x in [20, 40], z in [0, 10] -> washer r 20..40, height 10.
+    let prof = Profile::Polygon(vec![[20.0, 0.0], [40.0, 0.0], [40.0, 10.0], [20.0, 10.0]]);
+    for (angle, label) in [(2.0 * PI, "full"), (PI / 2.0, "quarter")] {
+        let b = revolve(&prof, &Frame::XZ, angle).unwrap();
+        let m = measure(&b).unwrap();
+        assert_eq!(m.shell_count, 1, "{label}");
+        assert!(m.all_shells_closed, "{label}");
+        let expected = 200.0 * angle * 30.0;
+        let (v, est) = vol(&m);
+        assert!(
+            (v - expected).abs() <= 0.001f64.max(expected * 1e-7),
+            "{label}: {v} vs {expected} (est {est})"
+        );
+        let mc = check_mesh(&tessellate(&b, 0.01).unwrap());
+        assert!(mc.watertight, "{label}: {mc:?}");
+        assert!(
+            (mc.mesh_volume - expected).abs() / expected < 1e-3,
+            "{label}: {mc:?}"
+        );
+    }
+    let full = revolve(&prof, &Frame::XZ, 2.0 * PI).unwrap();
+    let m = measure(&full).unwrap();
+    assert!(
+        (m.bounds.min[0] + 40.0).abs() < 1e-6 && (m.bounds.max[2] - 10.0).abs() < 1e-6,
+        "{:?}",
+        m.bounds
+    );
+}
+
+#[test]
+fn revolve_rejects_bad_inputs() {
+    let crossing = Profile::Polygon(vec![[-5.0, 0.0], [5.0, 0.0], [5.0, 1.0], [-5.0, 1.0]]);
+    assert!(revolve(&crossing, &Frame::XZ, PI).is_err());
+    let ok = Profile::Polygon(vec![[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]]);
+    assert!(revolve(&ok, &Frame::XZ, 0.0).is_err());
+    assert!(revolve(&ok, &Frame::XZ, 7.0).is_err());
+    assert!(revolve(&ok, &Frame::XZ, f64::NAN).is_err());
+}
