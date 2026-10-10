@@ -8,6 +8,7 @@ native app, the CLI, and the tests. Commands are JSON objects tagged by `cmd`.
 ```bash
 cargo build --release -p f420-cli
 target/release/f420-cli run examples/plate_workflow.json      # JSON lines, one per command
+target/release/f420-cli run examples/bracket_workflow.json    # 120x60 bracket, 5 holes, STL+STEP
 target/release/f420-cli acceptance --out artifacts/acceptance # GOAL.md workflow + analytic checks
 ```
 
@@ -20,15 +21,17 @@ target/release/f420-cli acceptance --out artifacts/acceptance # GOAL.md workflow
 | cmd | fields | notes |
 |---|---|---|
 | `new_document` | | replaces any open document (no prompt; headless) |
-| `create_sketch` | `name?`, `plane`, `template` + template fields | `plane`: `"WorldXY"` or `{"Face":{"feature":N,"role":"ExtrudeEndCap"\|"ExtrudeStartCap"}}`; `template`: `"centered_rectangle"` (`width`,`height`) or `"centered_circle"` (`diameter`) |
+| `create_sketch` | `name?`, `plane`, `template` + template fields | `plane`: `"WorldXY"`, `"WorldXZ"` (x = world X, y = world Z) or `{"Face":{"feature":N,"role":"ExtrudeEndCap"\|"ExtrudeStartCap"}}`; `template`: `"centered_rectangle"` (`width`,`height`,`center?`) or `"centered_circle"` (`diameter`,`center?`); `center` = `[x, y]` in the plane's frame, default origin |
 | `extrude` | `name?`, `sketch`, `distance` | new body; distance > 0 mm; one base extrusion per document (product limit) |
-| `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal |
-| `set_parameter` | `feature`, `name`, `value` | sketch dims: `width`, `height`, `diameter`; extrude: `distance` |
+| `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
+| `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside it (product limit); not on revolved bodies |
+| `set_parameter` | `feature`, `name`, `value` | sketch: `width`, `height`, `diameter`, `center_x`, `center_y`; extrude: `distance` (mm); revolve: `angle_deg` (stored in radians) |
 | `undo` / `redo` | | document-level snapshots |
 | `save` | `path` | atomic (temp file + fsync + rename) |
 | `open` | `path` | validates format/version/references, regenerates, compares with saved cache |
 | `close` | | |
 | `export_stl` | `path`, `chord?` (mm, default 0.01) | binary STL; refused if the tessellation is not watertight |
+| `export_step` | `path` | AP214 via truck-stepio with exact NURBS edge rebuild; refused when an edge can't be written exactly |
 | `measure` / `inspect` | | measurements / full `summary` |
 
 ## Response

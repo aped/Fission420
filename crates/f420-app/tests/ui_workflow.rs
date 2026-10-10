@@ -323,3 +323,22 @@ fn demo_script_reaches_final_plate() {
     assert_eq!(field_value(&h, "width (mm)").as_deref(), Some("100"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn revolve_through_widgets() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    click(&mut h, "Rectangle on XZ…");
+    click(&mut h, "OK");
+    click(&mut h, "Revolve…");
+    type_into(&mut h, "Revolve angle (deg)", "90");
+    click(&mut h, "OK");
+    // Washer quarter: A = 20*10, x_c = 30 -> V = 200 * pi/2 * 30 (Pappus).
+    assert_volume(&h, 200.0 * std::f64::consts::FRAC_PI_2 * 30.0);
+    let row = feature_row_label(&h, 1);
+    click(&mut h, &row);
+    assert_eq!(field_value(&h, "angle_deg (deg)").as_deref(), Some("90"));
+    type_into(&mut h, "angle_deg (deg)", "360");
+    click(&mut h, "Apply");
+    assert_volume(&h, 200.0 * 2.0 * std::f64::consts::PI * 30.0);
+}

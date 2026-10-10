@@ -30,6 +30,17 @@ pub struct Diagnostic {
 /// Open modal-ish form. Only one at a time.
 #[derive(Debug, Clone, PartialEq)]
 enum Dialog {
+    /// Rectangle on world XZ (profile for a revolve about world Z).
+    RectangleXz {
+        width: String,
+        height: String,
+        cx: String,
+        cz: String,
+    },
+    Revolve {
+        sketch: Option<FeatureId>,
+        angle: String,
+    },
     Rectangle {
         width: String,
         height: String,
@@ -69,6 +80,8 @@ impl Dialog {
         match self {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
             Dialog::Extrude { .. } => "New extrusion",
+            Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
+            Dialog::Revolve { .. } => "New revolve (about world Z)",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
             Dialog::Cut { .. } => "New through-all cut",
             Dialog::SaveAs { .. } => "Save document as",
@@ -930,6 +943,26 @@ impl F420App {
                 });
             }
             if ui
+                .add_enabled(idle && open, egui::Button::new("Rectangle on XZ…"))
+                .clicked()
+            {
+                self.dialog = Some(Dialog::RectangleXz {
+                    width: "20".into(),
+                    height: "10".into(),
+                    cx: "30".into(),
+                    cz: "5".into(),
+                });
+            }
+            if ui
+                .add_enabled(idle && has_sketch, egui::Button::new("Revolve…"))
+                .clicked()
+            {
+                self.dialog = Some(Dialog::Revolve {
+                    sketch: self.unused_sketch(),
+                    angle: "360".into(),
+                });
+            }
+            if ui
                 .add_enabled(idle && has_extrude, egui::Button::new("Circle on face…"))
                 .clicked()
             {
@@ -1148,7 +1181,8 @@ impl F420App {
             .num_columns(2)
             .show(ui, |ui| {
                 for (pname, _, buf) in &mut ins.fields {
-                    let l = ui.label(format!("{pname} (mm)"));
+                    let unit = if pname.ends_with("_deg") { "deg" } else { "mm" };
+                    let l = ui.label(format!("{pname} ({unit})"));
                     ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
                         .labelled_by(l.id);
                     ui.end_row();
@@ -1320,6 +1354,22 @@ impl F420App {
                         feature_combo(ui, "Profile sketch", sketch, &sketches);
                         num_field(ui, "Extrude distance (mm)", distance);
                     }
+                    Dialog::RectangleXz {
+                        width,
+                        height,
+                        cx,
+                        cz,
+                    } => {
+                        num_field(ui, "XZ rectangle width (mm)", width);
+                        num_field(ui, "XZ rectangle height (mm)", height);
+                        num_field(ui, "XZ rectangle center X (mm)", cx);
+                        num_field(ui, "XZ rectangle center Z (mm)", cz);
+                        ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
+                    }
+                    Dialog::Revolve { sketch, angle } => {
+                        feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
+                        num_field(ui, "Revolve angle (deg)", angle);
+                    }
                     Dialog::CircleOnFace {
                         extrude,
                         diameter,
@@ -1408,6 +1458,25 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
                 height: parse_num("height", height)?,
                 center: Some([parse_num("center X", cx)?, parse_num("center Y", cy)?]),
             },
+        },
+        Dialog::RectangleXz {
+            width,
+            height,
+            cx,
+            cz,
+        } => Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXZ,
+            template: SketchTemplate::CenteredRectangle {
+                width: parse_num("width", width)?,
+                height: parse_num("height", height)?,
+                center: Some([parse_num("center X", cx)?, parse_num("center Z", cz)?]),
+            },
+        },
+        Dialog::Revolve { sketch, angle } => Command::Revolve {
+            name: None,
+            sketch: need(sketch, "profile sketch")?,
+            angle_deg: parse_num("angle", angle)?,
         },
         Dialog::Extrude { sketch, distance } => Command::Extrude {
             name: None,
