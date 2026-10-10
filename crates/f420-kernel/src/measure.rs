@@ -164,7 +164,10 @@ fn volume(solid: &Solid) -> VolumeResult {
         // The three refinement levels are independent; evaluate them concurrently.
         let [a, b, c] = std::thread::scope(|sc| {
             let hs = [n / 2, n, 2 * n].map(|k| sc.spawn(move || volume_z(solid, k)));
-            hs.map(|h| h.join().unwrap_or_else(|_| Err("volume worker panicked".into())))
+            hs.map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err("volume worker panicked".into()))
+            })
         });
         let (a, b, c) = (a?, b?, c?);
         let r1 = (4.0 * b - a) / 3.0;

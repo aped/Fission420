@@ -151,3 +151,13 @@ fn step_export_has_unique_ids_and_no_intersection_curves() {
     std::fs::create_dir_all("../../artifacts").ok();
     std::fs::write("../../artifacts/plate_100x50x10.step", &text).unwrap();
 }
+
+#[test]
+fn review_chord_bounds() {
+    let body = plate_with_hole(100.0, 50.0, 10.0, 10.0);
+    assert!(tessellate(&body, 1e-6).is_err());
+    assert!(tessellate(&body, 0.0).is_err());
+    assert!(tessellate(&body, f64::NAN).is_err());
+    let m = tessellate(&body, 2e-3).unwrap();
+    assert!(check_mesh(&m).watertight, "{:?}", check_mesh(&m));
+}

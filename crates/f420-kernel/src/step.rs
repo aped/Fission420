@@ -40,7 +40,10 @@ fn is_z_extrusion(s: &NurbsSurface<Vector4>) -> bool {
     let ((u0, u1), (v0, v1)) = s.range_tuple();
     (0..=8).all(|i| {
         (0..=8).all(|j| {
-            let n = s.normal(u0 + (u1 - u0) * i as f64 / 8.0, v0 + (v1 - v0) * j as f64 / 8.0);
+            let n = s.normal(
+                u0 + (u1 - u0) * i as f64 / 8.0,
+                v0 + (v1 - v0) * j as f64 / 8.0,
+            );
             n.z.abs() < 1e-12
         })
     })
@@ -101,7 +104,9 @@ fn exact_edge(ic: &IntersectionCurve<Leader, Surface>, p0: Point3, p1: Point3) -
         .search_nearest_parameter(mid, None, 100)
         .is_some_and(|t| t >= s0 - 1e-9 && t <= s1 + 1e-9 && sub.subs(t).distance(mid) < 1e-5);
     if !on_sub {
-        return Err(unsupported("rebuilt edge is not the same arc as the original"));
+        return Err(unsupported(
+            "rebuilt edge is not the same arc as the original",
+        ));
     }
     Ok(Curve::NurbsCurve(sub))
 }
@@ -121,7 +126,10 @@ pub fn export_step(body: &Body, organization_system: &str) -> Result<String> {
         }
         let text = out::CompleteStepDisplay::new(
             out::StepModel::from(&cs),
-            out::StepHeaderDescriptor { organization_system: organization_system.into(), ..Default::default() },
+            out::StepHeaderDescriptor {
+                organization_system: organization_system.into(),
+                ..Default::default()
+            },
         )
         .to_string();
         check_unique_ids(&text)?;
@@ -137,7 +145,9 @@ fn check_unique_ids(text: &str) -> Result<()> {
             && id.starts_with('#')
             && !seen.insert(id)
         {
-            return Err(KernelError::Internal(format!("STEP writer produced duplicate entity {id}")));
+            return Err(KernelError::Internal(format!(
+                "STEP writer produced duplicate entity {id}"
+            )));
         }
     }
     Ok(())

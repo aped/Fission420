@@ -156,10 +156,11 @@ impl Document {
             .ok_or(DocError::UnknownFeature(id))
     }
 
-    /// Append a feature, allocating its id.
+    /// Append a feature, allocating its id. Ids saturate at `u32::MAX - 1`; at that
+    /// point `evaluation_order` rejects the document instead of wrapping.
     pub fn push(&mut self, name: impl Into<String>, kind: FeatureKind) -> FeatureId {
-        let id = FeatureId(self.next_id.max(1));
-        self.next_id = id.0 + 1;
+        let id = FeatureId(self.next_id.clamp(1, u32::MAX - 1));
+        self.next_id = id.0.saturating_add(1);
         self.features.push(Feature {
             id,
             name: name.into(),

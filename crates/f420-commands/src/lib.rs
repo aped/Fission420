@@ -8,7 +8,7 @@ pub mod acceptance;
 
 use f420_document::{
     DocError, Document, FaceRef, FaceRole, FeatureId, FeatureKind, Model, SketchPlane, load_file,
-    save_file,
+    save_file, write_atomic,
 };
 use f420_kernel::{self as k, Frame, Measurements, MeshCheck};
 use f420_sketch::{Sketch, SolveStatus};
@@ -321,12 +321,11 @@ impl Session {
             }
             Command::ExportStep { path } => {
                 let m = self.model_mut()?;
-                let body = m
-                    .evaluation()
-                    .body
-                    .as_ref()
-                    .ok_or(DocError::Validation("document has no solid body to export".into()))?;
-                let text = k::export_step(body, "Fission420").map_err(|e| DocError::Validation(e.to_string()))?;
+                let body = m.evaluation().body.as_ref().ok_or(DocError::Validation(
+                    "document has no solid body to export".into(),
+                ))?;
+                let text = k::export_step(body, "Fission420")
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
                 write_atomic(path, text.as_bytes())?;
                 r.message = Some(format!("wrote {} ({} bytes)", path.display(), text.len()));
             }
@@ -388,32 +387,6 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
             }
         })
         .collect()
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), DocError> {
-    use std::io::Write;
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let name = path
-        .file_name()
-        .ok_or_else(|| DocError::File(format!("not a file path: {}", path.display())))?;
-    let tmp = dir.join(format!(
-        ".{}.tmp-{}",
-        name.to_string_lossy(),
-        std::process::id()
-    ));
-    let res = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    res.map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        DocError::File(format!("write {}: {e}", path.display()))
-    })
 }
 
 /// Convenience: the semantic reference to an extrusion's end cap ("top face").

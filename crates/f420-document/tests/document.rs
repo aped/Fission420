@@ -282,3 +282,124 @@ fn second_base_extrusion_is_rejected() {
     assert!(matches!(r, Err(DocError::ProductLimit(_))));
     assert_eq!(m.document(), &doc);
 }
+
+/// Move a template sketch's fixed origin point (the template's anchor) to (x, y).
+fn anchored(mut s: Sketch, x: f64, y: f64) -> Sketch {
+    for c in &mut s.constraints {
+        if let f420_sketch::Constraint::FixedPoint { x: cx, y: cy, .. } = c {
+            *cx = x;
+            *cy = y;
+        }
+    }
+    s
+}
+
+fn doc_with_cut(
+    rect: Sketch,
+    plane: impl Fn(FeatureId) -> SketchPlane,
+    circle: Sketch,
+) -> Document {
+    let mut d = Document::new();
+    let s1 = d.push(
+        "S1",
+        FeatureKind::Sketch {
+            plane: SketchPlane::WorldXY,
+            sketch: rect,
+        },
+    );
+    let e1 = d.push(
+        "E1",
+        FeatureKind::Extrude {
+            sketch: s1,
+            distance: 5.0,
+        },
+    );
+    let s2 = d.push(
+        "S2",
+        FeatureKind::Sketch {
+            plane: plane(e1),
+            sketch: circle,
+        },
+    );
+    d.push(
+        "C1",
+        FeatureKind::Cut {
+            sketch: s2,
+            extent: CutExtent::ThroughAll,
+        },
+    );
+    d
+}
+
+#[test]
+fn review_start_cap_containment_uses_host_frame() {
+    // Plate y in [-5, 15]. Start-cap frame has y flipped: local (0, 4) is world (0, -4).
+    let rect = || anchored(Sketch::centered_rectangle(40.0, 20.0).unwrap(), 0.0, 5.0);
+    let start = |e| {
+        SketchPlane::Face(FaceRef {
+            feature: e,
+            role: FaceRole::ExtrudeStartCap,
+        })
+    };
+    let outside = doc_with_cut(
+        rect(),
+        start,
+        anchored(Sketch::centered_circle(4.0).unwrap(), 0.0, 4.0),
+    );
+    assert!(matches!(
+        regenerate(&outside),
+        Err(DocError::ProductLimit(_))
+    ));
+    let inside = doc_with_cut(
+        rect(),
+        start,
+        anchored(Sketch::centered_circle(4.0).unwrap(), 0.0, -4.0),
+    );
+    let ev = regenerate(&inside).unwrap();
+    let loops = f420_kernel::z_face_inner_loops(ev.body.as_ref().unwrap()).unwrap();
+    assert_eq!(loops.len(), 2);
+    assert!((loops[0].centroid_xy[1] - 4.0).abs() < 1e-6, "{loops:?}");
+}
+
+#[test]
+fn review_world_xy_cut_is_also_contained() {
+    let xy = |_| SketchPlane::WorldXY;
+    let notch = doc_with_cut(
+        Sketch::centered_rectangle(40.0, 20.0).unwrap(),
+        xy,
+        anchored(Sketch::centered_circle(4.0).unwrap(), 20.0, 0.0),
+    );
+    assert!(matches!(regenerate(&notch), Err(DocError::ProductLimit(_))));
+    let tangent = doc_with_cut(
+        Sketch::centered_rectangle(40.0, 20.0).unwrap(),
+        xy,
+        Sketch::centered_circle(20.0).unwrap(),
+    );
+    assert!(matches!(
+        regenerate(&tangent),
+        Err(DocError::ProductLimit(_))
+    ));
+    let ok = doc_with_cut(
+        Sketch::centered_rectangle(40.0, 20.0).unwrap(),
+        xy,
+        Sketch::centered_circle(10.0).unwrap(),
+    );
+    assert!(regenerate(&ok).is_ok());
+}
+
+#[test]
+fn review_feature_id_space_does_not_wrap() {
+    let mut d = Document::new();
+    d.next_id = u32::MAX - 1;
+    let sk = || FeatureKind::Sketch {
+        plane: SketchPlane::WorldXY,
+        sketch: Sketch::centered_rectangle(1.0, 1.0).unwrap(),
+    };
+    assert_eq!(d.push("a", sk()), FeatureId(u32::MAX - 1));
+    assert_eq!(d.next_id, u32::MAX);
+    d.push("b", sk());
+    assert!(
+        d.evaluation_order().is_err(),
+        "duplicate id must be rejected, not wrapped"
+    );
+}

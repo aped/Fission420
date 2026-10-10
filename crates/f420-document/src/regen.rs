@@ -89,6 +89,36 @@ fn check_hole_inside(hole: &SketchProfile, host: &SketchProfile) -> Result<()> {
     Ok(())
 }
 
+/// Express a circular cut profile (in `cut_frame`) in the host extrusion's start frame.
+/// The cut axis must be parallel to the extrusion direction (product limit).
+fn hole_in_host_frame(
+    hole: &SketchProfile,
+    cut_frame: &Frame,
+    host: &Frame,
+) -> Result<SketchProfile> {
+    let SketchProfile::Circle { center, radius } = hole else {
+        return Err(DocError::ProductLimit(
+            "only circular cuts are supported".into(),
+        ));
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (dot(cut_frame.z, host.z).abs() - 1.0).abs() > 1e-9 {
+        return Err(DocError::ProductLimit(
+            "cut axis must be parallel to the base extrusion direction".into(),
+        ));
+    }
+    let w = cut_frame.to_world(*center);
+    let d = [
+        w[0] - host.origin[0],
+        w[1] - host.origin[1],
+        w[2] - host.origin[2],
+    ];
+    Ok(SketchProfile::Circle {
+        center: [dot(d, host.x), dot(d, host.y)],
+        radius: *radius,
+    })
+}
+
 /// Regenerate the whole document. Pure function of the document; deterministic.
 pub fn regenerate(doc: &Document) -> Result<Evaluation> {
     let order = doc.evaluation_order()?;
@@ -180,18 +210,14 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                     from: id,
                     detail: "cut has no body to cut".into(),
                 })?;
-                // Product limit: hole must sit inside the face it is sketched on.
-                if let FeatureKind::Sketch {
-                    plane: SketchPlane::Face(fr),
-                    ..
-                } = &doc.feature(*sketch)?.kind
-                {
-                    let host = extrudes.get(&fr.feature).ok_or(DocError::BrokenReference {
-                        from: id,
-                        detail: format!("host feature {} is not an extrusion", fr.feature),
-                    })?;
-                    check_hole_inside(&s.profile, &host.profile)?;
-                }
+                // Product limit: every cut must lie inside the base extrusion's profile,
+                // evaluated in the base profile's own frame (not the cut sketch's frame).
+                let host = extrudes.values().next().ok_or(DocError::BrokenReference {
+                    from: id,
+                    detail: "cut has no base extrusion".into(),
+                })?;
+                let hole = hole_in_host_frame(&s.profile, &s.frame, &host.start)?;
+                check_hole_inside(&hole, &host.profile)?;
                 let b =
                     k::cut_through_all(target, &to_kernel(&s.profile), &s.frame).map_err(|e| {
                         DocError::Kernel {

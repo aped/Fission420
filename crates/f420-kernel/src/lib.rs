@@ -15,8 +15,8 @@ pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on,
     z_face_inner_loops,
 };
-pub use step::export_step;
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
+pub use step::export_step;
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;
@@ -36,6 +36,9 @@ pub mod tol {
     /// coplanar cutter caps, which Truck 0.6 booleans reject (see ADR 0001).
     pub const THROUGH_ALL_MARGIN_REL: f64 = 0.05;
     pub const THROUGH_ALL_MARGIN_ABS: f64 = 1.0;
+    /// Smallest accepted chordal tolerance: max(ABS, REL * bounding diagonal).
+    pub const MIN_MESH_CHORD_ABS: f64 = 1.0e-3;
+    pub const MIN_MESH_CHORD_REL: f64 = 1.0e-5;
     /// Default chordal tolerance for display/STL tessellation.
     pub const MESH_CHORD: f64 = 0.01;
 }

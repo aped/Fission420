@@ -9,7 +9,7 @@ mod model;
 mod regen;
 mod session;
 
-pub use io::{FORMAT_NAME, FORMAT_VERSION, NativeFile, load_file, save_file};
+pub use io::{FORMAT_NAME, FORMAT_VERSION, NativeFile, load_file, save_file, write_atomic};
 pub use model::*;
 pub use regen::{Evaluation, FeatureResult, ResolvedFace, regenerate};
 pub use session::{Model, ParamChange};

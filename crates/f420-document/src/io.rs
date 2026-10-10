@@ -51,13 +51,19 @@ impl NativeFile {
     }
 }
 
-/// Save atomically: write a sibling temp file, fsync, rename over the target, fsync dir.
-/// On any error the previous file at `path` is untouched.
+/// Save atomically (see [`write_atomic`]). On any error the previous file is untouched.
 pub fn save_file(path: &Path, doc: &Document, eval: Option<&Evaluation>) -> Result<()> {
-    let ferr =
-        |what: &str, e: std::io::Error| DocError::File(format!("{what} {}: {e}", path.display()));
     let json = serde_json::to_vec_pretty(&NativeFile::new(doc, eval))
         .map_err(|e| DocError::File(format!("serialize: {e}")))?;
+    write_atomic(path, &json)
+}
+
+/// Write `bytes` to `path` atomically: unique sibling temp file (`create_new`), fsync,
+/// copy the target's permissions if it exists, rename over the target, fsync the
+/// directory (best effort). The rename replaces a symlink at `path` rather than its
+/// target (documented limitation).
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let dir = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => std::path::PathBuf::from("."),
@@ -65,14 +71,25 @@ pub fn save_file(path: &Path, doc: &Document, eval: Option<&Evaluation>) -> Resu
     let fname = path
         .file_name()
         .ok_or_else(|| DocError::File(format!("not a file path: {}", path.display())))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = dir.join(format!(
-        ".{}.tmp-{}",
+        ".{}.tmp-{}-{nonce}-{seq}",
         fname.to_string_lossy(),
         std::process::id()
     ));
     let res = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&json)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        if let Ok(meta) = std::fs::metadata(path) {
+            f.set_permissions(meta.permissions())?;
+        }
         f.sync_all()?;
         drop(f);
         std::fs::rename(&tmp, path)?;
@@ -83,7 +100,7 @@ pub fn save_file(path: &Path, doc: &Document, eval: Option<&Evaluation>) -> Resu
     })();
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);
-        return Err(ferr("save", e));
+        return Err(DocError::File(format!("write {}: {e}", path.display())));
     }
     Ok(())
 }

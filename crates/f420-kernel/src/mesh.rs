@@ -29,9 +29,17 @@ pub fn tessellate_display(body: &Body, chord: f64) -> Result<TriMesh> {
 }
 
 fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<TriMesh> {
-    if !chord.is_finite() || chord <= 0.0 {
+    // Bound the chord from below relative to the part size: tiny chords make Truck
+    // allocate unboundedly (observed: 1e-6 mm aborts on a ~1 GB allocation).
+    let b = crate::measure::raw_bounds(&body.solid)?;
+    let diag = (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let min_chord = crate::tol::MIN_MESH_CHORD_ABS.max(diag * crate::tol::MIN_MESH_CHORD_REL);
+    if !chord.is_finite() || chord < min_chord {
         return Err(KernelError::InvalidInput(format!(
-            "chord tolerance must be > 0, got {chord}"
+            "chord tolerance must be >= {min_chord:.3e} mm for this part, got {chord}"
         )));
     }
     guarded("tessellate", || {
