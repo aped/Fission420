@@ -224,3 +224,73 @@ pub fn planar_faces_on(body: &Body, frame: &Frame) -> usize {
         })
         .count()
 }
+
+/// An inner boundary loop (hole outline) of a planar face perpendicular to Z.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InnerLoop {
+    /// Z of the face plane.
+    pub z: f64,
+    /// Area centroid of the loop (Green's theorem on exact edge curves, Richardson).
+    pub centroid_xy: [f64; 2],
+    /// Enclosed area (mm^2), same method.
+    pub area: f64,
+    /// Diameter of the circle with the same area (equals the diameter for circles).
+    pub equivalent_diameter: f64,
+}
+
+/// Area and first moments (A, Mx, My) of a wire via chord sums on exact curve points.
+fn wire_moments(w: &Wire, n: usize) -> Option<[f64; 3]> {
+    let (mut a, mut mx, mut my) = (0.0, 0.0, 0.0);
+    for e in w.edge_iter() {
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let mut prev = eval_curve(&c, t0)?;
+        for i in 1..=n {
+            let p = eval_curve(&c, t0 + (t1 - t0) * i as f64 / n as f64)?;
+            let cr = prev.x * p.y - p.x * prev.y;
+            a += cr;
+            mx += (prev.x + p.x) * cr;
+            my += (prev.y + p.y) * cr;
+            prev = p;
+        }
+    }
+    Some([a / 2.0, mx / 6.0, my / 6.0])
+}
+
+/// Inner loops of all Z-perpendicular planar faces, measured on exact edge curves.
+/// A loop is "inner" when its signed area about the face normal is negative.
+pub fn z_face_inner_loops(body: &Body) -> Result<Vec<InnerLoop>> {
+    let fail = || KernelError::Internal("intersection curve evaluation failed".into());
+    guarded("inner loops", || -> Result<Vec<InnerLoop>> {
+        let mut out = Vec::new();
+        for f in body.solid.face_iter() {
+            let Surface::Plane(pl) = f.surface() else {
+                continue;
+            };
+            let mut n = pl.normal();
+            if !f.orientation() {
+                n = -n;
+            }
+            if n.x.abs() + n.y.abs() > 1e-12 {
+                continue;
+            }
+            for w in f.boundaries() {
+                let m1 = wire_moments(&w, VOLUME_CHORDS).ok_or_else(fail)?;
+                if m1[0] * n.z >= 0.0 {
+                    continue;
+                }
+                let m2 = wire_moments(&w, 2 * VOLUME_CHORDS).ok_or_else(fail)?;
+                let r: Vec<f64> = (0..3).map(|i| (4.0 * m2[i] - m1[i]) / 3.0).collect();
+                let area = r[0].abs();
+                out.push(InnerLoop {
+                    z: pl.origin().z,
+                    centroid_xy: [r[1] / r[0], r[2] / r[0]],
+                    area,
+                    equivalent_diameter: 2.0 * (area / std::f64::consts::PI).sqrt(),
+                });
+            }
+        }
+        out.sort_by(|a, b| a.z.total_cmp(&b.z));
+        Ok(out)
+    })?
+}

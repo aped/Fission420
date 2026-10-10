@@ -10,7 +10,10 @@ mod measure;
 mod mesh;
 
 pub use build::{cut_through_all, extrude};
-pub use measure::{Bounds, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on};
+pub use measure::{
+    Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on,
+    z_face_inner_loops,
+};
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
 
 use serde::{Deserialize, Serialize};
