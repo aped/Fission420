@@ -4,7 +4,7 @@
 - Start: 2026-10-10T00:34:03-07:00
 - Deadline: 2026-10-10T08:34:03-07:00 (8 h; human's /goal instruction overrides GOAL.md's 6 h default)
 - Integration reserve begins: 2026-10-10T08:04:03-07:00
-- Task budget: 24 bounded tasks. Used: 23 (see log). Run closed at 2026-10-10T01:5x-07:00 with ~6.5 h of time budget unused (no further authorized high-value work without exceeding the task budget's final reserve).
+- Task budget: 24 bounded tasks. Used: 23 (see log). Run closed at 2026-10-10T01:45-07:00: acceptance goal met and stretch items 1, 3, 4, 5 done; ~6.8 h of time and 1 task unused (remaining stretch item, freeform sketch constraints, is larger than one bounded task).
 
 ## Environment (observed)
 - Bazzite (Fedora 44 atomic), kernel 7.2.7, x86_64, 16 threads, Wayland (WAYLAND_DISPLAY=wayland-0, DISPLAY=:0)
