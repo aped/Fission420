@@ -11,7 +11,9 @@ mod session;
 
 pub use io::{FORMAT_NAME, FORMAT_VERSION, NativeFile, load_file, save_file, write_atomic};
 pub use model::*;
-pub use regen::{Evaluation, FeatureResult, ResolvedFace, regenerate};
+pub use regen::{
+    Evaluation, FeatureResult, RegenCache, ResolvedFace, regenerate, regenerate_cached,
+};
 pub use session::{Model, ParamChange};
 
 use serde::{Deserialize, Serialize};

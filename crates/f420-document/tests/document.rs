@@ -403,3 +403,31 @@ fn review_feature_id_space_does_not_wrap() {
         "duplicate id must be rejected, not wrapped"
     );
 }
+
+#[test]
+fn cached_regeneration_matches_uncached() {
+    let (mut m, [s1, e1, s2, _]) = plate(80.0, 50.0, 10.0, 10.0, FaceRole::ExtrudeEndCap);
+    let edits: [(FeatureId, &str, f64); 5] = [
+        (s1, "width", 100.0),
+        (e1, "distance", 12.0),
+        (s2, "diameter", 8.0),
+        (e1, "distance", 10.0),
+        (s1, "width", 80.0),
+    ];
+    for (f, n, v) in edits {
+        m.set_parameter(f, n, v).unwrap();
+        let fresh = regenerate(m.document()).unwrap();
+        assert_eq!(m.evaluation().features, fresh.features, "after {n}={v}");
+        assert_eq!(
+            m.evaluation().measurements,
+            fresh.measurements,
+            "after {n}={v}"
+        );
+    }
+    m.undo().unwrap();
+    m.undo().unwrap();
+    let fresh = regenerate(m.document()).unwrap();
+    assert_eq!(m.evaluation().measurements, fresh.measurements);
+    let (hits, _) = m.cache_stats();
+    assert!(hits >= 5, "cache was not used: {:?}", m.cache_stats());
+}

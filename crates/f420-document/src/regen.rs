@@ -39,11 +39,13 @@ pub struct Evaluation {
     pub measurements: Option<Measurements>,
 }
 
+#[derive(Clone)]
 struct SketchOut {
     frame: Frame,
     profile: SketchProfile,
 }
 
+#[derive(Clone)]
 struct ExtrudeOut {
     start: Frame,
     distance: f64,
@@ -119,9 +121,62 @@ fn hole_in_host_frame(
     })
 }
 
+/// Regeneration state after a history prefix (cached by [`RegenCache`]).
+#[derive(Clone)]
+struct Snapshot {
+    sketches: HashMap<FeatureId, SketchOut>,
+    extrudes: HashMap<FeatureId, ExtrudeOut>,
+    body: Option<Body>,
+    last_solid: Option<usize>,
+    results: Vec<FeatureResult>,
+}
+
+/// Memo of regeneration states keyed by the exact serialized feature definitions of
+/// the evaluated prefix (so any upstream change misses). Bounded FIFO. Results are
+/// identical to uncached regeneration because regeneration is deterministic and
+/// B-rep results are never mutated after creation.
+#[derive(Default)]
+pub struct RegenCache {
+    states: HashMap<String, Snapshot>,
+    measurements: HashMap<String, Measurements>,
+    order: std::collections::VecDeque<String>,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+const REGEN_CACHE_CAPACITY: usize = 128;
+
+impl RegenCache {
+    fn insert(&mut self, key: String, snap: Snapshot) {
+        if self.states.insert(key.clone(), snap).is_none() {
+            self.order.push_back(key);
+            while self.order.len() > REGEN_CACHE_CAPACITY {
+                if let Some(old) = self.order.pop_front() {
+                    self.states.remove(&old);
+                    self.measurements.remove(&old);
+                }
+            }
+        }
+    }
+}
+
 /// Regenerate the whole document. Pure function of the document; deterministic.
 pub fn regenerate(doc: &Document) -> Result<Evaluation> {
+    regenerate_cached(doc, None)
+}
+
+/// Like [`regenerate`], reusing and filling `cache` for unchanged history prefixes.
+pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> Result<Evaluation> {
     let order = doc.evaluation_order()?;
+    let mut keys = Vec::with_capacity(order.len());
+    let mut key = String::new();
+    for id in &order {
+        let f = serde_json::to_string(doc.feature(*id)?)
+            .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
+        key.push_str(&f);
+        key.push('\n');
+        keys.push(key.clone());
+    }
     let mut sketches: HashMap<FeatureId, SketchOut> = HashMap::new();
     let mut extrudes: HashMap<FeatureId, ExtrudeOut> = HashMap::new();
     let mut body: Option<Body> = None;
@@ -130,7 +185,28 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
     let mut last_solid: Option<usize> = None;
     let mut results = Vec::new();
 
-    for id in order {
+    let mut start = 0;
+    if let Some(c) = cache.as_deref_mut() {
+        if let Some(i) = (0..order.len())
+            .rev()
+            .find(|&i| c.states.contains_key(&keys[i]))
+        {
+            let snap = c.states[&keys[i]].clone();
+            (sketches, extrudes, body, last_solid, results) = (
+                snap.sketches,
+                snap.extrudes,
+                snap.body,
+                snap.last_solid,
+                snap.results,
+            );
+            start = i + 1;
+            c.hits += 1;
+        } else {
+            c.misses += 1;
+        }
+    }
+
+    for (i, id) in order.iter().copied().enumerate().skip(start) {
         let f = doc.feature(id)?;
         let mut r = FeatureResult {
             id,
@@ -253,10 +329,34 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
             }
         }
         results.push(r);
+        if let Some(c) = cache.as_deref_mut() {
+            c.insert(
+                keys[i].clone(),
+                Snapshot {
+                    sketches: sketches.clone(),
+                    extrudes: extrudes.clone(),
+                    body: body.clone(),
+                    last_solid,
+                    results: results.clone(),
+                },
+            );
+        }
     }
+    let full = keys.last().cloned().unwrap_or_default();
     let measurements = match (&body, last_solid) {
         (Some(b), Some(i)) => {
-            let m = measure(results[i].id, b)?;
+            let cached = cache
+                .as_deref()
+                .and_then(|c| c.measurements.get(&full).cloned());
+            let m = match cached {
+                Some(m) => m,
+                None => measure(results[i].id, b)?,
+            };
+            if let Some(c) = cache.as_deref_mut()
+                && c.states.contains_key(&full)
+            {
+                c.measurements.insert(full, m.clone());
+            }
             results[i].measurements = Some(m.clone());
             Some(m)
         }

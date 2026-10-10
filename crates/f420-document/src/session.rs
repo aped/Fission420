@@ -1,5 +1,6 @@
 //! Transactions and undo/redo over the authoritative document.
-use crate::{DocError, Document, Evaluation, FeatureId, Result, regenerate};
+use crate::regen::{RegenCache, regenerate_cached};
+use crate::{DocError, Document, Evaluation, FeatureId, Result};
 use serde::{Deserialize, Serialize};
 
 /// Record of a committed parameter change (for UIs / logs).
@@ -23,6 +24,8 @@ pub struct Model {
     pub revision: u64,
     /// Changes since the last save/load.
     pub dirty: bool,
+    /// Memo of regenerated history prefixes (geometry cache only; never authoritative).
+    cache: RegenCache,
 }
 
 /// Cap on undo depth; documents are small, so this is generous.
@@ -43,12 +46,14 @@ impl Model {
             redo: vec![],
             revision: 0,
             dirty: false,
+            cache: RegenCache::default(),
         }
     }
 
     /// Build from a loaded document; fails (without side effects) if it does not regenerate.
     pub fn from_document(doc: Document) -> Result<Self> {
-        let eval = regenerate(&doc)?;
+        let mut cache = RegenCache::default();
+        let eval = regenerate_cached(&doc, Some(&mut cache))?;
         Ok(Self {
             doc,
             eval,
@@ -56,7 +61,13 @@ impl Model {
             redo: vec![],
             revision: 0,
             dirty: false,
+            cache,
         })
+    }
+
+    /// (hits, misses) of the regeneration cache, for diagnostics.
+    pub fn cache_stats(&self) -> (u64, u64) {
+        (self.cache.hits, self.cache.misses)
     }
 
     pub fn document(&self) -> &Document {
@@ -75,7 +86,7 @@ impl Model {
     ) -> Result<T> {
         let mut candidate = self.doc.clone();
         let out = edit(&mut candidate)?;
-        let eval = regenerate(&candidate)?;
+        let eval = regenerate_cached(&candidate, Some(&mut self.cache))?;
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
         self.undo.push((label.to_string(), old));
@@ -132,7 +143,7 @@ impl Model {
     /// Undo the last committed change. Returns its label.
     pub fn undo(&mut self) -> Result<String> {
         let (label, prev) = self.undo.pop().ok_or(DocError::NothingTo("undo".into()))?;
-        match regenerate(&prev) {
+        match regenerate_cached(&prev, Some(&mut self.cache)) {
             Ok(eval) => {
                 let cur = std::mem::replace(&mut self.doc, prev);
                 self.eval = eval;
@@ -151,7 +162,7 @@ impl Model {
     /// Redo the last undone change. Returns its label.
     pub fn redo(&mut self) -> Result<String> {
         let (label, next) = self.redo.pop().ok_or(DocError::NothingTo("redo".into()))?;
-        match regenerate(&next) {
+        match regenerate_cached(&next, Some(&mut self.cache)) {
             Ok(eval) => {
                 let cur = std::mem::replace(&mut self.doc, next);
                 self.eval = eval;
