@@ -1,0 +1,240 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Base sketch",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 3
+          }
+        },
+        {
+          "Vertical": {
+            "line": 2
+          }
+        },
+        {
+          "Vertical": {
+            "line": 4
+          }
+        },
+        {
+          "SymmetricAboutPoint": {
+            "a": 1,
+            "b": 3,
+            "center": 0
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 1,
+            "b": 2,
+            "dim": {
+              "name": "width",
+              "value": 80.0
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 1,
+            "b": 4,
+            "dim": {
+              "name": "height",
+              "value": 50.0
+            }
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 1,
+            "id": 4
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": -40.0,
+          "y": -25.0
+        },
+        {
+          "id": 2,
+          "x": 40.0,
+          "y": -25.0
+        },
+        {
+          "id": 3,
+          "x": 40.0,
+          "y": 25.0
+        },
+        {
+          "id": 4,
+          "x": -40.0,
+          "y": 25.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 10.0,
+    "name": "Plate",
+    "sketch": 1
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Hole sketch",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Diameter": {
+            "circle": 1,
+            "dim": {
+              "name": "diameter",
+              "value": 10.0
+            }
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Circle": {
+            "center": 0,
+            "id": 1,
+            "radius": 5.0
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "cut_through_all",
+    "name": "Hole",
+    "sketch": 3
+  },
+  {
+    "cmd": "set_parameter",
+    "feature": 1,
+    "name": "width",
+    "value": 100.0
+  },
+  {
+    "cmd": "set_parameter",
+    "feature": 2,
+    "name": "distance",
+    "value": 12.0
+  },
+  {
+    "cmd": "undo"
+  },
+  {
+    "cmd": "undo"
+  },
+  {
+    "cmd": "redo"
+  },
+  {
+    "cmd": "redo"
+  },
+  {
+    "cmd": "set_parameter",
+    "expect_ok": false,
+    "feature": 3,
+    "name": "diameter",
+    "value": 50.0
+  },
+  {
+    "cmd": "save",
+    "path": "examples/scenario_a.f420.json"
+  },
+  {
+    "cmd": "close"
+  },
+  {
+    "cmd": "open",
+    "path": "examples/scenario_a.f420.json"
+  },
+  {
+    "chord": 0.01,
+    "cmd": "export_stl",
+    "path": "artifacts/scenario_a.stl"
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/scenario_a.step"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

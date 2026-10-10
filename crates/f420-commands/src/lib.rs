@@ -5,6 +5,8 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod scenarios;
+pub mod sketches;
 
 use f420_document::{
     DocError, Document, FaceRef, FaceRole, FeatureId, FeatureKind, Model, SketchPlane, load_file,

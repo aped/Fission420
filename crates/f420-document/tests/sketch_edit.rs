@@ -75,8 +75,10 @@ fn volume(m: &Model) -> f64 {
     }
 }
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")
+/// Frozen copy of the run-1 `examples/plate.f420.json` (format v1). The
+/// example itself is re-saved (as v2) by `examples/plate_workflow.json`.
+fn v1_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plate_v1.f420.json")
 }
 
 #[test]
@@ -190,8 +192,8 @@ fn conflicting_dimension_edit_rolls_back_and_names_culprits() {
 }
 
 #[test]
-fn v1_example_loads_saves_as_v2_and_reloads_equal() {
-    let src = examples_dir().join("plate.f420.json");
+fn v1_file_loads_saves_as_v2_and_reloads_equal() {
+    let src = v1_fixture();
     let raw: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap();
     assert_eq!(raw["version"], 1, "fixture must stay a v1 file");
