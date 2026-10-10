@@ -93,7 +93,12 @@ fn build_plate_and_hole_sketch(h: &mut Harness<'_, F420App>) {
     assert_eq!(s.len(), 1);
     assert_eq!(
         s[0].parameters,
-        vec![("width".to_string(), 80.0), ("height".to_string(), 50.0)]
+        vec![
+            ("width".to_string(), 80.0),
+            ("height".to_string(), 50.0),
+            ("center_x".to_string(), 0.0),
+            ("center_y".to_string(), 0.0)
+        ]
     );
     // The history tree shows the actual constraint state.
     h.get_by_label_contains("FullyConstrained · DOF 0 · residual");
