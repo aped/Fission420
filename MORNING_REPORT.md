@@ -25,25 +25,47 @@ Works (verified, evidence below):
   - an inspector with Apply / Cancel edits;
   - create forms, undo/redo, save/open/close, STL/STEP export, and diagnostics.
   - Regeneration runs on a worker thread.
+- **Stretch work, all verified:**
+  - **Interactive placement:** drag a rectangle on world XY, or drag a hole on the semantic end cap,
+    with a live overlay preview; it opens a pre-filled dialog and creates the feature through the
+    same commands. Centres are editable as `center_x` / `center_y`.
+  - **Revolve:** a WorldXZ profile about world Z, checked against Pappus' theorem.
+  - **Bracket example:** a 120×60 plate with five holes, with STL and STEP exported and validated
+    by FreeCAD.
+  - **Regeneration cache:** undo/redo and downstream edits reuse upstream B-reps.
 - **Acceptance:** all 10 GOAL.md steps pass headlessly, 96/96 checks. Steps 1–7 and 10 also pass by
   driving the real UI widgets with egui_kittest.
 
 Does not work / not done:
 - **UI scope:**
-  - Sketching uses dimension forms, not interactive placement or dragging.
+  - Placement creates fixed-template sketches (rectangle, circle). There is no freehand sketching
+    or dragging of existing geometry.
   - There are no dimension annotations drawn in the 3D view.
   - Selecting a history feature does not highlight its faces in 3D; only pointer hover highlights a
     face.
 - **Modeling scope:**
-  - One base extrusion per document.
+  - One base body (extrude or revolve) per document. Cuts are only supported on extruded bodies.
   - Cuts must be circular, parallel to the extrusion, and strictly inside the base profile.
   - Face roles exist only for extrusion caps.
   - No fillets, revolve, or assemblies.
 - **Undo history** is not persisted, so Undo is empty after Open (by design).
-- **Real-window interaction:** no human has clicked through the app. Mouse/keyboard behaviour in the
-  live window was not exercised, since no input-injection tool was available on Wayland. The live
-  window was only run scripted (`--demo`) for screenshots. Widget interaction was verified with
-  egui_kittest, which runs the same `F420App::ui` code headlessly without the GPU viewport.
+- **Real-window interaction:** no human has clicked through the app, and mouse/keyboard behaviour
+  in the live window was not exercised.
+  - I tried `xdotool` against the app running under XWayland. The X pointer warps and clicks never
+    reached the window: GNOME's XWayland pointer state was stale, and XTEST may require an
+    input-emulation permission prompt.
+  - I stopped there rather than trigger or bypass prompts, or inject input into the whole desktop
+    with `ydotool`.
+  - What is verified: the live window was run scripted (`--demo`, `--demo-place`) for screenshots.
+    egui_kittest drives the same `F420App::ui` code with real egui pointer and key events, including
+    viewport drags.
+  - To record your own walkthrough: `target/release/f420-app --shot-dir /tmp/shots`, then press F12
+    at each step.
+- **Truck boolean fragility:** some multi-hole configurations make `truck_shapeops::and` return
+  None (example: a corner Ø6.5 hole followed by a centred Ø20).
+  - The adapter retries with the same exact geometry: 4 circle seam angles × 3 boolean tolerances.
+    That fixed every case observed.
+  - If every attempt fails, the cut is reported as a `Kernel` error and the document is preserved.
 - **Reference validation:** no Fusion comparison was done (no access), so it is pending.
 
 ## 2. Commands that were run
@@ -57,13 +79,16 @@ tools/external_validation.sh artifacts/acceptance   # python STL check + FreeCAD
 cargo build --release -p f420-app
 target/release/f420-app                              # interactive
 timeout 90 target/release/f420-app --demo --screenshot artifacts/ui_demo.png
+timeout 90 target/release/f420-app --demo-place --screenshot artifacts/ui_place_done.png
+timeout 90 target/release/f420-app --demo-place-preview --screenshot artifacts/ui_place_preview.png
+target/release/f420-cli run examples/bracket_workflow.json
 ```
 
 ## 3. Evidence and observed results
 
 | check | result | evidence |
 |---|---|---|
-| `cargo xtask check` | all stages pass; 57 tests (app 6, commands 3, document 10, kernel 9, sketch 15, viewport 14) | `artifacts/xtask_check.log` |
+| `cargo xtask check` | all stages pass (fmt, clippy, tests, acceptance, plate and bracket examples); 78 tests (app 8 unit + 4 placement + 7 workflow, commands 5, document 11, kernel 11, sketch 15, viewport 17) | `artifacts/xtask_check_full.log` |
 | headless acceptance | 96 passed, 0 failed | `artifacts/acceptance/acceptance_report.json` |
 | 80×50×10, Ø10 volume | 39214.601825 vs 39214.601837 (err 1.2e-5; tol 3.9e-3) | report step 4 |
 | 100×50×10, Ø10 volume | 49214.601834 (err 2.8e-6; tol 4.9e-3) | report step 5 |
@@ -76,6 +101,10 @@ timeout 90 target/release/f420-app --demo --screenshot artifacts/ui_demo.png
 | STL (chord 0.01 mm) | watertight (Rust check, independent Python parser, FreeCAD `isSolid`, no non-manifolds); mesh volume rel err 1.7e-5 | `artifacts/acceptance/stl_check_*` |
 | STEP | FreeCAD/OCC: 1 solid, 9 faces, `isValid`, volume 49214.6018371 (err 5e-7) | `artifacts/acceptance/step_check_freecad.txt` |
 | UI screenshot | plate with hole, history with semantic ref, DOF 0, inspector, rejected −10 shown | `artifacts/ui_demo.png` |
+| placement | mid-drag preview "Ø12 mm @ (20, 8)" on Plate.EndCap; committed off-centre hole, volume 38869.026652 = 40000 − 360π | `artifacts/ui_place_preview.png`, `artifacts/ui_place_done.png` |
+| revolve | washer 360° and 90° match Pappus within 1e-3 mm³, watertight; also driven through UI forms | kernel/commands/app tests |
+| bracket | 120×60×6, 4×Ø6.5 + Ø20: B-rep volume 40518.650659 vs 40518.650670 analytic; FreeCAD STEP 1 valid solid, 21 faces, err 2e-6 | `artifacts/bracket_workflow.jsonl`, `artifacts/bracket_step_check_freecad.txt` |
+| external validation | Python STL check + FreeCAD STL/STEP pass | `artifacts/external_validation.log` |
 
 Notes:
 - **Volume method:** the "B-rep volume" is a boundary integral over the exact Truck curves (chord sums
@@ -100,8 +129,11 @@ and its STEP facade is broken. Full detail in `docs/adr/0001-kernel.md`. Observe
 - **`IntersectionCurve::subs` can panic.** The adapter wraps all Truck calls in `catch_unwind`.
 - **STEP writer bug:** truck-stepio 0.3 writes duplicate entity ids for `INTERSECTION_CURVE`. It is
   worked around by rebuilding exact NURBS edges, for the plane ∩ Z-extrusion case only.
-- **Performance:** about 1.3 s per regeneration of the plate in release builds. Most of that is the
-  exact-curve volume passes, which now run in 3 threads.
+- **Performance:**
+  - A full plate regeneration takes about 1.3 s in release builds, dominated by the exact-curve
+    volume passes (now 3 threads, final body only).
+  - The prefix cache makes undo/redo and downstream-only edits much cheaper.
+  - The bracket script still takes about 70 s, because every new hole needs a real boolean.
 - **Cylinder export:** cylinders go to STEP as rational B-spline surfaces, not `CYLINDRICAL_SURFACE`.
 - **Transitive C code:** liblzma is compiled via truck-meshalgo's `vtk` feature. It isn't geometry;
   documented in `docs/DEPENDENCIES.md`.
@@ -123,17 +155,22 @@ and its STEP facade is broken. Full detail in `docs/adr/0001-kernel.md`. Observe
 9. Set F2 distance to −10, then set F3 diameter to 60. Both show red errors, and the model is
    unchanged.
 
+10. Optional: **Place hole**, choose F2 in the combo, press on the top face, drag outward, release,
+    then OK. **Rectangle on XZ…** then **Revolve…** makes a washer.
+
 Headless equivalent: `target/release/f420-cli run examples/plate_workflow.json`.
 
 ## 6. Next three tasks (by value) and open decisions
 
-1. **Interactive sketching.** Rectangle/circle placement and dragging in the viewport, plus dimension
-   annotations drawn in 3D, feeding the same commands.
+1. **Freeform sketching.** Lines and arcs with interactive constraints (coincident, equal, tangent)
+   using the existing solver, plus dimension annotations drawn in 3D. Template placement already
+   exists.
 2. **Generalise semantic references.** Add roles for side faces (keyed by profile edge) and faces
    created by cuts. Allow more than one body or feature per document, using union and blind cuts.
    This needs a topological-naming design (ADR 0002).
-3. **Performance.** Cache per-feature B-rep results so edits regenerate only downstream features, and
-   measure volume lazily. Also upstream the truck-stepio fix, or patch it via `[patch]`.
+3. **Kernel hardening.** Upstream or `[patch]` the truck-stepio INTERSECTION_CURVE fix and the boolean
+   fragility repro (`examples/bracket_workflow.json` without retries). Faster volume on unchanged
+   faces.
 
 Open decisions:
 - Whether to vendor or patch Truck. That would remove liblzma and fix the STEP writer at the source.
