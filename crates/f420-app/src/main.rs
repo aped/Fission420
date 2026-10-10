@@ -28,6 +28,8 @@ struct Args {
     /// `Some(stop_mid_drag)`.
     demo_place: Option<bool>,
     sync: bool,
+    /// Save a screenshot to this directory each time F12 is pressed (live-window evidence).
+    shot_dir: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -37,6 +39,7 @@ fn parse_args() -> Result<Args, String> {
         demo: false,
         demo_place: None,
         sync: false,
+        shot_dir: None,
     };
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -50,10 +53,16 @@ fn parse_args() -> Result<Args, String> {
             Some("--demo-place") => out.demo_place = Some(false),
             Some("--demo-place-preview") => out.demo_place = Some(true),
             Some("--sync") => out.sync = true,
+            Some("--shot-dir") => {
+                let p = args
+                    .next()
+                    .ok_or_else(|| "--shot-dir requires a directory".to_string())?;
+                out.shot_dir = Some(PathBuf::from(p));
+            }
             Some("-h" | "--help") => {
                 return Err(
                     "usage: f420-app [--demo | --demo-place | --demo-place-preview] [--sync] \
-                     [--screenshot <path.png>]"
+                     [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)]"
                         .to_string(),
                 );
             }
@@ -73,6 +82,9 @@ struct Shot {
 struct Shell {
     app: F420App,
     shot: Option<Shot>,
+    shot_dir: Option<PathBuf>,
+    shots_taken: u32,
+    f12_pending: bool,
     result: Arc<Mutex<Result<(), String>>>,
 }
 
@@ -121,6 +133,36 @@ impl Shell {
     }
 }
 
+impl Shell {
+    /// F12: save `shot_NNN.png` into `--shot-dir` without exiting.
+    fn drive_f12(&mut self, ctx: &egui::Context) {
+        let Some(dir) = self.shot_dir.clone() else {
+            return;
+        };
+        if self.f12_pending {
+            let image = ctx.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(image) = image {
+                self.shots_taken += 1;
+                let path = dir.join(format!("shot_{:03}.png", self.shots_taken));
+                match save_png(&path, &image) {
+                    Ok(()) => eprintln!("screenshot saved to {}", path.display()),
+                    Err(e) => eprintln!("screenshot failed: {e}"),
+                }
+                self.f12_pending = false;
+            }
+            ctx.request_repaint();
+        } else if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
+            self.f12_pending = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+        }
+    }
+}
+
 fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), String> {
     let [w, h] = image.size;
     let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
@@ -140,6 +182,7 @@ impl eframe::App for Shell {
         let ctx = ui.ctx().clone();
         self.app.ui(ui);
         self.drive_screenshot(&ctx);
+        self.drive_f12(&ctx);
     }
 }
 
@@ -188,6 +231,9 @@ fn main() -> ExitCode {
                     requested: false,
                     started: std::time::Instant::now(),
                 }),
+                shot_dir: args.shot_dir,
+                shots_taken: 0,
+                f12_pending: false,
                 result: result_app,
             }))
         }),
