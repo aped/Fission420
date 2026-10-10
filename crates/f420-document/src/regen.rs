@@ -125,7 +125,9 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
     let mut sketches: HashMap<FeatureId, SketchOut> = HashMap::new();
     let mut extrudes: HashMap<FeatureId, ExtrudeOut> = HashMap::new();
     let mut body: Option<Body> = None;
-    let mut last_m: Option<Measurements> = None;
+    // Index (into `results`) of the feature that produced the current body. Only the
+    // final body is measured: intermediate measurements cost ~1 s each.
+    let mut last_solid: Option<usize> = None;
     let mut results = Vec::new();
 
     for id in order {
@@ -180,9 +182,7 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                 }
                 let b = k::revolve(&to_kernel(&s.profile), &s.frame, *angle)
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
-                let m = measure(id, &b)?;
-                r.measurements = Some(m.clone());
-                last_m = Some(m);
+                last_solid = Some(results.len());
                 body = Some(b);
             }
             FeatureKind::Extrude { sketch, distance } => {
@@ -214,9 +214,7 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                         profile: s.profile.clone(),
                     },
                 );
-                let m = measure(id, &b)?;
-                r.measurements = Some(m.clone());
-                last_m = Some(m);
+                last_solid = Some(results.len());
                 body = Some(b);
             }
             FeatureKind::Cut { sketch, .. } => {
@@ -242,30 +240,32 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
                             detail: e.to_string(),
                         }
                     })?;
-                let m = measure(id, &b)?;
-                if let Some(prev) = &last_m
-                    && let (
-                        k::VolumeResult::Value { volume: v0, .. },
-                        k::VolumeResult::Value { volume: v1, .. },
-                    ) = (&prev.volume, &m.volume)
-                    && *v1 >= *v0
-                {
+                // A cut that removes material always adds faces; containment (checked
+                // above) guarantees the cutter intersects the body.
+                if k::face_count(&b) <= k::face_count(target) {
                     return Err(DocError::Kernel {
                         feature: id,
                         detail: "cut removed no material".into(),
                     });
                 }
-                r.measurements = Some(m.clone());
-                last_m = Some(m);
+                last_solid = Some(results.len());
                 body = Some(b);
             }
         }
         results.push(r);
     }
+    let measurements = match (&body, last_solid) {
+        (Some(b), Some(i)) => {
+            let m = measure(results[i].id, b)?;
+            results[i].measurements = Some(m.clone());
+            Some(m)
+        }
+        _ => None,
+    };
     Ok(Evaluation {
         features: results,
         body,
-        measurements: last_m,
+        measurements,
     })
 }
 

@@ -10,7 +10,18 @@ fn v3(a: [f64; 3]) -> Vector3 {
 }
 
 /// Planar face for a profile, with normal along `frame.z`.
+/// Circle seam (start-vertex) angles tried, in order, when a boolean fails. They give
+/// the same exact geometry with a different arc partition; Truck 0.6 booleans are
+/// sensitive to where arc vertices fall (see ADR 0001). Deterministic, fixed list.
+const SEAM_ANGLES: [f64; 4] = [0.0, 0.41, 1.27, 2.03];
+/// Boolean tolerances tried per seam (first is the policy value `tol::BOOLEAN`).
+const BOOLEAN_TOLS: [f64; 3] = [tol::BOOLEAN, 0.02, 0.1];
+
 fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
+    profile_face_seam(profile, frame, 0.0)
+}
+
+fn profile_face_seam(profile: &Profile, frame: &Frame, seam: f64) -> Result<Face> {
     let wire: Wire = match profile {
         Profile::Polygon(pts) => {
             let verts: Vec<Vertex> = pts
@@ -24,7 +35,10 @@ fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
         }
         Profile::Circle { center, radius } => {
             let c = frame.to_world(*center);
-            let start = frame.to_world([center[0] + radius, center[1]]);
+            let start = frame.to_world([
+                center[0] + radius * seam.cos(),
+                center[1] + radius * seam.sin(),
+            ]);
             let v = builder::vertex(p3(start));
             // A full turn (> 2*pi) closes the wire; Truck splits it into arcs.
             builder::rsweep(&v, p3(c), v3(frame.z), Rad(7.0))
@@ -94,16 +108,39 @@ pub fn cut_through_all(target: &Body, profile: &Profile, frame: &Frame) -> Resul
     .sqrt();
     let margin = tol::THROUGH_ALL_MARGIN_ABS.max(diag * tol::THROUGH_ALL_MARGIN_REL);
     let start = frame.offset(lo - margin);
-    let tool = extrude(profile, &start, hi - lo + 2.0 * margin)?;
-    let solid = guarded("cut", || {
-        let mut t = tool.solid.clone();
-        t.not();
-        truck_shapeops::and(&target.solid, &t, tol::BOOLEAN)
-    })?
-    .ok_or_else(|| KernelError::BooleanFailed("truck_shapeops::and returned None".into()))?;
-    let body = Body { solid };
-    check_single_closed(&body, "cut")?;
-    Ok(body)
+    let length = hi - lo + 2.0 * margin;
+    let seams: &[f64] = match profile {
+        Profile::Circle { .. } => &SEAM_ANGLES,
+        Profile::Polygon(_) => &SEAM_ANGLES[..1],
+    };
+    let mut failures = Vec::new();
+    let attempts = seams
+        .iter()
+        .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
+    for (seam, btol) in attempts {
+        let tool = guarded("cut tool", || -> Result<Solid> {
+            let face = profile_face_seam(profile, &start, seam)?;
+            Ok(builder::tsweep(&face, v3(start.z) * length))
+        })??;
+        let attempt = guarded("cut", || {
+            let mut t = tool.clone();
+            t.not();
+            truck_shapeops::and(&target.solid, &t, btol)
+        });
+        let seam = format!("{seam}/tol {btol}");
+        match attempt {
+            Ok(Some(solid)) => {
+                let body = Body { solid };
+                match check_single_closed(&body, "cut") {
+                    Ok(()) => return Ok(body),
+                    Err(e) => failures.push(format!("seam {seam}: {e}")),
+                }
+            }
+            Ok(None) => failures.push(format!("seam {seam}: truck_shapeops::and returned None")),
+            Err(e) => failures.push(format!("seam {seam}: {e}")),
+        }
+    }
+    Err(KernelError::BooleanFailed(failures.join("; ")))
 }
 
 fn check_single_closed(body: &Body, what: &str) -> Result<()> {

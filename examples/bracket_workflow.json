@@ -1,0 +1,153 @@
+[
+ {
+  "cmd": "new_document"
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Bracket outline",
+  "plane": "WorldXY",
+  "template": "centered_rectangle",
+  "width": 120,
+  "height": 60
+ },
+ {
+  "cmd": "extrude",
+  "name": "Bracket plate",
+  "sketch": 1,
+  "distance": 8
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Hole 1 sketch",
+  "plane": {
+   "Face": {
+    "feature": 2,
+    "role": "ExtrudeEndCap"
+   }
+  },
+  "template": "centered_circle",
+  "diameter": 6.5,
+  "center": [
+   50,
+   20
+  ]
+ },
+ {
+  "cmd": "cut_through_all",
+  "name": "Hole 1",
+  "sketch": 3
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Hole 2 sketch",
+  "plane": {
+   "Face": {
+    "feature": 2,
+    "role": "ExtrudeEndCap"
+   }
+  },
+  "template": "centered_circle",
+  "diameter": 6.5,
+  "center": [
+   -50,
+   20
+  ]
+ },
+ {
+  "cmd": "cut_through_all",
+  "name": "Hole 2",
+  "sketch": 5
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Hole 3 sketch",
+  "plane": {
+   "Face": {
+    "feature": 2,
+    "role": "ExtrudeEndCap"
+   }
+  },
+  "template": "centered_circle",
+  "diameter": 6.5,
+  "center": [
+   -50,
+   -20
+  ]
+ },
+ {
+  "cmd": "cut_through_all",
+  "name": "Hole 3",
+  "sketch": 7
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Hole 4 sketch",
+  "plane": {
+   "Face": {
+    "feature": 2,
+    "role": "ExtrudeEndCap"
+   }
+  },
+  "template": "centered_circle",
+  "diameter": 6.5,
+  "center": [
+   50,
+   -20
+  ]
+ },
+ {
+  "cmd": "cut_through_all",
+  "name": "Hole 4",
+  "sketch": 9
+ },
+ {
+  "cmd": "create_sketch",
+  "name": "Hole 5 sketch",
+  "plane": {
+   "Face": {
+    "feature": 2,
+    "role": "ExtrudeEndCap"
+   }
+  },
+  "template": "centered_circle",
+  "diameter": 20,
+  "center": [
+   0,
+   0
+  ]
+ },
+ {
+  "cmd": "cut_through_all",
+  "name": "Hole 5",
+  "sketch": 11
+ },
+ {
+  "cmd": "set_parameter",
+  "feature": 2,
+  "name": "distance",
+  "value": 6
+ },
+ {
+  "cmd": "set_parameter",
+  "feature": 3,
+  "name": "center_x",
+  "value": 56.75,
+  "expect_ok": false
+ },
+ {
+  "cmd": "save",
+  "path": "examples/bracket.f420.json"
+ },
+ {
+  "cmd": "export_stl",
+  "path": "artifacts/bracket.stl",
+  "chord": 0.01
+ },
+ {
+  "cmd": "export_step",
+  "path": "artifacts/bracket.step"
+ },
+ {
+  "cmd": "measure"
+ }
+]

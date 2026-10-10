@@ -12,8 +12,8 @@ mod step;
 
 pub use build::{cut_through_all, extrude, revolve};
 pub use measure::{
-    Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on,
-    z_face_inner_loops,
+    Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
+    planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
 pub use step::export_step;

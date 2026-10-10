@@ -222,6 +222,11 @@ fn volume(solid: &Solid) -> VolumeResult {
     }
 }
 
+/// Number of B-rep faces (cheap; no geometry evaluation).
+pub fn face_count(body: &Body) -> usize {
+    body.solid.face_iter().count()
+}
+
 pub fn measure(body: &Body) -> Result<Measurements> {
     let s = &body.solid;
     guarded("measure", || -> Result<Measurements> {

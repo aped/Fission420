@@ -1,0 +1,502 @@
+{
+  "format": "fission420",
+  "version": 1,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Bracket outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -60.0,
+                "y": -30.0
+              },
+              {
+                "id": 2,
+                "x": 60.0,
+                "y": -30.0
+              },
+              {
+                "id": 3,
+                "x": 60.0,
+                "y": 30.0
+              },
+              {
+                "id": 4,
+                "x": -60.0,
+                "y": 30.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 120.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 60.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Bracket plate",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 6.0
+        }
+      },
+      {
+        "id": 3,
+        "name": "Hole 1 sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.25
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 50.0,
+                  "y": 20.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.5
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Hole 1",
+        "kind": {
+          "type": "Cut",
+          "sketch": 3,
+          "extent": "ThroughAll"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Hole 2 sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.25
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -50.0,
+                  "y": 20.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.5
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "Hole 2",
+        "kind": {
+          "type": "Cut",
+          "sketch": 5,
+          "extent": "ThroughAll"
+        }
+      },
+      {
+        "id": 7,
+        "name": "Hole 3 sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.25
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -50.0,
+                  "y": -20.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.5
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 8,
+        "name": "Hole 3",
+        "kind": {
+          "type": "Cut",
+          "sketch": 7,
+          "extent": "ThroughAll"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Hole 4 sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.25
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 50.0,
+                  "y": -20.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.5
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 10,
+        "name": "Hole 4",
+        "kind": {
+          "type": "Cut",
+          "sketch": 9,
+          "extent": "ThroughAll"
+        }
+      },
+      {
+        "id": 11,
+        "name": "Hole 5 sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 10.0
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 20.0
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 12,
+        "name": "Hole 5",
+        "kind": {
+          "type": "Cut",
+          "sketch": 11,
+          "extent": "ThroughAll"
+        }
+      }
+    ],
+    "next_id": 13
+  },
+  "cache": {
+    "volume": 40518.65065921035,
+    "bounds": {
+      "min": [
+        -60.0,
+        -30.0,
+        -1.7763568394002505e-15
+      ],
+      "max": [
+        60.0,
+        30.0,
+        6.0000000000000036
+      ]
+    },
+    "face_count": 21
+  }
+}
