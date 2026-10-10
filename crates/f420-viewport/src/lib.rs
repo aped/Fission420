@@ -7,15 +7,24 @@
 //! Conventions: Z-up, right-handed, model units are millimetres.
 //!
 //! Controls: LMB or MMB drag = orbit, RMB or Shift+LMB drag = pan,
-//! scroll = zoom.
+//! scroll = zoom. While a placement tool owns the primary button
+//! ([`Viewport::set_primary_drag_navigates`]`(false)`), LMB does not move the
+//! camera; MMB orbit, RMB pan and scroll still do.
+//!
+//! Previews are drawn with [`paint_overlay`] after [`Viewport::ui`], using
+//! [`Viewport::camera`] and the rect returned in the response.
 
 mod camera;
 mod gpu;
 mod math;
 mod mesh;
+mod overlay;
 
 pub use camera::{Camera, Ray};
 pub use mesh::{Aabb, MeshError, RenderMesh, box_mesh, ray_triangle};
+pub use overlay::{
+    Overlay, OverlayLabel, OverlayPolyline, overlay_shapes, paint_overlay, ray_plane,
+};
 
 use eframe::egui;
 use gpu::{Gpu, LineVertex, MeshVertex, Uniforms};
@@ -37,6 +46,10 @@ pub struct Viewport {
     highlight: Option<u32>,
     hovered: Option<u32>,
     last_aspect: f32,
+    /// Size (points) of the last drawn viewport rect; zero before the first frame.
+    last_size: [f32; 2],
+    /// Whether an LMB drag orbits/pans (false while a placement tool is active).
+    primary_navigates: bool,
 }
 
 impl Viewport {
@@ -55,6 +68,8 @@ impl Viewport {
             highlight: None,
             hovered: None,
             last_aspect: DEFAULT_ASPECT,
+            last_size: [0.0; 2],
+            primary_navigates: true,
         };
         vp.rebuild_grid();
         Some(vp)
@@ -88,6 +103,17 @@ impl Viewport {
         self.camera.fit_sphere(center, radius, self.last_aspect);
     }
 
+    /// Size in points of the last drawn view (zero before the first frame).
+    pub fn last_size(&self) -> [f32; 2] {
+        self.last_size
+    }
+
+    /// When `false`, primary-button drags no longer orbit or pan, so a tool
+    /// can use them. Other navigation stays available.
+    pub fn set_primary_drag_navigates(&mut self, on: bool) {
+        self.primary_navigates = on;
+    }
+
     /// Group id of the triangle under the pointer as of the last `ui` call.
     pub fn hovered_group(&self) -> Option<u32> {
         self.hovered
@@ -101,6 +127,7 @@ impl Viewport {
             return response;
         }
         self.last_aspect = rect.width() / rect.height();
+        self.last_size = [rect.width(), rect.height()];
         self.handle_input(ui, &response, rect);
 
         self.hovered = response.hover_pos().and_then(|p| {
@@ -129,7 +156,7 @@ impl Viewport {
     fn handle_input(&mut self, ui: &egui::Ui, response: &egui::Response, rect: egui::Rect) {
         let shift = ui.input(|i| i.modifiers.shift);
         let d = response.drag_delta();
-        let primary = response.dragged_by(egui::PointerButton::Primary);
+        let primary = self.primary_navigates && response.dragged_by(egui::PointerButton::Primary);
         if (primary && !shift) || response.dragged_by(egui::PointerButton::Middle) {
             self.camera.orbit(d.x, d.y);
         } else if (primary && shift) || response.dragged_by(egui::PointerButton::Secondary) {

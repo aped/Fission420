@@ -4,6 +4,9 @@
 //! - `--demo`: run the GOAL.md acceptance sequence through the UI request path.
 //! - `--screenshot <path.png>`: once idle, save a window screenshot and exit
 //!   (non-zero on failure).
+//! - `--demo-place`: build a plate, then place an off-centre hole with
+//!   synthetic pointer events through the placement tool, commit, and cut.
+//! - `--demo-place-preview`: as above but stop mid-drag (preview visible).
 //! - `--sync`: execute commands on the UI thread (debugging; UI blocks).
 
 use std::path::PathBuf;
@@ -22,6 +25,8 @@ const SCREENSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 struct Args {
     screenshot: Option<PathBuf>,
     demo: bool,
+    /// `Some(stop_mid_drag)`.
+    demo_place: Option<bool>,
     sync: bool,
 }
 
@@ -30,6 +35,7 @@ fn parse_args() -> Result<Args, String> {
     let mut out = Args {
         screenshot: None,
         demo: false,
+        demo_place: None,
         sync: false,
     };
     while let Some(a) = args.next() {
@@ -41,10 +47,14 @@ fn parse_args() -> Result<Args, String> {
                 out.screenshot = Some(PathBuf::from(p));
             }
             Some("--demo") => out.demo = true,
+            Some("--demo-place") => out.demo_place = Some(false),
+            Some("--demo-place-preview") => out.demo_place = Some(true),
             Some("--sync") => out.sync = true,
             Some("-h" | "--help") => {
                 return Err(
-                    "usage: f420-app [--demo] [--sync] [--screenshot <path.png>]".to_string(),
+                    "usage: f420-app [--demo | --demo-place | --demo-place-preview] [--sync] \
+                     [--screenshot <path.png>]"
+                        .to_string(),
                 );
             }
             _ => return Err(format!("unknown argument: {}", a.to_string_lossy())),
@@ -167,6 +177,8 @@ fn main() -> ExitCode {
             app.viewport = Viewport::new(cc);
             if args.demo {
                 app.start_demo(std::env::temp_dir().join("fission420-demo"));
+            } else if let Some(stop) = args.demo_place {
+                app.start_demo_place(stop);
             }
             Ok(Box::new(Shell {
                 app,

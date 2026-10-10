@@ -8,9 +8,13 @@ use eframe::egui;
 use f420_commands::{Command, DocSummary, FeatureSummary, SketchTemplate, end_cap_of};
 use f420_document::{DocError, FaceRole, FeatureId, SketchPlane};
 use f420_kernel::{Measurements, MeshCheck, VolumeResult};
-use f420_viewport::Viewport;
+use f420_viewport::{Camera, Overlay, OverlayLabel, OverlayPolyline, Viewport};
 
 use crate::engine::{Engine, ExecMode, MeshUpdate, Reply};
+use crate::place::{self, Phase, Placement, Proposal, Tool};
+
+/// View size assumed for placement when no viewport has been laid out yet.
+const FALLBACK_VIEW_SIZE: [f32; 2] = [800.0, 600.0];
 
 /// Max diagnostics kept in the panel.
 const MAX_DIAGNOSTICS: usize = 50;
@@ -29,6 +33,8 @@ enum Dialog {
     Rectangle {
         width: String,
         height: String,
+        cx: String,
+        cy: String,
     },
     Extrude {
         sketch: Option<FeatureId>,
@@ -37,6 +43,8 @@ enum Dialog {
     CircleOnFace {
         extrude: Option<FeatureId>,
         diameter: String,
+        cx: String,
+        cy: String,
     },
     Cut {
         sketch: Option<FeatureId>,
@@ -103,6 +111,17 @@ enum DemoStep {
         value: f64,
     },
     Select(&'static str),
+    /// Activate "Place hole" on the end cap of the named extrusion.
+    PlaceHoleOn(&'static str),
+    /// Synthetic pointer event at the screen projection of a world point
+    /// (same path as real mouse input).
+    Pointer(Phase, [f64; 3]),
+    /// Press OK on the open dialog.
+    DialogOk,
+    /// Cut through all with the most recent unused sketch.
+    CutLatest(&'static str),
+    /// Select the most recently created sketch.
+    SelectLatestSketch,
 }
 
 pub struct F420App {
@@ -119,6 +138,13 @@ pub struct F420App {
     fitted: bool,
     demo: VecDeque<DemoStep>,
     replies_seen: u64,
+    /// Active placement tool (rays from the view camera feed it).
+    placement: Option<Placement>,
+    /// Finished placement whose pre-filled dialog is open; drawn until it closes.
+    held_preview: Option<Placement>,
+    /// Camera used for placement when there is no GPU viewport (tests).
+    pub fallback_camera: Camera,
+    view_rect: Option<egui::Rect>,
 }
 
 impl F420App {
@@ -145,6 +171,14 @@ impl F420App {
             fitted: false,
             demo: VecDeque::new(),
             replies_seen: 0,
+            placement: None,
+            held_preview: None,
+            fallback_camera: Camera {
+                target: [0.0, 0.0, 5.0],
+                distance: 220.0,
+                ..Camera::default()
+            },
+            view_rect: None,
         }
     }
 
@@ -254,6 +288,192 @@ impl F420App {
         ]);
     }
 
+    /// Queue a scripted interactive placement: plate, then an off-centre hole
+    /// placed with synthetic pointer events through [`Self::place_pointer`].
+    /// With `stop_mid_drag` the script ends while the drag (and its preview)
+    /// is still active.
+    pub fn start_demo_place(&mut self, stop_mid_drag: bool) {
+        use DemoStep::*;
+        let z = 10.0;
+        let mut steps = vec![
+            Cmd(Command::NewDocument),
+            Cmd(Command::CreateSketch {
+                name: Some("Base sketch".into()),
+                plane: SketchPlane::WorldXY,
+                template: SketchTemplate::CenteredRectangle {
+                    width: 80.0,
+                    height: 50.0,
+                    center: None,
+                },
+            }),
+            ExtrudeOf {
+                name: "Plate",
+                sketch: "Base sketch",
+                distance: z,
+            },
+            PlaceHoleOn("Plate"),
+            Pointer(Phase::Press, [20.3, 7.8, z]),
+            Pointer(Phase::Move, [23.0, 8.0, z]),
+            Pointer(Phase::Move, [26.2, 8.1, z]),
+        ];
+        if !stop_mid_drag {
+            steps.extend([
+                Pointer(Phase::Release, [26.2, 8.1, z]),
+                DialogOk,
+                CutLatest("Hole"),
+                SelectLatestSketch,
+            ]);
+        }
+        self.demo = VecDeque::from(steps);
+    }
+
+    // ----- placement -----
+
+    pub fn placement(&self) -> Option<&Placement> {
+        self.placement.as_ref()
+    }
+
+    /// Activate a placement tool (replaces any active one).
+    pub fn start_tool(&mut self, tool: Tool) {
+        match Placement::for_document(tool, &self.summary.features) {
+            Ok(p) => self.placement = Some(p),
+            Err(e) => {
+                self.placement = None;
+                self.diag(true, "Input", format!("cannot place: {e}"));
+            }
+        }
+    }
+
+    pub fn cancel_tool(&mut self) {
+        self.placement = None;
+    }
+
+    /// Camera and view size (points) used to turn pointer positions into rays.
+    pub fn view_camera(&self) -> (Camera, [f32; 2]) {
+        if let Some(vp) = &self.viewport
+            && vp.last_size()[0] > 0.0
+        {
+            return (vp.camera.clone(), vp.last_size());
+        }
+        let size = self
+            .view_rect
+            .map_or(FALLBACK_VIEW_SIZE, |r| [r.width(), r.height()]);
+        (self.fallback_camera.clone(), size)
+    }
+
+    /// Screen rect of the 3D view as of the last frame.
+    pub fn view_rect(&self) -> Option<egui::Rect> {
+        self.view_rect
+    }
+
+    /// Absolute screen position of a world point in the 3D view (tests, demo).
+    pub fn world_to_screen(&self, world: [f64; 3]) -> Option<egui::Pos2> {
+        let (cam, [w, h]) = self.view_camera();
+        let [x, y] = cam.project(world.map(|v| v as f32), w, h)?;
+        let min = self.view_rect.map_or(egui::Pos2::ZERO, |r| r.min);
+        Some(min + egui::vec2(x, y))
+    }
+
+    /// Feed a pointer event (position relative to the view's top-left, in
+    /// points) to the active tool. Shared by mouse handling, the demo script
+    /// and tests. A finished drag opens the matching pre-filled dialog.
+    pub fn place_pointer(&mut self, phase: Phase, local: [f32; 2], snapping: bool) {
+        let (cam, [w, h]) = self.view_camera();
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        let Some(ray) = cam.ray(local[0], local[1], w, h) else {
+            return;
+        };
+        match p.pointer(phase, &ray, snapping) {
+            None => {}
+            Some(Err(e)) => self.diag(true, "Input", e),
+            Some(Ok(prop)) => {
+                self.dialog = Some(match prop {
+                    Proposal::Rectangle {
+                        width,
+                        height,
+                        center,
+                    } => Dialog::Rectangle {
+                        width: place::fmt(width),
+                        height: place::fmt(height),
+                        cx: place::fmt(center[0]),
+                        cy: place::fmt(center[1]),
+                    },
+                    Proposal::Circle {
+                        extrude,
+                        diameter,
+                        center,
+                    } => Dialog::CircleOnFace {
+                        extrude: Some(extrude),
+                        diameter: place::fmt(diameter),
+                        cx: place::fmt(center[0]),
+                        cy: place::fmt(center[1]),
+                    },
+                });
+                self.held_preview = self.placement.take();
+            }
+        }
+    }
+
+    fn placement_hint(&self) -> Option<String> {
+        let p = self.placement.as_ref()?;
+        Some(match p.tool {
+            Tool::Rectangle => {
+                "Place rectangle: drag corner to corner on world XY · Shift = no snap · Esc cancels"
+                    .into()
+            }
+            Tool::Hole { extrude } => format!(
+                "Place hole on {}.EndCap: press at centre, drag to set size · Shift = no snap · Esc cancels",
+                self.feature_name(extrude)
+            ),
+        })
+    }
+
+    fn placement_overlay(&self) -> Overlay {
+        let mut ov = Overlay::default();
+        let (p, live) = match (&self.placement, &self.held_preview) {
+            (Some(p), _) => (p, true),
+            (None, Some(p)) => (p, false),
+            _ => return ov,
+        };
+        let Some(pv) = p.preview() else {
+            return ov;
+        };
+        let color = if pv.plausible {
+            egui::Color32::from_rgb(255, 205, 60)
+        } else {
+            egui::Color32::from_rgb(240, 70, 70)
+        };
+        let f = |q: [f64; 3]| q.map(|v| v as f32);
+        ov.polylines.push(OverlayPolyline {
+            points: pv.outline.iter().map(|q| f(*q)).collect(),
+            closed: true,
+            color,
+            width: 2.0,
+            dashed: live,
+        });
+        for g in &pv.guides {
+            ov.polylines.push(OverlayPolyline {
+                points: vec![f(g[0]), f(g[1])],
+                closed: false,
+                color,
+                width: 1.0,
+                dashed: false,
+            });
+        }
+        let mut text = pv.label;
+        if !pv.plausible {
+            text += "  (outside base: will be rejected)";
+        }
+        ov.labels.push(OverlayLabel {
+            at: f(pv.label_at),
+            text,
+            color,
+        });
+        ov
+    }
+
     // ----- request path -----
 
     /// Send a document command to the engine (the only way UI mutates state).
@@ -326,6 +546,13 @@ impl F420App {
         {
             self.selected = Some(f);
         }
+        // Re-derive the placement plane from the new document state.
+        if let Some(p) = &self.placement
+            && !p.dragging()
+        {
+            let tool = p.tool;
+            self.start_tool(tool);
+        }
         // Rebuild edit buffers from the document: committed edits show the new
         // value, rejected edits revert to the document value.
         self.reset_inspector();
@@ -381,7 +608,7 @@ impl F420App {
             return;
         };
         let id = |n: &str| self.feature_by_name(n).map(|f| f.id);
-        let cmd = match step {
+        let cmd = match step.clone() {
             DemoStep::Cmd(c) => Some(c),
             DemoStep::ExtrudeOf {
                 name,
@@ -419,6 +646,56 @@ impl F420App {
             }),
             DemoStep::Select(n) => {
                 let f = id(n);
+                self.select(f);
+                return;
+            }
+            DemoStep::PlaceHoleOn(n) => match id(n) {
+                Some(e) => {
+                    self.start_tool(Tool::Hole { extrude: e });
+                    return;
+                }
+                None => None,
+            },
+            DemoStep::Pointer(phase, world) => {
+                // Wait for the first laid-out frame of the real viewport.
+                if self
+                    .viewport
+                    .as_ref()
+                    .is_some_and(|v| v.last_size()[0] <= 0.0)
+                    || self.view_rect.is_none()
+                {
+                    self.demo.push_front(step);
+                    return;
+                }
+                let (cam, [w, h]) = self.view_camera();
+                match cam.project(world.map(|v| v as f32), w, h) {
+                    Some(local) => {
+                        self.place_pointer(phase, local, true);
+                        return;
+                    }
+                    None => None,
+                }
+            }
+            DemoStep::DialogOk => match self.dialog.take().map(|d| build_command(&d)) {
+                Some(Ok(c)) => Some(c),
+                Some(Err(e)) => {
+                    self.diag(true, "Input", e);
+                    None
+                }
+                None => None,
+            },
+            DemoStep::CutLatest(name) => self.unused_sketch().map(|s| Command::CutThroughAll {
+                name: Some(name.into()),
+                sketch: s,
+            }),
+            DemoStep::SelectLatestSketch => {
+                let f = self
+                    .summary
+                    .features
+                    .iter()
+                    .rev()
+                    .find(|f| f.kind == "sketch")
+                    .map(|f| f.id);
                 self.select(f);
                 return;
             }
@@ -467,22 +744,99 @@ impl F420App {
                     self.diagnostics_ui(ui);
                 });
             });
-        egui::CentralPanel::no_frame().show(ui, |ui| match self.viewport.as_mut() {
-            Some(vp) => {
-                vp.ui(ui);
-                let h = vp.hovered_group();
-                vp.set_highlight(h);
-            }
-            None => {
-                ui.centered_and_justified(|ui| {
-                    ui.label(format!(
-                        "3D view unavailable (no wgpu renderer). Display mesh: {} triangles",
-                        self.mesh_triangles
-                    ));
+        if self.placement.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.cancel_tool();
+        }
+        let tool_active = self.placement.is_some();
+        let mut events: Vec<(Phase, egui::Pos2)> = vec![];
+        let mut snapping = true;
+        let mut layer = None;
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            let resp = match self.viewport.as_mut() {
+                Some(vp) => {
+                    vp.set_primary_drag_navigates(!tool_active);
+                    let r = vp.ui(ui);
+                    let h = vp.hovered_group();
+                    vp.set_highlight(h);
+                    r
+                }
+                None => {
+                    let (rect, r) =
+                        ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        format!(
+                            "3D view unavailable (no wgpu renderer). Display mesh: {} triangles",
+                            self.mesh_triangles
+                        ),
+                        egui::FontId::proportional(14.0),
+                        ui.visuals().text_color(),
+                    );
+                    r
+                }
+            };
+            self.view_rect = Some(resp.rect);
+            layer = Some(ui.layer_id());
+            if tool_active {
+                let prim = egui::PointerButton::Primary;
+                let (shift, origin, latest) = ui.input(|i| {
+                    (
+                        i.modifiers.shift,
+                        i.pointer.press_origin(),
+                        i.pointer.latest_pos(),
+                    )
                 });
+                snapping = !shift;
+                if resp.drag_started_by(prim)
+                    && let Some(o) = origin
+                {
+                    events.push((Phase::Press, o));
+                }
+                if (resp.dragged_by(prim) || resp.drag_stopped_by(prim))
+                    && let Some(p) = latest
+                {
+                    events.push((Phase::Move, p));
+                }
+                if resp.drag_stopped_by(prim)
+                    && let Some(p) = latest
+                {
+                    events.push((Phase::Release, p));
+                }
             }
         });
+        if let Some(rect) = self.view_rect {
+            for (phase, pos) in events {
+                let l = pos - rect.min;
+                self.place_pointer(phase, [l.x, l.y], snapping);
+            }
+        }
         self.dialog_ui(&ctx, busy);
+        if !matches!(
+            self.dialog,
+            Some(Dialog::Rectangle { .. } | Dialog::CircleOnFace { .. })
+        ) {
+            self.held_preview = None;
+        }
+        if let (Some(rect), Some(layer)) = (self.view_rect, layer) {
+            let painter = ctx.layer_painter(layer).with_clip_rect(rect);
+            let (cam, _) = self.view_camera();
+            f420_viewport::paint_overlay(&painter, &cam, rect, &self.placement_overlay());
+            if let Some(hint) = self.placement_hint() {
+                let pos = rect.min + egui::vec2(10.0, 10.0);
+                let galley = painter.layout_no_wrap(
+                    hint,
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::from_rgb(255, 205, 60),
+                );
+                painter.rect_filled(
+                    egui::Rect::from_min_size(pos, galley.size()).expand(4.0),
+                    3.0,
+                    egui::Color32::from_black_alpha(170),
+                );
+                painter.galley(pos, galley, egui::Color32::WHITE);
+            }
+        }
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -562,6 +916,8 @@ impl F420App {
                 self.dialog = Some(Dialog::Rectangle {
                     width: "80".into(),
                     height: "50".into(),
+                    cx: "0".into(),
+                    cy: "0".into(),
                 });
             }
             if ui
@@ -586,6 +942,8 @@ impl F420App {
                 self.dialog = Some(Dialog::CircleOnFace {
                     extrude: last.map(|f| f.id),
                     diameter: "10".into(),
+                    cx: "0".into(),
+                    cy: "0".into(),
                 });
             }
             if ui
@@ -595,6 +953,60 @@ impl F420App {
                 self.dialog = Some(Dialog::Cut {
                     sketch: self.unused_sketch(),
                 });
+            }
+            ui.separator();
+            let current = self.placement.as_ref().map(|p| p.tool);
+            let rect_on = current == Some(Tool::Rectangle);
+            if ui
+                .add_enabled(
+                    idle && open,
+                    egui::Button::new("Place rectangle").selected(rect_on),
+                )
+                .clicked()
+            {
+                if rect_on {
+                    self.cancel_tool();
+                } else {
+                    self.start_tool(Tool::Rectangle);
+                }
+            }
+            let hole_on = matches!(current, Some(Tool::Hole { .. }));
+            if ui
+                .add_enabled(
+                    idle && has_extrude,
+                    egui::Button::new("Place hole").selected(hole_on),
+                )
+                .clicked()
+            {
+                if hole_on {
+                    self.cancel_tool();
+                } else if let Some(e) = self
+                    .summary
+                    .features
+                    .iter()
+                    .rev()
+                    .find(|f| f.kind == "extrude")
+                {
+                    let extrude = e.id;
+                    self.start_tool(Tool::Hole { extrude });
+                }
+            }
+            if let Some(Tool::Hole { extrude }) = current {
+                let extrudes: Vec<FeatureSummary> = self
+                    .summary
+                    .features
+                    .iter()
+                    .filter(|f| f.kind == "extrude")
+                    .cloned()
+                    .collect();
+                let refs: Vec<&FeatureSummary> = extrudes.iter().collect();
+                let mut sel = Some(extrude);
+                feature_combo(ui, "Hole on end cap of", &mut sel, &refs);
+                if let Some(e) = sel
+                    && e != extrude
+                {
+                    self.start_tool(Tool::Hole { extrude: e });
+                }
             }
             ui.separator();
             if ui
@@ -660,6 +1072,7 @@ impl F420App {
     fn plane_text(&self, plane: &SketchPlane) -> String {
         match plane {
             SketchPlane::WorldXY => "on World XY".into(),
+            SketchPlane::WorldXZ => "on World XZ".into(),
             SketchPlane::Face(r) => {
                 let role = match r.role {
                     FaceRole::ExtrudeEndCap => "EndCap",
@@ -891,18 +1304,33 @@ impl F420App {
             .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
             .show(ctx, |ui| {
                 match &mut dlg {
-                    Dialog::Rectangle { width, height } => {
+                    Dialog::Rectangle {
+                        width,
+                        height,
+                        cx,
+                        cy,
+                    } => {
                         num_field(ui, "Rectangle width (mm)", width);
                         num_field(ui, "Rectangle height (mm)", height);
-                        ui.small("Centered on the origin of the world XY plane.");
+                        num_field(ui, "Rectangle center X (mm)", cx);
+                        num_field(ui, "Rectangle center Y (mm)", cy);
+                        ui.small("Centre in world XY coordinates.");
                     }
                     Dialog::Extrude { sketch, distance } => {
                         feature_combo(ui, "Profile sketch", sketch, &sketches);
                         num_field(ui, "Extrude distance (mm)", distance);
                     }
-                    Dialog::CircleOnFace { extrude, diameter } => {
+                    Dialog::CircleOnFace {
+                        extrude,
+                        diameter,
+                        cx,
+                        cy,
+                    } => {
                         feature_combo(ui, "End cap of extrusion", extrude, &extrudes);
                         num_field(ui, "Circle diameter (mm)", diameter);
+                        num_field(ui, "Circle center X (mm)", cx);
+                        num_field(ui, "Circle center Y (mm)", cy);
+                        ui.small("Centre in the end cap's frame (the profile sketch's X/Y).");
                         ui.small("Attached semantically to the extrusion's end cap face.");
                     }
                     Dialog::Cut { sketch } => {
@@ -967,13 +1395,18 @@ fn parse_num(label: &str, s: &str) -> Result<f64, String> {
 fn build_command(d: &Dialog) -> Result<Command, String> {
     let need = |f: &Option<FeatureId>, what: &str| f.ok_or_else(|| format!("choose a {what}"));
     Ok(match d {
-        Dialog::Rectangle { width, height } => Command::CreateSketch {
+        Dialog::Rectangle {
+            width,
+            height,
+            cx,
+            cy,
+        } => Command::CreateSketch {
             name: None,
             plane: SketchPlane::WorldXY,
             template: SketchTemplate::CenteredRectangle {
                 width: parse_num("width", width)?,
                 height: parse_num("height", height)?,
-                center: None,
+                center: Some([parse_num("center X", cx)?, parse_num("center Y", cy)?]),
             },
         },
         Dialog::Extrude { sketch, distance } => Command::Extrude {
@@ -981,13 +1414,18 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
             sketch: need(sketch, "profile sketch")?,
             distance: parse_num("distance", distance)?,
         },
-        Dialog::CircleOnFace { extrude, diameter } => Command::CreateSketch {
+        Dialog::CircleOnFace {
+            extrude,
+            diameter,
+            cx,
+            cy,
+        } => Command::CreateSketch {
             name: None,
             // Semantic face reference (feature + generated-face role), never an index.
             plane: end_cap_of(need(extrude, "extrusion")?),
             template: SketchTemplate::CenteredCircle {
                 diameter: parse_num("diameter", diameter)?,
-                center: None,
+                center: Some([parse_num("center X", cx)?, parse_num("center Y", cy)?]),
             },
         },
         Dialog::Cut { sketch } => Command::CutThroughAll {

@@ -237,3 +237,90 @@ fn grid_spacing_scales_with_model() {
     assert!(bs.max[0] >= 10.0 && bs.max[0] < 100.0);
     assert!(bb.max[0] >= 1000.0 && bb.max[0] < 10000.0);
 }
+
+#[test]
+fn project_is_inverse_of_ray() {
+    let c = cam(0.7, 0.45);
+    let (w, h) = (900.0, 600.0);
+    for p in [[0.0, 0.0, 0.0], [30.0, -12.0, 10.0], [-40.0, 25.0, 0.0]] {
+        let [px, py] = c.project(p, w, h).expect("in front");
+        let ray = c.ray(px, py, w, h).expect("ray");
+        // Distance from p to the ray line.
+        let rel = math::sub(p, ray.origin);
+        let along = math::dot(rel, ray.dir);
+        let off = math::sub(rel, math::scale(ray.dir, along));
+        assert!(
+            math::length(off) < 1e-3,
+            "{p:?} off by {}",
+            math::length(off)
+        );
+    }
+    // Target lands at the centre; points behind the eye do not project.
+    let [cx, cy] = c.project(c.target, w, h).unwrap();
+    assert!(approx(cx, 450.0, 1e-3) && approx(cy, 300.0, 1e-3));
+    let behind = math::add(c.eye(), math::scale(c.basis().2, -10.0));
+    assert!(c.project(behind, w, h).is_none());
+    assert!(c.project([0.0; 3], 0.0, h).is_none());
+}
+
+#[test]
+fn ray_plane_hits_xy_and_offset_planes() {
+    let c = cam(-0.6, 0.8);
+    let ray = c.ray(400.0, 300.0, 800.0, 600.0).unwrap();
+    let hit = ray_plane(&ray, [0.0, 0.0, 20.0], [0.0, 0.0, 1.0]).unwrap();
+    // The centre ray passes through the target, which lies on z = 20.
+    assert!((hit[0] - 10.0).abs() < 1e-3 && (hit[1] + 5.0).abs() < 1e-3);
+    assert!((hit[2] - 20.0).abs() < 1e-9);
+    // Unnormalised normal gives the same hit.
+    let hit2 = ray_plane(&ray, [0.0, 0.0, 20.0], [0.0, 0.0, 7.0]).unwrap();
+    assert!((0..3).all(|k| (hit[k] - hit2[k]).abs() < 1e-9));
+    // Parallel ray, plane behind the origin, and zero normal all miss.
+    let flat = Ray {
+        origin: [0.0, 0.0, 5.0],
+        dir: [1.0, 0.0, 0.0],
+    };
+    assert!(ray_plane(&flat, [0.0; 3], [0.0, 0.0, 1.0]).is_none());
+    let up = Ray {
+        origin: [0.0, 0.0, 5.0],
+        dir: [0.0, 0.0, 1.0],
+    };
+    assert!(ray_plane(&up, [0.0; 3], [0.0, 0.0, 1.0]).is_none());
+    assert!(ray_plane(&up, [0.0, 0.0, 9.0], [0.0; 3]).is_none());
+}
+
+#[test]
+fn overlay_projects_polylines_and_dashes() {
+    let c = Camera::default();
+    let rect = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 600.0));
+    let square = vec![
+        [-10.0, -10.0, 0.0],
+        [10.0, -10.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [-10.0, 10.0, 0.0],
+    ];
+    let mut ov = Overlay {
+        polylines: vec![OverlayPolyline {
+            points: square,
+            closed: true,
+            color: egui::Color32::YELLOW,
+            width: 2.0,
+            dashed: false,
+        }],
+        labels: vec![],
+    };
+    let solid = overlay_shapes(&c, rect, &ov);
+    assert_eq!(solid.len(), 1);
+    let egui::Shape::Path(p) = &solid[0] else {
+        panic!("expected a path");
+    };
+    // Closed: first point repeated; all inside the rect around its centre.
+    assert_eq!(p.points.len(), 5);
+    assert_eq!(p.points[0], p.points[4]);
+    assert!(p.points.iter().all(|q| rect.contains(*q)));
+    ov.polylines[0].dashed = true;
+    assert!(overlay_shapes(&c, rect, &ov).len() > 4);
+    // A polyline entirely behind the eye draws nothing.
+    let behind = math::add(c.eye(), math::scale(c.basis().2, -5.0));
+    ov.polylines[0].points = vec![behind, math::add(behind, [1.0, 0.0, 0.0])];
+    assert!(overlay_shapes(&c, rect, &ov).is_empty());
+}
