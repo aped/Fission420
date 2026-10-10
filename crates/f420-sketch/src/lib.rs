@@ -16,8 +16,11 @@
 //!
 //! Geometric/profile tolerances reuse the solve tolerance (a length in mm).
 
+mod edit;
 mod profile;
 mod solver;
+
+pub use edit::{DragOutcome, DragResult};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -123,6 +126,12 @@ pub enum Constraint {
     Diameter { circle: EntityId, dim: Dimension },
     /// `a == b`; 2 equations.
     Coincident { a: PointId, b: PointId },
+    /// Euclidean `|b - a| = dim.value` (aligned length); 1 nonlinear equation.
+    Distance {
+        a: PointId,
+        b: PointId,
+        dim: Dimension,
+    },
 }
 
 impl Constraint {
@@ -130,15 +139,17 @@ impl Constraint {
         match self {
             Constraint::HorizontalDistance { dim, .. }
             | Constraint::VerticalDistance { dim, .. }
+            | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. } => Some(dim),
             _ => None,
         }
     }
 
-    fn dimension_mut(&mut self) -> Option<&mut Dimension> {
+    pub fn dimension_mut(&mut self) -> Option<&mut Dimension> {
         match self {
             Constraint::HorizontalDistance { dim, .. }
             | Constraint::VerticalDistance { dim, .. }
+            | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. } => Some(dim),
             _ => None,
         }
@@ -227,6 +238,11 @@ pub struct Sketch {
     pub points: Vec<SketchPoint>,
     pub entities: Vec<Entity>,
     pub constraints: Vec<Constraint>,
+    /// The sketch-origin point (fixed at (0, 0) by a `FixedPoint` constraint) of
+    /// editor-created sketches. Templates have none: their single fixed point is a
+    /// movable anchor (`center_x` / `center_y`). Absent in format-v1 files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<PointId>,
 }
 
 fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
@@ -258,6 +274,7 @@ impl Sketch {
             b: PointId(b),
         };
         let s = Sketch {
+            origin: None,
             points: vec![
                 p(0, 0.0, 0.0),
                 p(1, -hw, -hh),
@@ -301,6 +318,7 @@ impl Sketch {
     pub fn centered_circle(diameter: f64) -> Result<Sketch, SketchError> {
         check_dim_value("diameter", diameter)?;
         let s = Sketch {
+            origin: None,
             points: vec![
                 SketchPoint {
                     id: PointId(0),
@@ -436,6 +454,7 @@ impl Sketch {
                 }
                 Constraint::HorizontalDistance { a, b, .. }
                 | Constraint::VerticalDistance { a, b, .. }
+                | Constraint::Distance { a, b, .. }
                 | Constraint::Coincident { a, b } => {
                     need_point(a)?;
                     need_point(b)?;
@@ -453,6 +472,9 @@ impl Sketch {
                     return Err(SketchError::DuplicateDimension(d.name.clone()));
                 }
             }
+        }
+        if let Some(o) = &self.origin {
+            need_point(o)?;
         }
         let unknowns = self.unknown_count();
         if unknowns > MAX_UNKNOWNS {

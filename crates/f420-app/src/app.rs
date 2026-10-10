@@ -165,6 +165,7 @@ impl F420App {
         Self {
             engine: Engine::new(mode, repaint),
             summary: DocSummary {
+                doc_id: 0,
                 open: false,
                 path: None,
                 dirty: false,

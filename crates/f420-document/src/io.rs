@@ -1,6 +1,6 @@
 //! Versioned native file format (`.f420.json`) with atomic save.
 //!
-//! Layout: `{ "format": "fission420", "version": 1, "document": {...}, "cache": {...} }`.
+//! Layout: `{ "format": "fission420", "version": 2, "document": {...}, "cache": {...} }`.
 //! `document` is authoritative. `cache` is an informational summary of the geometry at
 //! save time; loaders regenerate and may compare against it, never trust it.
 use crate::{DocError, Document, Evaluation, Result};
@@ -10,7 +10,11 @@ use std::io::Write;
 use std::path::Path;
 
 pub const FORMAT_NAME: &str = "fission420";
-pub const FORMAT_VERSION: u32 = 1;
+/// v2 (run 2): sketches may carry `origin` and `Distance` constraints. v1 files
+/// are a strict subset and load unchanged (identity migration); saves write v2.
+pub const FORMAT_VERSION: u32 = 2;
+/// Oldest version this build reads.
+pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this.
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -135,7 +139,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         )));
     }
     match h.version {
-        Some(FORMAT_VERSION) => {}
+        Some(v) if (MIN_FORMAT_VERSION..=FORMAT_VERSION).contains(&v) => {}
         Some(v) if v > FORMAT_VERSION => {
             return Err(DocError::File(format!(
                 "file version {v} is newer than supported {FORMAT_VERSION}"

@@ -1,0 +1,332 @@
+//! Editing helpers used by the interactive sketch editor: id allocation,
+//! geometry insertion/removal, human-readable constraint labels, and
+//! constraint-respecting drags.
+//!
+//! Drags never bypass constraints. A drag first tries to pin the dragged
+//! point (or circle radius) at the target with temporary equations; if the
+//! constraints forbid that, it tries pinning only x or only y (sliding along a
+//! constraint), and otherwise leaves the sketch unchanged and reports which
+//! constraints block the motion.
+
+use crate::solver::{self, Pin};
+use crate::{
+    Constraint, Dimension, Entity, EntityId, PointId, Sketch, SketchPoint, SolveReport, SolveStatus,
+};
+
+/// How far a drag got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragOutcome {
+    /// The dragged item reached the target exactly.
+    Reached,
+    /// Constraints allowed motion along one axis only (closest reachable).
+    Partial,
+    /// Constraints forbid moving toward the target; sketch unchanged.
+    Blocked,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DragResult {
+    pub outcome: DragOutcome,
+    /// Solve report of the sketch after the drag (without pins).
+    pub report: SolveReport,
+    /// Constraint indices that prevent reaching the target (Partial/Blocked).
+    pub blocked_by: Vec<usize>,
+}
+
+impl Sketch {
+    pub fn next_point_id(&self) -> PointId {
+        PointId(
+            self.points
+                .iter()
+                .map(|p| p.id.0.saturating_add(1))
+                .max()
+                .unwrap_or(0),
+        )
+    }
+
+    pub fn next_entity_id(&self) -> EntityId {
+        EntityId(
+            self.entities
+                .iter()
+                .map(|e| e.id().0.saturating_add(1))
+                .max()
+                .unwrap_or(1)
+                .max(1),
+        )
+    }
+
+    pub fn point(&self, id: PointId) -> Option<&SketchPoint> {
+        self.points.iter().find(|p| p.id == id)
+    }
+
+    pub fn point_xy(&self, id: PointId) -> Option<[f64; 2]> {
+        self.point(id).map(|p| [p.x, p.y])
+    }
+
+    pub fn entity(&self, id: EntityId) -> Option<&Entity> {
+        self.entities.iter().find(|e| e.id() == id)
+    }
+
+    pub fn add_point(&mut self, x: f64, y: f64) -> PointId {
+        let id = self.next_point_id();
+        self.points.push(SketchPoint { id, x, y });
+        id
+    }
+
+    pub fn add_line(&mut self, a: PointId, b: PointId) -> EntityId {
+        let id = self.next_entity_id();
+        self.entities.push(Entity::Line { id, a, b });
+        id
+    }
+
+    pub fn add_circle(&mut self, center: PointId, radius: f64) -> EntityId {
+        let id = self.next_entity_id();
+        self.entities.push(Entity::Circle { id, center, radius });
+        id
+    }
+
+    /// The sketch-origin point, created (fixed at (0, 0)) if absent.
+    pub fn ensure_origin(&mut self) -> PointId {
+        if let Some(o) = self.origin
+            && self.point(o).is_some()
+        {
+            return o;
+        }
+        let id = self.add_point(0.0, 0.0);
+        self.constraints.push(Constraint::FixedPoint {
+            p: id,
+            x: 0.0,
+            y: 0.0,
+        });
+        self.origin = Some(id);
+        id
+    }
+
+    fn used_by_entity(&self, id: PointId) -> bool {
+        self.entities.iter().any(|e| match e {
+            Entity::Line { a, b, .. } => *a == id || *b == id,
+            Entity::Circle { center, .. } => *center == id,
+        })
+    }
+
+    /// Remove an entity, the constraints on it, its endpoints that no other entity
+    /// uses (with their constraints), and construction points (such as a
+    /// rectangle centre) that nothing references any more. The origin is kept.
+    /// Returns false if the entity does not exist.
+    pub fn remove_entity(&mut self, id: EntityId) -> bool {
+        let Some(pos) = self.entities.iter().position(|e| e.id() == id) else {
+            return false;
+        };
+        let e = self.entities.remove(pos);
+        self.constraints
+            .retain(|c| constraint_entity(c) != Some(id));
+        let pts: Vec<PointId> = match e {
+            Entity::Line { a, b, .. } => vec![a, b],
+            Entity::Circle { center, .. } => vec![center],
+        };
+        for p in pts {
+            if !self.used_by_entity(p) && self.origin != Some(p) {
+                self.constraints
+                    .retain(|c| !constraint_points(c).contains(&p));
+                self.points.retain(|q| q.id != p);
+            }
+        }
+        loop {
+            let orphan = self.points.iter().map(|p| p.id).find(|&id| {
+                self.origin != Some(id)
+                    && !self.used_by_entity(id)
+                    && !self
+                        .constraints
+                        .iter()
+                        .any(|c| constraint_points(c).contains(&id))
+            });
+            let Some(id) = orphan else { break };
+            self.points.retain(|q| q.id != id);
+        }
+        true
+    }
+
+    pub fn remove_constraint(&mut self, index: usize) -> Option<Constraint> {
+        (index < self.constraints.len()).then(|| self.constraints.remove(index))
+    }
+
+    /// `preferred` if unused, else `preferred2`, `preferred3`, ...
+    pub fn unique_dimension_name(&self, preferred: &str) -> String {
+        let used = |n: &str| self.dimensions().iter().any(|(m, _)| m == n);
+        if !used(preferred) {
+            return preferred.to_string();
+        }
+        (2..)
+            .map(|i| format!("{preferred}{i}"))
+            .find(|n| !used(n))
+            .unwrap_or_else(|| preferred.to_string())
+    }
+
+    /// Human-readable description of constraint `index` (for diagnostics/UI).
+    pub fn constraint_label(&self, index: usize) -> String {
+        let Some(c) = self.constraints.get(index) else {
+            return format!("constraint #{index}");
+        };
+        let p = |id: &PointId| {
+            if self.origin == Some(*id) {
+                "origin".to_string()
+            } else {
+                format!("P{}", id.0)
+            }
+        };
+        let dim = |d: &Dimension| format!("{} = {} mm", d.name, fmt_mm(d.value));
+        match c {
+            Constraint::FixedPoint { p: q, x, y } => {
+                format!("Fixed {} at ({}, {})", p(q), fmt_mm(*x), fmt_mm(*y))
+            }
+            Constraint::Horizontal { line } => format!("Horizontal L{}", line.0),
+            Constraint::Vertical { line } => format!("Vertical L{}", line.0),
+            Constraint::HorizontalDistance { a, b, dim: d } => {
+                format!("{} (horizontal {}→{})", dim(d), p(a), p(b))
+            }
+            Constraint::VerticalDistance { a, b, dim: d } => {
+                format!("{} (vertical {}→{})", dim(d), p(a), p(b))
+            }
+            Constraint::Distance { a, b, dim: d } => {
+                format!("{} (distance {}–{})", dim(d), p(a), p(b))
+            }
+            Constraint::SymmetricAboutPoint { a, b, center } => {
+                format!("Symmetric {} / {} about {}", p(a), p(b), p(center))
+            }
+            Constraint::Diameter { circle, dim: d } => {
+                format!("{} (diameter of C{})", dim(d), circle.0)
+            }
+            Constraint::Coincident { a, b } => format!("Coincident {} · {}", p(a), p(b)),
+        }
+    }
+
+    /// Drag point `p` toward `target` (sketch-plane mm) without violating any
+    /// constraint. On `Blocked` the sketch is unchanged.
+    pub fn drag_point(&mut self, p: PointId, target: [f64; 2]) -> DragResult {
+        let pins = |mask: [bool; 2]| -> Vec<Pin> {
+            (0..2)
+                .filter(|&axis| mask[axis])
+                .map(|axis| Pin::Coord {
+                    p,
+                    axis,
+                    value: target[axis],
+                })
+                .collect()
+        };
+        let mut moved = self.clone();
+        if let Some(q) = moved.points.iter_mut().find(|q| q.id == p) {
+            (q.x, q.y) = (target[0], target[1]);
+        }
+        self.drag_with(
+            &moved,
+            &pins([true, true]),
+            &[pins([true, false]), pins([false, true])],
+            |s| {
+                s.point_xy(p)
+                    .map(|q| (q[0] - target[0]).hypot(q[1] - target[1]))
+                    .unwrap_or(f64::INFINITY)
+            },
+        )
+    }
+
+    /// Drag a circle's radius toward `radius` (mm, > 0).
+    pub fn drag_radius(&mut self, circle: EntityId, radius: f64) -> DragResult {
+        let pin = [Pin::Radius {
+            circle,
+            value: radius,
+        }];
+        let mut moved = self.clone();
+        for e in &mut moved.entities {
+            if let Entity::Circle { id, radius: r, .. } = e
+                && *id == circle
+            {
+                *r = radius;
+            }
+        }
+        self.drag_with(&moved, &pin, &[], |_| 0.0)
+    }
+
+    fn drag_with(
+        &mut self,
+        moved: &Sketch,
+        full: &[Pin],
+        partial: &[Vec<Pin>],
+        miss: impl Fn(&Sketch) -> f64,
+    ) -> DragResult {
+        let ok = |r: &SolveReport| r.is_success();
+        let mut first = moved.clone();
+        let r1 = solver::solve_with(&mut first, full);
+        if ok(&r1) {
+            let report = first.solve();
+            *self = first;
+            return DragResult {
+                outcome: DragOutcome::Reached,
+                report,
+                blocked_by: vec![],
+            };
+        }
+        let blocked_by = r1.conflicting.clone();
+        let mut best: Option<(f64, Sketch)> = None;
+        for pins in partial {
+            let mut s = moved.clone();
+            if ok(&solver::solve_with(&mut s, pins)) {
+                let d = miss(&s);
+                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                    best = Some((d, s));
+                }
+            }
+        }
+        if let Some((_, mut s)) = best {
+            let report = s.solve();
+            if report.is_success() {
+                *self = s;
+                return DragResult {
+                    outcome: DragOutcome::Partial,
+                    report,
+                    blocked_by,
+                };
+            }
+        }
+        let report = self.clone().solve();
+        DragResult {
+            outcome: DragOutcome::Blocked,
+            report,
+            blocked_by,
+        }
+    }
+
+    /// Solve status shorthand: true when the sketch is solvable and DOF = 0.
+    pub fn is_fully_constrained(&self) -> bool {
+        self.clone().solve().status == SolveStatus::FullyConstrained
+    }
+}
+
+/// Points a constraint references (not the line entities' endpoints).
+pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
+    match c {
+        Constraint::FixedPoint { p, .. } => vec![*p],
+        Constraint::HorizontalDistance { a, b, .. }
+        | Constraint::VerticalDistance { a, b, .. }
+        | Constraint::Distance { a, b, .. }
+        | Constraint::Coincident { a, b } => vec![*a, *b],
+        Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
+        Constraint::Horizontal { .. }
+        | Constraint::Vertical { .. }
+        | Constraint::Diameter { .. } => vec![],
+    }
+}
+
+fn constraint_entity(c: &Constraint) -> Option<EntityId> {
+    match c {
+        Constraint::Horizontal { line } | Constraint::Vertical { line } => Some(*line),
+        Constraint::Diameter { circle, .. } => Some(*circle),
+        _ => None,
+    }
+}
+
+/// Compact mm formatting for labels (up to 4 decimals, trailing zeros trimmed).
+pub fn fmt_mm(v: f64) -> String {
+    let s = format!("{v:.4}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".into() } else { s.into() }
+}

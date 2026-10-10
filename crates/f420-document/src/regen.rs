@@ -29,6 +29,13 @@ pub struct FeatureResult {
     pub resolved_face: Option<ResolvedFace>,
     /// Solid-producing features: measurements of the body after this feature.
     pub measurements: Option<Measurements>,
+    /// Sketch features: the solved sketch (display / editor seed; not authoritative).
+    #[serde(default)]
+    pub solved_sketch: Option<f420_sketch::Sketch>,
+    /// Sketch features: why the geometry is not a usable profile (open loop,
+    /// self-intersection, ...). Such sketches are kept but cannot be extruded/cut.
+    #[serde(default)]
+    pub profile_error: Option<String>,
 }
 
 /// Disposable geometry cache for a document.
@@ -42,7 +49,20 @@ pub struct Evaluation {
 #[derive(Clone)]
 struct SketchOut {
     frame: Frame,
-    profile: SketchProfile,
+    /// `Err(reason)` when the sketch is not a single closed profile.
+    profile: std::result::Result<SketchProfile, String>,
+}
+
+impl SketchOut {
+    /// The profile, or a structured error naming the consuming feature.
+    fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&SketchProfile> {
+        self.profile.as_ref().map_err(|why| {
+            DocError::Validation(format!(
+                "{user}: sketch {sketch} has no usable profile ({why}); \
+                 close the loop or remove extra geometry"
+            ))
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -215,6 +235,8 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
             frame: None,
             resolved_face: None,
             measurements: None,
+            solved_sketch: None,
+            profile_error: None,
         };
         match &f.kind {
             FeatureKind::Sketch { plane, sketch } => {
@@ -229,21 +251,31 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                 let mut s = sketch.clone();
                 let report = s.solve();
                 if !report.is_success() {
+                    let culprits: Vec<String> = report
+                        .conflicting
+                        .iter()
+                        .map(|&i| sketch.constraint_label(i))
+                        .collect();
                     return Err(DocError::SketchSolve {
                         feature: id,
                         detail: format!(
-                            "{:?}, residual {:.3e} mm, conflicting constraints {:?}",
-                            report.status, report.residual, report.conflicting
+                            "{:?}, residual {:.3e} mm, conflicting constraints: {}",
+                            report.status,
+                            report.residual,
+                            if culprits.is_empty() {
+                                "not identified".to_string()
+                            } else {
+                                culprits.join("; ")
+                            }
                         ),
                     });
                 }
-                let profile = s.profile().map_err(|e| DocError::SketchSolve {
-                    feature: id,
-                    detail: e.to_string(),
-                })?;
+                let profile = s.profile().map_err(|e| e.to_string());
+                r.profile_error = profile.as_ref().err().cloned();
                 r.solve = Some(report);
                 r.frame = Some(frame);
                 r.resolved_face = resolved;
+                r.solved_sketch = Some(s);
                 sketches.insert(id, SketchOut { frame, profile });
             }
             FeatureKind::Revolve { sketch, angle } => {
@@ -256,7 +288,7 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                         "only one base body (extrude or revolve) per document is supported".into(),
                     ));
                 }
-                let b = k::revolve(&to_kernel(&s.profile), &s.frame, *angle)
+                let b = k::revolve(&to_kernel(s.usable(id, *sketch)?), &s.frame, *angle)
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
                 last_solid = Some(results.len());
                 body = Some(b);
@@ -276,7 +308,8 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                         "{id}.distance: extrusion thickness must be > 0 mm, got {distance}"
                     )));
                 }
-                let b = k::extrude(&to_kernel(&s.profile), &s.frame, *distance).map_err(|e| {
+                let profile = s.usable(id, *sketch)?.clone();
+                let b = k::extrude(&to_kernel(&profile), &s.frame, *distance).map_err(|e| {
                     DocError::Kernel {
                         feature: id,
                         detail: e.to_string(),
@@ -287,7 +320,7 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                     ExtrudeOut {
                         start: s.frame,
                         distance: *distance,
-                        profile: s.profile.clone(),
+                        profile,
                     },
                 );
                 last_solid = Some(results.len());
@@ -307,10 +340,11 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                 let host = extrudes.values().next().ok_or(DocError::ProductLimit(
                     "cuts are only supported on an extruded base body".into(),
                 ))?;
-                let hole = hole_in_host_frame(&s.profile, &s.frame, &host.start)?;
+                let cut_profile = s.usable(id, *sketch)?;
+                let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
                 check_hole_inside(&hole, &host.profile)?;
                 let b =
-                    k::cut_through_all(target, &to_kernel(&s.profile), &s.frame).map_err(|e| {
+                    k::cut_through_all(target, &to_kernel(cut_profile), &s.frame).map_err(|e| {
                         DocError::Kernel {
                             feature: id,
                             detail: e.to_string(),

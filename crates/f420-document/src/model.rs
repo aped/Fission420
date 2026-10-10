@@ -141,7 +141,15 @@ impl Feature {
                         name: name.into(),
                     },
                     other => DocError::Validation(format!("{id}.{name}: {other}")),
-                })
+                })?;
+                // Store the solved geometry so the definition stays a solved state
+                // (freeform vertices are solver unknowns seeded from storage). A
+                // failed solve leaves the seed; regeneration then reports it.
+                let mut solved = sketch.clone();
+                if solved.solve().is_success() {
+                    *sketch = solved;
+                }
+                Ok(())
             }
             FeatureKind::Revolve { angle, .. } if name == "angle_deg" => {
                 if value <= 0.0 || value > 360.0 {
@@ -171,7 +179,11 @@ impl Feature {
 
 /// Position of a template sketch's single fixed anchor point (the template centre),
 /// exposed as the editable parameters `center_x` / `center_y` (mm, sketch-plane frame).
+/// Editor sketches (with an `origin` point) have no movable anchor.
 pub fn anchor(sketch: &f420_sketch::Sketch) -> Option<(f64, f64)> {
+    if sketch.origin.is_some() {
+        return None;
+    }
     let mut fixed = sketch.constraints.iter().filter_map(|c| match c {
         f420_sketch::Constraint::FixedPoint { x, y, .. } => Some((*x, *y)),
         _ => None,

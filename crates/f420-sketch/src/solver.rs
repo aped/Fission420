@@ -29,7 +29,13 @@ enum Eq {
     Mid { a: usize, b: usize, m: usize },
     /// `k * x[c] - v`
     Scaled { c: usize, k: f64, v: f64 },
+    /// `|(x[b], x[b+1]) - (x[a], x[a+1])| - v` (a, b are x columns of points)
+    Dist { a: usize, b: usize, v: f64 },
 }
+
+/// Below this length (mm) the distance gradient is undefined; the Jacobian row
+/// uses a fixed unit direction so LM can still move the points apart.
+const DIST_GRAD_FLOOR: f64 = 1e-12;
 
 impl Eq {
     fn eval(&self, x: &[f64]) -> f64 {
@@ -38,11 +44,12 @@ impl Eq {
             Eq::Diff { a, b, v } => x[b] - x[a] - v,
             Eq::Mid { a, b, m } => 0.5 * (x[a] + x[b]) - x[m],
             Eq::Scaled { c, k, v } => k * x[c] - v,
+            Eq::Dist { a, b, v } => (x[b] - x[a]).hypot(x[b + 1] - x[a + 1]) - v,
         }
     }
 
     /// Adds this row's partial derivatives into `row` of `j`.
-    fn jac(&self, _x: &[f64], j: &mut DMatrix<f64>, row: usize) {
+    fn jac(&self, x: &[f64], j: &mut DMatrix<f64>, row: usize) {
         match *self {
             Eq::Fix { c, .. } => j[(row, c)] += 1.0,
             Eq::Diff { a, b, .. } => {
@@ -55,6 +62,19 @@ impl Eq {
                 j[(row, m)] -= 1.0;
             }
             Eq::Scaled { c, k, .. } => j[(row, c)] += k,
+            Eq::Dist { a, b, .. } => {
+                let (dx, dy) = (x[b] - x[a], x[b + 1] - x[a + 1]);
+                let l = dx.hypot(dy);
+                let (ux, uy) = if l > DIST_GRAD_FLOOR {
+                    (dx / l, dy / l)
+                } else {
+                    (1.0, 0.0)
+                };
+                j[(row, b)] += ux;
+                j[(row, b + 1)] += uy;
+                j[(row, a)] -= ux;
+                j[(row, a + 1)] -= uy;
+            }
         }
     }
 }
@@ -70,8 +90,29 @@ pub(crate) struct System {
     radius_col: Vec<(usize, usize)>, // (entity index, column)
 }
 
+/// Temporary equation used for interactive drags; not part of the sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Pin {
+    /// `axis` 0 = x, 1 = y.
+    Coord {
+        p: crate::PointId,
+        axis: usize,
+        value: f64,
+    },
+    Radius {
+        circle: crate::EntityId,
+        value: f64,
+    },
+}
+
 impl System {
     pub(crate) fn build(s: &Sketch) -> System {
+        Self::build_with(s, &[])
+    }
+
+    /// Build with extra pin equations. Pins are owned by the pseudo-constraint
+    /// index `s.constraints.len()`, so conflict diagnosis never reports them.
+    pub(crate) fn build_with(s: &Sketch, pins: &[Pin]) -> System {
         let mut initial = Vec::with_capacity(s.points.len() * 2);
         let mut point_col = HashMap::new();
         for p in &s.points {
@@ -143,6 +184,11 @@ impl System {
                     k: 2.0,
                     v: dim.value,
                 }),
+                Constraint::Distance { a, b, dim } => push(Eq::Dist {
+                    a: point_col[a],
+                    b: point_col[b],
+                    v: dim.value,
+                }),
                 Constraint::Coincident { a, b } => {
                     let (a, b) = (point_col[a], point_col[b]);
                     push(Eq::Diff { a, b, v: 0.0 });
@@ -152,6 +198,22 @@ impl System {
                         v: 0.0,
                     });
                 }
+            }
+        }
+        let pin_owner = s.constraints.len();
+        for pin in pins {
+            let e = match *pin {
+                Pin::Coord { p, axis, value } => point_col.get(&p).map(|&c| Eq::Fix {
+                    c: c + axis.min(1),
+                    v: value,
+                }),
+                Pin::Radius { circle, value } => {
+                    circles.get(&circle).map(|&c| Eq::Fix { c, v: value })
+                }
+            };
+            if let Some(e) = e {
+                eqs.push(e);
+                owner.push(pin_owner);
             }
         }
         let n = initial.len();
@@ -289,6 +351,11 @@ fn rank(j: &DMatrix<f64>) -> usize {
 }
 
 pub(crate) fn solve(sketch: &mut Sketch) -> SolveReport {
+    solve_with(sketch, &[])
+}
+
+/// Solve with temporary pins (see [`Pin`]). Same write-back rule as [`solve`].
+pub(crate) fn solve_with(sketch: &mut Sketch, pins: &[Pin]) -> SolveReport {
     if sketch.validate().is_err() {
         return SolveReport {
             status: SolveStatus::Invalid,
@@ -298,7 +365,7 @@ pub(crate) fn solve(sketch: &mut Sketch) -> SolveReport {
             conflicting: Vec::new(),
         };
     }
-    let sys = System::build(sketch);
+    let sys = System::build_with(sketch, pins);
     let tol = solve_tolerance(sketch.scale());
     let rows = sys.all_rows();
     let lm = levenberg_marquardt(&sys, &rows, &sys.initial, tol);
