@@ -48,3 +48,100 @@ fn commands_without_document_fail_cleanly() {
     });
     assert!(!r.ok);
 }
+
+#[test]
+fn off_center_hole_is_placed_editable_and_contained() {
+    use f420_commands::{Command, Session, SketchTemplate, end_cap_of};
+    use f420_document::{FeatureId, SketchPlane};
+    let mut s = Session::new();
+    let ok = |s: &mut Session, c: Command| {
+        let r = s.execute(&c);
+        assert!(r.ok, "{c:?}: {:?}", r.error);
+        r
+    };
+    ok(&mut s, Command::NewDocument);
+    let rect = SketchTemplate::CenteredRectangle {
+        width: 100.0,
+        height: 50.0,
+        center: None,
+    };
+    ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: rect,
+        },
+    );
+    ok(
+        &mut s,
+        Command::Extrude {
+            name: None,
+            sketch: FeatureId(1),
+            distance: 10.0,
+        },
+    );
+    let circle = SketchTemplate::CenteredCircle {
+        diameter: 10.0,
+        center: Some([30.0, -10.0]),
+    };
+    ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: end_cap_of(FeatureId(2)),
+            template: circle,
+        },
+    );
+    ok(
+        &mut s,
+        Command::CutThroughAll {
+            name: None,
+            sketch: FeatureId(3),
+        },
+    );
+    let centroid = |s: &Session| {
+        let body = s.model().unwrap().evaluation().body.as_ref().unwrap();
+        let l = f420_kernel::z_face_inner_loops(body).unwrap();
+        assert_eq!(l.len(), 2);
+        l[1].centroid_xy
+    };
+    let c = centroid(&s);
+    assert!(
+        (c[0] - 30.0).abs() < 1e-6 && (c[1] + 10.0).abs() < 1e-6,
+        "{c:?}"
+    );
+    ok(
+        &mut s,
+        Command::SetParameter {
+            feature: FeatureId(3),
+            name: "center_x".into(),
+            value: -20.0,
+        },
+    );
+    let c = centroid(&s);
+    assert!((c[0] + 20.0).abs() < 1e-6, "{c:?}");
+    // Moving the hole so it breaks out of the plate is a product-limit rejection.
+    let r = s.execute(&Command::SetParameter {
+        feature: FeatureId(3),
+        name: "center_x".into(),
+        value: 47.0,
+    });
+    assert!(
+        !r.ok && matches!(r.error, Some(f420_document::DocError::ProductLimit(_))),
+        "{r:?}"
+    );
+    // Non-finite centre at creation is rejected.
+    let bad = SketchTemplate::CenteredCircle {
+        diameter: 4.0,
+        center: Some([f64::NAN, 0.0]),
+    };
+    assert!(
+        !s.execute(&Command::CreateSketch {
+            name: None,
+            plane: end_cap_of(FeatureId(2)),
+            template: bad
+        })
+        .ok
+    );
+}

@@ -200,6 +200,7 @@ impl F420App {
                 template: SketchTemplate::CenteredRectangle {
                     width: 80.0,
                     height: 50.0,
+                    center: None,
                 },
             }),
             ExtrudeOf {
@@ -398,7 +399,10 @@ impl F420App {
             } => id(extrude).map(|e| Command::CreateSketch {
                 name: Some(name.into()),
                 plane: end_cap_of(e),
-                template: SketchTemplate::CenteredCircle { diameter },
+                template: SketchTemplate::CenteredCircle {
+                    diameter,
+                    center: None,
+                },
             }),
             DemoStep::CutOf { name, sketch } => id(sketch).map(|s| Command::CutThroughAll {
                 name: Some(name.into()),
@@ -969,6 +973,7 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
             template: SketchTemplate::CenteredRectangle {
                 width: parse_num("width", width)?,
                 height: parse_num("height", height)?,
+                center: None,
             },
         },
         Dialog::Extrude { sketch, distance } => Command::Extrude {
@@ -982,6 +987,7 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
             plane: end_cap_of(need(extrude, "extrusion")?),
             template: SketchTemplate::CenteredCircle {
                 diameter: parse_num("diameter", diameter)?,
+                center: None,
             },
         },
         Dialog::Cut { sketch } => Command::CutThroughAll {

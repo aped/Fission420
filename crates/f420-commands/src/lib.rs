@@ -18,10 +18,21 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "template", rename_all = "snake_case")]
 pub enum SketchTemplate {
-    /// Dimensioned rectangle centred on the sketch origin (dimensions "width", "height").
-    CenteredRectangle { width: f64, height: f64 },
-    /// Circle centred on the sketch origin (dimension "diameter").
-    CenteredCircle { diameter: f64 },
+    /// Dimensioned rectangle centred on `center` (default: sketch origin).
+    /// Parameters: "width", "height", "center_x", "center_y".
+    CenteredRectangle {
+        width: f64,
+        height: f64,
+        #[serde(default)]
+        center: Option<[f64; 2]>,
+    },
+    /// Circle centred on `center` (default: sketch origin).
+    /// Parameters: "diameter", "center_x", "center_y".
+    CenteredCircle {
+        diameter: f64,
+        #[serde(default)]
+        center: Option<[f64; 2]>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,15 +222,29 @@ impl Session {
                 plane,
                 template,
             } => {
-                let sketch = match template {
-                    SketchTemplate::CenteredRectangle { width, height } => {
-                        Sketch::centered_rectangle(*width, *height)
+                let (sketch, center) = match template {
+                    SketchTemplate::CenteredRectangle {
+                        width,
+                        height,
+                        center,
+                    } => (Sketch::centered_rectangle(*width, *height), *center),
+                    SketchTemplate::CenteredCircle { diameter, center } => {
+                        (Sketch::centered_circle(*diameter), *center)
                     }
-                    SketchTemplate::CenteredCircle { diameter } => {
-                        Sketch::centered_circle(*diameter)
+                };
+                let mut sketch = sketch.map_err(|e| DocError::Validation(e.to_string()))?;
+                if let Some([cx, cy]) = center {
+                    if !(cx.is_finite() && cy.is_finite()) {
+                        return Err(DocError::Validation(format!(
+                            "center must be finite, got [{cx}, {cy}]"
+                        )));
+                    }
+                    for c in &mut sketch.constraints {
+                        if let f420_sketch::Constraint::FixedPoint { x, y, .. } = c {
+                            (*x, *y) = (cx, cy);
+                        }
                     }
                 }
-                .map_err(|e| DocError::Validation(e.to_string()))?;
                 let (name, plane) = (name.clone(), *plane);
                 let id = self.model_mut()?.transact("Create sketch", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Sketch"));

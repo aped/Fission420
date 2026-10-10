@@ -86,7 +86,14 @@ impl Feature {
     /// Editable named parameters (mm).
     pub fn parameters(&self) -> Vec<(String, f64)> {
         match &self.kind {
-            FeatureKind::Sketch { sketch, .. } => sketch.dimensions(),
+            FeatureKind::Sketch { sketch, .. } => {
+                let mut p = sketch.dimensions();
+                if let Some((x, y)) = anchor(sketch) {
+                    p.push(("center_x".into(), x));
+                    p.push(("center_y".into(), y));
+                }
+                p
+            }
             FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Cut { .. } => vec![],
         }
@@ -101,6 +108,20 @@ impl Feature {
             )));
         }
         match &mut self.kind {
+            FeatureKind::Sketch { sketch, .. } if name == "center_x" || name == "center_y" => {
+                let Some(f420_sketch::Constraint::FixedPoint { x, y, .. }) = sketch
+                    .constraints
+                    .iter_mut()
+                    .find(|c| matches!(c, f420_sketch::Constraint::FixedPoint { .. }))
+                else {
+                    return Err(DocError::UnknownParameter {
+                        feature: id,
+                        name: name.into(),
+                    });
+                };
+                *(if name == "center_x" { x } else { y }) = value;
+                Ok(())
+            }
             FeatureKind::Sketch { sketch, .. } => {
                 sketch.set_dimension(name, value).map_err(|e| match e {
                     f420_sketch::SketchError::UnknownDimension(_) => DocError::UnknownParameter {
@@ -125,6 +146,17 @@ impl Feature {
             }),
         }
     }
+}
+
+/// Position of a template sketch's single fixed anchor point (the template centre),
+/// exposed as the editable parameters `center_x` / `center_y` (mm, sketch-plane frame).
+pub fn anchor(sketch: &f420_sketch::Sketch) -> Option<(f64, f64)> {
+    let mut fixed = sketch.constraints.iter().filter_map(|c| match c {
+        f420_sketch::Constraint::FixedPoint { x, y, .. } => Some((*x, *y)),
+        _ => None,
+    });
+    let first = fixed.next()?;
+    fixed.next().is_none().then_some(first)
 }
 
 /// The authoritative model: ordered feature history plus the id allocator.

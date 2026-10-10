@@ -230,6 +230,7 @@ fn workflow(r: &mut Run<'_>) {
         template: SketchTemplate::CenteredRectangle {
             width: 80.0,
             height: 50.0,
+            center: None,
         },
     });
     let Some(s1) = r.ok("create_sketch", &x) else {
@@ -273,7 +274,10 @@ fn workflow(r: &mut Run<'_>) {
     let x = r.exec(Command::CreateSketch {
         name: Some("Hole sketch".into()),
         plane: end_cap_of(e1),
-        template: SketchTemplate::CenteredCircle { diameter: 10.0 },
+        template: SketchTemplate::CenteredCircle {
+            diameter: 10.0,
+            center: None,
+        },
     });
     let Some(s2) = r.ok("create_sketch on top face", &x) else {
         return;
