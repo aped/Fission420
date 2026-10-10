@@ -12,6 +12,7 @@ use crate::solver::{self, Pin};
 use crate::{
     Constraint, Dimension, Entity, EntityId, PointId, Sketch, SketchPoint, SolveReport, SolveStatus,
 };
+use std::collections::HashSet;
 
 /// How far a drag got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,40 +110,83 @@ impl Sketch {
         })
     }
 
-    /// Remove an entity, the constraints on it, its endpoints that no other entity
-    /// uses (with their constraints), and construction points (such as a
-    /// rectangle centre) that nothing references any more. The origin is kept.
-    /// Returns false if the entity does not exist.
+    /// Remove an entity and everything that only existed for it:
+    /// * constraints on the entity itself (Horizontal/Vertical/Diameter);
+    /// * its endpoints/centre that no other entity uses, with every constraint
+    ///   that references them;
+    /// * construction points (points used by no entity, such as a rectangle
+    ///   centre) that were linked to the removed geometry through constraints
+    ///   and are no longer linked by any surviving constraint to a point that an
+    ///   entity uses. A link to the origin alone does not keep them alive.
+    ///
+    /// The origin and unrelated standalone points are never removed.
+    /// Returns false if the entity does not exist (sketch unchanged).
     pub fn remove_entity(&mut self, id: EntityId) -> bool {
         let Some(pos) = self.entities.iter().position(|e| e.id() == id) else {
             return false;
         };
         let e = self.entities.remove(pos);
-        self.constraints
-            .retain(|c| constraint_entity(c) != Some(id));
-        let pts: Vec<PointId> = match e {
+        let ends: Vec<PointId> = match e {
             Entity::Line { a, b, .. } => vec![a, b],
             Entity::Circle { center, .. } => vec![center],
         };
-        for p in pts {
-            if !self.used_by_entity(p) && self.origin != Some(p) {
-                self.constraints
-                    .retain(|c| !constraint_points(c).contains(&p));
-                self.points.retain(|q| q.id != p);
+        self.constraints
+            .retain(|c| constraint_entity(c) != Some(id));
+        let is_construction = |s: &Sketch, q: PointId| s.origin != Some(q) && !s.used_by_entity(q);
+
+        // Construction points reachable from the removed geometry via constraints.
+        let mut seen: HashSet<PointId> = ends.iter().copied().collect();
+        let mut frontier = ends.clone();
+        let mut candidates: HashSet<PointId> = HashSet::new();
+        while let Some(p) = frontier.pop() {
+            for c in &self.constraints {
+                let pts = constraint_points(c);
+                if !pts.contains(&p) {
+                    continue;
+                }
+                for q in pts {
+                    if seen.insert(q) && is_construction(self, q) {
+                        candidates.insert(q);
+                        frontier.push(q);
+                    }
+                }
             }
         }
+        let mut dead: HashSet<PointId> = ends
+            .iter()
+            .copied()
+            .filter(|&p| is_construction(self, p))
+            .collect();
+        // Fixpoint: a candidate survives if a constraint without dead points links
+        // it to an entity point or to another surviving candidate.
+        let mut alive: HashSet<PointId> = HashSet::new();
         loop {
-            let orphan = self.points.iter().map(|p| p.id).find(|&id| {
-                self.origin != Some(id)
-                    && !self.used_by_entity(id)
-                    && !self
-                        .constraints
-                        .iter()
-                        .any(|c| constraint_points(c).contains(&id))
-            });
-            let Some(id) = orphan else { break };
-            self.points.retain(|q| q.id != id);
+            let newly: Vec<PointId> = candidates
+                .iter()
+                .copied()
+                .filter(|q| !alive.contains(q))
+                .filter(|&q| {
+                    self.constraints.iter().any(|c| {
+                        let pts = constraint_points(c);
+                        pts.contains(&q)
+                            && !pts.iter().any(|r| dead.contains(r))
+                            && pts.iter().any(|&r| {
+                                r != q
+                                    && self.origin != Some(r)
+                                    && (self.used_by_entity(r) || alive.contains(&r))
+                            })
+                    })
+                })
+                .collect();
+            if newly.is_empty() {
+                break;
+            }
+            alive.extend(newly);
         }
+        dead.extend(candidates.difference(&alive).copied());
+        self.constraints
+            .retain(|c| !constraint_points(c).iter().any(|p| dead.contains(p)));
+        self.points.retain(|q| !dead.contains(&q.id));
         true
     }
 
@@ -201,8 +245,12 @@ impl Sketch {
     }
 
     /// Drag point `p` toward `target` (sketch-plane mm) without violating any
-    /// constraint. On `Blocked` the sketch is unchanged.
+    /// constraint. On `Blocked` the sketch is unchanged. A missing point or a
+    /// non-finite target is `Blocked` with an empty `blocked_by`.
     pub fn drag_point(&mut self, p: PointId, target: [f64; 2]) -> DragResult {
+        if self.point(p).is_none() || !target.iter().all(|v| v.is_finite()) {
+            return self.blocked(vec![]);
+        }
         let pins = |mask: [bool; 2]| -> Vec<Pin> {
             (0..2)
                 .filter(|&axis| mask[axis])
@@ -229,8 +277,13 @@ impl Sketch {
         )
     }
 
-    /// Drag a circle's radius toward `radius` (mm, > 0).
+    /// Drag a circle's radius toward `radius` (mm, finite and > 0). A missing
+    /// circle or invalid radius is `Blocked` with an empty `blocked_by`.
     pub fn drag_radius(&mut self, circle: EntityId, radius: f64) -> DragResult {
+        let is_circle = matches!(self.entity(circle), Some(Entity::Circle { .. }));
+        if !is_circle || !radius.is_finite() || radius <= 0.0 {
+            return self.blocked(vec![]);
+        }
         let pin = [Pin::Radius {
             circle,
             value: radius,
@@ -246,6 +299,35 @@ impl Sketch {
         self.drag_with(&moved, &pin, &[], |_| 0.0)
     }
 
+    fn blocked(&self, blocked_by: Vec<usize>) -> DragResult {
+        DragResult {
+            outcome: DragOutcome::Blocked,
+            report: self.clone().solve(),
+            blocked_by,
+        }
+    }
+
+    /// Largest change of any solver unknown between `self` and `other` (same
+    /// topology), mm.
+    fn max_change(&self, other: &Sketch) -> f64 {
+        let pts = self
+            .points
+            .iter()
+            .zip(&other.points)
+            .map(|(a, b)| (a.x - b.x).abs().max((a.y - b.y).abs()));
+        let radii = self
+            .entities
+            .iter()
+            .zip(&other.entities)
+            .map(|(a, b)| match (a, b) {
+                (Entity::Circle { radius: r1, .. }, Entity::Circle { radius: r2, .. }) => {
+                    (r1 - r2).abs()
+                }
+                _ => 0.0,
+            });
+        pts.chain(radii).fold(0.0, f64::max)
+    }
+
     fn drag_with(
         &mut self,
         moved: &Sketch,
@@ -258,27 +340,38 @@ impl Sketch {
         let r1 = solver::solve_with(&mut first, full);
         if ok(&r1) {
             let report = first.solve();
-            *self = first;
-            return DragResult {
-                outcome: DragOutcome::Reached,
-                report,
-                blocked_by: vec![],
-            };
+            if report.is_success() {
+                *self = first;
+                return DragResult {
+                    outcome: DragOutcome::Reached,
+                    report,
+                    blocked_by: vec![],
+                };
+            }
         }
-        let blocked_by = r1.conflicting.clone();
+        let mut blocked_by = r1.conflicting.clone();
         let mut best: Option<(f64, Sketch)> = None;
         for pins in partial {
             let mut s = moved.clone();
-            if ok(&solver::solve_with(&mut s, pins)) {
+            let rp = solver::solve_with(&mut s, pins);
+            if ok(&rp) {
                 let d = miss(&s);
                 if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                     best = Some((d, s));
                 }
+            } else if r1.conflicting.is_empty() {
+                // No single constraint explains the full block (e.g. both axes
+                // are dimensioned): report the per-axis culprits instead.
+                blocked_by.extend(rp.conflicting);
             }
         }
+        blocked_by.sort_unstable();
+        blocked_by.dedup();
+        let tol = crate::solve_tolerance(self.scale());
         if let Some((_, mut s)) = best {
             let report = s.solve();
-            if report.is_success() {
+            // A partial solve that does not actually move anything is a block.
+            if report.is_success() && self.max_change(&s) > tol {
                 *self = s;
                 return DragResult {
                     outcome: DragOutcome::Partial,
@@ -287,12 +380,7 @@ impl Sketch {
                 };
             }
         }
-        let report = self.clone().solve();
-        DragResult {
-            outcome: DragOutcome::Blocked,
-            report,
-            blocked_by,
-        }
+        self.blocked(blocked_by)
     }
 
     /// Solve status shorthand: true when the sketch is solvable and DOF = 0.

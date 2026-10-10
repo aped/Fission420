@@ -20,7 +20,7 @@ mod edit;
 mod profile;
 mod solver;
 
-pub use edit::{DragOutcome, DragResult};
+pub use edit::{DragOutcome, DragResult, fmt_mm};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -539,3 +539,6 @@ impl Sketch {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_edit;
