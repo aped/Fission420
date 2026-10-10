@@ -174,6 +174,29 @@ fn full_workflow_through_widgets() {
     click_contains(&mut h, "Redo:");
     assert_volume(&h, V_100X50);
 
+    // Step 6: depth 12 through the inspector; the hole sketch follows the top face.
+    let row = feature_row_label(&h, 1);
+    click(&mut h, &row);
+    type_into(&mut h, "distance (mm)", "12");
+    click(&mut h, "Apply");
+    assert_volume(&h, 60000.0 - 300.0 * std::f64::consts::PI);
+    let hole = &h.state().summary().features[2];
+    assert_eq!(hole.frame.map(|f| f.origin[2]), Some(12.0), "{hole:?}");
+    type_into(&mut h, "distance (mm)", "10");
+    click(&mut h, "Apply");
+    assert_volume(&h, V_100X50);
+
+    // Step 10b: oversize hole through the inspector is rejected (product limit).
+    let before = h.state().summary().clone();
+    let row = feature_row_label(&h, 2);
+    click(&mut h, &row);
+    type_into(&mut h, "diameter (mm)", "60");
+    click(&mut h, "Apply");
+    let d = h.state().diagnostics().last().expect("diagnostic").clone();
+    assert!(d.error && d.kind == "ProductLimit", "{d:?}");
+    assert_eq!(h.state().summary(), &before);
+    assert_eq!(field_value(&h, "diameter (mm)").as_deref(), Some("10"));
+
     // Step 10: a negative thickness is rejected, shown, reverted; doc unchanged.
     let before = h.state().summary().clone();
     let row = feature_row_label(&h, 1);
