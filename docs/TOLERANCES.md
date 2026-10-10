@@ -13,7 +13,9 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::MIN_MESH_CHORD_*` | max(1e-3 mm, 1e-5 × bbox diagonal) | mesh | lower bound on chord (prevents runaway allocation) |
 | `tol::MESH_CHORD` | 0.01 mm | mesh | default chordal tolerance for display/STL |
 | sketch solver tolerance | see crates/f420-sketch | numerical | Newton residual convergence |
-| viewport pick tolerance | pixels | viewport | picking only; never touches model |
+| viewport pick tolerance | pixels | viewport | picking only; never touches model; convert with `Viewport::pixels_per_mm()` |
+| feature-edge quantum (f420-viewport `edges.rs`) | max(1e-5 × mesh diagonal, 4e-7 × max abs coord, 1e-9) | display | matching duplicated tessellation positions when deriving display edges; display cache only |
+| grid min cell (`f420_viewport::MIN_CELL_PX`) | 14 points | viewport | adaptive grid spacing from {1,2,5}×10^k mm; snapping step via `Viewport::grid_spacing()` |
 
 Acceptance tolerances (GOAL.md) live in tests and the headless demo, not in model code.
 
