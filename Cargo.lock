@@ -862,6 +862,8 @@ dependencies = [
  "truck-meshalgo",
  "truck-modeling",
  "truck-shapeops",
+ "truck-stepio",
+ "truck-topology",
 ]
 
 [[package]]

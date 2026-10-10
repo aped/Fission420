@@ -140,3 +140,14 @@ fn stl_has_expected_size() {
     let bytes = write_stl_binary(&mesh, "t");
     assert_eq!(bytes.len(), 84 + 50 * mesh.triangles.len());
 }
+
+#[test]
+fn step_export_has_unique_ids_and_no_intersection_curves() {
+    let body = plate_with_hole(100.0, 50.0, 10.0, 10.0);
+    let text = export_step(&body, "test").unwrap();
+    assert!(text.starts_with("ISO-10303-21;"));
+    assert!(!text.contains("INTERSECTION_CURVE"));
+    assert_eq!(text.matches("FACE_SURFACE").count(), 9);
+    std::fs::create_dir_all("../../artifacts").ok();
+    std::fs::write("../../artifacts/plate_100x50x10.step", &text).unwrap();
+}

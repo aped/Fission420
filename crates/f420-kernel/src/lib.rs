@@ -8,12 +8,14 @@
 mod build;
 mod measure;
 mod mesh;
+mod step;
 
 pub use build::{cut_through_all, extrude};
 pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, measure, planar_faces_on,
     z_face_inner_loops,
 };
+pub use step::export_step;
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
 
 use serde::{Deserialize, Serialize};

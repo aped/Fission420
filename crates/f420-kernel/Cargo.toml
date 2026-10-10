@@ -10,3 +10,5 @@ thiserror = "2.0.21"
 truck-meshalgo = { version = "0.4.0", default-features = false, features = ["analyzers", "tessellation"] }
 truck-modeling = "0.6.0"
 truck-shapeops = "0.4.0"
+truck-stepio = "0.3.0"
+truck-topology = "0.6.0"

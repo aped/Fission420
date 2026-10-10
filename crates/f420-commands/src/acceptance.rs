@@ -419,6 +419,18 @@ fn workflow(r: &mut Run<'_>) {
         size == 84 + 50 * tris && tris > 0,
     );
 
+    let step = r.out_dir.join("plate.step");
+    let x = r.exec(Command::ExportStep { path: step.clone() });
+    r.ok("export_step", &x);
+    let text = std::fs::read_to_string(&step).unwrap_or_default();
+    let header = text.starts_with("ISO-10303-21;") && text.contains("MANIFOLD_SOLID_BREP") && !text.contains("INTERSECTION_CURVE");
+    r.check(
+        "STEP structure (B-rep solid, exact NURBS edges; external validation: tools/freecad_check_step.py)",
+        "ISO-10303-21, MANIFOLD_SOLID_BREP, no INTERSECTION_CURVE",
+        format!("{} bytes, ok={header}", text.len()),
+        header,
+    );
+
     r.step = "10 invalid edits rejected, document preserved".into();
     let before = r.s.model().map(|m| (m.document().clone(), m.revision));
     let x = r.exec(Command::SetParameter {

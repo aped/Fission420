@@ -65,6 +65,11 @@ pub enum Command {
         #[serde(default)]
         chord: Option<f64>,
     },
+    /// STEP (AP214 via truck-stepio) of the exact B-rep. Refused for geometry the
+    /// exporter cannot write exactly (see f420_kernel::export_step).
+    ExportStep {
+        path: PathBuf,
+    },
     Measure,
     Inspect,
 }
@@ -83,6 +88,7 @@ impl Command {
             Command::Open { .. } => "open",
             Command::Close => "close",
             Command::ExportStl { .. } => "export_stl",
+            Command::ExportStep { .. } => "export_step",
             Command::Measure => "measure",
             Command::Inspect => "inspect",
         }
@@ -312,6 +318,17 @@ impl Session {
                     path.display(),
                     mesh.triangles.len()
                 ));
+            }
+            Command::ExportStep { path } => {
+                let m = self.model_mut()?;
+                let body = m
+                    .evaluation()
+                    .body
+                    .as_ref()
+                    .ok_or(DocError::Validation("document has no solid body to export".into()))?;
+                let text = k::export_step(body, "Fission420").map_err(|e| DocError::Validation(e.to_string()))?;
+                write_atomic(path, text.as_bytes())?;
+                r.message = Some(format!("wrote {} ({} bytes)", path.display(), text.len()));
             }
             Command::Measure => {
                 let m = self.model_mut()?;
