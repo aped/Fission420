@@ -254,3 +254,25 @@ fn revolve_washer_edit_undo_and_limits() {
     });
     assert!(r.ok && r.mesh_check.unwrap().watertight);
 }
+
+/// Response.superseded / elapsed_ms are front-end annotations: Session never
+/// sets them, they are omitted from JSON when unset, and older JSON without
+/// them still parses.
+#[test]
+fn response_front_end_fields_are_optional() {
+    use f420_commands::{Command, Response, Session};
+    let mut s = Session::new();
+    let r = s.execute(&Command::NewDocument);
+    assert!(r.ok && !r.superseded && r.elapsed_ms.is_none());
+    let json = serde_json::to_value(&r).unwrap();
+    assert!(json.get("superseded").is_none() && json.get("elapsed_ms").is_none());
+    let old: Response = serde_json::from_str(r#"{"ok":true,"command":"inspect"}"#).unwrap();
+    assert!(!old.superseded && old.elapsed_ms.is_none());
+    let marked = Response {
+        superseded: true,
+        elapsed_ms: Some(1.5),
+        ..r
+    };
+    let back: Response = serde_json::from_value(serde_json::to_value(&marked).unwrap()).unwrap();
+    assert_eq!(back, marked);
+}

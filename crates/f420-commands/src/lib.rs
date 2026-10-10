@@ -198,6 +198,16 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// Set by a queueing front end (the app engine) when this command was not
+    /// executed because a newer edit of the same parameter was already queued
+    /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
+    /// Wall time (ms) the front end spent on this command, including any work
+    /// it did after [`Session::execute`] (e.g. display tessellation). [`Session`]
+    /// leaves it `None`; profiling only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<f64>,
 }
 
 /// An application session: at most one open document.
