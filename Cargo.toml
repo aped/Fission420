@@ -7,3 +7,7 @@ exclude = ["spikes"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
+
+# Truck booleans are ~30x slower unoptimised; optimise dependencies in dev/test builds.
+[profile.dev.package."*"]
+opt-level = 2
