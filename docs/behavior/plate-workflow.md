@@ -22,8 +22,10 @@ Limit: roles exist only for extrusion caps; side faces, faces created by cuts, a
 feature splits into several coplanar pieces are not referenceable yet.
 
 ## Hole restriction (initial product limit, not a CAD rule)
-A circular cut sketched on an extrusion face must lie strictly inside that extrusion's polygonal
-profile, with clearance > `tol::MIN_LENGTH` (1 µm) to every edge. For a centred rectangle this is
+Every cut must be circular, with its axis parallel to the base extrusion direction, and must lie
+strictly inside the base extrusion's polygonal profile, with clearance > `tol::MIN_LENGTH` (1 µm)
+to every edge. The check maps the circle centre through the cut sketch's frame into the base profile's
+frame, so start-cap sketches (flipped y) and WorldXY sketches are checked correctly (review fix). For a centred rectangle this is
 `diameter < min(width, height)`. Equality (tangent) is rejected too **[assumed]**. Checked on every
 regeneration, so it also rejects shrinking the plate below the hole.
 
