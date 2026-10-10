@@ -799,6 +799,14 @@ version = "0.1.0"
 [[package]]
 name = "f420-commands"
 version = "0.1.0"
+dependencies = [
+ "f420-document",
+ "f420-kernel",
+ "f420-sketch",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "f420-document"
