@@ -161,9 +161,12 @@ fn volume_z(solid: &Solid, n: usize) -> std::result::Result<f64, String> {
 fn volume(solid: &Solid) -> VolumeResult {
     let r = (|| -> std::result::Result<(f64, f64), String> {
         let n = VOLUME_CHORDS;
-        let a = volume_z(solid, n / 2)?;
-        let b = volume_z(solid, n)?;
-        let c = volume_z(solid, 2 * n)?;
+        // The three refinement levels are independent; evaluate them concurrently.
+        let [a, b, c] = std::thread::scope(|sc| {
+            let hs = [n / 2, n, 2 * n].map(|k| sc.spawn(move || volume_z(solid, k)));
+            hs.map(|h| h.join().unwrap_or_else(|_| Err("volume worker panicked".into())))
+        });
+        let (a, b, c) = (a?, b?, c?);
         let r1 = (4.0 * b - a) / 3.0;
         let r2 = (4.0 * c - b) / 3.0;
         Ok((r2, (r2 - r1).abs()))
