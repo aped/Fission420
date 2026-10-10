@@ -352,7 +352,7 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                 Some(m) => m,
                 None => measure(results[i].id, b)?,
             };
-            if let Some(c) = cache.as_deref_mut()
+            if let Some(c) = cache
                 && c.states.contains_key(&full)
             {
                 c.measurements.insert(full, m.clone());
