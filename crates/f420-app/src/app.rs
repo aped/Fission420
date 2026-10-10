@@ -1,22 +1,34 @@
 //! The Fission420 UI. Widgets hold only transient edit buffers; the document
 //! state shown here is always the last [`DocSummary`] reported by the engine.
+//!
+//! Layout: command bar (top), browser/feature tree (left), contextual inspector
+//! (right), status bar (bottom), 3D view (centre). See [`crate::panels`] for the
+//! panels and [`crate::view3d`] for the 3D view.
+//!
+//! Modes: normal modelling, placement tools (template drag, see
+//! [`crate::place`]), and sketch editing ([`SketchSession`]). The sketch editor
+//! owns the primary mouse button in the 3D view; camera navigation stays on
+//! MMB/RMB/scroll so drawing and camera drags never compete.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use f420_commands::{Command, DocSummary, FeatureSummary, SketchTemplate, end_cap_of};
 use f420_document::{DocError, FaceRole, FeatureId, SketchPlane};
 use f420_kernel::{Measurements, MeshCheck, VolumeResult};
-use f420_viewport::{Camera, Overlay, OverlayLabel, OverlayPolyline, Viewport};
+use f420_viewport::{Camera, RenderMesh, Viewport};
 
 use crate::engine::{Engine, ExecMode, MeshUpdate, Reply};
-use crate::place::{self, Phase, Placement, Proposal, Tool};
+use crate::place::{self, Phase, Placement, PlaneFrame, Proposal, Tool};
+use crate::sketch_edit::SketchEditor;
+use crate::view3d::FaceInfo;
 
 /// View size assumed for placement when no viewport has been laid out yet.
-const FALLBACK_VIEW_SIZE: [f32; 2] = [800.0, 600.0];
+pub(crate) const FALLBACK_VIEW_SIZE: [f32; 2] = [800.0, 600.0];
 
-/// Max diagnostics kept in the panel.
+/// Max diagnostics kept in the messages panel.
 const MAX_DIAGNOSTICS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +41,7 @@ pub struct Diagnostic {
 
 /// Open modal-ish form. Only one at a time.
 #[derive(Debug, Clone, PartialEq)]
-enum Dialog {
+pub(crate) enum Dialog {
     /// Rectangle on world XZ (profile for a revolve about world Z).
     RectangleXz {
         width: String,
@@ -76,7 +88,7 @@ enum Dialog {
 }
 
 impl Dialog {
-    fn title(&self) -> &'static str {
+    pub(crate) fn title(&self) -> &'static str {
         match self {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
             Dialog::Extrude { .. } => "New extrusion",
@@ -94,9 +106,60 @@ impl Dialog {
 
 /// Inspector edit buffers for the selected feature (preview only until Apply).
 #[derive(Debug, Clone, PartialEq)]
-struct Inspector {
-    feature: FeatureId,
-    fields: Vec<(String, f64, String)>, // (name, document value, edit buffer)
+pub(crate) struct Inspector {
+    pub feature: FeatureId,
+    pub fields: Vec<(String, f64, String)>, // (name, document value, edit buffer)
+}
+
+/// Where a sketch edit session will be committed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SketchTarget {
+    New { plane: SketchPlane },
+    Existing(FeatureId),
+}
+
+/// An open sketch edit session (UI-local until Finish Sketch).
+pub struct SketchSession {
+    pub editor: SketchEditor,
+    pub target: SketchTarget,
+    pub frame: PlaneFrame,
+    pub title: String,
+    /// Document this session belongs to (None: adopt the next document opened).
+    pub doc_id: Option<u64>,
+    /// Camera before entering the sketch (restored on exit).
+    pub saved_camera: Option<Camera>,
+    /// Finish was pressed; waiting for the commit reply.
+    pub committing: bool,
+}
+
+/// Actions that discard the open document and therefore need confirmation
+/// when there are unsaved changes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Guarded {
+    New,
+    /// New document followed by a sketch on XY (empty-state "Create Sketch").
+    NewAndSketch,
+    Open(PathBuf),
+    Close,
+    Exit,
+}
+
+/// Inline editor for a dimension of a finished sketch shown in the 3D view.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DocDimEdit {
+    pub feature: FeatureId,
+    pub name: String,
+    pub buffer: String,
+    pub constraint: usize,
+    pub focus: bool,
+}
+
+/// Answer to the unsaved-changes confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmAnswer {
+    Save,
+    Discard,
+    Cancel,
 }
 
 /// One step of the `--demo` script, resolved against the current document
@@ -138,26 +201,52 @@ enum DemoStep {
 }
 
 pub struct F420App {
-    engine: Engine,
-    summary: DocSummary,
-    measurements: Option<Measurements>,
-    selected: Option<FeatureId>,
-    inspector: Option<Inspector>,
-    dialog: Option<Dialog>,
-    diagnostics: Vec<Diagnostic>,
-    last_export: Option<MeshCheck>,
+    pub(crate) engine: Engine,
+    pub(crate) summary: DocSummary,
+    pub(crate) measurements: Option<Measurements>,
+    pub(crate) selected: Option<FeatureId>,
+    /// Selected face (display group id) in the 3D view.
+    pub(crate) selected_face: Option<u32>,
+    pub(crate) inspector: Option<Inspector>,
+    pub(crate) dialog: Option<Dialog>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    /// Latest error shown as a banner over the 3D view until dismissed.
+    pub(crate) banner: Option<Diagnostic>,
+    pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
-    mesh_triangles: usize,
-    fitted: bool,
+    pub(crate) mesh_triangles: usize,
+    /// Last display mesh (face analysis for selection; display only).
+    pub(crate) display_mesh: RenderMesh,
+    pub(crate) faces: Vec<FaceInfo>,
+    pub(crate) fitted: bool,
     demo: VecDeque<DemoStep>,
     replies_seen: u64,
     /// Active placement tool (rays from the view camera feed it).
-    placement: Option<Placement>,
+    pub(crate) placement: Option<Placement>,
     /// Finished placement whose pre-filled dialog is open; drawn until it closes.
-    held_preview: Option<Placement>,
-    /// Camera used for placement when there is no GPU viewport (tests).
+    pub(crate) held_preview: Option<Placement>,
+    /// Camera used when there is no GPU viewport (tests).
     pub fallback_camera: Camera,
-    view_rect: Option<egui::Rect>,
+    pub(crate) view_rect: Option<egui::Rect>,
+    pub(crate) sketch: Option<SketchSession>,
+    pub(crate) confirm: Option<Guarded>,
+    /// Guarded action to run after the pending save succeeds.
+    pub(crate) after_save: Option<Guarded>,
+    pub(crate) exit_confirmed: bool,
+    pub(crate) rename: Option<(FeatureId, String)>,
+    pub(crate) doc_dim_edit: Option<DocDimEdit>,
+    /// Screen rects of the selected finished sketch's dimension labels.
+    pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
+    pub(crate) show_help: bool,
+    /// Commands in flight with their submit time (FIFO; latency measurement).
+    in_flight: VecDeque<(String, Instant)>,
+    /// Last command round trips (name, latency) for the status bar / report.
+    pub(crate) latencies: VecDeque<(String, Duration)>,
+    /// Exponential moving average of frame time.
+    pub(crate) frame_ema: Option<Duration>,
+    last_frame: Option<Instant>,
+    /// Sketch to start once the requested new document exists.
+    pending_new_sketch: bool,
 }
 
 impl F420App {
@@ -176,12 +265,16 @@ impl F420App {
             },
             measurements: None,
             selected: None,
+            selected_face: None,
             inspector: None,
             dialog: None,
             diagnostics: vec![],
+            banner: None,
             last_export: None,
             viewport: None,
             mesh_triangles: 0,
+            display_mesh: RenderMesh::default(),
+            faces: vec![],
             fitted: false,
             demo: VecDeque::new(),
             replies_seen: 0,
@@ -193,6 +286,19 @@ impl F420App {
                 ..Camera::default()
             },
             view_rect: None,
+            sketch: None,
+            confirm: None,
+            after_save: None,
+            exit_confirmed: false,
+            rename: None,
+            doc_dim_edit: None,
+            doc_dim_targets: vec![],
+            show_help: false,
+            in_flight: VecDeque::new(),
+            latencies: VecDeque::new(),
+            frame_ema: None,
+            last_frame: None,
+            pending_new_sketch: false,
         }
     }
 
@@ -231,6 +337,70 @@ impl F420App {
     }
     pub fn feature_by_name(&self, name: &str) -> Option<&FeatureSummary> {
         self.summary.features.iter().find(|f| f.name == name)
+    }
+    pub fn selected(&self) -> Option<FeatureId> {
+        self.selected
+    }
+    pub fn selected_face(&self) -> Option<&FaceInfo> {
+        let g = self.selected_face?;
+        self.faces.iter().find(|f| f.group == g)
+    }
+    /// The open sketch edit session, if any.
+    pub fn sketch_session(&self) -> Option<&SketchSession> {
+        self.sketch.as_ref()
+    }
+    pub fn sketch_session_mut(&mut self) -> Option<&mut SketchSession> {
+        self.sketch.as_mut()
+    }
+    pub fn pending_confirmation(&self) -> Option<&Guarded> {
+        self.confirm.as_ref()
+    }
+    pub fn command_latencies(&self) -> impl Iterator<Item = &(String, Duration)> {
+        self.latencies.iter()
+    }
+    pub fn frame_time(&self) -> Option<Duration> {
+        self.frame_ema
+    }
+    /// Analysed faces of the current display mesh.
+    pub fn faces(&self) -> &[FaceInfo] {
+        &self.faces
+    }
+    /// Unsaved changes in the document or in an open sketch session.
+    pub fn has_unsaved_changes(&self) -> bool {
+        (self.summary.open && self.summary.dirty)
+            || self.sketch.as_ref().is_some_and(|s| s.editor.modified())
+    }
+
+    /// Window title with the document name and a dirty marker.
+    pub fn window_title(&self) -> String {
+        if !self.summary.open {
+            return "Fission420".into();
+        }
+        let name = self
+            .summary
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map_or("Untitled".into(), |n| n.to_string_lossy().into_owned());
+        format!(
+            "{}{name} — Fission420",
+            if self.summary.dirty { "● " } else { "" }
+        )
+    }
+
+    /// Called when the window manager asks to close. Returns true when the
+    /// window may close now; otherwise a confirmation is shown.
+    pub fn allow_close(&mut self) -> bool {
+        if self.exit_confirmed || !self.has_unsaved_changes() {
+            return true;
+        }
+        self.confirm = Some(Guarded::Exit);
+        false
+    }
+
+    /// The user confirmed that the window may close (Discard on Exit).
+    pub fn exit_confirmed(&self) -> bool {
+        self.exit_confirmed
     }
 
     /// Queue the GOAL.md acceptance sequence (mirrors f420_commands::acceptance)
@@ -341,7 +511,7 @@ impl F420App {
         self.demo = VecDeque::from(steps);
     }
 
-    // ----- placement -----
+    // ----- placement (template drag tools) -----
 
     pub fn placement(&self) -> Option<&Placement> {
         self.placement.as_ref()
@@ -375,6 +545,13 @@ impl F420App {
         (self.fallback_camera.clone(), size)
     }
 
+    pub(crate) fn camera_mut(&mut self) -> &mut Camera {
+        match self.viewport.as_mut() {
+            Some(vp) => &mut vp.camera,
+            None => &mut self.fallback_camera,
+        }
+    }
+
     /// Screen rect of the 3D view as of the last frame.
     pub fn view_rect(&self) -> Option<egui::Rect> {
         self.view_rect
@@ -388,9 +565,15 @@ impl F420App {
         Some(min + egui::vec2(x, y))
     }
 
+    /// Absolute screen position of a sketch-plane point of the open sketch session.
+    pub fn sketch_to_screen(&self, p: [f64; 2]) -> Option<egui::Pos2> {
+        let s = self.sketch.as_ref()?;
+        self.world_to_screen(s.frame.to_world(p))
+    }
+
     /// Feed a pointer event (position relative to the view's top-left, in
-    /// points) to the active tool. Shared by mouse handling, the demo script
-    /// and tests. A finished drag opens the matching pre-filled dialog.
+    /// points) to the active placement tool. Shared by mouse handling, the
+    /// demo script and tests. A finished drag opens the matching pre-filled dialog.
     pub fn place_pointer(&mut self, phase: Phase, local: [f32; 2], snapping: bool) {
         let (cam, [w, h]) = self.view_camera();
         let Some(p) = self.placement.as_mut() else {
@@ -430,83 +613,32 @@ impl F420App {
         }
     }
 
-    fn placement_hint(&self) -> Option<String> {
-        let p = self.placement.as_ref()?;
-        Some(match p.tool {
-            Tool::Rectangle => {
-                "Place rectangle: drag corner to corner on world XY · Shift = no snap · Esc cancels"
-                    .into()
-            }
-            Tool::Hole { extrude } => format!(
-                "Place hole on {}.EndCap: press at centre, drag to set size · Shift = no snap · Esc cancels",
-                self.feature_name(extrude)
-            ),
-        })
-    }
-
-    fn placement_overlay(&self) -> Overlay {
-        let mut ov = Overlay::default();
-        let (p, live) = match (&self.placement, &self.held_preview) {
-            (Some(p), _) => (p, true),
-            (None, Some(p)) => (p, false),
-            _ => return ov,
-        };
-        let Some(pv) = p.preview() else {
-            return ov;
-        };
-        let color = if pv.plausible {
-            egui::Color32::from_rgb(255, 205, 60)
-        } else {
-            egui::Color32::from_rgb(240, 70, 70)
-        };
-        let f = |q: [f64; 3]| q.map(|v| v as f32);
-        ov.polylines.push(OverlayPolyline {
-            points: pv.outline.iter().map(|q| f(*q)).collect(),
-            closed: true,
-            color,
-            width: 2.0,
-            dashed: live,
-        });
-        for g in &pv.guides {
-            ov.polylines.push(OverlayPolyline {
-                points: vec![f(g[0]), f(g[1])],
-                closed: false,
-                color,
-                width: 1.0,
-                dashed: false,
-            });
-        }
-        let mut text = pv.label;
-        if !pv.plausible {
-            text += "  (outside base: will be rejected)";
-        }
-        ov.labels.push(OverlayLabel {
-            at: f(pv.label_at),
-            text,
-            color,
-        });
-        ov
-    }
-
     // ----- request path -----
 
     /// Send a document command to the engine (the only way UI mutates state).
     pub fn request(&mut self, cmd: Command) {
-        if !self.engine.submit(cmd) {
+        let name = cmd.name().to_string();
+        if self.engine.submit(cmd) {
+            self.in_flight.push_back((name, Instant::now()));
+        } else {
             self.diag(
                 true,
                 "Worker",
-                "session worker thread is not running".into(),
+                "session worker thread is not running; restart the app".into(),
             );
         }
     }
 
-    fn diag(&mut self, error: bool, kind: &str, text: String) {
-        self.diagnostics.push(Diagnostic {
+    pub(crate) fn diag(&mut self, error: bool, kind: &str, text: String) {
+        let d = Diagnostic {
             error,
             kind: kind.into(),
             text,
-        });
+        };
+        if error {
+            self.banner = Some(d.clone());
+        }
+        self.diagnostics.push(d);
         if self.diagnostics.len() > MAX_DIAGNOSTICS {
             self.diagnostics.remove(0);
         }
@@ -514,13 +646,21 @@ impl F420App {
 
     fn handle_reply(&mut self, r: Reply) {
         self.replies_seen += 1;
+        if let Some((name, t0)) = self.in_flight.pop_front() {
+            self.latencies.push_back((name, t0.elapsed()));
+            if self.latencies.len() > 20 {
+                self.latencies.pop_front();
+            }
+        }
         let Reply {
             command,
             response,
             summary,
             measurements,
             mesh,
+            ..
         } = r;
+        let doc_changed = summary.doc_id != self.summary.doc_id;
         if response.ok {
             let mut text = format!("{} ok", response.command);
             if let Some(f) = response.feature {
@@ -535,19 +675,44 @@ impl F420App {
                 Some(e) => (error_kind(e), e.to_string()),
                 None => ("Error", "command failed".to_string()),
             };
-            self.diag(true, kind, format!("{} rejected: {msg}", response.command));
+            let hint = response.error.as_ref().map(next_step).unwrap_or_default();
+            self.diag(
+                true,
+                kind,
+                format!("{} rejected: {msg}{hint}", response.command),
+            );
         }
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
         }
-        if matches!(
-            command,
-            Command::NewDocument | Command::Open { .. } | Command::Close
-        ) && response.ok
-        {
+        if doc_changed {
             self.fitted = false;
             self.selected = None;
+            self.selected_face = None;
+            self.doc_dim_edit = None;
+            self.rename = None;
         }
+        // A sketch session belongs to one document; a different document
+        // (Open/New/Close completed) ends it without committing.
+        if doc_changed && let Some(s) = &mut self.sketch {
+            match s.doc_id {
+                None if summary.open => s.doc_id = Some(summary.doc_id),
+                Some(id) if id != summary.doc_id => {
+                    self.sketch = None;
+                    self.diag(
+                        true,
+                        "Sketch",
+                        "the document changed while a sketch was open; the sketch edit was discarded"
+                            .into(),
+                    );
+                }
+                _ => {}
+            }
+        }
+        let edited_param = match &command {
+            Command::SetParameter { feature, name, .. } => Some((*feature, name.clone())),
+            _ => None,
+        };
         self.summary = summary;
         self.measurements = measurements;
         if let Some(sel) = self.selected
@@ -555,10 +720,64 @@ impl F420App {
         {
             self.selected = None;
         }
-        if let (Some(f), true) = (response.feature, response.ok)
-            && !matches!(command, Command::SetParameter { .. })
+        // Sketch commit replies close (or keep, on failure) the session.
+        let commit_reply = matches!(
+            command,
+            Command::EditSketch { .. }
+                | Command::CreateSketch {
+                    template: SketchTemplate::Custom { .. },
+                    ..
+                }
+        );
+        if commit_reply && self.sketch.as_ref().is_some_and(|s| s.committing) {
+            if response.ok {
+                self.end_sketch_session();
+                if let Some(f) = response.feature {
+                    self.selected = Some(f);
+                    self.selected_face = None;
+                }
+            } else if let Some(s) = &mut self.sketch {
+                s.committing = false;
+                s.editor.feedback = Some(crate::sketch_edit::Feedback {
+                    error: true,
+                    text: format!(
+                        "Finish failed, the document is unchanged: {}",
+                        response
+                            .error
+                            .as_ref()
+                            .map_or(String::new(), |e| e.to_string())
+                    ),
+                });
+            }
+        } else if let (Some(f), true) = (response.feature, response.ok)
+            && !matches!(
+                command,
+                Command::SetParameter { .. } | Command::RenameFeature { .. }
+            )
         {
             self.selected = Some(f);
+            self.selected_face = None;
+        }
+        // Continue a guarded action once its pre-save succeeded.
+        if matches!(command, Command::Save { .. })
+            && let Some(g) = self.after_save.take()
+        {
+            if response.ok {
+                self.run_guarded(g);
+            } else {
+                self.diag(
+                    true,
+                    "File",
+                    "save failed, so the pending action was cancelled; the document is still open and unsaved"
+                        .into(),
+                );
+            }
+        }
+        if self.pending_new_sketch && self.summary.open && matches!(command, Command::NewDocument) {
+            self.pending_new_sketch = false;
+            self.begin_sketch(SketchTarget::New {
+                plane: SketchPlane::WorldXY,
+            });
         }
         // Re-derive the placement plane from the new document state.
         if let Some(p) = &self.placement
@@ -567,18 +786,17 @@ impl F420App {
             let tool = p.tool;
             self.start_tool(tool);
         }
-        // Rebuild edit buffers from the document: committed edits show the new
-        // value, rejected edits revert to the document value.
-        self.reset_inspector();
+        self.refresh_inspector(edited_param.as_ref());
         match mesh {
             MeshUpdate::Unchanged => {}
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
             MeshUpdate::Replace(m) => {
                 self.mesh_triangles = m.triangle_count();
+                self.selected_face = None;
                 if let Some(vp) = self.viewport.as_mut() {
                     match vp.set_mesh(&m) {
                         Ok(()) => {
-                            if !self.fitted && m.triangle_count() > 0 {
+                            if !self.fitted && m.triangle_count() > 0 && self.sketch.is_none() {
                                 vp.fit();
                                 self.fitted = true;
                             }
@@ -589,30 +807,412 @@ impl F420App {
                         }
                     }
                 }
+                self.display_mesh = m;
+            }
+        }
+        self.faces = crate::view3d::analyse_faces(&self.display_mesh, &self.summary.features);
+        self.sync_viewport_selection();
+    }
+
+    /// Rebuild inspector buffers from the document while keeping the user's
+    /// un-applied edits. A reply to a parameter edit resets that field, so a
+    /// committed edit shows the new value and a rejected one reverts.
+    fn refresh_inspector(&mut self, edited: Option<&(FeatureId, String)>) {
+        let Some(id) = self.selected else {
+            self.inspector = None;
+            return;
+        };
+        let Some(f) = self.summary.features.iter().find(|f| f.id == id) else {
+            self.inspector = None;
+            return;
+        };
+        let old = self.inspector.take().filter(|i| i.feature == id);
+        let fields = f
+            .parameters
+            .iter()
+            .map(|(n, v)| {
+                let keep = old.as_ref().and_then(|o| {
+                    o.fields.iter().find(|(on, ov, ob)| {
+                        on == n
+                            && ob.trim().parse::<f64>().ok() != Some(*ov)
+                            && edited != Some(&(id, n.clone()))
+                    })
+                });
+                let buf = keep.map_or_else(|| fmt_num(*v), |(_, _, b)| b.clone());
+                (n.clone(), *v, buf)
+            })
+            .collect();
+        self.inspector = Some(Inspector {
+            feature: id,
+            fields,
+        });
+    }
+
+    pub(crate) fn reset_inspector(&mut self) {
+        self.inspector = None;
+        self.refresh_inspector(None);
+    }
+
+    pub(crate) fn select(&mut self, id: Option<FeatureId>) {
+        if self.selected != id || self.selected_face.is_some() {
+            self.selected = id;
+            self.selected_face = None;
+            self.doc_dim_edit = None;
+            self.reset_inspector();
+            self.sync_viewport_selection();
+        }
+    }
+
+    /// Select a face of the display mesh (and its owning feature, when known).
+    pub fn select_face(&mut self, group: Option<u32>) {
+        self.doc_dim_edit = None;
+        match group.and_then(|g| self.faces.iter().find(|f| f.group == g).cloned()) {
+            Some(info) => {
+                self.selected = info.owner;
+                self.selected_face = Some(info.group);
+                self.reset_inspector();
+            }
+            None => {
+                self.selected = None;
+                self.selected_face = None;
+                self.inspector = None;
+            }
+        }
+        self.sync_viewport_selection();
+    }
+
+    /// Groups highlighted for the current selection: the picked face, or every
+    /// face whose provenance is reliably the selected feature.
+    pub fn highlighted_faces(&self) -> Vec<u32> {
+        match (self.selected_face, self.selected) {
+            (Some(g), _) => vec![g],
+            (None, Some(id)) => self
+                .faces
+                .iter()
+                .filter(|f| f.owner == Some(id))
+                .map(|f| f.group)
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// Push the selection highlight to the GPU view.
+    pub(crate) fn sync_viewport_selection(&mut self) {
+        let groups = self.highlighted_faces();
+        if let Some(vp) = self.viewport.as_mut() {
+            vp.set_selection(&groups);
+        }
+    }
+
+    // ----- guarded document actions -----
+
+    /// Run `g` now, or ask first when there are unsaved changes.
+    pub fn guarded(&mut self, g: Guarded) {
+        if self.has_unsaved_changes() {
+            self.confirm = Some(g);
+        } else {
+            self.run_guarded(g);
+        }
+    }
+
+    pub(crate) fn run_guarded(&mut self, g: Guarded) {
+        self.sketch = None;
+        self.placement = None;
+        match g {
+            Guarded::New => self.request(Command::NewDocument),
+            Guarded::NewAndSketch => {
+                self.pending_new_sketch = true;
+                self.request(Command::NewDocument);
+            }
+            Guarded::Open(path) => self.request(Command::Open { path }),
+            Guarded::Close => self.request(Command::Close),
+            Guarded::Exit => self.exit_confirmed = true,
+        }
+    }
+
+    /// Confirmation answer: save first (when the document has a path), discard, or cancel.
+    pub fn answer_confirm(&mut self, answer: ConfirmAnswer) {
+        let Some(g) = self.confirm.take() else {
+            return;
+        };
+        match answer {
+            ConfirmAnswer::Cancel => {}
+            ConfirmAnswer::Discard => self.run_guarded(g),
+            ConfirmAnswer::Save => match self.summary.path.clone() {
+                Some(path) if self.sketch.is_none() => {
+                    self.after_save = Some(g);
+                    self.request(Command::Save { path });
+                }
+                _ => {
+                    self.dialog = Some(Dialog::SaveAs {
+                        path: self.default_path("f420.json"),
+                    });
+                    self.diag(
+                        false,
+                        "info",
+                        "choose a path and save, then repeat the action".into(),
+                    );
+                }
+            },
+        }
+    }
+
+    // ----- sketch sessions -----
+
+    /// Frame of a sketch plane from the current document summary.
+    pub fn plane_frame(&self, plane: &SketchPlane) -> Result<PlaneFrame, String> {
+        match plane {
+            SketchPlane::WorldXY => Ok(PlaneFrame::WORLD_XY),
+            SketchPlane::WorldXZ => Ok(PlaneFrame::from_kernel(&f420_kernel::Frame::XZ)),
+            SketchPlane::Face(r) => self
+                .summary
+                .features
+                .iter()
+                .flat_map(|f| f.faces.iter())
+                .find(|fs| fs.reference == *r)
+                .map(|fs| PlaneFrame::from_kernel(&fs.frame))
+                .ok_or_else(|| {
+                    format!(
+                        "{}'s {:?} is not available (the feature must be evaluated)",
+                        r.feature, r.role
+                    )
+                }),
+        }
+    }
+
+    /// Open the sketch editor for a new sketch or an existing sketch feature.
+    pub fn begin_sketch(&mut self, target: SketchTarget) {
+        if self.sketch.is_some() {
+            self.diag(
+                true,
+                "Sketch",
+                "a sketch is already open: Finish or Cancel it first".into(),
+            );
+            return;
+        }
+        let (sketch, frame, title) = match &target {
+            SketchTarget::New { plane } => match self.plane_frame(plane) {
+                Ok(fr) => (
+                    f420_sketch::Sketch::default(),
+                    fr,
+                    format!("New sketch {}", self.plane_text(plane)),
+                ),
+                Err(e) => {
+                    self.diag(true, "Sketch", format!("cannot create a sketch here: {e}"));
+                    return;
+                }
+            },
+            SketchTarget::Existing(id) => {
+                let Some(f) = self.summary.features.iter().find(|f| f.id == *id) else {
+                    return;
+                };
+                let (Some(sk), Some(fr)) = (f.sketch.clone(), f.frame) else {
+                    self.diag(
+                        true,
+                        "Sketch",
+                        format!(
+                            "{} cannot be edited: it did not evaluate (fix the error shown for it first)",
+                            f.name
+                        ),
+                    );
+                    return;
+                };
+                (
+                    sk,
+                    PlaneFrame::from_kernel(&fr),
+                    format!("Editing {}", f.name),
+                )
+            }
+        };
+        self.placement = None;
+        self.dialog = None;
+        self.doc_dim_edit = None;
+        let saved_camera = Some(self.view_camera().0);
+        self.sketch = Some(SketchSession {
+            editor: SketchEditor::new(sketch),
+            target,
+            frame,
+            title,
+            doc_id: self.summary.open.then_some(self.summary.doc_id),
+            saved_camera,
+            committing: false,
+        });
+        self.orient_to_sketch();
+    }
+
+    /// Point the camera along the sketch normal and frame the sketch.
+    pub(crate) fn orient_to_sketch(&mut self) {
+        let Some(s) = &self.sketch else { return };
+        let frame = s.frame;
+        let bounds = crate::sketch_view::sketch_bounds(&s.editor.sketch);
+        let aspect = {
+            let [w, h] = self.view_camera().1;
+            if h > 0.0 { w / h } else { 1.5 }
+        };
+        crate::view3d::look_at_plane(self.camera_mut(), &frame, bounds, aspect);
+    }
+
+    /// Finish Sketch: one command → one document undo entry. The session stays
+    /// open until the reply confirms the commit (a failure keeps the work).
+    pub fn finish_sketch(&mut self) {
+        let Some(s) = &mut self.sketch else { return };
+        if s.committing {
+            return;
+        }
+        s.editor.cancel_gesture();
+        if !s.editor.report.is_success() {
+            let why = s.editor.status().1;
+            s.editor.feedback = Some(crate::sketch_edit::Feedback {
+                error: true,
+                text: format!("Cannot finish: {why}. Fix or delete the conflicting constraint."),
+            });
+            return;
+        }
+        let sketch = s.editor.sketch.clone();
+        let cmd = match &s.target {
+            SketchTarget::New { plane } => {
+                if sketch.entities.is_empty() {
+                    // Nothing drawn: finishing an empty new sketch just closes it.
+                    self.end_sketch_session();
+                    return;
+                }
+                Command::CreateSketch {
+                    name: None,
+                    plane: *plane,
+                    template: SketchTemplate::Custom { sketch },
+                }
+            }
+            SketchTarget::Existing(id) => {
+                if !s.editor.modified() {
+                    self.end_sketch_session();
+                    return;
+                }
+                Command::EditSketch {
+                    feature: *id,
+                    sketch,
+                }
+            }
+        };
+        s.committing = true;
+        self.request(cmd);
+    }
+
+    /// Cancel Sketch: discard the session; the document was never touched.
+    pub fn cancel_sketch(&mut self) {
+        if self.sketch.as_ref().is_some_and(|s| s.committing) {
+            return;
+        }
+        self.end_sketch_session();
+    }
+
+    fn end_sketch_session(&mut self) {
+        if let Some(s) = self.sketch.take()
+            && let Some(cam) = s.saved_camera
+        {
+            *self.camera_mut() = cam;
+        }
+    }
+
+    // ----- helpers shared by the panels -----
+
+    pub(crate) fn default_path(&self, ext: &str) -> String {
+        match &self.summary.path {
+            Some(p) if ext == "f420.json" => p.display().to_string(),
+            Some(p) => p.with_extension(ext).display().to_string(),
+            None => format!("part.{ext}"),
+        }
+    }
+
+    /// Last sketch not yet consumed by an extrude or cut.
+    pub(crate) fn unused_sketch(&self) -> Option<FeatureId> {
+        let fs = &self.summary.features;
+        fs.iter()
+            .rev()
+            .filter(|f| f.kind == "sketch")
+            .find(|s| !self.consumed(s.id))
+            .or_else(|| fs.iter().rev().find(|f| f.kind == "sketch"))
+            .map(|f| f.id)
+    }
+
+    /// The solid feature that consumes sketch `id`, if any.
+    pub(crate) fn consumer_of(&self, id: FeatureId) -> Option<&FeatureSummary> {
+        self.summary
+            .features
+            .iter()
+            .find(|o| o.kind != "sketch" && o.depends_on.contains(&id))
+    }
+
+    pub(crate) fn consumed(&self, id: FeatureId) -> bool {
+        self.consumer_of(id).is_some()
+    }
+
+    pub(crate) fn has_body(&self) -> bool {
+        self.summary
+            .features
+            .iter()
+            .any(|f| f.kind == "extrude" || f.kind == "revolve")
+    }
+
+    pub(crate) fn feature_name(&self, id: FeatureId) -> String {
+        self.summary
+            .features
+            .iter()
+            .find(|f| f.id == id)
+            .map_or_else(|| format!("{id}?"), |f| f.name.clone())
+    }
+
+    pub(crate) fn plane_text(&self, plane: &SketchPlane) -> String {
+        match plane {
+            SketchPlane::WorldXY => "on World XY".into(),
+            SketchPlane::WorldXZ => "on World XZ".into(),
+            SketchPlane::Face(r) => {
+                let role = match r.role {
+                    FaceRole::ExtrudeEndCap => "EndCap",
+                    FaceRole::ExtrudeStartCap => "StartCap",
+                };
+                format!(
+                    "on {}.{role} (semantic: {} {:?})",
+                    self.feature_name(r.feature),
+                    r.feature,
+                    r.role
+                )
             }
         }
     }
 
-    fn reset_inspector(&mut self) {
-        self.inspector = self.selected.and_then(|id| {
-            let f = self.summary.features.iter().find(|f| f.id == id)?;
-            Some(Inspector {
-                feature: id,
-                fields: f
-                    .parameters
-                    .iter()
-                    .map(|(n, v)| (n.clone(), *v, fmt_num(*v)))
-                    .collect(),
-            })
-        });
+    /// Why Extrude is unavailable for `sketch`, or None if it can run.
+    pub(crate) fn extrude_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
+        if self.has_body() {
+            return Some(
+                "Only one base body per document is supported (product limit); use Cut Through All for holes"
+                    .into(),
+            );
+        }
+        if let Some(e) = &sketch.profile_error {
+            return Some(format!("Profile is not usable: {e}"));
+        }
+        None
     }
 
-    fn select(&mut self, id: Option<FeatureId>) {
-        if self.selected != id {
-            self.selected = id;
-            self.reset_inspector();
+    /// Why Cut Through All is unavailable for `sketch`, or None.
+    pub(crate) fn cut_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
+        if !self.has_body() {
+            return Some("Create a body first (Extrude)".into());
         }
+        if let Some(c) = self.consumer_of(sketch.id) {
+            return Some(format!("Already used by {}", c.name));
+        }
+        if let Some(e) = &sketch.profile_error {
+            return Some(format!("Profile is not usable: {e}"));
+        }
+        let circle = sketch
+            .sketch
+            .as_ref()
+            .is_some_and(|s| matches!(s.profile(), Ok(f420_sketch::Profile::Circle { .. })));
+        (!circle).then(|| "Only circular through-all cuts are supported (product limit)".into())
     }
+
+    // ----- demo -----
 
     fn advance_demo(&mut self) {
         if self.engine.busy() {
@@ -732,6 +1332,14 @@ impl F420App {
     /// Whole-application UI. Works with or without a GPU viewport.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        let now = Instant::now();
+        if let Some(t) = self.last_frame.replace(now) {
+            let dt = now - t;
+            self.frame_ema = Some(match self.frame_ema {
+                Some(e) => e.mul_f64(0.9) + dt.mul_f64(0.1),
+                None => dt,
+            });
+        }
         while let Some(r) = self.engine.poll() {
             self.handle_reply(r);
         }
@@ -743,88 +1351,44 @@ impl F420App {
             self.diag(true, "Worker", "session worker thread stopped".into());
         }
         let busy = self.engine.busy();
+        self.shortcuts(&ctx);
 
-        egui::Panel::top("f420_toolbar").show(ui, |ui| self.toolbar(ui, busy));
-        egui::Panel::bottom("f420_status").show(ui, |ui| self.status_bar(ui));
-        egui::Panel::left("f420_browser")
-            .resizable(true)
-            .default_size(330.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.history(ui);
-                    ui.separator();
-                    self.inspector_ui(ui, busy);
-                    ui.separator();
-                    self.diagnostics_ui(ui);
-                });
-            });
-        if self.placement.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.cancel_tool();
-        }
-        let tool_active = self.placement.is_some();
-        let mut events: Vec<(Phase, egui::Pos2)> = vec![];
-        let mut snapping = true;
-        let mut layer = None;
-        egui::CentralPanel::no_frame().show(ui, |ui| {
-            let resp = match self.viewport.as_mut() {
-                Some(vp) => {
-                    vp.set_primary_drag_navigates(!tool_active);
-                    let r = vp.ui(ui);
-                    let h = vp.hovered_group();
-                    vp.set_highlight(h);
-                    r
-                }
-                None => {
-                    let (rect, r) =
-                        ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        format!(
-                            "3D view unavailable (no wgpu renderer). Display mesh: {} triangles",
-                            self.mesh_triangles
-                        ),
-                        egui::FontId::proportional(14.0),
-                        ui.visuals().text_color(),
-                    );
-                    r
-                }
-            };
-            self.view_rect = Some(resp.rect);
-            layer = Some(ui.layer_id());
-            if tool_active {
-                let prim = egui::PointerButton::Primary;
-                let (shift, origin, latest) = ui.input(|i| {
-                    (
-                        i.modifiers.shift,
-                        i.pointer.press_origin(),
-                        i.pointer.latest_pos(),
-                    )
-                });
-                snapping = !shift;
-                if resp.drag_started_by(prim)
-                    && let Some(o) = origin
-                {
-                    events.push((Phase::Press, o));
-                }
-                if (resp.dragged_by(prim) || resp.drag_stopped_by(prim))
-                    && let Some(p) = latest
-                {
-                    events.push((Phase::Move, p));
-                }
-                if resp.drag_stopped_by(prim)
-                    && let Some(p) = latest
-                {
-                    events.push((Phase::Release, p));
-                }
+        egui::Panel::top("f420_toolbar").show(ui, |ui| {
+            if self.sketch.is_some() {
+                self.sketch_toolbar(ui);
+            } else {
+                self.toolbar(ui, busy);
             }
         });
-        if let Some(rect) = self.view_rect {
-            for (phase, pos) in events {
-                let l = pos - rect.min;
-                self.place_pointer(phase, [l.x, l.y], snapping);
-            }
-        }
+        egui::Panel::bottom("f420_status").show(ui, |ui| self.status_bar(ui, busy));
+        egui::Panel::left("f420_browser")
+            .resizable(true)
+            .default_size(260.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("browser_scroll")
+                    .show(ui, |ui| {
+                        self.history(ui);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        self.diagnostics_ui(ui);
+                    });
+            });
+        egui::Panel::right("f420_inspector")
+            .resizable(true)
+            .default_size(290.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("inspector_scroll")
+                    .show(ui, |ui| {
+                        if self.sketch.is_some() {
+                            self.sketch_inspector(ui);
+                        } else {
+                            self.inspector_ui(ui, busy);
+                        }
+                    });
+            });
+        egui::CentralPanel::no_frame().show(ui, |ui| self.view_ui(ui));
         self.dialog_ui(&ctx, busy);
         if !matches!(
             self.dialog,
@@ -832,618 +1396,152 @@ impl F420App {
         ) {
             self.held_preview = None;
         }
-        if let (Some(rect), Some(layer)) = (self.view_rect, layer) {
-            let painter = ctx.layer_painter(layer).with_clip_rect(rect);
-            let (cam, _) = self.view_camera();
-            f420_viewport::paint_overlay(&painter, &cam, rect, &self.placement_overlay());
-            if let Some(hint) = self.placement_hint() {
-                let pos = rect.min + egui::vec2(10.0, 10.0);
-                let galley = painter.layout_no_wrap(
-                    hint,
-                    egui::FontId::proportional(14.0),
-                    egui::Color32::from_rgb(255, 205, 60),
-                );
-                painter.rect_filled(
-                    egui::Rect::from_min_size(pos, galley.size()).expand(4.0),
-                    3.0,
-                    egui::Color32::from_black_alpha(170),
-                );
-                painter.galley(pos, galley, egui::Color32::WHITE);
-            }
-        }
+        self.confirm_ui(&ctx);
+        self.rename_ui(&ctx);
+        self.help_ui(&ctx);
         if busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, busy: bool) {
-        let open = self.summary.open;
-        let idle = !busy;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("Fission420");
-            ui.separator();
-            if ui.add_enabled(idle, egui::Button::new("New")).clicked() {
-                self.request(Command::NewDocument);
-            }
-            if ui.add_enabled(idle, egui::Button::new("Open…")).clicked() {
-                self.dialog = Some(Dialog::Open {
-                    path: self.default_path("f420.json"),
-                });
-            }
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Save"))
-                .clicked()
-            {
-                match self.summary.path.clone() {
-                    Some(path) => self.request(Command::Save { path }),
-                    None => {
-                        self.dialog = Some(Dialog::SaveAs {
-                            path: self.default_path("f420.json"),
-                        })
-                    }
-                }
-            }
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Save As…"))
-                .clicked()
-            {
+    /// Keyboard shortcuts. Ignored while a text field has focus so typing
+    /// never triggers modelling commands.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.rename.is_some() {
+            return;
+        }
+        let sc = |m: Modifiers, k: Key| {
+            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
+        };
+        if sc(Modifiers::NONE, Key::F1) {
+            self.show_help = !self.show_help;
+        }
+        if self.sketch.is_some() {
+            self.sketch_shortcuts(ctx);
+            return;
+        }
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        // Order matters: shifted variants first.
+        if sc(cmd_shift, Key::S) {
+            if self.summary.open {
                 self.dialog = Some(Dialog::SaveAs {
                     path: self.default_path("f420.json"),
                 });
             }
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Close"))
-                .clicked()
-            {
-                self.request(Command::Close);
-            }
-            ui.separator();
-            let undo = match &self.summary.can_undo {
-                Some(l) => format!("Undo: {l}"),
-                None => "Undo".into(),
-            };
-            let can_undo = self.summary.can_undo.is_some();
-            if ui
-                .add_enabled(idle && can_undo, egui::Button::new(undo))
-                .clicked()
-            {
-                self.request(Command::Undo);
-            }
-            let redo = match &self.summary.can_redo {
-                Some(l) => format!("Redo: {l}"),
-                None => "Redo".into(),
-            };
-            let can_redo = self.summary.can_redo.is_some();
-            if ui
-                .add_enabled(idle && can_redo, egui::Button::new(redo))
-                .clicked()
-            {
+        } else if sc(Modifiers::COMMAND, Key::S) {
+            self.save();
+        } else if sc(Modifiers::COMMAND, Key::O) {
+            self.dialog = Some(Dialog::Open {
+                path: self.default_path("f420.json"),
+            });
+        } else if sc(Modifiers::COMMAND, Key::N) {
+            self.guarded(Guarded::New);
+        } else if sc(cmd_shift, Key::Z) || sc(Modifiers::COMMAND, Key::Y) {
+            if self.summary.can_redo.is_some() {
                 self.request(Command::Redo);
             }
-            ui.separator();
-            let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
-            let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Rectangle on XY…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Rectangle {
-                    width: "80".into(),
-                    height: "50".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
+        } else if sc(Modifiers::COMMAND, Key::Z) {
+            if self.summary.can_undo.is_some() {
+                self.request(Command::Undo);
             }
-            if ui
-                .add_enabled(idle && has_sketch, egui::Button::new("Extrude…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Extrude {
-                    sketch: self.unused_sketch(),
-                    distance: "10".into(),
-                });
+        } else if sc(Modifiers::NONE, Key::F) {
+            self.fit_view();
+        } else if sc(Modifiers::NONE, Key::Escape) {
+            if self.placement.is_some() {
+                self.cancel_tool();
+            } else if self.dialog.is_some() {
+                self.dialog = None;
+            } else if self.doc_dim_edit.is_some() {
+                self.doc_dim_edit = None;
+            } else {
+                self.select(None);
             }
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Rectangle on XZ…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::RectangleXz {
-                    width: "20".into(),
-                    height: "10".into(),
-                    cx: "30".into(),
-                    cz: "5".into(),
-                });
-            }
-            if ui
-                .add_enabled(idle && has_sketch, egui::Button::new("Revolve…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Revolve {
-                    sketch: self.unused_sketch(),
-                    angle: "360".into(),
-                });
-            }
-            if ui
-                .add_enabled(idle && has_extrude, egui::Button::new("Circle on face…"))
-                .clicked()
-            {
-                let last = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude");
-                self.dialog = Some(Dialog::CircleOnFace {
-                    extrude: last.map(|f| f.id),
-                    diameter: "10".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
-            }
-            if ui
-                .add_enabled(idle && has_sketch, egui::Button::new("Cut through all…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Cut {
-                    sketch: self.unused_sketch(),
-                });
-            }
-            ui.separator();
-            let current = self.placement.as_ref().map(|p| p.tool);
-            let rect_on = current == Some(Tool::Rectangle);
-            if ui
-                .add_enabled(
-                    idle && open,
-                    egui::Button::new("Place rectangle").selected(rect_on),
-                )
-                .clicked()
-            {
-                if rect_on {
-                    self.cancel_tool();
-                } else {
-                    self.start_tool(Tool::Rectangle);
-                }
-            }
-            let hole_on = matches!(current, Some(Tool::Hole { .. }));
-            if ui
-                .add_enabled(
-                    idle && has_extrude,
-                    egui::Button::new("Place hole").selected(hole_on),
-                )
-                .clicked()
-            {
-                if hole_on {
-                    self.cancel_tool();
-                } else if let Some(e) = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude")
-                {
-                    let extrude = e.id;
-                    self.start_tool(Tool::Hole { extrude });
-                }
-            }
-            if let Some(Tool::Hole { extrude }) = current {
-                let extrudes: Vec<FeatureSummary> = self
-                    .summary
-                    .features
-                    .iter()
-                    .filter(|f| f.kind == "extrude")
-                    .cloned()
-                    .collect();
-                let refs: Vec<&FeatureSummary> = extrudes.iter().collect();
-                let mut sel = Some(extrude);
-                feature_combo(ui, "Hole on end cap of", &mut sel, &refs);
-                if let Some(e) = sel
-                    && e != extrude
-                {
-                    self.start_tool(Tool::Hole { extrude: e });
-                }
-            }
-            ui.separator();
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Export STL…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::ExportStl {
-                    path: self.default_path("stl"),
-                    chord: "0.01".into(),
-                });
-            }
-            if ui
-                .add_enabled(idle && open, egui::Button::new("Export STEP…"))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::ExportStep {
-                    path: self.default_path("step"),
-                });
-            }
-            if ui.button("Fit view").clicked()
-                && let Some(vp) = self.viewport.as_mut()
-            {
-                vp.fit();
-            }
-            if busy {
-                ui.separator();
-                ui.spinner();
-                ui.label("Regenerating…");
-            }
-        });
-    }
-
-    fn default_path(&self, ext: &str) -> String {
-        match &self.summary.path {
-            Some(p) if ext == "f420.json" => p.display().to_string(),
-            Some(p) => p.with_extension(ext).display().to_string(),
-            None => format!("part.{ext}"),
         }
-    }
-
-    /// Last sketch not yet consumed by an extrude or cut.
-    fn unused_sketch(&self) -> Option<FeatureId> {
-        let fs = &self.summary.features;
-        fs.iter()
-            .rev()
-            .filter(|f| f.kind == "sketch")
-            .find(|s| {
-                !fs.iter()
-                    .any(|o| o.kind != "sketch" && o.depends_on.contains(&s.id))
-            })
-            .or_else(|| fs.iter().rev().find(|f| f.kind == "sketch"))
-            .map(|f| f.id)
-    }
-
-    fn feature_name(&self, id: FeatureId) -> String {
-        self.summary
-            .features
-            .iter()
-            .find(|f| f.id == id)
-            .map_or_else(|| format!("{id}?"), |f| f.name.clone())
-    }
-
-    fn plane_text(&self, plane: &SketchPlane) -> String {
-        match plane {
-            SketchPlane::WorldXY => "on World XY".into(),
-            SketchPlane::WorldXZ => "on World XZ".into(),
-            SketchPlane::Face(r) => {
-                let role = match r.role {
-                    FaceRole::ExtrudeEndCap => "EndCap",
-                    FaceRole::ExtrudeStartCap => "StartCap",
-                };
-                format!(
-                    "on {}.{role} (semantic: {} {:?})",
-                    self.feature_name(r.feature),
-                    r.feature,
-                    r.role
-                )
+        for (k, preset) in crate::view3d::VIEW_KEYS {
+            if sc(Modifiers::NONE, *k) {
+                self.set_view(*preset);
             }
         }
     }
 
-    fn history(&mut self, ui: &mut egui::Ui) {
-        ui.heading("History");
+    fn sketch_shortcuts(&mut self, ctx: &egui::Context) {
+        use crate::sketch_edit::SketchTool as T;
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let sc = |m: Modifiers, k: Key| {
+            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
+        };
+        let Some(s) = &mut self.sketch else { return };
+        if s.committing {
+            return;
+        }
+        let ed = &mut s.editor;
+        if sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || sc(Modifiers::COMMAND, Key::Y) {
+            ed.redo();
+        } else if sc(Modifiers::COMMAND, Key::Z) {
+            ed.undo();
+        } else if sc(Modifiers::SHIFT, Key::R) {
+            ed.set_tool(T::CornerRectangle);
+        } else if sc(Modifiers::NONE, Key::R) {
+            ed.set_tool(T::CenterRectangle);
+        } else if sc(Modifiers::NONE, Key::L) {
+            ed.set_tool(T::Line);
+        } else if sc(Modifiers::NONE, Key::C) {
+            ed.set_tool(T::Circle);
+        } else if sc(Modifiers::NONE, Key::D) {
+            ed.set_tool(T::Dimension);
+        } else if sc(Modifiers::NONE, Key::S) {
+            ed.set_tool(T::Select);
+        } else if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {
+            ed.delete_selection();
+        } else if sc(Modifiers::NONE, Key::Enter) {
+            ed.finish_chain();
+        } else if sc(Modifiers::NONE, Key::Escape) {
+            ed.escape();
+        } else if sc(Modifiers::NONE, Key::F) {
+            self.orient_to_sketch();
+        }
+    }
+
+    pub(crate) fn save(&mut self) {
         if !self.summary.open {
-            ui.weak("No document open. Use New or Open….");
             return;
         }
-        if self.summary.features.is_empty() {
-            ui.weak("Empty document. Start with Rectangle on XY….");
-        }
-        let mut clicked = None;
-        for f in &self.summary.features {
-            let sel = self.selected == Some(f.id);
-            let title = format!("{} {}  [{}]", f.id, f.name, f.kind);
-            if ui.selectable_label(sel, title).clicked() {
-                clicked = Some(f.id);
-            }
-            ui.indent(("feat", f.id.0), |ui| {
-                if !f.depends_on.is_empty() {
-                    let deps: Vec<String> = f
-                        .depends_on
-                        .iter()
-                        .map(|d| format!("{} {}", d, self.feature_name(*d)))
-                        .collect();
-                    ui.small(format!("uses {}", deps.join(", ")));
-                }
-                if let Some(p) = &f.plane {
-                    ui.small(self.plane_text(p));
-                }
-                if let Some(st) = f.solve_status {
-                    let dof = f.solve_dof.map_or("?".into(), |d| d.to_string());
-                    let res = f.solve_residual.map_or("?".into(), |r| format!("{r:.1e}"));
-                    ui.small(format!("{st:?} · DOF {dof} · residual {res}"));
-                }
-            });
-        }
-        if let Some(id) = clicked {
-            self.select(Some(id));
-        }
-    }
-
-    fn inspector_ui(&mut self, ui: &mut egui::Ui, busy: bool) {
-        ui.heading("Inspector");
-        let Some(ins) = self.inspector.as_mut() else {
-            ui.weak("Select a feature to edit its parameters.");
-            return;
-        };
-        let name = self
-            .summary
-            .features
-            .iter()
-            .find(|f| f.id == ins.feature)
-            .map_or(String::new(), |f| f.name.clone());
-        ui.label(format!("{} {name}", ins.feature));
-        if ins.fields.is_empty() {
-            ui.weak("No editable parameters.");
-        }
-        egui::Grid::new("inspector_grid")
-            .num_columns(2)
-            .show(ui, |ui| {
-                for (pname, _, buf) in &mut ins.fields {
-                    let unit = if pname.ends_with("_deg") { "deg" } else { "mm" };
-                    let l = ui.label(format!("{pname} ({unit})"));
-                    ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
-                        .labelled_by(l.id);
-                    ui.end_row();
-                }
-            });
-        let modified = ins
-            .fields
-            .iter()
-            .any(|(_, v, b)| b.trim().parse::<f64>().ok() != Some(*v));
-        let mut apply = false;
-        let mut cancel = false;
-        ui.horizontal(|ui| {
-            apply = ui
-                .add_enabled(!busy && modified, egui::Button::new("Apply"))
-                .clicked();
-            cancel = ui
-                .add_enabled(modified, egui::Button::new("Cancel edits"))
-                .clicked();
-        });
-        if modified {
-            ui.small("Preview only: not in the document until Apply.");
-        }
-        if cancel {
-            self.reset_inspector();
-        } else if apply {
-            let ins = ins.clone();
-            let mut cmds = vec![];
-            let mut bad = vec![];
-            for (pname, v, b) in &ins.fields {
-                match b.trim().parse::<f64>() {
-                    Ok(x) if x != *v => cmds.push(Command::SetParameter {
-                        feature: ins.feature,
-                        name: pname.clone(),
-                        value: x,
-                    }),
-                    Ok(_) => {}
-                    Err(_) => bad.push(format!("{pname}: '{b}' is not a number")),
-                }
-            }
-            if !bad.is_empty() {
-                self.diag(true, "Input", bad.join("; "));
-                self.reset_inspector();
-            }
-            for c in cmds {
-                self.request(c);
+        match self.summary.path.clone() {
+            Some(path) => self.request(Command::Save { path }),
+            None => {
+                self.dialog = Some(Dialog::SaveAs {
+                    path: self.default_path("f420.json"),
+                })
             }
         }
     }
 
-    fn diagnostics_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Diagnostics");
-            if ui.small_button("Clear").clicked() {
-                self.diagnostics.clear();
-            }
-        });
-        if let Some(e) = self.diagnostics.iter().rev().find(|d| d.error) {
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                format!("Last error [{}]: {}", e.kind, e.text),
-            );
-        }
-        for d in self.diagnostics.iter().rev().take(8) {
-            let t = format!("[{}] {}", d.kind, d.text);
-            if d.error {
-                ui.colored_label(ui.visuals().warn_fg_color, egui::RichText::new(t).small());
-            } else {
-                ui.small(t);
-            }
+    pub(crate) fn fit_view(&mut self) {
+        if self.sketch.is_some() {
+            self.orient_to_sketch();
+        } else if let Some(vp) = self.viewport.as_mut() {
+            vp.fit();
         }
     }
 
-    fn status_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            match &self.measurements {
-                Some(m) => {
-                    match &m.volume {
-                        VolumeResult::Value {
-                            volume,
-                            error_estimate,
-                            method,
-                        } => ui.label(format!(
-                            "Volume {volume:.6} mm³ ({method:?}, est. err {error_estimate:.1e})"
-                        )),
-                        VolumeResult::Unavailable { reason } => {
-                            ui.label(format!("Volume unavailable: {reason}"))
-                        }
-                    };
-                    ui.separator();
-                    let (a, b) = (m.bounds.min, m.bounds.max);
-                    ui.label(format!(
-                        "Bounds X[{:.3}, {:.3}] Y[{:.3}, {:.3}] Z[{:.3}, {:.3}]",
-                        a[0], b[0], a[1], b[1], a[2], b[2]
-                    ));
-                    ui.separator();
-                    ui.label(format!(
-                        "Solids {} · {}",
-                        m.shell_count,
-                        if m.all_shells_closed {
-                            "closed"
-                        } else {
-                            "OPEN"
-                        }
-                    ));
-                }
-                None => {
-                    ui.label("No body");
-                }
-            }
-            ui.separator();
-            if self.summary.open {
-                let path = self
-                    .summary
-                    .path
-                    .as_ref()
-                    .map_or("unsaved".into(), |p| p.display().to_string());
-                ui.label(format!(
-                    "rev {} · {} · {path}",
-                    self.summary.revision,
-                    if self.summary.dirty {
-                        "modified"
-                    } else {
-                        "saved"
-                    }
-                ));
-            } else {
-                ui.label("no document");
-            }
-            if let Some(vp) = &self.viewport
-                && let Some(g) = vp.hovered_group()
-            {
-                ui.separator();
-                ui.label(format!("face {g}"));
-            }
-        });
-    }
-
-    fn dialog_ui(&mut self, ctx: &egui::Context, busy: bool) {
-        let Some(mut dlg) = self.dialog.take() else {
-            return;
-        };
-        let features = self.summary.features.clone();
-        let sketches: Vec<&FeatureSummary> =
-            features.iter().filter(|f| f.kind == "sketch").collect();
-        let extrudes: Vec<&FeatureSummary> =
-            features.iter().filter(|f| f.kind == "extrude").collect();
-        let mut ok = false;
-        let mut cancel = false;
-        let mut error: Option<String> = None;
-        egui::Window::new(dlg.title())
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
-            .show(ctx, |ui| {
-                match &mut dlg {
-                    Dialog::Rectangle {
-                        width,
-                        height,
-                        cx,
-                        cy,
-                    } => {
-                        num_field(ui, "Rectangle width (mm)", width);
-                        num_field(ui, "Rectangle height (mm)", height);
-                        num_field(ui, "Rectangle center X (mm)", cx);
-                        num_field(ui, "Rectangle center Y (mm)", cy);
-                        ui.small("Centre in world XY coordinates.");
-                    }
-                    Dialog::Extrude { sketch, distance } => {
-                        feature_combo(ui, "Profile sketch", sketch, &sketches);
-                        num_field(ui, "Extrude distance (mm)", distance);
-                    }
-                    Dialog::RectangleXz {
-                        width,
-                        height,
-                        cx,
-                        cz,
-                    } => {
-                        num_field(ui, "XZ rectangle width (mm)", width);
-                        num_field(ui, "XZ rectangle height (mm)", height);
-                        num_field(ui, "XZ rectangle center X (mm)", cx);
-                        num_field(ui, "XZ rectangle center Z (mm)", cz);
-                        ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
-                    }
-                    Dialog::Revolve { sketch, angle } => {
-                        feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
-                        num_field(ui, "Revolve angle (deg)", angle);
-                    }
-                    Dialog::CircleOnFace {
-                        extrude,
-                        diameter,
-                        cx,
-                        cy,
-                    } => {
-                        feature_combo(ui, "End cap of extrusion", extrude, &extrudes);
-                        num_field(ui, "Circle diameter (mm)", diameter);
-                        num_field(ui, "Circle center X (mm)", cx);
-                        num_field(ui, "Circle center Y (mm)", cy);
-                        ui.small("Centre in the end cap's frame (the profile sketch's X/Y).");
-                        ui.small("Attached semantically to the extrusion's end cap face.");
-                    }
-                    Dialog::Cut { sketch } => {
-                        feature_combo(ui, "Cut profile sketch", sketch, &sketches);
-                    }
-                    Dialog::SaveAs { path } | Dialog::Open { path } => {
-                        text_field(ui, "File path", path);
-                    }
-                    Dialog::ExportStl { path, chord } => {
-                        text_field(ui, "STL path", path);
-                        num_field(ui, "Chord tolerance (mm)", chord);
-                        if let Some(mc) = &self.last_export {
-                            ui.label(format!(
-                                "Last export: watertight {} · {} triangles · mesh volume {:.4} mm³",
-                                if mc.watertight { "yes" } else { "NO" },
-                                mc.triangles,
-                                mc.mesh_volume
-                            ));
-                        }
-                    }
-                    Dialog::ExportStep { path } => {
-                        text_field(ui, "STEP path", path);
-                        ui.label(
-                            "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
-                        );
-                    }
-                }
-                ui.horizontal(|ui| {
-                    ok = ui.add_enabled(!busy, egui::Button::new("OK")).clicked();
-                    cancel = ui.button("Cancel").clicked();
-                });
-            });
-        if cancel {
-            return; // dialog dropped; nothing created
+    pub(crate) fn set_view(&mut self, preset: f420_viewport::ViewPreset) {
+        if let Some(vp) = self.viewport.as_mut() {
+            vp.set_view(preset);
+            vp.fit();
+        } else {
+            self.fallback_camera.set_view(preset);
         }
-        if ok {
-            match build_command(&dlg) {
-                Ok(cmd) => {
-                    let keep = matches!(dlg, Dialog::ExportStl { .. });
-                    self.request(cmd);
-                    if keep {
-                        self.dialog = Some(dlg);
-                    }
-                    return;
-                }
-                Err(e) => error = Some(e),
-            }
-        }
-        if let Some(e) = error {
-            self.diag(true, "Input", e);
-        }
-        self.dialog = Some(dlg);
     }
 }
 
-fn parse_num(label: &str, s: &str) -> Result<f64, String> {
+pub(crate) fn parse_num(label: &str, s: &str) -> Result<f64, String> {
     s.trim()
         .parse::<f64>()
         .map_err(|_| format!("{label}: '{s}' is not a number"))
 }
 
-fn build_command(d: &Dialog) -> Result<Command, String> {
+pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
     let need = |f: &Option<FeatureId>, what: &str| f.ok_or_else(|| format!("choose a {what}"));
     Ok(match d {
         Dialog::Rectangle {
@@ -1518,47 +1616,13 @@ fn build_command(d: &Dialog) -> Result<Command, String> {
     })
 }
 
-fn nonempty_path(s: &str) -> Result<PathBuf, String> {
+pub(crate) fn nonempty_path(s: &str) -> Result<PathBuf, String> {
     let t = s.trim();
     if t.is_empty() {
         Err("path is empty".into())
     } else {
         Ok(PathBuf::from(t))
     }
-}
-
-fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
-    ui.horizontal(|ui| {
-        let l = ui.label(label);
-        ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
-            .labelled_by(l.id);
-    });
-}
-
-fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
-    ui.horizontal(|ui| {
-        let l = ui.label(label);
-        ui.add(egui::TextEdit::singleline(buf).desired_width(320.0))
-            .labelled_by(l.id);
-    });
-}
-
-fn feature_combo(
-    ui: &mut egui::Ui,
-    label: &str,
-    sel: &mut Option<FeatureId>,
-    options: &[&FeatureSummary],
-) {
-    let text = sel
-        .and_then(|id| options.iter().find(|f| f.id == id))
-        .map_or("(choose)".to_string(), |f| format!("{} {}", f.id, f.name));
-    egui::ComboBox::from_label(label)
-        .selected_text(text)
-        .show_ui(ui, |ui| {
-            for f in options {
-                ui.selectable_value(sel, Some(f.id), format!("{}: {}", f.id, f.name));
-            }
-        });
 }
 
 /// Variant name of a document error, for the diagnostics area.
@@ -1577,7 +1641,27 @@ pub fn error_kind(e: &DocError) -> &'static str {
     }
 }
 
+/// A practical next step for an error, appended to its message.
+pub fn next_step(e: &DocError) -> String {
+    let s = match e {
+        DocError::Validation(_) => "Check the value and try again; the model is unchanged.",
+        DocError::ProductLimit(_) => "This is a current product limit; the model is unchanged.",
+        DocError::BrokenReference { .. } => {
+            "The referenced feature/face is gone; edit the sketch plane or undo."
+        }
+        DocError::SketchSolve { .. } => {
+            "Edit the sketch and delete or change one of the conflicting constraints."
+        }
+        DocError::Kernel { .. } => {
+            "The geometry kernel could not build this; try a slightly different value, or undo."
+        }
+        DocError::File(_) => "Check the path and permissions; the open document is unchanged.",
+        _ => return String::new(),
+    };
+    format!(" — {s}")
+}
+
 /// Shortest representation that round-trips (so unchanged fields compare equal).
-fn fmt_num(v: f64) -> String {
+pub(crate) fn fmt_num(v: f64) -> String {
     format!("{v}")
 }

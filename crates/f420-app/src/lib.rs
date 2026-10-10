@@ -6,8 +6,11 @@
 
 pub mod app;
 pub mod engine;
+pub mod panels;
 pub mod place;
 pub mod sketch_edit;
+pub mod sketch_view;
+pub mod view3d;
 
-pub use app::{Diagnostic, F420App};
+pub use app::{ConfirmAnswer, Diagnostic, F420App, Guarded, SketchSession, SketchTarget};
 pub use engine::{ExecMode, Reply};

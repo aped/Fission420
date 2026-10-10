@@ -39,6 +39,14 @@ fn settle(h: &mut Harness<'_, F420App>) {
     }
 }
 
+/// Open the Templates menu and click one of its items.
+fn template(h: &mut Harness<'_, F420App>, item: &str) {
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    h.get_by_label(item).click();
+    settle(h);
+}
+
 fn click(h: &mut Harness<'_, F420App>, label: &str) {
     h.get_by_label(label).click();
     settle(h);
@@ -85,7 +93,7 @@ fn build_plate_and_hole_sketch(h: &mut Harness<'_, F420App>) {
     click(h, "New");
     assert!(h.state().summary().open);
 
-    click(h, "Rectangle on XY…");
+    template(h, "Rectangle on XY…");
     type_into(h, "Rectangle width (mm)", "80");
     type_into(h, "Rectangle height (mm)", "50");
     click(h, "OK");
@@ -100,8 +108,8 @@ fn build_plate_and_hole_sketch(h: &mut Harness<'_, F420App>) {
             ("center_y".to_string(), 0.0)
         ]
     );
-    // The history tree shows the actual constraint state.
-    h.get_by_label_contains("FullyConstrained · DOF 0 · residual");
+    // The inspector shows the actual constraint state (symbol + words).
+    h.get_by_label("✔ Fully constrained");
 
     click(h, "Extrude…");
     type_into(h, "Extrude distance (mm)", "10");
@@ -109,7 +117,7 @@ fn build_plate_and_hole_sketch(h: &mut Harness<'_, F420App>) {
     assert_eq!(h.state().summary().features.len(), 2);
     assert!((volume(h) - 40000.0).abs() <= VOL_TOL);
 
-    click(h, "Circle on face…");
+    template(h, "Circle on face…");
     // Pick the extrusion from the combo explicitly.
     h.get_by_role_and_label(Role::ComboBox, "End cap of extrusion")
         .click();
@@ -143,9 +151,9 @@ fn build_plate(h: &mut Harness<'_, F420App>) {
     check_cut_result(h);
 }
 
+/// Browser rows are labelled by the (unique) feature name.
 fn feature_row_label(h: &Harness<'_, F420App>, idx: usize) -> String {
-    let f = &h.state().summary().features[idx];
-    format!("{} {}  [{}]", f.id, f.name, f.kind)
+    h.state().summary().features[idx].name.clone()
 }
 
 #[test]
@@ -221,13 +229,13 @@ fn full_workflow_through_widgets() {
 fn cancel_creates_nothing_and_reverts_preview() {
     let mut h = harness(ExecMode::Sync);
     click(&mut h, "New");
-    click(&mut h, "Rectangle on XY…");
+    template(&mut h, "Rectangle on XY…");
     type_into(&mut h, "Rectangle width (mm)", "30");
     click(&mut h, "Cancel");
     assert!(h.state().summary().features.is_empty());
     assert!(h.query_by_label("Rectangle width (mm)").is_none());
 
-    click(&mut h, "Rectangle on XY…");
+    template(&mut h, "Rectangle on XY…");
     click(&mut h, "OK");
     let rev = h.state().summary().revision;
     let row = feature_row_label(&h, 0);
@@ -242,7 +250,7 @@ fn cancel_creates_nothing_and_reverts_preview() {
 fn non_numeric_input_is_reported() {
     let mut h = harness(ExecMode::Sync);
     click(&mut h, "New");
-    click(&mut h, "Rectangle on XY…");
+    template(&mut h, "Rectangle on XY…");
     type_into(&mut h, "Rectangle width (mm)", "abc");
     click(&mut h, "OK");
     assert!(h.state().summary().features.is_empty());
@@ -266,6 +274,8 @@ fn save_export_reopen_through_dialogs() {
     assert!(doc.exists());
     assert!(!h.state().summary().dirty);
 
+    h.get_by_label("Export").click();
+    let _ = h.try_run();
     click(&mut h, "Export STL…");
     type_into(&mut h, "STL path", stl.to_str().unwrap());
     type_into(&mut h, "Chord tolerance (mm)", "0.01");
@@ -292,14 +302,14 @@ fn threaded_worker_shows_busy_state() {
     let mut h = harness(ExecMode::Threaded);
     build_plate_and_hole_sketch(&mut h);
     // Submit the cut; the boolean regenerates on the worker thread while the UI
-    // keeps rendering with a busy indicator and modeling buttons disabled.
+    // keeps rendering with a busy indicator. Run 2: commands are queued (FIFO
+    // worker) instead of disabled, so New stays available while busy.
     h.get_by_label("OK").click();
     let _ = h.try_run();
     let _ = h.try_run();
     assert!(h.state().busy(), "cut should still be regenerating");
     h.get_by_label("Regenerating…");
-    assert!(h.get_by_label("New").accesskit_node().is_disabled());
-    assert!(h.get_by_label("Extrude…").accesskit_node().is_disabled());
+    assert!(!h.get_by_label("New").accesskit_node().is_disabled());
     settle(&mut h);
     assert!(h.query_by_label("Regenerating…").is_none());
     assert!(!h.get_by_label("New").accesskit_node().is_disabled());
@@ -328,7 +338,7 @@ fn demo_script_reaches_final_plate() {
 fn revolve_through_widgets() {
     let mut h = harness(ExecMode::Sync);
     click(&mut h, "New");
-    click(&mut h, "Rectangle on XZ…");
+    template(&mut h, "Rectangle on XZ…");
     click(&mut h, "OK");
     click(&mut h, "Revolve…");
     type_into(&mut h, "Revolve angle (deg)", "90");

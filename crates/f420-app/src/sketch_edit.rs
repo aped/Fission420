@@ -259,6 +259,14 @@ impl SketchEditor {
         self.screen_targets = t;
     }
 
+    /// Screen rectangle of a label/glyph as of the last painted frame.
+    pub fn screen_target(&self, item: Item) -> Option<egui::Rect> {
+        self.screen_targets
+            .iter()
+            .find(|(i, _)| *i == item)
+            .map(|(_, r)| *r)
+    }
+
     pub fn set_tool(&mut self, tool: SketchTool) {
         self.cancel_gesture();
         self.tool = tool;

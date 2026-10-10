@@ -85,6 +85,7 @@ struct Shell {
     shot_dir: Option<PathBuf>,
     shots_taken: u32,
     f12_pending: bool,
+    title: String,
     result: Arc<Mutex<Result<(), String>>>,
 }
 
@@ -180,6 +181,15 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Stri
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Unsaved changes: intercept the window-manager close and ask first.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.app.allow_close() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        let title = self.app.window_title();
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
         self.app.ui(ui);
         self.drive_screenshot(&ctx);
         self.drive_f12(&ctx);
@@ -234,6 +244,7 @@ fn main() -> ExitCode {
                 shot_dir: args.shot_dir,
                 shots_taken: 0,
                 f12_pending: false,
+                title: String::new(),
                 result: result_app,
             }))
         }),

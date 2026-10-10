@@ -32,6 +32,14 @@ fn settle(h: &mut Harness<'_, F420App>) {
     }
 }
 
+/// Open the Templates menu and click one of its items.
+fn template(h: &mut Harness<'_, F420App>, item: &str) {
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    h.get_by_label(item).click();
+    settle(h);
+}
+
 fn click(h: &mut Harness<'_, F420App>, label: &str) {
     h.get_by_label(label).click();
     settle(h);
@@ -61,7 +69,7 @@ fn p(n: &str, v: f64) -> (String, f64) {
 /// New + 80x50 rectangle + extrude 10, via dialogs.
 fn plate(h: &mut Harness<'_, F420App>) {
     click(h, "New");
-    click(h, "Rectangle on XY…");
+    template(h, "Rectangle on XY…");
     click(h, "OK");
     click(h, "Extrude…");
     click(h, "OK");
@@ -102,7 +110,7 @@ fn drag(h: &mut Harness<'_, F420App>, from: [f64; 3], to: [f64; 3]) {
 fn dialogs_accept_centre_fields() {
     let mut h = harness();
     click(&mut h, "New");
-    click(&mut h, "Rectangle on XY…");
+    template(&mut h, "Rectangle on XY…");
     type_into(&mut h, "Rectangle width (mm)", "60");
     type_into(&mut h, "Rectangle height (mm)", "30");
     type_into(&mut h, "Rectangle center X (mm)", "10");
@@ -119,7 +127,7 @@ fn dialogs_accept_centre_fields() {
     );
     click(&mut h, "Extrude…");
     click(&mut h, "OK");
-    click(&mut h, "Circle on face…");
+    template(&mut h, "Circle on face…");
     type_into(&mut h, "Circle diameter (mm)", "8");
     type_into(&mut h, "Circle center X (mm)", "12");
     type_into(&mut h, "Circle center Y (mm)", "-3");
@@ -130,7 +138,7 @@ fn dialogs_accept_centre_fields() {
     );
     // Off-centre hole outside the base is refused with ProductLimit and the
     // document is unchanged.
-    click(&mut h, "Circle on face…");
+    template(&mut h, "Circle on face…");
     type_into(&mut h, "Circle diameter (mm)", "8");
     type_into(&mut h, "Circle center X (mm)", "38");
     click(&mut h, "OK");
@@ -158,7 +166,7 @@ fn dialogs_accept_centre_fields() {
 fn pointer_drag_places_rectangle_and_esc_cancels() {
     let mut h = harness();
     click(&mut h, "New");
-    click(&mut h, "Place rectangle");
+    template(&mut h, "Place rectangle");
     assert_eq!(h.state().placement().map(|p| p.tool), Some(Tool::Rectangle));
     drag(&mut h, [-20.2, -10.1, 0.0], [30.3, 14.8, 0.0]);
     // Released: tool done, pre-filled dialog open, nothing created yet.
@@ -179,12 +187,12 @@ fn pointer_drag_places_rectangle_and_esc_cancels() {
         ]
     );
     // Esc cancels an active tool; a cancelled dialog creates nothing.
-    click(&mut h, "Place rectangle");
+    template(&mut h, "Place rectangle");
     assert!(h.state().placement().is_some());
     h.key_press(Key::Escape);
     let _ = h.try_run();
     assert!(h.state().placement().is_none());
-    click(&mut h, "Place rectangle");
+    template(&mut h, "Place rectangle");
     drag(&mut h, [0.0, 0.0, 0.0], [10.0, 10.0, 0.0]);
     click(&mut h, "Cancel");
     assert_eq!(h.state().summary().features.len(), 1);
@@ -194,7 +202,7 @@ fn pointer_drag_places_rectangle_and_esc_cancels() {
 fn pointer_drag_places_off_centre_hole_on_end_cap() {
     let mut h = harness();
     plate(&mut h);
-    click(&mut h, "Place hole");
+    template(&mut h, "Place hole");
     let ext = h.state().summary().features[1].id;
     assert_eq!(
         h.state().placement().map(|p| p.tool),
