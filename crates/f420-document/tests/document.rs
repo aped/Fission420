@@ -177,12 +177,14 @@ fn broken_and_cyclic_references_are_reported() {
             sketch: Sketch::centered_rectangle(10.0, 10.0).unwrap(),
         },
         notes: vec![],
+        expressions: Default::default(),
     });
     d.features.push(Feature {
         id: FeatureId(2),
         name: "E".into(),
         kind: FeatureKind::extrude(FeatureId(1), 1.0, Operation::NewBody { body: BodyId(1) }),
         notes: vec![],
+        expressions: Default::default(),
     });
     match regenerate(&d) {
         Err(DocError::Cycle(ids)) => assert_eq!(ids, vec![FeatureId(1), FeatureId(2)]),

@@ -13,8 +13,11 @@ pub const FORMAT_NAME: &str = "fission420";
 /// v2 (run 2): sketches may carry `origin` and `Distance` constraints, and the
 /// history may contain `Pocket` features. v1 files are a strict subset of v2.
 /// v3 (run 3, ADR 0003): bodies, blobs, extrude operations/extents, imports. v1/v2
-/// files are migrated on load (see [`migrate_to_v3`]); saves write v3.
-pub const FORMAT_VERSION: u32 = 3;
+/// files are migrated on load (see [`migrate_to_v3`]).
+/// v4 (run 4, docs/PARAMETERS.md): named user parameters and feature expression
+/// bindings (additive; a v3 document is a v4 document without them). Saves
+/// write v4, so older builds refuse the file instead of dropping expressions.
+pub const FORMAT_VERSION: u32 = 4;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -155,6 +158,19 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         // `nf.version` keeps the version read (so callers can report the
         // migration); `NativeFile::new` always writes FORMAT_VERSION.
         migrate_to_v3(&mut nf.document)?;
+    }
+    if nf.version < 4
+        && (!nf.document.parameters.is_empty()
+            || nf
+                .document
+                .features
+                .iter()
+                .any(|f| !f.expressions.is_empty()))
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain parameters or expressions (v4 feature)",
+            nf.version
+        )));
     }
     nf.document.evaluation_order()?;
     nf.document.validate_bodies()?;

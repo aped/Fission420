@@ -9,6 +9,7 @@ mod hole;
 pub mod import;
 mod io;
 mod model;
+pub mod params;
 mod regen;
 mod session;
 
@@ -17,6 +18,7 @@ pub use io::{
     migrate_to_v3, save_file, write_atomic,
 };
 pub use model::*;
+pub use params::{ParamUnit, Parameter, SlotKind};
 pub use regen::{
     BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FaceCandidate, FeatureResult,
     MeshBody, RegenCache, ResolvedFace, regenerate, regenerate_cached, regenerate_cached_opts,

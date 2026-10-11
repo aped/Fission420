@@ -346,6 +346,7 @@ impl F420App {
                 can_redo: None,
                 features: vec![],
                 bodies: vec![],
+                parameters: vec![],
             },
             measurements: None,
             selected: None,

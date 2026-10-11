@@ -457,6 +457,7 @@ mod tests {
             body: None,
             creates: vec![],
             notes: vec![],
+            expressions: Default::default(),
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

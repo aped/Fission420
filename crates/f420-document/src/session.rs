@@ -56,7 +56,8 @@ impl Model {
     }
 
     /// Build from a loaded document; fails (without side effects) if it does not regenerate.
-    pub fn from_document(doc: Document) -> Result<Self> {
+    pub fn from_document(mut doc: Document) -> Result<Self> {
+        crate::params::apply_expressions(&mut doc)?;
         let mut cache = RegenCache::default();
         let eval = regenerate_cached(&doc, Some(&mut cache))?;
         Ok(Self {
@@ -151,6 +152,8 @@ impl Model {
     ) -> Result<T> {
         let mut candidate = self.doc.clone();
         let out = edit(&mut candidate)?;
+        // Bound values follow their expressions in the same transaction.
+        crate::params::apply_expressions(&mut candidate)?;
         let eval = self.regen(&candidate)?;
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
@@ -173,6 +176,12 @@ impl Model {
         let label = format!("Set {feature}.{name} = {value}");
         self.transact(&label, |d| {
             let f = d.feature_mut(feature)?;
+            if let Some(e) = f.expressions.get(name) {
+                return Err(DocError::Validation(format!(
+                    "{feature}.{name} is bound to the expression '{e}'; edit the expression \
+                     (or replace it with a number to unbind it)"
+                )));
+            }
             let old = f
                 .parameters()
                 .into_iter()

@@ -9,10 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{Key, Modifiers};
-use egui_kittest::{
-    Harness,
-    kittest::Queryable as _,
-};
+use egui_kittest::{Harness, kittest::Queryable as _};
 use f420_app::{ExecMode, F420App};
 use f420_commands::{Command, ExtrudeOp, SketchTemplate};
 use f420_document::{BodyId, FaceRef, FaceRole, FeatureId, SketchPlane};

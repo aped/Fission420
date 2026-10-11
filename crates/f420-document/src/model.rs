@@ -303,6 +303,11 @@ pub struct Feature {
     /// counts and skipped content). Informational; never affects geometry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// Editable parameters bound to expressions (parameter name -> expression
+    /// text, v4; see `params.rs`). The bound values in `kind` are derived from
+    /// these by every transaction.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub expressions: std::collections::BTreeMap<String, String>,
 }
 
 impl Feature {
@@ -571,6 +576,9 @@ pub struct Document {
     pub blobs: Vec<Blob>,
     #[serde(default = "one")]
     pub next_blob_id: u32,
+    /// Named user parameters (v4), in display order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<crate::Parameter>,
 }
 
 fn one() -> u32 {
@@ -586,6 +594,7 @@ impl Document {
             next_body_id: 1,
             blobs: Vec::new(),
             next_blob_id: 1,
+            parameters: Vec::new(),
         }
     }
 
@@ -833,6 +842,7 @@ impl Document {
             name: name.into(),
             kind,
             notes: vec![],
+            expressions: Default::default(),
         });
         id
     }

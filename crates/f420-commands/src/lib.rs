@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod printables;
 pub mod scenarios;
 pub mod sketches;
 
@@ -137,6 +138,36 @@ pub enum Command {
         feature: FeatureId,
         name: String,
         value: f64,
+    },
+    /// Create or redefine the named user parameter `name` (docs/PARAMETERS.md).
+    /// `expression` may use numbers with units, other parameters, + - * /,
+    /// parentheses, min/max/abs. `unit` (default mm) is the declared unit.
+    /// One undoable step: every bound feature value is re-derived and the model
+    /// regenerated; any error leaves the document unchanged.
+    SetUserParameter {
+        name: String,
+        expression: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<f420_document::ParamUnit>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment: Option<String>,
+    },
+    /// Rename a user parameter, rewriting every expression that uses it.
+    RenameUserParameter {
+        name: String,
+        new_name: String,
+    },
+    /// Delete a user parameter; refused while anything uses it.
+    DeleteUserParameter {
+        name: String,
+    },
+    /// Bind feature parameter `name` (e.g. "distance", a sketch dimension) to
+    /// `expression`. A plain number sets the value and removes the binding; an
+    /// empty expression removes the binding and keeps the current value.
+    SetExpression {
+        feature: FeatureId,
+        name: String,
+        expression: String,
     },
     /// Replace a sketch feature's definition (one undoable step; the editor's
     /// Finish Sketch). Plane and downstream references are kept.
@@ -298,6 +329,10 @@ impl Command {
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::SetParameter { .. } => "set_parameter",
+            Command::SetUserParameter { .. } => "set_user_parameter",
+            Command::RenameUserParameter { .. } => "rename_user_parameter",
+            Command::DeleteUserParameter { .. } => "delete_user_parameter",
+            Command::SetExpression { .. } => "set_expression",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
             Command::RenameBody { .. } => "rename_body",
@@ -401,6 +436,25 @@ pub struct FeatureSummary {
     /// Imports: units, counts, warnings.
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Parameters bound to expressions (name -> expression).
+    #[serde(default)]
+    pub expressions: std::collections::BTreeMap<String, String>,
+}
+
+/// A named user parameter with its evaluated value and relationships.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterSummary {
+    pub name: String,
+    pub expression: String,
+    pub unit: f420_document::ParamUnit,
+    #[serde(default)]
+    pub comment: String,
+    /// Value in `unit` (None if the parameter set does not evaluate).
+    pub value: Option<f64>,
+    /// Parameters this expression refers to.
+    pub depends_on: Vec<String>,
+    /// Parameters and feature slots ("F2 Base.distance") that use it.
+    pub used_by: Vec<String>,
 }
 
 /// A semantically referenceable face and its current placement frame.
@@ -432,6 +486,9 @@ pub struct DocSummary {
     /// Bodies in creation order.
     #[serde(default)]
     pub bodies: Vec<BodySummary>,
+    /// Named user parameters in display order.
+    #[serde(default)]
+    pub parameters: Vec<ParameterSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -874,6 +931,172 @@ impl Session {
                 let c = self.model_mut()?.set_parameter(*feature, name, *value)?;
                 r.feature = Some(*feature);
                 r.message = Some(format!("{}.{}: {} -> {}", c.feature, c.name, c.old, c.new));
+            }
+            Command::SetUserParameter {
+                name,
+                expression,
+                unit,
+                comment,
+            } => {
+                use f420_document::params;
+                let name = name.trim().to_string();
+                params::valid_name(&name).map_err(|e| DocError::Expression {
+                    name: name.clone(),
+                    detail: e,
+                })?;
+                params::check_syntax(expression).map_err(|e| DocError::Expression {
+                    name: name.clone(),
+                    detail: format!("'{expression}': {e}"),
+                })?;
+                let (expression, unit, comment) =
+                    (expression.trim().to_string(), *unit, comment.clone());
+                let label = format!("Set parameter {name} = {expression}");
+                self.model_mut()?.transact(&label, |d| {
+                    match d.parameters.iter_mut().find(|p| p.name == name) {
+                        Some(p) => {
+                            p.expression = expression.clone();
+                            if let Some(u) = unit {
+                                p.unit = u;
+                            }
+                            if let Some(c) = comment {
+                                p.comment = c;
+                            }
+                        }
+                        None => d.parameters.push(f420_document::Parameter {
+                            name: name.clone(),
+                            expression: expression.clone(),
+                            unit: unit.unwrap_or_default(),
+                            comment: comment.unwrap_or_default(),
+                        }),
+                    }
+                    Ok(())
+                })?;
+                let v = self
+                    .model
+                    .as_ref()
+                    .and_then(|m| params::evaluate_parameters(m.document()).ok())
+                    .and_then(|e| e.get(&name).map(|q| q.value));
+                r.message = Some(match v {
+                    Some(v) => format!("{name} = {expression} = {v}"),
+                    None => format!("{name} = {expression}"),
+                });
+            }
+            Command::RenameUserParameter { name, new_name } => {
+                use f420_document::params;
+                let (old, new) = (name.clone(), new_name.trim().to_string());
+                params::valid_name(&new).map_err(|e| DocError::Expression {
+                    name: new.clone(),
+                    detail: e,
+                })?;
+                let m = self.model_mut()?;
+                if !m.document().parameters.iter().any(|p| p.name == old) {
+                    return Err(DocError::Expression {
+                        name: old,
+                        detail: "no such parameter".into(),
+                    });
+                }
+                if old != new && m.document().parameters.iter().any(|p| p.name == new) {
+                    return Err(DocError::Expression {
+                        name: new,
+                        detail: "another parameter already has this name".into(),
+                    });
+                }
+                let users = params::users_of(m.document(), &old);
+                m.transact(&format!("Rename parameter {old} to {new}"), |d| {
+                    for p in &mut d.parameters {
+                        if p.name == old {
+                            p.name = new.clone();
+                        }
+                        p.expression = params::rename_in(&p.expression, &old, &new);
+                    }
+                    for f in &mut d.features {
+                        for e in f.expressions.values_mut() {
+                            *e = params::rename_in(e, &old, &new);
+                        }
+                    }
+                    Ok(())
+                })?;
+                r.message = Some(format!(
+                    "renamed {old} to {new}; updated {} reference(s)",
+                    users.len()
+                ));
+            }
+            Command::DeleteUserParameter { name } => {
+                use f420_document::params;
+                let name = name.clone();
+                let m = self.model_mut()?;
+                if !m.document().parameters.iter().any(|p| p.name == name) {
+                    return Err(DocError::Expression {
+                        name,
+                        detail: "no such parameter".into(),
+                    });
+                }
+                let users = params::users_of(m.document(), &name);
+                if !users.is_empty() {
+                    return Err(DocError::Expression {
+                        name,
+                        detail: format!(
+                            "still used by {}; change those expressions first",
+                            users.join(", ")
+                        ),
+                    });
+                }
+                m.transact(&format!("Delete parameter {name}"), |d| {
+                    d.parameters.retain(|p| p.name != name);
+                    Ok(())
+                })?;
+            }
+            Command::SetExpression {
+                feature,
+                name,
+                expression,
+            } => {
+                use f420_document::params;
+                let (feature, slot, src) = (*feature, name.clone(), expression.trim().to_string());
+                let m = self.model_mut()?;
+                let f = m.document().feature(feature)?;
+                if params::slot_kind(&f.kind, &slot).is_none() {
+                    return Err(DocError::UnknownParameter {
+                        feature,
+                        name: slot,
+                    });
+                }
+                let label = format!("{}.{slot}", f.name);
+                if !src.is_empty() && params::plain_number(&src).is_none() {
+                    params::check_syntax(&src).map_err(|e| DocError::Expression {
+                        name: label.clone(),
+                        detail: format!("'{src}': {e}"),
+                    })?;
+                }
+                let title = if src.is_empty() {
+                    format!("Unbind {label}")
+                } else {
+                    format!("Set {label} = {src}")
+                };
+                m.transact(&title, |d| {
+                    let f = d.feature_mut(feature)?;
+                    if src.is_empty() {
+                        f.expressions.remove(&slot);
+                    } else if let Some(v) = params::plain_number(&src) {
+                        f.expressions.remove(&slot);
+                        f.set_parameter(&slot, v)?;
+                    } else {
+                        f.expressions.insert(slot.clone(), src.clone());
+                    }
+                    Ok(())
+                })?;
+                let v = self
+                    .model
+                    .as_ref()
+                    .and_then(|m| m.document().feature(feature).ok())
+                    .and_then(|f| f.parameters().into_iter().find(|(n, _)| *n == slot))
+                    .map(|(_, v)| v);
+                r.feature = Some(feature);
+                r.message = Some(format!(
+                    "{label} = {}{}",
+                    if src.is_empty() { "(unbound)" } else { &src },
+                    v.map(|v| format!(" = {v}")).unwrap_or_default()
+                ));
             }
             Command::EditSketch { feature, sketch } => {
                 let (feature, new) = (*feature, solved(sketch.clone())?);
@@ -1426,6 +1649,7 @@ impl Session {
                 can_redo: None,
                 features: vec![],
                 bodies: vec![],
+                parameters: vec![],
             };
         };
         DocSummary {
@@ -1458,6 +1682,7 @@ impl Session {
                     mesh: b.geometry.mesh().map(|mb| mb.diagnostics.clone()),
                 })
                 .collect(),
+            parameters: parameter_summaries(m.document()),
         }
     }
 }
@@ -1529,7 +1754,25 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                     .cloned()
                     .chain(res.map(|r| r.notes.clone()).unwrap_or_default())
                     .collect(),
+                expressions: f.expressions.clone(),
             }
+        })
+        .collect()
+}
+
+fn parameter_summaries(doc: &Document) -> Vec<ParameterSummary> {
+    use f420_document::params;
+    let env = params::evaluate_parameters(doc).ok();
+    doc.parameters
+        .iter()
+        .map(|p| ParameterSummary {
+            name: p.name.clone(),
+            expression: p.expression.clone(),
+            unit: p.unit,
+            comment: p.comment.clone(),
+            value: env.as_ref().and_then(|e| e.get(&p.name)).map(|q| q.value),
+            depends_on: params::references(&p.expression),
+            used_by: params::users_of(doc, &p.name),
         })
         .collect()
 }

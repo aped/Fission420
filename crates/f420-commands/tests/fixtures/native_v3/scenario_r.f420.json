@@ -1,0 +1,382 @@
+{
+  "format": "fission420",
+  "version": 3,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Rounded base",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": -1.403237732618505e-13,
+                "y": -1.5882007103562783e-13
+              },
+              {
+                "id": 1,
+                "x": -28.00000000000162,
+                "y": -25.000000000000647
+              },
+              {
+                "id": 2,
+                "x": 28.000000000000778,
+                "y": -25.000000000000824
+              },
+              {
+                "id": 3,
+                "x": 39.99999999999962,
+                "y": -13.000000000002059
+              },
+              {
+                "id": 4,
+                "x": 39.9999999999998,
+                "y": 13.00000000000086
+              },
+              {
+                "id": 5,
+                "x": 28.000000000001027,
+                "y": 24.999999999999577
+              },
+              {
+                "id": 6,
+                "x": -28.00000000000186,
+                "y": 24.99999999999965
+              },
+              {
+                "id": 7,
+                "x": -40.000000000000604,
+                "y": 13.000000000000792
+              },
+              {
+                "id": 8,
+                "x": -40.00000000000067,
+                "y": -13.000000000001554
+              },
+              {
+                "id": 9,
+                "x": 28.000000000000774,
+                "y": -13.0000000000019
+              },
+              {
+                "id": 10,
+                "x": 28.000000000000963,
+                "y": 13.0000000000009
+              },
+              {
+                "id": 11,
+                "x": -28.00000000000181,
+                "y": 13.000000000000718
+              },
+              {
+                "id": 12,
+                "x": -28.00000000000152,
+                "y": -13.00000000000153
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Arc": {
+                  "id": 2,
+                  "center": 9,
+                  "start": 2,
+                  "end": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Arc": {
+                  "id": 4,
+                  "center": 10,
+                  "start": 4,
+                  "end": 5
+                }
+              },
+              {
+                "Line": {
+                  "id": 5,
+                  "a": 5,
+                  "b": 6
+                }
+              },
+              {
+                "Arc": {
+                  "id": 6,
+                  "center": 11,
+                  "start": 6,
+                  "end": 7
+                }
+              },
+              {
+                "Line": {
+                  "id": 7,
+                  "a": 7,
+                  "b": 8
+                }
+              },
+              {
+                "Arc": {
+                  "id": 8,
+                  "center": 12,
+                  "start": 8,
+                  "end": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 5
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 7
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 1,
+                  "arc": 2
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 3,
+                  "arc": 2
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 3,
+                  "arc": 4
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 5,
+                  "arc": 4
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 5,
+                  "arc": 6
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 7,
+                  "arc": 6
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 7,
+                  "arc": 8
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 1,
+                  "arc": 8
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 12,
+                  "b": 10,
+                  "center": 0
+                }
+              },
+              {
+                "EqualRadius": {
+                  "a": 8,
+                  "b": 2
+                }
+              },
+              {
+                "EqualRadius": {
+                  "a": 8,
+                  "b": 4
+                }
+              },
+              {
+                "EqualRadius": {
+                  "a": 8,
+                  "b": 6
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 7,
+                  "b": 3,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 5,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "Radius": {
+                  "entity": 8,
+                  "dim": {
+                    "name": "radius",
+                    "value": 12.0
+                  }
+                }
+              }
+            ],
+            "origin": 0
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Rounded plate",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 10.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Hole sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 0,
+                  "radius": 5.0
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 10.0
+                  }
+                }
+              }
+            ],
+            "origin": 0
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Hole",
+        "kind": {
+          "type": "Cut",
+          "sketch": 3,
+          "extent": "ThroughAll",
+          "target": 1
+        }
+      }
+    ],
+    "next_id": 5,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 37978.49525777125,
+    "bounds": {
+      "min": [
+        -40.00000000000067,
+        -25.000000000000824,
+        -1.7763568394002505e-15
+      ],
+      "max": [
+        39.9999999999998,
+        24.99999999999965,
+        10.000000000000002
+      ]
+    },
+    "face_count": 13
+  }
+}
