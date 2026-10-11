@@ -909,3 +909,37 @@ fn delete_feature_from_browser_and_keyboard() {
     assert_eq!(h.state().summary().features.len(), 2);
     assert_volume(&h, 80.0 * 50.0 * 10.0);
 }
+
+/// Window close with unsaved changes: Save (document has a path) saves first and
+/// then confirms the exit; Keep editing does not.
+#[test]
+fn close_window_save_then_exit() {
+    let dir = std::env::temp_dir().join(format!("f420-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let doc = dir.join("exit.f420.json");
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Rectangle on XY…");
+    click(&mut h, "OK");
+    click(&mut h, "Save As…");
+    type_into(&mut h, "File path", doc.to_str().unwrap());
+    click(&mut h, "OK");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    assert!(h.state().summary().dirty);
+    // The window manager asks to close.
+    assert!(!h.state_mut().allow_close());
+    let _ = h.try_run();
+    click(&mut h, "Keep editing");
+    assert!(!h.state().exit_confirmed());
+    assert!(!h.state_mut().allow_close());
+    let _ = h.try_run();
+    click(&mut h, "Save first");
+    assert!(!h.state().summary().dirty, "saved before quitting");
+    assert!(h.state().exit_confirmed(), "exit proceeds after the save");
+    let saved = std::fs::read_to_string(&doc).unwrap();
+    assert!(saved.contains("Extrude"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

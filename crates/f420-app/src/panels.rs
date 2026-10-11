@@ -1242,7 +1242,12 @@ impl F420App {
                 ));
                 ui.horizontal(|ui| {
                     let can_save = self.summary.path.is_some() && self.sketch.is_none();
-                    let save_label = if can_save { "Save" } else { "Save As…" };
+                    // Distinct from the toolbar's Save / Save As… labels.
+                    let save_label = if can_save {
+                        "Save first"
+                    } else {
+                        "Save As first…"
+                    };
                     if ui.button(save_label).clicked() {
                         answer = Some(ConfirmAnswer::Save);
                     }
