@@ -1,0 +1,19 @@
+{
+ "_comment": "Clearance coupon (printables::coupon_workflow) placed with layout gap 10 on the P1S bed: plate 70x20x4 at x[85,155] y[118,138] (+-0.01, the row is laid out from the tessellated peg width); four through holes, centres x 97.5/112.5/127.5/142.5, y 128, diameters 6.3/6.5/6.7/6.9 (peg 6 + 2*c, c = 0.15/0.25/0.35/0.45 per side); peg d6 h10 at centre (168,128). Hole probes: inscribed square of half-side 2.0 (< r/sqrt2 - perimeter half width for the smallest hole r 3.15).",
+ "probes": [
+  {"name": "layer count 50 (peg 10 mm / 0.2)", "kind": "layer_count", "equals": 50},
+  {"name": "top layer z=10", "kind": "max_z", "value": 10.0},
+  {"name": "hole 1 (c0.15, d6.3) empty z0.4..4", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 4], "rect": [95.5, 126, 99.5, 130]},
+  {"name": "hole 2 (c0.25, d6.5) empty z0.4..4", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 4], "rect": [110.5, 126, 114.5, 130]},
+  {"name": "hole 3 (c0.35, d6.7) empty z0.4..4", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 4], "rect": [125.5, 126, 129.5, 130]},
+  {"name": "hole 4 (c0.45, d6.9) empty z0.4..4", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 4], "rect": [140.5, 126, 144.5, 130]},
+  {"name": "hole 1 wall present (+X side) z2", "kind": "extrusion_near", "frame": "plate", "z": 2, "xy": [100.85, 128], "radius": 0.5},
+  {"name": "hole 4 wall present (+X side) z2", "kind": "extrusion_near", "frame": "plate", "z": 2, "xy": [146.15, 128], "radius": 0.5},
+  {"name": "plate between holes 1-2 present z2", "kind": "extrusion_near", "frame": "plate", "z": 2, "xy": [105.0, 128], "radius": 1.0},
+  {"name": "plate between holes 3-4 present z2", "kind": "extrusion_near", "frame": "plate", "z": 2, "xy": [135.0, 128], "radius": 1.0},
+  {"name": "plate end walls present z2", "kind": "extrusion_near", "frame": "plate", "z": 2, "xy": [85.3, 128], "radius": 0.6},
+  {"name": "peg present above the plate z7 (+X wall)", "kind": "extrusion_near", "frame": "plate", "z": 7, "xy": [170.8, 128], "radius": 0.6},
+  {"name": "peg present above the plate z7 (-X wall)", "kind": "extrusion_near", "frame": "plate", "z": 7, "xy": [165.2, 128], "radius": 0.6},
+  {"name": "nothing above the plate except the peg z5..10", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [4.4, 10], "rect": [84, 116, 160, 140]}
+ ]
+}
