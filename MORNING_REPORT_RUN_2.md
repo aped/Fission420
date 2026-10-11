@@ -28,13 +28,22 @@ bracket) still works and still passes its tests.
   Help (F1); unsaved-changes guard on New/Open/Close/window close; Ctrl+S/Ctrl+Shift+S/Ctrl+O/
   Ctrl+Z/Ctrl+Shift+Z; shortcuts ignored while typing; error banner with a next step; empty
   state; dimensions of the selected sketch drawn in 3D and editable in place.
-* **Responsiveness**: exact B-rep measurement (75 % of a cut-body regeneration) is deferred to a
-  background thread; a plate edit now shows new geometry in **575 ms** instead of 2395 ms, with
-  measurements following and tagged by document id + revision (never shown as current for
-  newer geometry). Sketch interaction is local and sub-millisecond.
+* **Responsiveness**: profiling showed that exact measurement and display tessellation of
+  boolean results — not the boolean — dominated (1.8 s + 0.38 s of a 2.4 s plate edit), because
+  Truck's implicit intersection edges cost ~118 µs per evaluation. After every boolean the
+  kernel now replaces those edges with exact, verified NURBS (ADR 0002): a plate-with-hole
+  dimension edit takes **209 ms end to end including measurements** (was 2395 ms), undo 2 ms,
+  the bracket example 2.7 s (was 69 s), `cargo xtask check` 40 s (was 5 min). Measurement is
+  additionally deferred to a background thread tagged by document id + revision, so slow cases
+  never block geometry and never show stale numbers. Sketch interaction is local and
+  sub-millisecond.
 * **Stretch**: (1) blind circular pockets with an explicit Through all / Blind depth choice;
   (2) three-point arcs with Radius / Tangent / Equal radius and line+arc profiles;
-  (3) kernel bottleneck work: **TBD**.
+  (3) measured kernel hardening: exact post-boolean edges (above), plus a preserved
+  fragile-boolean regression case (the corner Ø6.5 + centred Ø20 sequence still needs the retry
+  path; a test fails on purpose if a Truck upgrade changes that).
+* **Also added**: Delete feature (dependency-checked, one undo step, Del), Midpoint constraint,
+  README.
 * **Evidence of real-window behaviour**: the desktop session was locked all night
   (`loginctl … LockedHint=yes`), so all window evidence comes from a *private headless GNOME
   compositor* (`mutter --headless`) running the real release binary, with **real Wayland
@@ -82,7 +91,7 @@ compositor with real Wayland input (`tools/live/*.txt`, assertions on the app's 
 | C.5 | unsaved changes on close; failed save path; focus blocks shortcuts | PASS (UI; Live window-close via Alt+F4 → confirm) | |
 | S1 | blind circular pocket, depth vs through-all, volume/closed/STEP | PASS (UI, Headless, Ext) | `blind_pocket_through_cut_dialog`; pocket STEP err 3.5e-7 |
 | S2 | three-point arcs, minimum constraints, profile validation | PASS (unit, UI, Live, Headless, Ext) | `three_point_arc_*`; acceptance R.1–R.7; R STEP err ≤ 1.4e-6 |
-| S3 | measured kernel hardening | **TBD** | |
+| S3 | measured kernel hardening | PASS | `docs/adr/0002-exact-boolean-edges.md`, `docs/behavior/timings.md`; kernel tests incl. fragile-boolean regression; acceptance 440/0; FreeCAD 8/8 |
 | run 1 | GOAL.md acceptance, plate/bracket examples, revolve, placement | PASS | `cargo xtask check`, `ui_workflow.rs`, `placement.rs` |
 
 Not run / not proven: a human clicking on a physical display (the session was locked);
@@ -102,11 +111,18 @@ Limitations (honest list):
   constraints; arc radius changes only through its points or a Radius dimension.
 * Sketch overlays are drawn on top of the body (no depth test) in the model view.
 * STEP writes cylinders/arcs as exact rational B-splines (other tools show splines).
-* Display tessellation after booleans is slow (~0.4 s); measurements of cut bodies arrive ~2 s
-  after the geometry.
+* The Truck boolean itself costs ~150–190 ms per cut; holes crossing holes or angled planes keep
+  Truck's implicit edges (correct but slow path, seconds).
 * Observed once, not reproduced (live or in a kittest pointer test): a toolbar click right after
   dismissing the unsaved-changes dialog did nothing; a second click worked
   (`crates/f420-app/tests/dialog_click.rs` guards it).
+* Frame pacing on Wayland (upstream behaviour, egui #8326, quoted in eframe's source): eframe
+  repaints only after a compositor frame callback. In the private headless compositor the frame
+  clock occasionally went quiet while the app waited for a worker reply, so the reply was applied
+  only at the next input event (traced: the engine finished and posted in time; no UI frame
+  ran). The live harness therefore nudges the pointer while waiting. Whether this ever shows on
+  a physical display (where mutter's clock follows vblank) is **unverified** — the desktop was
+  locked all night.
 * The glyphs ▾ ◐ → ● are missing from egui's default fonts and were replaced with ASCII.
 
 Known regressions vs run 1: none known. Behaviour changes: template dialogs moved into a
@@ -162,11 +178,12 @@ All "after" images are F12 captures from the real release binary in a private he
 |---|---|---|
 | sketch drag step (free vertex / resize / blocked + diagnosis) | 2 µs / 5 µs / 0.12 ms | `--example drag_latency` |
 | UI CPU per frame (status bar EMA) | 0.2–0.5 ms | live sessions |
-| plate+hole edit → new geometry | 575 ms (was 2395) | engine timing harness, 7 runs |
-| plate+hole edit → measurements | 2394 ms | same |
+| plate+hole width edit → geometry + measurements | 209 / 211 ms (was 2395 / 2394) | engine timing harness, 7 runs |
+| plate+hole undo (cached prefix) | 2.1 ms (was 517) | same |
 | box / scenario-B edit round trip | 1.1 ms | same |
-| boolean / measure / display tessellation of the plate | 170 / 1805 / 377 ms | `--example regen_profile` |
-| TBD kernel stretch numbers | | |
+| plate boolean / measure / display tessellation | 194 / 0.9 / 2.1 ms (was 183 / 1818 / 380) | `--example regen_profile` |
+| bracket example (5 holes) | 2.7 s (was 69 s) | `f420-cli run`, 3 runs (kernel worker) |
+| `cargo xtask check` | ~40 s (was 2m58s at baseline) | `artifacts/run2/xtask_final*.log` |
 
 ## 8. Examples and migration
 
@@ -184,8 +201,12 @@ All "after" images are F12 captures from the real release binary in a private he
   acceptance 440/440; 5 example replays) — `artifacts/run2/xtask_arcs.log`.
 * External: `tools/external_validation.sh` — 8 models, all PASS (Python STL, FreeCAD STL, FreeCAD
   STEP: 1 valid solid each, volume error ≤ 1.4e-6 mm³) — `artifacts/run2/external_validation.log`.
-* Live real-input walkthroughs: 4/4 PASS — `artifacts/run2/live_auto_all.log`,
-  `artifacts/run2/live_auto/*/{script.txt,result.log,app.log,shots}`.
+* Live real-input walkthroughs: 5/5 PASS on the final build (scenario A, B, C, arcs, pocket /
+  rename / delete) — logs per script under `artifacts/run2/live_final*/`
+  (`script.txt`, `result.log` with every assertion, `app.log` with the input trace, `shots/`).
+* Independent code review of the app (13 findings): 12 fixed with tests, 1 (stuck measuring
+  after a failed measurement) fixed earlier; a concurrency bug found while tracing (shallow
+  `Body` clones shared Truck mutexes across threads) fixed with deep copies.
 * Separation of evidence: kittest = widget/input logic with real egui events (no compositor);
   live = real window + compositor input routing (no human); scripted `--screenshot` = appearance.
 
