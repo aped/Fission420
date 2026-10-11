@@ -43,12 +43,17 @@ import json, sys
 bad = 0
 for line in open(sys.argv[1]):
     r = json.loads(line.split(" ", 1)[1])
+    # FreeCAD 1.1.4 merges all 3MF build items into ONE mesh, so for a multi-object 3MF its
+    # self-intersection flag also fires where separate objects overlap (e.g. as-modeled base
+    # and lid share space). Only per-file STLs (one body each) get a self-intersection verdict.
+    merged = r["file"].endswith(".3mf")
     for o in r.get("objects", []):
-        ok = o["isSolid"] and not o["hasNonManifolds"] and not o["hasSelfIntersections"] and o["volume"] > 0
+        si = o["hasSelfIntersections"]
+        ok = o["isSolid"] and not o["hasNonManifolds"] and o["volume"] > 0 and (merged or not si)
         bad += not ok
-        print("   %-28s %s solid=%s nonmanifold=%s selfintersect=%s V=%.4f" % (
-            r["file"].rsplit("/", 1)[1], o["name"], o["isSolid"], o["hasNonManifolds"],
-            o["hasSelfIntersections"], o["volume"]))
+        print("   %-28s %s solid=%s nonmanifold=%s selfintersect=%s%s V=%.4f" % (
+            r["file"].rsplit("/", 1)[1], o["name"], o["isSolid"], o["hasNonManifolds"], si,
+            " (merged 3MF objects: informational)" if merged else "", o["volume"]))
     if "error" in r:
         bad += 1; print("   error", r)
 sys.exit(1 if bad else 0)
@@ -65,7 +70,7 @@ for set in baseline variant; do
     if [ -f "$d/result.gcode.3mf" ]; then
       python3 -I tools/print/analyze_gcode.py "$d/result.gcode.3mf" --probes "tools/print/probes/${set}_plate.json" \
         --log "$d/slice.log" --out "$d/analysis.json" > "$d/analysis.txt" 2>&1; rc=$?
-      grep -E 'FAIL|layers|objects|repair|warning' "$d/analysis.txt" | head -12 | sed 's/^/   /'
+      sed 's/^/   /' "$d/analysis.txt" | cut -c1-200
       mark $rc
     fi
   done

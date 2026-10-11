@@ -167,6 +167,30 @@ policy, placement and units.
   then all of the above with `tools/print/enclosure_spec.json` and
   `tools/print/probes/{baseline,variant}_plate.json`.
 
+### Results (2026-10-11, commit of this doc; `artifacts/run4/print/validate.log`)
+
+Exports from `enclosure_print_workflow.json` (built from the worktree with `--release`,
+binary copied to `artifacts/run4/print/bin/f420-cli`):
+
+* Python checker: 91 PASS, 0 FAIL (`validation/mesh_check.txt`): unit `millimeter`, 2 named
+  objects per 3MF, all objects closed/manifold/outward, volumes 19592 / 9404 (baseline) and
+  36823.296 / 15148.48 (variant) within 0.5 mm³, dims 80×50×25 / 80×50×5 and 100×65×30 /
+  100×65×5 within 1e-4 mm, min z = 0, inside the P1S area; cylinder sagitta within chord.
+* FreeCAD 1.1.4: every STL `isSolid`, no non-manifolds, **no self-intersections**, volumes
+  as above (`validation/freecad.txt`). The merged as-modeled 3MF reports a self-intersection
+  because base and lid overlap in model space and FreeCAD merges 3MF objects (informational).
+* Bambu Studio 2.8.2.61 (P1S 0.4 / 0.20mm Standard @BBL X1C / Generic PLA, `--arrange 0`):
+  baseline and variant, each as 3MF and as two STLs, slice with exit 0; `mesh_stat` repair
+  counters all 0 (no edges fixed, facets reversed/removed, degenerate facets); no non-benign
+  log findings; objects kept at the exported positions (plate bbox equals ours). 125 / 150
+  layers. Toolpath probes (17 baseline, 15 variant, all pass): extrusion on all four base
+  walls at mid-height, no extrusion inside the cavity above the floor, floor footprint fully
+  covered, lid plate covered, all four lip walls present at z 3.5, lip opening empty, and the
+  clearance step outside the lip empty (`validation/slice_*/analysis.json`).
+
+This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
+says nothing about fit, strength or print quality.
+
 ## Not done / limits
 
 * App dialogs: new fields not exposed yet (the dialogs send defaults, i.e. as-modeled
