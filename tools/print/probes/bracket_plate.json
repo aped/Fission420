@@ -1,0 +1,18 @@
+{
+ "_comment": "Mounting bracket (printables::bracket_workflow), as-modeled orientation, centred on the P1S bed by layout: offset (+98, +108, 0). Plate 60x40x5 at x[98,158] y[108,148] z[0,5]; upright 50x5x35 at x[103,153] y[138,143] z[5,40]; plate holes d5.5 (along Z) at (113,123),(143,123); upright holes d5.5 (along Y) at x 113/143, z 26; 1 mm chamfer on the plate's front top edge (y 108, z 5). Hole probes use an inscribed square of half-side 1.8 (r 2.75).",
+ "probes": [
+  {"name": "layer count 200 (40 mm / 0.2)", "kind": "layer_count", "equals": 200},
+  {"name": "top layer z=40", "kind": "max_z", "value": 40.0},
+  {"name": "plate hole 1 empty z0.4..5", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 5], "rect": [111.2, 121.2, 114.8, 124.8]},
+  {"name": "plate hole 2 empty z0.4..5", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [0.4, 5], "rect": [141.2, 121.2, 144.8, 124.8]},
+  {"name": "plate hole 1 wall present z2.5", "kind": "extrusion_near", "frame": "plate", "z": 2.5, "xy": [116.0, 123], "radius": 0.5},
+  {"name": "plate solid between holes (bottom shell z<=0.6; mid-plate layers are 15% sparse infill)", "kind": "filled_rect", "frame": "plate", "z_range": [0, 0.6], "rect": [118, 113, 138, 133], "min_coverage": 0.95, "mode": "each"},
+  {"name": "plate outer wall -X z2.5", "kind": "extrusion_near", "frame": "plate", "z": 2.5, "xy": [98.3, 128], "radius": 0.6},
+  {"name": "upright front wall z20", "kind": "extrusion_near", "frame": "plate", "z": 20, "xy": [128.0, 138.3], "radius": 0.6},
+  {"name": "upright back wall z20", "kind": "extrusion_near", "frame": "plate", "z": 20, "xy": [128.0, 142.7], "radius": 0.6},
+  {"name": "nothing in front of the upright above the plate z5.4..40", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [5.4, 40], "rect": [97, 107, 159, 137.5]},
+  {"name": "upright hole 1 empty z25..27", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [25, 27], "rect": [111.2, 138.5, 114.8, 142.5]},
+  {"name": "upright hole 2 empty z25..27", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [25, 27], "rect": [141.2, 138.5, 144.8, 142.5]},
+  {"name": "upright present between its holes z26", "kind": "extrusion_near", "frame": "plate", "z": 26, "xy": [128.0, 138.3], "radius": 0.6}
+ ]
+}

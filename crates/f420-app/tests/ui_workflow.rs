@@ -278,7 +278,8 @@ fn save_export_reopen_through_dialogs() {
     let mc = h.state().last_export().expect("mesh check").clone();
     assert!(mc.watertight);
     assert!((mc.mesh_volume - V_80X50).abs() / V_80X50 <= 1e-3);
-    h.get_by_label_contains("Last export: watertight yes");
+    // The dialog's per-body report (run 4 print export) shows the mesh checks.
+    h.get_by_label_contains("valid solid mesh: closed yes");
     click(&mut h, "Cancel");
 
     let before = h.state().summary().features.clone();
