@@ -98,7 +98,7 @@ pub(crate) fn exact_edge(
     p1: Point3,
 ) -> Result<Curve> {
     if let (Surface::Plane(a), Surface::Plane(b)) = (ic.surface0(), ic.surface1()) {
-        return plane_plane_edge(ic, &a, &b, p0, p1);
+        return plane_plane_edge(ic, a, b, p0, p1);
     }
     let (plane, other) = match (ic.surface0(), ic.surface1()) {
         (Surface::Plane(p), o) | (o, Surface::Plane(p)) => (p, o),
