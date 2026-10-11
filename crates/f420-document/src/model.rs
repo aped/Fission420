@@ -240,6 +240,15 @@ pub enum FeatureKind {
         to_mm: f64,
         body: BodyId,
     },
+    /// Repeat the tool of `seed` (an Extrude Cut) `count - 1` more times, each
+    /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
+    /// normalized), on the seed's target body. The seed is instance 0.
+    LinearPattern {
+        seed: FeatureId,
+        count: u32,
+        spacing: f64,
+        direction: [f64; 2],
+    },
 }
 
 impl FeatureKind {
@@ -275,6 +284,7 @@ impl Feature {
             | FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
+            FeatureKind::LinearPattern { seed, .. } => vec![*seed],
             FeatureKind::ImportStep { .. } | FeatureKind::ImportMesh { .. } => vec![],
         }
     }
@@ -337,6 +347,10 @@ impl Feature {
             FeatureKind::Cut { .. } | FeatureKind::ImportStep { .. } => vec![],
             FeatureKind::ImportMesh { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
+            FeatureKind::LinearPattern { count, spacing, .. } => vec![
+                ("count".into(), f64::from(*count)),
+                ("spacing".into(), *spacing),
+            ],
         }
     }
 
@@ -405,6 +419,25 @@ impl Feature {
                 *distance = value;
                 Ok(())
             }
+            FeatureKind::LinearPattern { count, .. } if name == "count" => {
+                if value.fract() != 0.0 || !(2.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.count: pattern count must be an integer in 2..={MAX_PATTERN_COUNT}, \
+                         got {value}"
+                    )));
+                }
+                *count = value as u32;
+                Ok(())
+            }
+            FeatureKind::LinearPattern { spacing, .. } if name == "spacing" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.spacing: pattern spacing must be > 0 mm, got {value}"
+                    )));
+                }
+                *spacing = value;
+                Ok(())
+            }
             FeatureKind::Pocket { depth, .. } if name == "depth" => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
@@ -421,6 +454,9 @@ impl Feature {
         }
     }
 }
+
+/// Largest linear pattern count (bounds the boolean work of one feature).
+pub const MAX_PATTERN_COUNT: u32 = 100;
 
 /// Position of a template sketch's single fixed anchor point (the template centre),
 /// exposed as the editable parameters `center_x` / `center_y` (mm, sketch-plane frame).

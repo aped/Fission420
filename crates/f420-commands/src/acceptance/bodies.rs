@@ -815,3 +815,151 @@ pub(super) fn scenario_nested(r: &mut Run<'_>) {
         v.is_some_and(|v| (v - want).abs() <= vol_tol(want)),
     );
 }
+
+/// Backlog 3: a row of holes as a linear pattern of one Extrude Cut, with
+/// editable count and spacing.
+pub(super) fn scenario_pattern(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3P.1 row of holes".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let Some(sp) = r.polygon(
+        "Bar",
+        SketchPlane::WorldXY,
+        &[[0.0, 0.0], [80.0, 0.0], [80.0, 20.0], [0.0, 20.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Bar", sp, 5.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(bar) = r.ok("extrude bar 80x20x5", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Hole".into()),
+        plane: SketchPlane::Face(FaceRef {
+            feature: bar,
+            role: FaceRole::ExtrudeEndCap,
+        }),
+        template: SketchTemplate::CenteredCircle {
+            diameter: 5.0,
+            center: Some([10.0, 10.0]),
+        },
+    });
+    let Some(sh) = r.ok("hole sketch on top", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Hole", sh, 0.0, ExtrudeOp::Cut, None, true, None);
+    let Some(hole) = r.ok("through-all cut", &x) else {
+        return;
+    };
+    let x = r.exec(Command::LinearPattern {
+        name: Some("Row".into()),
+        feature: hole,
+        count: 5,
+        spacing: 15.0,
+        direction: [1.0, 0.0],
+    });
+    let Some(row) = r.ok("pattern x5 at 15 mm along sketch x", &x) else {
+        return;
+    };
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    let v = |n: f64| 80.0 * 20.0 * 5.0 - n * PI * 2.5 * 2.5 * 5.0;
+    r.check_body_solid(
+        "bar with 5 holes",
+        b,
+        v(5.0),
+        [0.0, 0.0, 0.0],
+        [80.0, 20.0, 5.0],
+    );
+
+    r.step = "3P.2 edit count and spacing".into();
+    let x = r.exec(Command::SetParameter {
+        feature: row,
+        name: "count".into(),
+        value: 3.0,
+    });
+    r.ok("count = 3", &x);
+    r.check_body_solid(
+        "bar with 3 holes",
+        b,
+        v(3.0),
+        [0.0, 0.0, 0.0],
+        [80.0, 20.0, 5.0],
+    );
+    let x = r.exec(Command::SetParameter {
+        feature: row,
+        name: "spacing".into(),
+        value: 30.0,
+    });
+    r.ok("spacing = 30 (holes at x = 10, 40, 70)", &x);
+    r.check_body_solid(
+        "bar with 3 holes at 30",
+        b,
+        v(3.0),
+        [0.0, 0.0, 0.0],
+        [80.0, 20.0, 5.0],
+    );
+
+    // Placement: hole loops on the top face (z = 5) centred at x = 10, 40, 70, y = 10.
+    let loops =
+        r.s.model()
+            .and_then(|m| {
+                m.evaluation()
+                    .body_by_id(b)
+                    .and_then(|e| e.geometry.brep().cloned())
+            })
+            .map(|body| f420_kernel::z_face_inner_loops(&body));
+    let mut centres: Vec<[f64; 2]> = match loops {
+        Some(Ok(l)) => l
+            .iter()
+            .filter(|l| (l.z - 5.0).abs() < 1e-9)
+            .map(|l| l.centroid_xy)
+            .collect(),
+        _ => vec![],
+    };
+    centres.sort_by(|p, q| p[0].total_cmp(&q[0]));
+    let want = [[10.0, 10.0], [40.0, 10.0], [70.0, 10.0]];
+    let placed = centres.len() == 3
+        && centres
+            .iter()
+            .zip(want)
+            .all(|(c, w)| (c[0] - w[0]).abs() < 1e-6 && (c[1] - w[1]).abs() < 1e-6);
+    r.check(
+        "hole centres on top face",
+        format!("{want:?}"),
+        format!("{centres:?}"),
+        placed,
+    );
+    r.refused(
+        "count 4 at 30 puts a hole at x = 100 (outside)",
+        Command::SetParameter {
+            feature: row,
+            name: "count".into(),
+            value: 4.0,
+        },
+        "instance 4 of 4",
+    );
+    r.refused(
+        "non-integer count",
+        Command::SetParameter {
+            feature: row,
+            name: "count".into(),
+            value: 2.5,
+        },
+        "integer",
+    );
+    r.refused(
+        "delete the seed while patterned",
+        Command::DeleteFeature { feature: hole },
+        "is used by",
+    );
+    let path = r.out_dir.join("pattern.f420.json");
+    let x = r.exec(Command::Save { path: path.clone() });
+    r.ok("save", &x);
+    let x = r.exec(Command::Open { path });
+    r.ok("reopen", &x);
+    r.check_body_solid("reopened", b, v(3.0), [0.0, 0.0, 0.0], [80.0, 20.0, 5.0]);
+}

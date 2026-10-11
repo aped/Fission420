@@ -256,6 +256,9 @@ struct ExtrudeOut {
     entities: Vec<EntityId>,
     /// Inner loops (New Body only) with their entities.
     holes: Vec<(SketchProfile, Vec<EntityId>)>,
+    /// Tool span `[a, b]` along the sketch normal actually used (after
+    /// overlap/margin adjustments).
+    span: (f64, f64),
     /// New/Join (material added) vs Cut (material removed).
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
@@ -563,6 +566,16 @@ pub fn regenerate_cached_opts(
                 }
                 r.body = bodies.last().copied();
             }
+            FeatureKind::LinearPattern {
+                seed,
+                count,
+                spacing,
+                direction,
+            } => {
+                r.body = Some(linear_pattern(
+                    &mut st, id, *seed, *count, *spacing, *direction,
+                )?);
+            }
             FeatureKind::ImportMesh { blob, to_mm, body } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;
@@ -819,6 +832,7 @@ fn extrude_feature(
         profile,
         entities,
         holes,
+        span: (0.0, 0.0),
         removes: false,
         joined: false,
         body: BodyId(0),
@@ -930,7 +944,78 @@ fn extrude_feature(
             return Err(DocError::Validation(format!("{id}: missing target body")));
         }
     }
+    out.span = (a, b);
     Ok(out)
+}
+
+/// Linear pattern of an Extrude Cut: the seed's exact tool (same span along
+/// the sketch normal) translated in the sketch plane, cut from the seed's target.
+fn linear_pattern(
+    st: &mut Snapshot,
+    id: FeatureId,
+    seed: FeatureId,
+    count: u32,
+    spacing: f64,
+    direction: [f64; 2],
+) -> Result<BodyId> {
+    let e = st
+        .extrudes
+        .get(&seed)
+        .cloned()
+        .ok_or(DocError::BrokenReference {
+            from: id,
+            detail: format!("{seed} is not an evaluated extrusion"),
+        })?;
+    if !e.removes {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: patterns are supported for Extrude Cut features ({seed} is not a cut)"
+        )));
+    }
+    if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
+        return Err(DocError::Validation(format!(
+            "{id}.count: must be in 2..={}, got {count}",
+            crate::MAX_PATTERN_COUNT
+        )));
+    }
+    if !spacing.is_finite() || spacing <= 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}.spacing: must be > 0 mm, got {spacing}"
+        )));
+    }
+    let len = direction[0].hypot(direction[1]);
+    if !len.is_finite() || len <= 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}: pattern direction must be a non-zero vector"
+        )));
+    }
+    let f = e.start;
+    let d = [direction[0] / len, direction[1] / len];
+    let world = [
+        f.x[0] * d[0] + f.y[0] * d[1],
+        f.x[1] * d[0] + f.y[1] * d[1],
+        f.x[2] * d[0] + f.y[2] * d[1],
+    ];
+    let kp = to_kernel(&e.profile);
+    let mut body = brep_target(st, id, e.body)?;
+    for i in 1..count {
+        let t = spacing * f64::from(i);
+        let frame = Frame {
+            origin: [
+                f.origin[0] + world[0] * t,
+                f.origin[1] + world[1] * t,
+                f.origin[2] + world[2] * t,
+            ],
+            ..f
+        };
+        body = k::cut_prism(&body, &kp, &frame.offset(e.span.0), e.span.1 - e.span.0).map_err(
+            |err| DocError::Kernel {
+                feature: id,
+                detail: format!("instance {} of {count}: {err}", i + 1),
+            },
+        )?;
+    }
+    replace_body(st, id, e.body, body);
+    Ok(e.body)
 }
 
 /// Run-1/2 circular cut (`depth == None`: through all) and pocket features on
