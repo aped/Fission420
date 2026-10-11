@@ -547,6 +547,8 @@ impl F420App {
                 "revolve" => "Revolve",
                 "cut_through_all" => "Cut",
                 "pocket" => "Pocket",
+                "linear_pattern" => "Pattern",
+                "import_step" | "import_mesh" => "Import",
                 k => k,
             };
             ui.horizontal(|ui| {
@@ -738,6 +740,21 @@ impl F420App {
                 }
             }
             "extrude" => {
+                if matches!(f.operation, Some(f420_document::Operation::Cut { .. }))
+                    && ui
+                        .button("Pattern…")
+                        .probe("Pattern…")
+                        .on_hover_text("Repeat this cut in a row along its sketch's X or Y axis (editable count and spacing)")
+                        .clicked()
+                {
+                    self.dialog = Some(Dialog::Pattern {
+                        feature: f.id,
+                        count: "3".into(),
+                        spacing: "10".into(),
+                        along_y: false,
+                        reverse: false,
+                    });
+                }
                 ui.horizontal_wrapped(|ui| {
                     for fs in &f.faces {
                         let label =
@@ -1259,6 +1276,24 @@ impl F420App {
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
                         );
                         ui.small("Exports the last committed model revision (queued after pending edits).");
+                    }
+                    Dialog::Pattern {
+                        feature,
+                        count,
+                        spacing,
+                        along_y,
+                        reverse,
+                    } => {
+                        ui.label(format!("Seed: {}", self.feature_name(*feature)));
+                        num_field(ui, "Pattern count", count);
+                        num_field(ui, "Pattern spacing (mm)", spacing);
+                        ui.horizontal(|ui| {
+                            ui.label("Direction");
+                            ui.radio_value(along_y, false, "Sketch X");
+                            ui.radio_value(along_y, true, "Sketch Y");
+                            ui.checkbox(reverse, "Reverse");
+                        });
+                        ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances cut the same target. Count and spacing stay editable parameters.");
                     }
                     Dialog::ExportDxf { path, sketch } => {
                         ok_allowed &= self.export_dxf_ui(ui, path, sketch);

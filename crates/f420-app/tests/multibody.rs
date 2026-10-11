@@ -316,5 +316,16 @@ fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
     assert!(h.state().diagnostics().last().unwrap().error);
     assert_close(body_volume(&h, a), 12500.0);
     assert_eq!(h.state().summary().bodies.len(), 2);
+    // Linear pattern of the rectangular cut: 2 instances 15 mm apart along
+    // the sketch X axis (second slot x 16..26, clear of the boss): -500.
+    click(&mut h, &cut.name);
+    click(&mut h, "Pattern…");
+    type_into(&mut h, "Pattern count", "2");
+    type_into(&mut h, "Pattern spacing (mm)", "15");
+    click(&mut h, "OK");
+    let pat = h.state().summary().features.last().unwrap().clone();
+    assert_eq!(pat.kind, "linear_pattern");
+    assert_close(body_volume(&h, a), 12000.0);
+    assert_close(body_volume(&h, b), 4000.0);
     let _ = SketchPlane::WorldXY;
 }

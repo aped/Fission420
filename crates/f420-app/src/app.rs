@@ -92,6 +92,14 @@ pub(crate) enum Dialog {
         sketch: Option<FeatureId>,
     },
     Import(crate::exchange::ImportForm),
+    /// Linear pattern of an Extrude Cut along its sketch's local X or Y.
+    Pattern {
+        feature: FeatureId,
+        count: String,
+        spacing: String,
+        along_y: bool,
+        reverse: bool,
+    },
 }
 
 impl Dialog {
@@ -109,6 +117,7 @@ impl Dialog {
             Dialog::ExportStep { .. } => "Export STEP",
             Dialog::ExportDxf { .. } => "Export DXF",
             Dialog::Import(_) => "Import",
+            Dialog::Pattern { .. } => "Linear pattern",
         }
     }
 }
@@ -1851,6 +1860,28 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             sketch: need(sketch, "sketch")?,
         },
         Dialog::Import(form) => form.command()?,
+        Dialog::Pattern {
+            feature,
+            count,
+            spacing,
+            along_y,
+            reverse,
+        } => {
+            let n = parse_num("count", count)?;
+            if !(n.is_finite() && n >= 2.0 && n.fract() == 0.0 && n <= 1000.0) {
+                return Err(format!(
+                    "count must be a whole number from 2 to 1000, got {n}"
+                ));
+            }
+            let s = if *reverse { -1.0 } else { 1.0 };
+            Command::LinearPattern {
+                name: None,
+                feature: *feature,
+                count: n as u32,
+                spacing: parse_num("spacing", spacing)?,
+                direction: if *along_y { [0.0, s] } else { [s, 0.0] },
+            }
+        }
     })
 }
 
