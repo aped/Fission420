@@ -36,8 +36,10 @@ compete. Opening another document while a sketch is open discards the session wi
 | Dimension (D) | click a line (horizontal line → `width`, vertical → `height`, other → aligned `length`), a circle (`diameter`), an arc (`radius`), or two points (horizontal or vertical distance, whichever is larger). The inline editor opens immediately |
 
 Constraint buttons act on the selection and are disabled with the reason as hover text:
-Horizontal / Vertical (lines), Coincident (two points), Tangent (a line and an arc sharing an
-endpoint), Equal (two arcs/circles).
+Horizontal / Vertical (lines), Coincident (two points), Midpoint (a line and a point: the point
+stays at the line's midpoint, glyph `Mid`), Tangent (a line and an arc sharing an endpoint),
+Equal (two arcs/circles). Features are deleted from the browser context menu, the inspector or
+Del (refused, with the dependents named, while anything uses them; one undo step).
 
 ## Snapping (deterministic priority)
 

@@ -413,9 +413,14 @@ pub fn paint_sketch(
                     targets.push((item, glyph("C", sp + egui::vec2(11.0, -11.0))));
                 }
             }
-            Constraint::SymmetricAboutPoint { center, .. } => {
+            Constraint::SymmetricAboutPoint { a, b, center } => {
+                // "Mid" when the pair is a line's own endpoints, else symmetry.
+                let is_mid = s.entities.iter().any(|e| {
+                    matches!(e, Entity::Line { a: x, b: y, .. } if (x == a && y == b) || (x == b && y == a))
+                });
                 if let Some(sp) = s.point_xy(*center).and_then(|p| pr.screen(p)) {
-                    targets.push((item, glyph("Sym", sp + egui::vec2(22.0, 16.0))));
+                    let t = if is_mid { "Mid" } else { "Sym" };
+                    targets.push((item, glyph(t, sp + egui::vec2(22.0, 16.0))));
                 }
             }
             Constraint::FixedPoint { p, .. } if s.origin != Some(*p) => {

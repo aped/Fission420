@@ -1473,6 +1473,39 @@ impl SketchEditor {
         (es.len() != 2 || !round).then_some("Select exactly two arcs/circles")
     }
 
+    /// (line, point) when the selection is exactly one line and one point
+    /// that is not one of the line's endpoints.
+    fn midpoint_pair(&self) -> Option<(EntityId, PointId)> {
+        let lines = self.selected_lines();
+        let pts = self.selected_points();
+        if self.selection.len() != 2 || lines.len() != 1 || pts.len() != 1 {
+            return None;
+        }
+        let ends = self.sketch.entity(lines[0])?.points();
+        (!ends.contains(&pts[0])).then_some((lines[0], pts[0]))
+    }
+
+    pub fn midpoint_disabled_reason(&self) -> Option<&'static str> {
+        self.midpoint_pair()
+            .is_none()
+            .then_some("Select one line and one point (not its endpoint)")
+    }
+
+    /// Keep the selected point at the midpoint of the selected line.
+    pub fn constrain_midpoint(&mut self) {
+        let Some((line, p)) = self.midpoint_pair() else {
+            return;
+        };
+        let Some(Entity::Line { a, b, .. }) = self.sketch.entity(line).cloned() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints
+                .push(Constraint::SymmetricAboutPoint { a, b, center: p });
+            Ok(())
+        });
+    }
+
     pub fn constrain_tangent(&mut self) {
         let Some((line, arc)) = self.tangent_pair() else {
             return;
@@ -1869,6 +1902,40 @@ mod tests {
         ed.selection = vec![Item::Point(start)];
         ed.delete_selection();
         assert!(ed.sketch.entities.is_empty());
+    }
+
+    #[test]
+    fn midpoint_centres_a_circle_on_an_edge() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [40.0, 0.0]);
+        ed.escape();
+        ed.set_tool(SketchTool::Circle);
+        click(&mut ed, [13.0, 9.0]);
+        click(&mut ed, [16.0, 9.0]);
+        let line = ed.sketch.entities[0].id();
+        let Entity::Circle { center, .. } = ed.sketch.entities[1] else {
+            panic!("circle")
+        };
+        ed.set_tool(SketchTool::Select);
+        ed.selection = vec![Item::Entity(line)];
+        assert!(ed.midpoint_disabled_reason().is_some());
+        ed.selection = vec![Item::Entity(line), Item::Point(center)];
+        assert!(ed.midpoint_disabled_reason().is_none());
+        ed.constrain_midpoint();
+        let c = ed.sketch.point_xy(center).unwrap();
+        let tol = 40.0 * f420_sketch::solve_tolerance(40.0);
+        // Line endpoints are free too; the centre sits at their midpoint.
+        let Entity::Line { a, b, .. } = ed.sketch.entities[0] else {
+            panic!()
+        };
+        let (pa, pb) = (
+            ed.sketch.point_xy(a).unwrap(),
+            ed.sketch.point_xy(b).unwrap(),
+        );
+        assert!((c[0] - 0.5 * (pa[0] + pb[0])).abs() <= tol);
+        assert!((c[1] - 0.5 * (pa[1] + pb[1])).abs() <= tol);
     }
 
     #[test]
