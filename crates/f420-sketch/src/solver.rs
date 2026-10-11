@@ -42,6 +42,8 @@ enum Eq {
     /// `(p - c)·(q - p) / |q - p|`: component of the radius vector `p - c` along
     /// the line `p -> q` (mm); zero when the line is tangent at `p`.
     Tangent { p: usize, c: usize, q: usize },
+    /// `|a - c| - x[r]` (point x columns `c`, `a`; radius column `r`).
+    DistVar { c: usize, a: usize, r: usize },
 }
 
 /// Unit vector from `a` to `b` (x columns) and the distance; a fixed unit
@@ -75,6 +77,7 @@ impl Eq {
                 let (ux, uy, _) = unit(x, p, q);
                 (x[p] - x[c]) * ux + (x[p + 1] - x[c + 1]) * uy
             }
+            Eq::DistVar { c, a, r } => (x[a] - x[c]).hypot(x[a + 1] - x[c + 1]) - x[r],
         }
     }
 
@@ -129,6 +132,14 @@ impl Eq {
                 j[(row, c + 1)] -= uy;
                 j[(row, q)] += wx;
                 j[(row, q + 1)] += wy;
+            }
+            Eq::DistVar { c, a, r } => {
+                let (ux, uy, _) = unit(x, c, a);
+                j[(row, a)] += ux;
+                j[(row, a + 1)] += uy;
+                j[(row, c)] -= ux;
+                j[(row, c + 1)] -= uy;
+                j[(row, r)] -= 1.0;
             }
         }
     }
@@ -272,6 +283,27 @@ impl System {
                         });
                     } else if let Some(&c) = circles.get(entity) {
                         push(Eq::Fix { c, v: dim.value });
+                    }
+                }
+                Constraint::EqualRadius { a, b } => {
+                    let e = match (arcs.get(a), arcs.get(b), circles.get(a), circles.get(b)) {
+                        (Some(&(c1, s1, _)), Some(&(c2, s2, _)), _, _) => Some(Eq::SameDist {
+                            c: c1,
+                            a: s1,
+                            d: c2,
+                            b: s2,
+                        }),
+                        (Some(&(c, s, _)), None, _, Some(&r))
+                        | (None, Some(&(c, s, _)), Some(&r), _) => Some(Eq::DistVar { c, a: s, r }),
+                        (None, None, Some(&r1), Some(&r2)) => Some(Eq::Diff {
+                            a: r1,
+                            b: r2,
+                            v: 0.0,
+                        }),
+                        _ => None,
+                    };
+                    if let Some(e) = e {
+                        push(e);
                     }
                 }
                 Constraint::Tangent { line, arc } => {
@@ -645,7 +677,8 @@ mod tests {
         assert!((j[(last, bcol + 1)] - dy / l).abs() < 1e-12);
     }
 
-    /// Arc rows (implied equal radius, Radius, Tangent) against central finite
+    /// Arc rows (implied equal radius, Radius, Tangent, EqualRadius arc-arc and
+    /// circle-arc) against central finite
     /// differences at a generic (unsolved) configuration.
     #[test]
     fn arc_rows_jacobian_matches_finite_differences() {
@@ -661,6 +694,9 @@ mod tests {
                 pt(1, 9.1, 1.2),
                 pt(2, -1.5, 8.7),
                 pt(3, 13.0, -6.0),
+                pt(4, 2.0, 3.0),
+                pt(5, 6.5, 2.5),
+                pt(6, 3.0, 9.0),
             ],
             entities: vec![
                 Entity::Arc {
@@ -674,6 +710,17 @@ mod tests {
                     a: PointId(3),
                     b: PointId(1),
                 },
+                Entity::Arc {
+                    id: EntityId(3),
+                    center: PointId(4),
+                    start: PointId(5),
+                    end: PointId(6),
+                },
+                Entity::Circle {
+                    id: EntityId(4),
+                    center: PointId(4),
+                    radius: 3.3,
+                },
             ],
             constraints: vec![
                 Constraint::Radius {
@@ -684,16 +731,29 @@ mod tests {
                     line: EntityId(2),
                     arc: EntityId(1),
                 },
+                Constraint::EqualRadius {
+                    a: EntityId(1),
+                    b: EntityId(3),
+                },
+                Constraint::EqualRadius {
+                    a: EntityId(4),
+                    b: EntityId(3),
+                },
             ],
         };
         s.validate().unwrap();
         let sys = System::build(&s);
-        assert_eq!(sys.eqs.len(), 3, "radius, tangent, implied equal radius");
         assert_eq!(
-            sys.owner[2],
-            s.constraints.len(),
-            "implied row has the pseudo-owner"
+            sys.eqs.len(),
+            6,
+            "radius, tangent, 2 equal radius, 2 implied"
         );
+        assert_eq!(
+            sys.owner[4],
+            s.constraints.len(),
+            "implied rows: pseudo-owner"
+        );
+        assert_eq!(sys.owner[5], s.constraints.len());
         let rows = sys.all_rows();
         let x0 = sys.initial.clone();
         let j = sys.jacobian(&x0, &rows);

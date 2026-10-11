@@ -155,6 +155,9 @@ pub enum Constraint {
     /// centre, Q the line's other end). The line and the arc must share exactly
     /// one endpoint.
     Tangent { line: EntityId, arc: EntityId },
+    /// Two arcs/circles have equal radii (arc radius = |start − centre|);
+    /// 1 equation, no dimension.
+    EqualRadius { a: EntityId, b: EntityId },
     /// `a == b`; 2 equations.
     Coincident { a: PointId, b: PointId },
     /// Euclidean `|b - a| = dim.value` (aligned length); 1 nonlinear equation.
@@ -551,6 +554,15 @@ impl Sketch {
                 }
                 Constraint::Radius { entity, .. } => {
                     need_entity(i, entity, "arc or circle")?;
+                }
+                Constraint::EqualRadius { a, b } => {
+                    need_entity(i, a, "arc or circle")?;
+                    need_entity(i, b, "arc or circle")?;
+                    if a == b {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: equal radius needs two different entities"
+                        )));
+                    }
                 }
                 Constraint::Tangent { line, arc } => {
                     let l = need_entity(i, line, "line")?;

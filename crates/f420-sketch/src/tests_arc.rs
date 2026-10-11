@@ -336,7 +336,7 @@ fn removing_an_arc_drops_its_centre_and_constraints_but_keeps_shared_points() {
 
 #[test]
 fn arc_sketch_json_round_trip() {
-    let s = rounded_rect(80.0, 50.0, 8.0);
+    let s = rounded_rect(80.0, 50.0, 8.0, false);
     let j = serde_json::to_string(&s).unwrap();
     let back: Sketch = serde_json::from_str(&j).unwrap();
     assert_eq!(s, back);
@@ -347,8 +347,9 @@ fn arc_sketch_json_round_trip() {
 /// Rounded rectangle centred on the origin, built CCW like the editor would:
 /// 4 lines + 4 three-point arcs sharing endpoints, H/V lines, 8 tangents, the
 /// BL/TR arc centres symmetric about the origin, width/height between the
-/// straight sides, one Radius dimension per corner. 26 unknowns, 26 equations.
-fn rounded_rect(w: f64, h: f64, r: f64) -> Sketch {
+/// straight sides, and either one Radius dimension per corner (`per_corner`)
+/// or one "radius" on BL plus three EqualRadius. 26 unknowns, 26 equations.
+fn rounded_rect(w: f64, h: f64, r: f64, per_corner: bool) -> Sketch {
     let mut s = Sketch::default();
     let o = s.ensure_origin();
     let (x, y) = (w / 2.0, h / 2.0);
@@ -406,12 +407,22 @@ fn rounded_rect(w: f64, h: f64, r: f64) -> Sketch {
             dim: Dimension::new("height", h),
         },
     ]);
-    for arc in [bl, br, tr, tl] {
-        let name = s.unique_dimension_name("radius");
+    if per_corner {
+        for arc in [bl, br, tr, tl] {
+            let name = s.unique_dimension_name("radius");
+            s.constraints.push(Constraint::Radius {
+                entity: arc,
+                dim: Dimension::new(name, r),
+            });
+        }
+    } else {
         s.constraints.push(Constraint::Radius {
-            entity: arc,
-            dim: Dimension::new(name, r),
+            entity: bl,
+            dim: Dimension::new("radius", r),
         });
+        for b in [br, tr, tl] {
+            s.constraints.push(Constraint::EqualRadius { a: bl, b });
+        }
     }
     s.validate().unwrap();
     s
@@ -419,7 +430,12 @@ fn rounded_rect(w: f64, h: f64, r: f64) -> Sketch {
 
 #[test]
 fn rounded_rectangle_is_fully_constrained_with_hand_derived_area() {
-    let mut s = rounded_rect(80.0, 50.0, 8.0);
+    for per_corner in [false, true] {
+        let mut s = rounded_rect(80.0, 50.0, 8.0, per_corner);
+        let rep = s.solve();
+        assert_eq!(rep.status, SolveStatus::FullyConstrained, "{rep:?}");
+    }
+    let mut s = rounded_rect(80.0, 50.0, 8.0, false);
     let rep = s.solve();
     assert_eq!(rep.status, SolveStatus::FullyConstrained, "{rep:?}");
     let segs = loop_of(&s);
@@ -440,10 +456,9 @@ fn rounded_rectangle_is_fully_constrained_with_hand_derived_area() {
 
 #[test]
 fn rounded_rectangle_radius_edit_regenerates_corners() {
-    let mut s = rounded_rect(80.0, 50.0, 8.0);
-    for n in ["radius", "radius2", "radius3", "radius4"] {
-        s.set_dimension(n, 12.0).unwrap();
-    }
+    // One "radius" dimension drives all four corners through EqualRadius.
+    let mut s = rounded_rect(80.0, 50.0, 8.0, false);
+    s.set_dimension("radius", 12.0).unwrap();
     let rep = s.solve();
     assert_eq!(rep.status, SolveStatus::FullyConstrained, "{rep:?}");
     let segs = loop_of(&s);
@@ -460,7 +475,7 @@ fn rounded_rectangle_radius_edit_regenerates_corners() {
     // A single corner: the outline stays 80 x 50 (BL r = 20). The BL/TR centres
     // stay symmetric about the origin, so the outline shifts: BL centre
     // (-26,-11), TR centre (26,11); x in [-46, 34], y in [-31, 19].
-    let mut s = rounded_rect(80.0, 50.0, 8.0);
+    let mut s = rounded_rect(80.0, 50.0, 8.0, true);
     s.set_dimension("radius", 20.0).unwrap();
     assert!(s.solve().is_success());
     let segs = loop_of(&s);
@@ -792,4 +807,44 @@ fn line_arc_tangent_joint_is_not_an_intersection() {
     ];
     assert!(!loop_self_intersects(&geo, tol), "D shape");
     let _ = FRAC_PI_2;
+}
+
+#[test]
+fn equal_radius_validation_and_labels() {
+    let (mut s, arc, _, _, _) = quarter();
+    let p = s.add_point(30.0, 30.0);
+    let circ = s.add_circle(p, 2.0);
+    let line = s.add_line(p, s.origin.unwrap());
+    let mut bad = s.clone();
+    bad.constraints
+        .push(Constraint::EqualRadius { a: arc, b: arc });
+    assert!(matches!(bad.validate(), Err(SketchError::InvalidValue(_))));
+    let mut bad = s.clone();
+    bad.constraints
+        .push(Constraint::EqualRadius { a: arc, b: line });
+    assert!(matches!(
+        bad.validate(),
+        Err(SketchError::WrongEntityKind { .. })
+    ));
+    // Arc (r = 10) and circle (r = 2): the solve brings them to a common radius.
+    s.constraints
+        .push(Constraint::EqualRadius { a: arc, b: circ });
+    let i = s.constraints.len() - 1;
+    assert_eq!(
+        s.constraint_label(i),
+        format!("Equal radius A{} · C{}", arc.0, circ.0)
+    );
+    assert!(s.solve().is_success());
+    let ra = s.arc_geometry(arc).unwrap().radius;
+    let Some(Entity::Circle { radius: rc, .. }) = s.entity(circ) else {
+        panic!()
+    };
+    assert!(near(ra, *rc, SOLVED), "{ra} {rc}");
+    // Removing the circle drops the constraint.
+    assert!(s.remove_entity(circ));
+    assert!(
+        !s.constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::EqualRadius { .. }))
+    );
 }

@@ -113,7 +113,7 @@ impl Sketch {
     }
 
     /// Remove an entity and everything that only existed for it:
-    /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent);
+    /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent/EqualRadius);
     /// * its endpoints/centre (an arc's centre included) that no other entity uses, with every constraint
     ///   that references them;
     /// * construction points (points used by no entity, such as a rectangle
@@ -248,6 +248,13 @@ impl Sketch {
                 format!("{} (radius of {prefix}{})", dim(d), entity.0)
             }
             Constraint::Tangent { line, arc } => format!("Tangent L{} · A{}", line.0, arc.0),
+            Constraint::EqualRadius { a, b } => {
+                let name = |id: &EntityId| match self.entity(*id) {
+                    Some(Entity::Circle { .. }) => format!("C{}", id.0),
+                    _ => format!("A{}", id.0),
+                };
+                format!("Equal radius {} · {}", name(a), name(b))
+            }
         }
     }
 
@@ -409,7 +416,8 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Vertical { .. }
         | Constraint::Diameter { .. }
         | Constraint::Radius { .. }
-        | Constraint::Tangent { .. } => vec![],
+        | Constraint::Tangent { .. }
+        | Constraint::EqualRadius { .. } => vec![],
     }
 }
 
@@ -420,6 +428,7 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         Constraint::Diameter { circle, .. } => vec![*circle],
         Constraint::Radius { entity, .. } => vec![*entity],
         Constraint::Tangent { line, arc } => vec![*line, *arc],
+        Constraint::EqualRadius { a, b } => vec![*a, *b],
         _ => vec![],
     }
 }
