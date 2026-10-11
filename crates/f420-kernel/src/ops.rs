@@ -1,9 +1,9 @@
 //! General extrusion operations on explicit target bodies (ADR 0003): join and
 //! cut with an arbitrary closed profile prism, plus the plane/face queries the
 //! document needs to place tools without coplanar boolean faces.
-use crate::build::{BOOLEAN_TOLS, check_single_closed, subtract_prism, with_exact_edges};
+use crate::build::{BOOLEAN_TOLS, check_single_closed, subtract_region, with_exact_edges};
 use crate::measure::raw_bounds;
-use crate::{Body, Bounds, Frame, KernelError, Profile, Result, extrude, guarded, tol};
+use crate::{Body, Bounds, Frame, KernelError, Profile, Result, extrude_region, guarded, tol};
 use truck_modeling::*;
 
 /// Axis-aligned bounds overlap with slack `eps` (touching counts).
@@ -15,7 +15,18 @@ fn overlaps(a: &Bounds, b: &Bounds, eps: f64) -> bool {
 /// along `start.z`. Refuses tools that do not reach the target and results that
 /// are not one closed shell (e.g. disconnected solids).
 pub fn join_prism(target: &Body, profile: &Profile, start: &Frame, length: f64) -> Result<Body> {
-    let tool = extrude(profile, start, length)?;
+    join_region(target, profile, &[], start, length)
+}
+
+/// [`join_prism`] of a region with inner loops (`holes`, counter-clockwise).
+pub fn join_region(
+    target: &Body,
+    profile: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+) -> Result<Body> {
+    let tool = extrude_region(profile, holes, start, length)?;
     let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
     if !overlaps(&tb, &ob, tol::KERNEL_LINEAR) {
         return Err(KernelError::InvalidInput(
@@ -52,14 +63,25 @@ pub fn join_prism(target: &Body, profile: &Profile, start: &Frame, length: f64) 
 /// Subtract the prism of `profile` swept from `start` by `length` from `target`.
 /// Refuses tools whose bounds miss the target and cuts that remove nothing.
 pub fn cut_prism(target: &Body, profile: &Profile, start: &Frame, length: f64) -> Result<Body> {
-    let tool = extrude(profile, start, length)?;
+    cut_region(target, profile, &[], start, length)
+}
+
+/// [`cut_prism`] of a region with inner loops (`holes`, counter-clockwise).
+pub fn cut_region(
+    target: &Body,
+    profile: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+) -> Result<Body> {
+    let tool = extrude_region(profile, holes, start, length)?;
     let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
     if !overlaps(&tb, &ob, -tol::KERNEL_LINEAR) {
         return Err(KernelError::InvalidInput(
             "cut: the extrusion does not intersect the target body".into(),
         ));
     }
-    let out = subtract_prism(target, profile, start, length, "cut")?;
+    let out = subtract_region(target, profile, holes, start, length, "cut")?;
     if same_shape(target, &out) {
         return Err(KernelError::InvalidInput(
             "cut: the extrusion removes no material from the target body".into(),

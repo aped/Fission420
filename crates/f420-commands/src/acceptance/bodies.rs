@@ -730,3 +730,88 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         back == Some(SketchPlane::Face(side.reference)),
     );
 }
+
+/// Backlog 1: a rectangle with an inner circle and an inner rectangle is one
+/// profile region; one New Body extrusion makes a plate with two through holes.
+pub(super) fn scenario_nested(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3N.1 plate with holes from one sketch".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let mut sk = f420_sketch::Sketch::default();
+    sk.ensure_origin();
+    let quad = |sk: &mut f420_sketch::Sketch, v: [[f64; 2]; 4]| {
+        let p: Vec<_> = v.iter().map(|q| sk.add_point(q[0], q[1])).collect();
+        for i in 0..4 {
+            sk.add_line(p[i], p[(i + 1) % 4]);
+        }
+    };
+    quad(
+        &mut sk,
+        [[0.0, 0.0], [80.0, 0.0], [80.0, 50.0], [0.0, 50.0]],
+    );
+    let c = sk.add_point(20.0, 25.0);
+    sk.add_circle(c, 5.0);
+    quad(
+        &mut sk,
+        [[50.0, 22.0], [60.0, 22.0], [60.0, 28.0], [50.0, 28.0]],
+    );
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Plate with holes".into()),
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: sk },
+    });
+    let Some(sid) = r.ok("sketch: outer + circle + slot loops", &x) else {
+        return;
+    };
+    let x = r.exec(Command::extrude(Some("Plate".into()), sid, 10.0));
+    r.ok("extrude (new body)", &x);
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // (80*50 - pi*5^2 - 10*6) * 10.
+    let want = (4000.0 - 25.0 * PI - 60.0) * 10.0;
+    r.check_body_solid(
+        "plate with holes",
+        b,
+        want,
+        [0.0, 0.0, 0.0],
+        [80.0, 50.0, 10.0],
+    );
+    let faces =
+        r.s.model()
+            .map(|m| m.evaluation().bodies[0].measurements.clone());
+    let fc = faces.flatten().map(|m| m.face_count).unwrap_or(0);
+    r.check(
+        "faces: 6 plate + hole wall(s) + 4 slot walls",
+        ">= 11",
+        fc,
+        fc >= 11,
+    );
+    let step = r.out_dir.join("nested_loops.step");
+    let x = r.exec(Command::ExportStep {
+        path: step.clone(),
+        bodies: None,
+    });
+    r.ok("export STEP", &x);
+    let mut s2 = crate::Session::new();
+    s2.execute(&Command::NewDocument);
+    let x = s2.execute(&Command::ImportStep {
+        path: step,
+        units_to_mm: None,
+    });
+    let v = x
+        .summary
+        .and_then(|s| s.bodies.first().and_then(|b| b.measurements.clone()))
+        .and_then(|m| match m.volume {
+            VolumeResult::Value { volume, .. } => Some(volume),
+            _ => None,
+        });
+    r.check(
+        "STEP re-import volume",
+        format!("{want:.6}"),
+        format!("{v:?}"),
+        v.is_some_and(|v| (v - want).abs() <= vol_tol(want)),
+    );
+}

@@ -345,7 +345,7 @@ fn reversed(segs: &[LoopSegment]) -> Vec<LoopSegment> {
         .collect()
 }
 
-fn dist(p: [f64; 2], q: [f64; 2]) -> f64 {
+pub(crate) fn dist(p: [f64; 2], q: [f64; 2]) -> f64 {
     (q[0] - p[0]).hypot(q[1] - p[1])
 }
 
@@ -466,7 +466,7 @@ pub(crate) fn loop_self_intersects(geo: &[Prim], tol: f64) -> bool {
 }
 
 /// Line-line test (exact orientation predicates at `tol × length`), as in run 1.
-fn segments_touch(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2], tol: f64) -> bool {
+pub(crate) fn segments_touch(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2], tol: f64) -> bool {
     let la = dist(a, b);
     let lc = dist(c, d);
     // Orientation values are areas; compare against tol * length.

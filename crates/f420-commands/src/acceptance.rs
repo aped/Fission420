@@ -223,6 +223,7 @@ pub fn run(out_dir: &Path) -> Report {
     arcs::scenario_r(&mut r);
     bodies::scenario_a(&mut r);
     bodies::scenario_b(&mut r);
+    bodies::scenario_nested(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {

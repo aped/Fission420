@@ -196,3 +196,78 @@ fn imported_step_survives_moving_the_source() {
     assert_eq!((b2.id, b2.name), (b.id, b.name));
     assert!((body_volume(&s, b2.id) - v0).abs() < 1e-9);
 }
+
+#[test]
+fn nested_loops_make_a_plate_with_holes_in_one_feature() {
+    use f420_document::FaceRole;
+    use std::f64::consts::PI;
+    let mut sk = f420_sketch::Sketch::default();
+    sk.ensure_origin();
+    let quad = |sk: &mut f420_sketch::Sketch, v: [[f64; 2]; 4]| {
+        let p: Vec<_> = v.iter().map(|q| sk.add_point(q[0], q[1])).collect();
+        (0..4)
+            .map(|i| sk.add_line(p[i], p[(i + 1) % 4]))
+            .collect::<Vec<_>>()
+    };
+    quad(
+        &mut sk,
+        [[0.0, 0.0], [80.0, 0.0], [80.0, 50.0], [0.0, 50.0]],
+    );
+    let c = sk.add_point(20.0, 25.0);
+    sk.add_circle(c, 5.0);
+    let slot = quad(
+        &mut sk,
+        [[50.0, 22.0], [60.0, 22.0], [60.0, 28.0], [50.0, 28.0]],
+    );
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let sid = ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom { sketch: sk },
+        },
+    )
+    .feature
+    .unwrap();
+    let e = ok(&mut s, Command::extrude(None, sid, 10.0))
+        .feature
+        .unwrap();
+    let b = s.summary().bodies[0].id;
+    let want = (80.0 * 50.0 - 25.0 * PI - 60.0) * 10.0;
+    assert!((body_volume(&s, b) - want).abs() < 1e-7 * want);
+    // The slot's walls are referenceable side faces facing into the slot: the
+    // wall on x = 50 has outward normal +X (material on the -X side).
+    let faces = s
+        .summary()
+        .features
+        .into_iter()
+        .find(|f| f.id == e)
+        .unwrap()
+        .faces;
+    let wall = faces.iter().find(|f| {
+        matches!(f.reference.role, FaceRole::ExtrudeSide { entity } if slot.iter().any(|id| id.0 == entity))
+            && (f.frame.origin[0] - 50.0).abs() < 1e-9
+            && f.frame.x[1].abs() > 0.5
+    });
+    let wall = wall.expect("slot wall at x=50");
+    assert!((wall.frame.z[0] - 1.0).abs() < 1e-12, "{:?}", wall.frame);
+    // Join/Cut with inner loops: explicit product limit, model kept.
+    let rev = s.model().unwrap().revision;
+    let r = s.execute(&Command::Extrude {
+        name: None,
+        sketch: sid,
+        distance: 5.0,
+        op: ExtrudeOp::Cut,
+        target: Some(b),
+        through_all: false,
+        reverse: false,
+        body_name: None,
+    });
+    assert!(
+        matches!(r.error, Some(DocError::ProductLimit(ref m)) if m.contains("inner loop")),
+        "{r:?}"
+    );
+    assert_eq!(s.model().unwrap().revision, rev);
+}
