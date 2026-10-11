@@ -78,11 +78,8 @@ pub(crate) enum Dialog {
     Open {
         path: String,
     },
-    ExportStl {
-        path: String,
-        chord: String,
-        scope: crate::exchange::ExportScope,
-    },
+    /// Print export (STL): selection, tessellation, placement, bed, report.
+    ExportStl(crate::exchange::PrintForm),
     ExportStep {
         path: String,
         scope: crate::exchange::ExportScope,
@@ -93,12 +90,8 @@ pub(crate) enum Dialog {
         /// SVG instead of DXF.
         svg: bool,
     },
-    Export3mf {
-        path: String,
-        chord: String,
-        scope: crate::exchange::ExportScope,
-        unit: f420_exchange::threemf::ThreeMfUnit,
-    },
+    /// Print export (3MF, unit in the form).
+    Export3mf(crate::exchange::PrintForm),
     Import(crate::exchange::ImportForm),
     /// Linear / circular pattern or mirror of an Extrude Join or Cut.
     Pattern {
@@ -142,11 +135,11 @@ impl Dialog {
             Dialog::Cut { .. } => "New cut",
             Dialog::SaveAs { .. } => "Save document as",
             Dialog::Open { .. } => "Open document",
-            Dialog::ExportStl { .. } => "Export STL",
+            Dialog::ExportStl(_) => "Export STL",
             Dialog::ExportStep { .. } => "Export STEP",
             Dialog::ExportDxf { svg: false, .. } => "Export DXF",
             Dialog::ExportDxf { svg: true, .. } => "Export SVG",
-            Dialog::Export3mf { .. } => "Export 3MF",
+            Dialog::Export3mf(_) => "Export 3MF",
             Dialog::Import(_) => "Import",
             Dialog::Pattern { .. } => "Pattern / mirror",
             Dialog::Chamfer { .. } => "Chamfer edge",
@@ -1017,6 +1010,7 @@ impl F420App {
         self.faces =
             crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
         self.import_reply(&command, &response, self.replies_seen);
+        self.print_export_reply(&command, &response, self.replies_seen);
         if response.ok && matches!(command, Command::Undo | Command::Redo) {
             self.close_dialog_after_undo(&command);
         }
@@ -1048,9 +1042,8 @@ impl F420App {
                     .collect(),
                 vec![],
             ),
-            Dialog::ExportStl { scope: s, .. }
-            | Dialog::ExportStep { scope: s, .. }
-            | Dialog::Export3mf { scope: s, .. } => (vec![], scope(s)),
+            Dialog::ExportStep { scope: s, .. } => (vec![], scope(s)),
+            Dialog::ExportStl(f) | Dialog::Export3mf(f) => (f.face_features(), scope(&f.scope)),
             Dialog::Import(f) => (f.face.iter().map(|(r, _)| r.feature).collect(), vec![]),
             Dialog::Rectangle { .. }
             | Dialog::RectangleXz { .. }
@@ -2049,12 +2042,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::Open { path } => Command::Open {
             path: nonempty_path(path)?,
         },
-        Dialog::ExportStl { path, chord, scope } => Command::ExportStl {
-            path: nonempty_path(path)?,
-            chord: Some(parse_num("chord", chord)?),
-            bodies: scope.bodies(),
-            print: Default::default(),
-        },
+        Dialog::ExportStl(f) | Dialog::Export3mf(f) => f.command()?,
         Dialog::ExportStep { path, scope } => Command::ExportStep {
             path: nonempty_path(path)?,
             bodies: scope.bodies(),
@@ -2074,18 +2062,6 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         } => Command::ExportSvg {
             path: nonempty_path(path)?,
             sketch: need(sketch, "sketch")?,
-        },
-        Dialog::Export3mf {
-            path,
-            chord,
-            scope,
-            unit,
-        } => Command::Export3mf {
-            path: nonempty_path(path)?,
-            chord: Some(parse_num("chord", chord)?),
-            bodies: scope.bodies(),
-            unit: Some(*unit),
-            print: Default::default(),
         },
         Dialog::Import(form) => form.command()?,
         Dialog::Pattern {

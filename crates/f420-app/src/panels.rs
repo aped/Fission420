@@ -111,11 +111,7 @@ impl F420App {
                     .probe("Export STL…")
                     .clicked()
                 {
-                    self.dialog = Some(Dialog::ExportStl {
-                        path: self.default_path("stl"),
-                        chord: "0.01".into(),
-                        scope: self.default_export_scope(),
-                    });
+                    self.open_print_export_dialog(true);
                     ui.close();
                 }
                 if ui
@@ -185,12 +181,7 @@ impl F420App {
                     .probe("Export 3MF…")
                     .clicked()
                 {
-                    self.dialog = Some(Dialog::Export3mf {
-                        path: self.default_path("3mf"),
-                        chord: "0.01".into(),
-                        scope: self.default_export_scope(),
-                        unit: f420_exchange::threemf::ThreeMfUnit::Millimeter,
-                    });
+                    self.open_print_export_dialog(false);
                     ui.close();
                 }
             });
@@ -1366,19 +1357,8 @@ impl F420App {
                     Dialog::SaveAs { path } | Dialog::Open { path } => {
                         text_field(ui, "File path", path);
                     }
-                    Dialog::ExportStl { path, chord, scope } => {
-                        text_field(ui, "STL path", path);
-                        num_field(ui, "Chord tolerance (mm)", chord);
-                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
-                        ui.small("Exports the last committed model revision (queued after pending edits).");
-                        if let Some(mc) = &self.last_export {
-                            ui.label(format!(
-                                "Last export: watertight {} · {} triangles · mesh volume {:.4} mm³",
-                                if mc.watertight { "yes" } else { "NO" },
-                                mc.triangles,
-                                mc.mesh_volume
-                            ));
-                        }
+                    Dialog::ExportStl(form) | Dialog::Export3mf(form) => {
+                        ok_allowed &= self.print_export_ui(ui, form);
                     }
                     Dialog::ExportStep { path, scope } => {
                         text_field(ui, "STEP path", path);
@@ -1492,25 +1472,6 @@ impl F420App {
                     Dialog::ExportDxf { path, sketch, svg } => {
                         ok_allowed &= self.export_dxf_ui(ui, path, sketch, *svg);
                     }
-                    Dialog::Export3mf {
-                        path,
-                        chord,
-                        scope,
-                        unit,
-                    } => {
-                        use f420_exchange::threemf::ThreeMfUnit as U;
-                        text_field(ui, "3MF path", path);
-                        num_field(ui, "3MF chord tolerance (mm)", chord);
-                        egui::ComboBox::from_label("3MF file unit")
-                            .selected_text(format!("{unit:?}"))
-                            .show_ui(ui, |ui| {
-                                for u in [U::Millimeter, U::Centimeter, U::Meter, U::Inch, U::Foot, U::Micron] {
-                                    ui.selectable_value(unit, u, format!("{u:?}"));
-                                }
-                            });
-                        ui.small("Each body is one mesh object (B-rep bodies tessellated at the chord tolerance, watertightness checked; mesh bodies as imported). Coordinates are written in the chosen unit; no materials or colours.");
-                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
-                    }
                     Dialog::Import(form) => {
                         ok_allowed &= self.import_form_ui(ui, form);
                         if form.pending.is_some() {
@@ -1541,9 +1502,16 @@ impl F420App {
                     return;
                 }
                 Ok(cmd) => {
-                    let keep = matches!(dlg, Dialog::ExportStl { .. } | Dialog::Import(_));
+                    let keep = matches!(
+                        dlg,
+                        Dialog::ExportStl(_) | Dialog::Export3mf(_) | Dialog::Import(_)
+                    );
                     let token = self.request_token(cmd);
                     if let Dialog::Import(f) = &mut dlg {
+                        f.pending = token;
+                        f.error = None;
+                    }
+                    if let Dialog::ExportStl(f) | Dialog::Export3mf(f) = &mut dlg {
                         f.pending = token;
                         f.error = None;
                     }

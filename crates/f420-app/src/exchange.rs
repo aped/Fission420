@@ -17,6 +17,9 @@
 use std::path::Path;
 
 use eframe::egui::{self, Color32, RichText};
+use f420_commands::print::{
+    BedPreset, BedSpec, BodyPlacement, ExportReport, Layout, Orient, Placement, PrintOptions,
+};
 use f420_commands::{Command, Response};
 use f420_document::{BodyId, FaceRef, FeatureId, SketchPlane};
 
@@ -553,4 +556,473 @@ impl F420App {
         }
         sketch.is_some()
     }
+}
+
+// ------------------------------------------------------------ print export
+
+/// Printable volume choice of the STL/3MF export dialogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BedChoice {
+    /// No fit report.
+    Off,
+    /// Bambu Lab P1S (values from the installed Bambu Studio profile).
+    P1s,
+    Manual,
+}
+
+/// STL / 3MF export dialog state (docs/PRINT_EXPORT.md): body selection,
+/// tessellation, units, export-only placement, bed fit, and the per-body
+/// report of the last export from this dialog.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrintForm {
+    /// STL (else 3MF).
+    pub stl: bool,
+    pub path: String,
+    pub chord: String,
+    /// Max facet angle (degrees); empty = chord only.
+    pub angle: String,
+    pub scope: ExportScope,
+    /// 3MF file unit.
+    pub unit: f420_exchange::threemf::ThreeMfUnit,
+    /// Export-only placement on the bed (off: document coordinates).
+    pub place: bool,
+    /// Per-body orientation (bodies not listed: as modeled).
+    pub orient: Vec<(BodyId, Orient)>,
+    pub layout: bool,
+    pub gap: String,
+    pub bed: BedChoice,
+    pub bed_size: [String; 3],
+    /// STL only: one file per body.
+    pub separate_files: bool,
+    pub allow_open_meshes: bool,
+    /// Request token of the export this form waits for.
+    pub pending: Option<u64>,
+    /// Report of the last successful export from this dialog.
+    pub report: Option<ExportReport>,
+    /// Last failure (nothing was written).
+    pub error: Option<String>,
+}
+
+impl PrintForm {
+    pub fn new(stl: bool, path: String, scope: ExportScope) -> Self {
+        Self {
+            stl,
+            path,
+            chord: format!("{}", f420_kernel::tol::MESH_CHORD),
+            angle: String::new(),
+            scope,
+            unit: f420_exchange::threemf::ThreeMfUnit::Millimeter,
+            place: false,
+            orient: vec![],
+            layout: false,
+            gap: "10".into(),
+            bed: BedChoice::Off,
+            bed_size: ["256".into(), "256".into(), "250".into()],
+            separate_files: false,
+            allow_open_meshes: false,
+            pending: None,
+            report: None,
+            error: None,
+        }
+    }
+
+    pub fn orientation(&self, body: BodyId) -> Orient {
+        self.orient
+            .iter()
+            .find(|(b, _)| *b == body)
+            .map_or(Orient::AsModeled, |(_, o)| *o)
+    }
+
+    pub fn set_orientation(&mut self, body: BodyId, o: Orient) {
+        self.orient.retain(|(b, _)| *b != body);
+        if o != Orient::AsModeled {
+            self.orient.push((body, o));
+        }
+    }
+
+    /// Features referenced by face-down choices (for dialog revalidation).
+    pub fn face_features(&self) -> Vec<FeatureId> {
+        self.orient
+            .iter()
+            .filter_map(|(_, o)| match o {
+                Orient::FaceDown(r) => Some(r.feature),
+                Orient::AsModeled => None,
+            })
+            .collect()
+    }
+
+    pub fn options(&self) -> Result<PrintOptions, String> {
+        use crate::app::parse_num;
+        let angle = match self.angle.trim() {
+            "" => None,
+            a => Some(parse_num("max facet angle", a)?),
+        };
+        let bed = match self.bed {
+            BedChoice::Off => None,
+            BedChoice::P1s => Some(BedSpec::Preset {
+                preset: BedPreset::BambuP1s,
+            }),
+            BedChoice::Manual => Some(BedSpec::Manual {
+                width: parse_num("bed width", &self.bed_size[0])?,
+                depth: parse_num("bed depth", &self.bed_size[1])?,
+                height: parse_num("bed height", &self.bed_size[2])?,
+            }),
+        };
+        let placement = if self.place {
+            Some(Placement {
+                bodies: self
+                    .orient
+                    .iter()
+                    .map(|(b, o)| BodyPlacement {
+                        body: *b,
+                        orient: *o,
+                    })
+                    .collect(),
+                layout: if self.layout {
+                    Some(Layout {
+                        gap: parse_num("layout gap", &self.gap)?,
+                    })
+                } else {
+                    None
+                },
+            })
+        } else {
+            None
+        };
+        Ok(PrintOptions {
+            angle_deg: angle,
+            placement,
+            bed,
+            separate_files: self.stl && self.separate_files,
+            allow_open_meshes: self.allow_open_meshes,
+        })
+    }
+
+    pub fn command(&self) -> Result<Command, String> {
+        let path = nonempty_path(&self.path)?;
+        let chord = Some(crate::app::parse_num("chord", &self.chord)?);
+        let bodies = self.scope.bodies();
+        // Face-down choices only for exported bodies (the selection may have changed).
+        let mut form = self.clone();
+        if let Some(ids) = &bodies {
+            form.orient.retain(|(b, _)| ids.contains(b));
+        }
+        let print = form.options()?;
+        Ok(if self.stl {
+            Command::ExportStl {
+                path,
+                chord,
+                bodies,
+                print,
+            }
+        } else {
+            Command::Export3mf {
+                path,
+                chord,
+                bodies,
+                unit: Some(self.unit),
+                print,
+            }
+        })
+    }
+}
+
+fn fmt3(v: [f64; 3]) -> String {
+    format!("{:.3} × {:.3} × {:.3}", v[0], v[1], v[2])
+}
+
+impl F420App {
+    pub(crate) fn open_print_export_dialog(&mut self, stl: bool) {
+        let form = PrintForm::new(
+            stl,
+            self.default_path(if stl { "stl" } else { "3mf" }),
+            self.default_export_scope(),
+        );
+        self.dialog = Some(if stl {
+            crate::app::Dialog::ExportStl(form)
+        } else {
+            crate::app::Dialog::Export3mf(form)
+        });
+    }
+
+    /// Engine reply to an STL/3MF export: store the report (or the error) in
+    /// the form that submitted it (matched by request token).
+    pub(crate) fn print_export_reply(&mut self, cmd: &Command, response: &Response, token: u64) {
+        if !matches!(cmd, Command::ExportStl { .. } | Command::Export3mf { .. }) {
+            return;
+        }
+        let form = match &mut self.dialog {
+            Some(crate::app::Dialog::ExportStl(f) | crate::app::Dialog::Export3mf(f))
+                if f.pending == Some(token) =>
+            {
+                f
+            }
+            _ => return,
+        };
+        form.pending = None;
+        if response.ok {
+            form.report = response.export.clone();
+            form.error = None;
+        } else {
+            form.report = None;
+            form.error = Some(
+                response
+                    .error
+                    .as_ref()
+                    .map_or("export failed".to_string(), |e| e.to_string()),
+            );
+        }
+    }
+
+    /// Body of the Export STL / Export 3MF dialog. Returns true when OK may be pressed.
+    pub(crate) fn print_export_ui(&self, ui: &mut egui::Ui, form: &mut PrintForm) -> bool {
+        use f420_exchange::threemf::ThreeMfUnit as U;
+        let warn = Color32::from_rgb(255, 200, 120);
+        let mut ok = true;
+        if form.stl {
+            crate::panels::text_field(ui, "STL path", &mut form.path);
+            ui.small("Units: coordinates in mm. STL has no unit field, so the slicer must interpret the file as millimetres.");
+        } else {
+            crate::panels::text_field(ui, "3MF path", &mut form.path);
+            egui::ComboBox::from_label("3MF file unit")
+                .selected_text(format!("{:?}", form.unit))
+                .show_ui(ui, |ui| {
+                    for u in [
+                        U::Millimeter,
+                        U::Centimeter,
+                        U::Meter,
+                        U::Inch,
+                        U::Foot,
+                        U::Micron,
+                    ] {
+                        ui.selectable_value(&mut form.unit, u, format!("{u:?}"));
+                    }
+                });
+            ui.small(format!(
+                "Units: declared in the file as {}; sizes below are mm. Geometry only: one named object per body, no printer, process or filament settings.",
+                form.unit.name()
+            ));
+        }
+        crate::panels::num_field(ui, "Chord tolerance (mm)", &mut form.chord);
+        crate::panels::num_field(ui, "Max facet angle (deg)", &mut form.angle);
+        ui.small(format!(
+            "Default chord {} mm (max distance of the mesh from curved surfaces). Facet angle empty = chord only; otherwise the chord is refined until adjacent facets of a curved face differ by at most this angle.",
+            f420_kernel::tol::MESH_CHORD
+        ));
+        ok &= self.export_scope_ui(ui, &mut form.scope, false).is_none();
+        let bodies = &self.summary.bodies;
+        let hidden: Vec<&str> = bodies
+            .iter()
+            .filter(|b| !b.visible)
+            .map(|b| b.name.as_str())
+            .collect();
+        let chosen: Vec<_> = match &form.scope {
+            ExportScope::AllVisible => bodies.iter().filter(|b| b.visible).collect(),
+            ExportScope::Selected(ids) => bodies.iter().filter(|b| ids.contains(&b.id)).collect(),
+        };
+        ui.small(match (&form.scope, hidden.is_empty()) {
+            (_, true) => "Hidden bodies: none.".to_string(),
+            (ExportScope::AllVisible, false) => {
+                format!("Hidden bodies are not exported: {}.", hidden.join(", "))
+            }
+            (ExportScope::Selected(_), false) => format!(
+                "Hidden bodies are exported only when ticked: {}.",
+                hidden.join(", ")
+            ),
+        });
+        ui.checkbox(&mut form.place, "Place on bed (export only)")
+            .probe("Place on bed (export only)");
+        let face = self
+            .selected_face()
+            .and_then(|f| f.reference.map(|r| (r, f.body)));
+        egui::Grid::new("print_bodies")
+            .striped(true)
+            .show(ui, |ui| {
+                ui.strong("Body");
+                ui.strong("Kind");
+                ui.strong("Modeled size (mm)");
+                ui.strong("Orientation");
+                ui.end_row();
+                for b in &chosen {
+                    ui.label(format!(
+                        "{}{}",
+                        b.name,
+                        if b.visible { "" } else { " (hidden)" }
+                    ));
+                    ui.label(match (&b.mesh, b.kind.as_str()) {
+                        (Some(d), _) if d.closed => "mesh (closed)",
+                        (Some(_), _) => "mesh (OPEN)",
+                        (None, "mesh") => "mesh",
+                        _ => "solid",
+                    });
+                    let size = b
+                        .measurements
+                        .as_ref()
+                        .map(|m| {
+                            let bb = &m.bounds;
+                            fmt3(std::array::from_fn(|i| bb.max[i] - bb.min[i]))
+                        })
+                        .or_else(|| {
+                            b.mesh
+                                .as_ref()
+                                .and_then(|d| d.bounds)
+                                .map(|(lo, hi)| fmt3(std::array::from_fn(|i| hi[i] - lo[i])))
+                        })
+                        .unwrap_or_else(|| "measuring…".into());
+                    ui.label(size);
+                    ui.add_enabled_ui(form.place, |ui| {
+                        ui.horizontal(|ui| {
+                            let cur = form.orientation(b.id);
+                            if ui
+                                .radio(cur == Orient::AsModeled, "As modeled")
+                                .probe(&format!("{} as modeled", b.name))
+                                .clicked()
+                            {
+                                form.set_orientation(b.id, Orient::AsModeled);
+                            }
+                            let here = face.filter(|(_, fb)| *fb == Some(b.id)).map(|(r, _)| r);
+                            let resp = ui
+                                .add_enabled(
+                                    here.is_some(),
+                                    egui::RadioButton::new(
+                                        matches!(cur, Orient::FaceDown(_)),
+                                        "Selected face down",
+                                    ),
+                                )
+                                .probe(&format!("{} selected face down", b.name))
+                                .on_disabled_hover_text(
+                                    "Select a planar face of this body in the viewport first",
+                                );
+                            if resp.clicked()
+                                && let Some(r) = here
+                            {
+                                form.set_orientation(b.id, Orient::FaceDown(r));
+                            }
+                            if let Orient::FaceDown(r) = cur {
+                                ui.small(format!(
+                                    "on bed: {} {}",
+                                    self.feature_name(r.feature),
+                                    crate::face_role_label(&r.role)
+                                ));
+                            }
+                        });
+                    });
+                    ui.end_row();
+                }
+            });
+        if form.place {
+            ui.checkbox(&mut form.layout, "Lay out side by side along X")
+                .probe("Lay out side by side along X");
+            if form.layout {
+                crate::panels::num_field(ui, "Layout gap (mm)", &mut form.gap);
+            }
+            ui.small("Each body is rotated (proper rotation, never mirrored) so its chosen face lies on the bed, then moved so its lowest point is at z = 0. The document is not changed.");
+        } else {
+            ui.small("Coordinates are written as modeled (document coordinates).");
+        }
+        ui.horizontal(|ui| {
+            ui.label("Bed");
+            ui.radio_value(&mut form.bed, BedChoice::Off, "None")
+                .probe("Bed none");
+            ui.radio_value(&mut form.bed, BedChoice::P1s, "Bambu Lab P1S")
+                .probe("Bambu Lab P1S");
+            ui.radio_value(&mut form.bed, BedChoice::Manual, "Manual")
+                .probe("Bed manual");
+        });
+        match form.bed {
+            BedChoice::P1s => {
+                ui.small("256 × 256 mm, height 250 mm, front-left 18 × 28 mm excluded (Bambu Studio 2.8.2.61 P1S 0.4 nozzle profile). Fit is reported, never forced.");
+            }
+            BedChoice::Manual => {
+                let [w, d, h] = &mut form.bed_size;
+                crate::panels::num_field(ui, "Bed width (mm)", w);
+                crate::panels::num_field(ui, "Bed depth (mm)", d);
+                crate::panels::num_field(ui, "Bed height (mm)", h);
+            }
+            BedChoice::Off => {}
+        }
+        if form.stl {
+            ui.checkbox(&mut form.separate_files, "One STL file per body")
+                .probe("One STL file per body");
+        }
+        ui.checkbox(&mut form.allow_open_meshes, "Allow open reference meshes")
+            .probe("Allow open reference meshes");
+        ui.small("Off: every body must export as a closed, manifold, outward solid mesh, or nothing is written. Self-intersection is not checked.");
+        if !form.allow_open_meshes
+            && chosen
+                .iter()
+                .any(|b| b.mesh.as_ref().is_some_and(|d| !d.closed))
+        {
+            ui.colored_label(warn, "An open mesh body is chosen: the export will be refused unless open reference meshes are allowed.");
+        }
+        if let Err(e) = form.options() {
+            ui.colored_label(warn, e);
+            ok = false;
+        }
+        ui.small("Exports the last committed model revision (queued after pending edits).");
+        if form.pending.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Exporting…");
+            });
+        }
+        if let Some(e) = &form.error {
+            ui.colored_label(
+                Color32::from_rgb(255, 110, 110),
+                format!("Export failed, nothing written: {e}"),
+            );
+        }
+        if let Some(r) = &form.report {
+            print_report_ui(ui, r);
+        }
+        ok && form.pending.is_none()
+    }
+}
+
+/// Per-body report of a finished export.
+fn print_report_ui(ui: &mut egui::Ui, r: &ExportReport) {
+    ui.separator();
+    ui.label(
+        RichText::new(format!(
+            "Exported revision {} as {} ({})",
+            r.revision, r.format, r.placement
+        ))
+        .strong(),
+    );
+    ui.small(format!("{}; units {}", r.selection, r.units));
+    egui::Grid::new("print_report")
+        .striped(true)
+        .show(ui, |ui| {
+            for h in ["Body", "Triangles", "Size (mm)", "Mesh checks", "Fit"] {
+                ui.strong(h);
+            }
+            ui.end_row();
+            for b in &r.bodies {
+                ui.label(&b.name);
+                ui.label(b.triangles.to_string());
+                ui.label(fmt3(b.dims));
+                let c = &b.mesh_check;
+                ui.label(format!(
+                    "{}: closed {} · manifold {} · outward {} · V {:.3} mm³ · self-intersection {}",
+                    b.label,
+                    yes(c.closed_edges),
+                    yes(c.nonmanifold_vertices == 0 && c.nonmanifold_edges == 0),
+                    yes(c.orientation_consistent && c.outward),
+                    c.mesh_volume,
+                    c.self_intersection
+                ));
+                ui.label(b.fit.as_ref().map_or("-", |f| f.detail.as_str()));
+                ui.end_row();
+            }
+        });
+    for f in &r.files {
+        ui.small(format!("{} ({} bytes)", f.path.display(), f.bytes));
+    }
+    for w in &r.warnings {
+        ui.colored_label(Color32::from_rgb(255, 200, 120), w);
+    }
+}
+
+fn yes(b: bool) -> &'static str {
+    if b { "yes" } else { "NO" }
 }

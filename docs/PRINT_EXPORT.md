@@ -1,8 +1,8 @@
 # Print export (STL / 3MF)
 
 Status: run 4. Command API (`export_stl`, `export_3mf` with optional print fields), kernel mesh
-checks, independent validators and Bambu Studio slicing are implemented and tested; the desktop
-export dialogs do not yet expose the new fields (they send the defaults). Nothing here has been
+checks, independent validators, Bambu Studio slicing and the desktop Export STL / Export 3MF
+dialogs (see "Desktop dialogs") are implemented and tested. Nothing here has been
 physically printed: "sliced" means Bambu Studio produced G-code whose toolpaths were checked.
 
 Code: `crates/f420-commands/src/print.rs` (selection, tessellation, checks, placement, bed fit,
@@ -191,10 +191,26 @@ binary copied to `artifacts/run4/print/bin/f420-cli`):
 This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
 says nothing about fit, strength or print quality.
 
+## Desktop dialogs (`crates/f420-app/src/exchange.rs`, `PrintForm`)
+
+Export STL… / Export 3MF… show: path; units (STL: "coordinates in mm; the slicer must interpret
+mm"; 3MF: the declared unit, geometry only); chord (default 0.01 mm) and optional max facet
+angle; the body selection (all visible / selected, hidden-body policy stated with names);
+a per-body table (solid / mesh closed|OPEN, modeled size, orientation "As modeled" or
+"Selected face down" using the face currently selected in the viewport, enabled only for its
+own body); "Place on bed (export only)", "Lay out side by side along X" + gap; bed None / Bambu
+Lab P1S / Manual; "One STL file per body"; "Allow open reference meshes". The dialog stays open
+after OK and shows the export's per-body report (triangles, size, mesh checks, fit, files,
+warnings) or the refusal. Test: `crates/f420-app/tests/print_export_ui.rs` (builds
+`printables::enclosure_workflow`, selects the lid plate's top face, exports a placed 3MF of
+both bodies on the P1S bed and re-reads it: lid min z 0, lip up with the lip's outer size,
+base on its floor, 10 mm gap, analytic volumes, document unchanged).
+
 ## Not done / limits
 
-* App dialogs: new fields not exposed yet (the dialogs send defaults, i.e. as-modeled
-  coordinates, strict checks).
+* App dialogs: no live pre-export preview of placed sizes/triangle counts (modeled sizes are
+  shown before export, the exact per-body report after it); one selected face at a time is
+  used for "Selected face down".
 * Self-intersection and minimum-thickness checks are not implemented in the app.
 * Truck's isotropic lateral-face grid makes curved parts heavier than necessary (see above).
 * Layout is a single row along X; no rotation about Z, no packing; it may not fit even when a
