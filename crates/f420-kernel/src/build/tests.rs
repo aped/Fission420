@@ -40,7 +40,16 @@ fn count_intersection_edges(body: &Body) -> usize {
 /// retries and without exact-edge replacement (Truck's raw output).
 fn raw_cut(target: &Body, profile: &Profile, frame: &Frame) -> Result<Body> {
     let (start, length) = through_all_cutter(target, frame)?;
-    subtract_attempt(target, profile, &start, length, 0.0, tol::BOOLEAN, "cut")
+    subtract_attempt(
+        target,
+        profile,
+        &[],
+        &start,
+        length,
+        0.0,
+        tol::BOOLEAN,
+        "cut",
+    )
 }
 
 fn volume_of(body: &Body) -> f64 {
@@ -209,7 +218,7 @@ fn fragile_corner_then_centre_hole_needs_retry() {
     for (label, first) in [("raw", &first_raw), ("exact", &first_exact)] {
         let (start, length) = through_all_cutter(first, &top).unwrap();
         for btol in BOOLEAN_TOLS {
-            let r = subtract_attempt(first, &centre, &start, length, 0.0, btol, "cut");
+            let r = subtract_attempt(first, &centre, &[], &start, length, 0.0, btol, "cut");
             assert!(
                 matches!(r, Err(KernelError::BooleanFailed(_))),
                 "{label} first-seam attempt at tol {btol} unexpectedly gave {r:?}"

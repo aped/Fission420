@@ -207,23 +207,38 @@ impl Evaluation {
 #[derive(Clone)]
 struct SketchOut {
     frame: Frame,
-    /// `Err(reason)` when the sketch is not a single closed profile.
-    profile: std::result::Result<(SketchProfile, Vec<EntityId>), String>,
+    /// `Err(reason)` when the sketch is not a closed profile region.
+    profile: std::result::Result<f420_sketch::Region, String>,
 }
 
 impl SketchOut {
     /// The profile, or a structured error naming the consuming feature.
-    fn usable(
-        &self,
-        user: FeatureId,
-        sketch: FeatureId,
-    ) -> Result<&(SketchProfile, Vec<EntityId>)> {
+    fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&f420_sketch::Region> {
         self.profile.as_ref().map_err(|why| {
             DocError::Validation(format!(
                 "{user}: sketch {sketch} has no usable profile ({why}); \
                  close the loop or remove extra geometry"
             ))
         })
+    }
+
+    /// The single outer loop, refusing inner loops for features that do not
+    /// support them (`what`).
+    fn single_loop(
+        &self,
+        user: FeatureId,
+        sketch: FeatureId,
+        what: &str,
+    ) -> Result<&SketchProfile> {
+        let r = self.usable(user, sketch)?;
+        if !r.holes.is_empty() {
+            return Err(DocError::ProductLimit(format!(
+                "{user}: sketch {sketch} has {} inner loop(s); {what} needs a single closed loop \
+                 (inner loops are supported by New Body extrusions)",
+                r.holes.len()
+            )));
+        }
+        Ok(&r.outer)
     }
 }
 
@@ -239,6 +254,11 @@ struct ExtrudeOut {
     extent: Extent,
     profile: SketchProfile,
     entities: Vec<EntityId>,
+    /// Inner loops (New Body only) with their entities.
+    holes: Vec<(SketchProfile, Vec<EntityId>)>,
+    /// Tool span `[a, b]` along the sketch normal actually used (after
+    /// overlap/margin adjustments).
+    span: (f64, f64),
     /// New/Join (material added) vs Cut (material removed).
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
@@ -456,7 +476,7 @@ pub fn regenerate_cached_opts(
                         ),
                     });
                 }
-                let profile = s.profile_with_entities().map_err(|e| e.to_string());
+                let profile = s.profile_region().map_err(|e| e.to_string());
                 r.profile_error = profile.as_ref().err().cloned();
                 r.solve = Some(report);
                 r.frame = Some(frame);
@@ -470,8 +490,12 @@ pub fn regenerate_cached_opts(
                 body,
             } => {
                 let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let b = k::revolve(&to_kernel(&s.usable(id, *sketch)?.0), &s.frame, *angle)
-                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let b = k::revolve(
+                    &to_kernel(s.single_loop(id, *sketch, "Revolve")?),
+                    &s.frame,
+                    *angle,
+                )
+                .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
                 create_body(
                     &mut st,
                     id,
@@ -541,6 +565,16 @@ pub fn regenerate_cached_opts(
                     )?;
                 }
                 r.body = bodies.last().copied();
+            }
+            FeatureKind::LinearPattern {
+                seed,
+                count,
+                spacing,
+                direction,
+            } => {
+                r.body = Some(linear_pattern(
+                    &mut st, id, *seed, *count, *spacing, *direction,
+                )?);
             }
             FeatureKind::ImportMesh { blob, to_mm, body } => {
                 let b = doc.blob(*blob)?;
@@ -646,6 +680,7 @@ fn face_candidates(st: &Snapshot, order: &[FeatureId]) -> Vec<FaceCandidate> {
                 .chain(
                     e.entities
                         .iter()
+                        .chain(e.holes.iter().flat_map(|(_, ents)| ents.iter()))
                         .map(|id| FaceRole::ExtrudeSide { entity: id.0 }),
                 );
             for role in roles {
@@ -744,7 +779,18 @@ fn extrude_feature(
         .get(&sketch)
         .ok_or(not_a_sketch(id, sketch))?
         .clone();
-    let (profile, entities) = s.usable(id, sketch)?.clone();
+    let region = s.usable(id, sketch)?.clone();
+    let (profile, entities) = (region.outer, region.outer_entities);
+    let holes = region.holes;
+    let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
+    if !holes.is_empty() && !matches!(operation, Operation::NewBody { .. }) {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: sketch {sketch} has {} inner loop(s); Join and Cut need a single closed loop \
+             (Truck 0.6 booleans fail for tools with inner loops); use New Body, or cut each \
+             loop separately",
+            holes.len()
+        )));
+    }
     let kp = to_kernel(&profile);
     let frame = s.frame;
     if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
@@ -785,6 +831,8 @@ fn extrude_feature(
         extent,
         profile,
         entities,
+        holes,
+        span: (0.0, 0.0),
         removes: false,
         joined: false,
         body: BodyId(0),
@@ -796,7 +844,8 @@ fn extrude_feature(
                     "{id}: 'through all' needs a Cut target body"
                 )));
             }
-            let solid = k::extrude(&kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            let solid =
+                k::extrude_region(&kp, &khole, &frame.offset(a), b - a).map_err(kernel(id))?;
             create_body(st, id, body, BodyGeometry::Brep(solid), BodySource::Modeled)?;
             out.body = body;
         }
@@ -895,7 +944,78 @@ fn extrude_feature(
             return Err(DocError::Validation(format!("{id}: missing target body")));
         }
     }
+    out.span = (a, b);
     Ok(out)
+}
+
+/// Linear pattern of an Extrude Cut: the seed's exact tool (same span along
+/// the sketch normal) translated in the sketch plane, cut from the seed's target.
+fn linear_pattern(
+    st: &mut Snapshot,
+    id: FeatureId,
+    seed: FeatureId,
+    count: u32,
+    spacing: f64,
+    direction: [f64; 2],
+) -> Result<BodyId> {
+    let e = st
+        .extrudes
+        .get(&seed)
+        .cloned()
+        .ok_or(DocError::BrokenReference {
+            from: id,
+            detail: format!("{seed} is not an evaluated extrusion"),
+        })?;
+    if !e.removes {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: patterns are supported for Extrude Cut features ({seed} is not a cut)"
+        )));
+    }
+    if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
+        return Err(DocError::Validation(format!(
+            "{id}.count: must be in 2..={}, got {count}",
+            crate::MAX_PATTERN_COUNT
+        )));
+    }
+    if !spacing.is_finite() || spacing <= 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}.spacing: must be > 0 mm, got {spacing}"
+        )));
+    }
+    let len = direction[0].hypot(direction[1]);
+    if !len.is_finite() || len <= 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}: pattern direction must be a non-zero vector"
+        )));
+    }
+    let f = e.start;
+    let d = [direction[0] / len, direction[1] / len];
+    let world = [
+        f.x[0] * d[0] + f.y[0] * d[1],
+        f.x[1] * d[0] + f.y[1] * d[1],
+        f.x[2] * d[0] + f.y[2] * d[1],
+    ];
+    let kp = to_kernel(&e.profile);
+    let mut body = brep_target(st, id, e.body)?;
+    for i in 1..count {
+        let t = spacing * f64::from(i);
+        let frame = Frame {
+            origin: [
+                f.origin[0] + world[0] * t,
+                f.origin[1] + world[1] * t,
+                f.origin[2] + world[2] * t,
+            ],
+            ..f
+        };
+        body = k::cut_prism(&body, &kp, &frame.offset(e.span.0), e.span.1 - e.span.0).map_err(
+            |err| DocError::Kernel {
+                feature: id,
+                detail: format!("instance {} of {count}: {err}", i + 1),
+            },
+        )?;
+    }
+    replace_body(st, id, e.body, body);
+    Ok(e.body)
 }
 
 /// Run-1/2 circular cut (`depth == None`: through all) and pocket features on
@@ -961,7 +1081,7 @@ fn legacy_cut(
             )));
         }
     }
-    let cut_profile = &s.usable(id, sketch)?.0;
+    let cut_profile = s.single_loop(id, sketch, "Cut Through All / Pocket")?;
     let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
     check_hole_inside(&hole, &host.profile)?;
     let kp = to_kernel(cut_profile);
@@ -1076,10 +1196,14 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
             Ok(frame_from(f.origin, scale(z_dir, -1.0), f.x))
         }
         FaceRole::ExtrudeSide { entity } => {
-            let i = e
-                .entities
-                .iter()
-                .position(|x| x.0 == entity)
+            // Outer loop first, then the holes (whose walls face into the hole).
+            let (profile, i, hole) = std::iter::once((&e.profile, &e.entities, false))
+                .chain(e.holes.iter().map(|(p, ents)| (p, ents, true)))
+                .find_map(|(p, ents, hole)| {
+                    ents.iter()
+                        .position(|x| x.0 == entity)
+                        .map(|i| (p, i, hole))
+                })
                 .ok_or_else(|| {
                     broken(format!(
                         "side face of sketch entity {entity}: the entity is no longer part of \
@@ -1087,7 +1211,7 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
                         fr.feature
                     ))
                 })?;
-            let (p, q) = match &e.profile {
+            let (p, q) = match profile {
                 SketchProfile::Polygon(v) => (v[i], v[(i + 1) % v.len()]),
                 SketchProfile::Loop(segs) => match segs[i] {
                     f420_sketch::LoopSegment::Line { start } => {
@@ -1110,9 +1234,10 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
                 return Err(broken("degenerate profile edge".into()));
             }
             let x = scale(d, 1.0 / len);
-            // CCW profile about the sketch normal: outward in-plane normal x × z.
+            // CCW loop about the sketch normal: outward in-plane normal x × z; a
+            // hole's wall faces into the hole (the loop's inside).
             let n = cross(x, f.z);
-            let z = if e.removes { scale(n, -1.0) } else { n };
+            let z = if e.removes != hole { scale(n, -1.0) } else { n };
             Ok(frame_from(a, z, x))
         }
         FaceRole::Imported { .. } => Err(broken(format!(

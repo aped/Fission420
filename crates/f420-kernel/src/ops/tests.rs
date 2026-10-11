@@ -1,6 +1,6 @@
 //! Join / general cut / face-region tests. Expected values are analytic.
 use super::*;
-use crate::{VolumeResult, export_step, measure};
+use crate::{VolumeResult, export_step, extrude, measure};
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
     Profile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
@@ -121,4 +121,26 @@ fn side_face_blind_cut_scenario_b() {
     let _ = p;
     let (lo, hi) = extent_along(&b, &f).unwrap();
     assert!((lo + 60.0).abs() < 1e-9 && hi.abs() < 1e-9);
+}
+
+#[test]
+fn region_with_holes_extrudes_cuts_and_exports() {
+    use std::f64::consts::PI;
+    // 80 x 50 plate, Ø10 hole at (20, 25), 10 x 6 slot at [50,60] x [22,28].
+    let outer = rect(0.0, 0.0, 80.0, 50.0);
+    let holes = [
+        Profile::Circle {
+            center: [20.0, 25.0],
+            radius: 5.0,
+        },
+        rect(50.0, 22.0, 60.0, 28.0),
+    ];
+    let b = crate::extrude_region(&outer, &holes, &Frame::XY, 10.0).unwrap();
+    let want = (4000.0 - 25.0 * PI - 60.0) * 10.0;
+    assert!((volume(&b) - want).abs() < 1e-6 * want, "{}", volume(&b));
+    let m = measure(&b).unwrap();
+    assert_eq!((m.shell_count, m.all_shells_closed), (1, true));
+    // 6 plate faces + 1 cylinder (Truck may split it) + 4 slot walls.
+    assert!(m.face_count >= 11, "{}", m.face_count);
+    assert!(export_step(&b, "t").is_ok());
 }

@@ -9,6 +9,13 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::FACE_MATCH` | 1e-7 mm | geometric | matching a semantic face reference to a B-rep plane |
 | `tol::MIN_LENGTH` | 1e-3 mm | validation | smallest accepted length/radius/distance |
 | `tol::THROUGH_ALL_MARGIN_*` | 5 % of bbox diagonal, >= 1 mm | construction | cutter overshoot (avoid coplanar boolean faces) |
+| join overlap `JOIN_OVERLAP` (f420-document `regen.rs`) | min(0.5 mm, distance / 2) | construction | a Join sketched on a face of its target starts this far inside the material (Truck 0.6 booleans fail on coplanar contact, ADR 0003); exact only because the profile must lie inside the face (`profile_within_face`) |
+| face-region containment slack (`ops.rs` `profile_within_face`) | max(10 × `KERNEL_LINEAR`, 1e-6 × extent) | geometric | sampled profile points may lie this far outside the support face region (chord error of curved face boundaries, 64 chords per edge) |
+| blind-cut floor on a face | `THROUGH_ALL_MARGIN_*` | construction | a blind cut whose floor lands exactly on a face whose material is on the tool's side is extended past it by the margin (same material removed, no coplanar faces) |
+| tool/target miss test (join, cut) | `KERNEL_LINEAR` on axis-aligned bounds | validation | "does not touch / does not intersect the target" |
+| STEP import validation (`step_in`) | max(1e-5 mm, 1e-9 × bounding diagonal) | geometric | vertex-on-curve / curve-on-surface checks of imported topology (docs/formats/step.md) |
+| DXF endpoint join (`DxfImportOptions::join_tolerance_mm`) | 1e-6 mm after scaling | geometric | DXF entity endpoints within this share one sketch point (docs/formats/dxf.md) |
+| STL vertex weld | exact coordinate equality | mesh | STL corners are welded only when bit-identical; near-coincident corners stay separate and show up as boundary edges in the diagnostics (docs/formats/stl.md) |
 | `WELD_TOLERANCE` (mesh.rs) | 1e-5 mm | mesh | welding tessellation vertices across faces |
 | `tol::MIN_MESH_CHORD_*` | max(1e-3 mm, 1e-5 × bbox diagonal) | mesh | lower bound on chord (prevents runaway allocation) |
 | `tol::MESH_CHORD` | 0.01 mm | mesh | default chordal tolerance for display/STL |

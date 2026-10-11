@@ -94,6 +94,17 @@ pub enum Command {
         sketch: FeatureId,
         depth: f64,
     },
+    /// Repeat an Extrude Cut `count - 1` more times at `spacing` mm along
+    /// `direction` (the seed sketch's local 2D axes; e.g. `[1, 0]` = sketch x),
+    /// on the seed's target body. Parameters "count", "spacing".
+    LinearPattern {
+        #[serde(default)]
+        name: Option<String>,
+        feature: FeatureId,
+        count: u32,
+        spacing: f64,
+        direction: [f64; 2],
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -215,6 +226,7 @@ impl Command {
             Command::CutThroughAll { .. } => "cut_through_all",
             Command::Pocket { .. } => "pocket",
             Command::Revolve { .. } => "revolve",
+            Command::LinearPattern { .. } => "linear_pattern",
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
@@ -699,6 +711,29 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::LinearPattern {
+                name,
+                feature,
+                count,
+                spacing,
+                direction,
+            } => {
+                let (name, seed, count, spacing, direction) =
+                    (name.clone(), *feature, *count, *spacing, *direction);
+                let id = self.model_mut()?.transact("Pattern", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Pattern"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::LinearPattern {
+                            seed,
+                            count,
+                            spacing,
+                            direction,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetParameter {
                 feature,
                 name,
@@ -1156,6 +1191,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Pocket { .. } => ("pocket", None),
                 FeatureKind::ImportStep { .. } => ("import_step", None),
                 FeatureKind::ImportMesh { .. } => ("import_mesh", None),
+                FeatureKind::LinearPattern { .. } => ("linear_pattern", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {

@@ -13,15 +13,15 @@ mod ops;
 mod step;
 mod step_in;
 
-pub use build::{cut_blind, cut_through_all, extrude, revolve};
+pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
     planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
 pub use ops::{
-    bounds, coplanar_face_side, cut_prism, extent_along, join_prism, plane_has_face,
-    profile_within_face, through_all_margin,
+    bounds, coplanar_face_side, cut_prism, cut_region, extent_along, join_prism, join_region,
+    plane_has_face, profile_within_face, through_all_margin,
 };
 pub use step::{export_step, export_step_bodies};
 pub use step_in::{

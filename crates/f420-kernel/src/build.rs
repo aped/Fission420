@@ -21,11 +21,12 @@ const SEAM_ANGLES: [f64; 4] = [0.0, 0.41, 1.27, 2.03];
 pub(crate) const BOOLEAN_TOLS: [f64; 3] = [tol::BOOLEAN, 0.02, 0.1];
 
 pub(crate) fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
-    profile_face_seam(profile, frame, 0.0)
+    region_face(profile, &[], frame, 0.0)
 }
 
-fn profile_face_seam(profile: &Profile, frame: &Frame, seam: f64) -> Result<Face> {
-    let wire: Wire = match profile {
+/// Closed wire of one profile loop (counter-clockwise about `frame.z`).
+fn profile_wire(profile: &Profile, frame: &Frame, seam: f64) -> Result<Wire> {
+    Ok(match profile {
         Profile::Polygon(pts) => {
             let verts: Vec<Vertex> = pts
                 .iter()
@@ -47,8 +48,25 @@ fn profile_face_seam(profile: &Profile, frame: &Frame, seam: f64) -> Result<Face
             // A full turn (> 2*pi) closes the wire; Truck splits it into arcs.
             builder::rsweep(&v, p3(c), v3(frame.z), Rad(7.0))
         }
-    };
-    let face = builder::try_attach_plane(&[wire])
+    })
+}
+
+/// Planar face bounded by `outer` with inner loops `holes` (all given
+/// counter-clockwise; holes are reversed here). The caller guarantees the holes
+/// lie strictly inside `outer` and do not touch each other (`f420_sketch`
+/// region extraction checks it). Circle seams (`seam`) apply to the outer loop.
+pub(crate) fn region_face(
+    outer: &Profile,
+    holes: &[Profile],
+    frame: &Frame,
+    seam: f64,
+) -> Result<Face> {
+    let mut wires = vec![profile_wire(outer, frame, seam)?];
+    for h in holes {
+        h.validate()?;
+        wires.push(profile_wire(h, frame, 0.0)?.inverse());
+    }
+    let face = builder::try_attach_plane(&wires)
         .map_err(|e| KernelError::InvalidInput(format!("cannot attach plane to profile: {e:?}")))?;
     // Make the face normal agree with the frame normal so the sweep is outward.
     let n = face_normal(&face);
@@ -152,6 +170,18 @@ fn face_normal(face: &Face) -> Vector3 {
 
 /// Extrude a closed profile along `frame.z` by `distance` (must be > 0).
 pub fn extrude(profile: &Profile, frame: &Frame, distance: f64) -> Result<Body> {
+    extrude_region(profile, &[], frame, distance)
+}
+
+/// [`extrude`] of the region bounded by `outer` minus the `holes` (one face with
+/// inner loops, swept: one closed shell with through-holes).
+pub fn extrude_region(
+    outer: &Profile,
+    holes: &[Profile],
+    frame: &Frame,
+    distance: f64,
+) -> Result<Body> {
+    let profile = outer;
     frame.validate()?;
     profile.validate()?;
     if !distance.is_finite() || distance < tol::MIN_LENGTH {
@@ -161,7 +191,7 @@ pub fn extrude(profile: &Profile, frame: &Frame, distance: f64) -> Result<Body> 
         )));
     }
     let solid = guarded("extrude", || -> Result<Solid> {
-        let face = profile_face(profile, frame)?;
+        let face = region_face(profile, holes, frame, 0.0)?;
         Ok(builder::tsweep(&face, v3(frame.z) * distance))
     })??;
     let body = Body { solid };
@@ -243,6 +273,18 @@ pub(crate) fn subtract_prism(
     length: f64,
     what: &str,
 ) -> Result<Body> {
+    subtract_region(target, profile, &[], start, length, what)
+}
+
+/// [`subtract_prism`] of a region with inner loops.
+pub(crate) fn subtract_region(
+    target: &Body,
+    profile: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+    what: &str,
+) -> Result<Body> {
     let seams: &[f64] = match profile {
         Profile::Circle { .. } => &SEAM_ANGLES,
         Profile::Polygon(_) | Profile::Loop(_) => &SEAM_ANGLES[..1],
@@ -252,7 +294,7 @@ pub(crate) fn subtract_prism(
         .iter()
         .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
     for (seam, btol) in attempts {
-        match subtract_attempt(target, profile, start, length, seam, btol, what) {
+        match subtract_attempt(target, profile, holes, start, length, seam, btol, what) {
             Ok(body) => return Ok(with_exact_edges(body)),
             Err(e) => failures.push(format!("seam {seam}/tol {btol}: {e}")),
         }
@@ -262,9 +304,11 @@ pub(crate) fn subtract_prism(
 
 /// One boolean attempt of [`subtract_prism`] with a given circle seam angle and
 /// boolean tolerance; the result is checked to be a single closed shell.
+#[allow(clippy::too_many_arguments)]
 fn subtract_attempt(
     target: &Body,
     profile: &Profile,
+    holes: &[Profile],
     start: &Frame,
     length: f64,
     seam: f64,
@@ -272,7 +316,7 @@ fn subtract_attempt(
     what: &str,
 ) -> Result<Body> {
     let tool = guarded(what, || -> Result<Solid> {
-        let face = profile_face_seam(profile, start, seam)?;
+        let face = region_face(profile, holes, start, seam)?;
         Ok(builder::tsweep(&face, v3(start.z) * length))
     })??;
     let solid = guarded(what, || {

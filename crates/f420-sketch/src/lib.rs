@@ -19,6 +19,7 @@
 mod arc;
 mod edit;
 mod profile;
+mod region;
 mod solver;
 
 pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
@@ -28,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use profile::{LoopSegment, Profile};
+pub use region::Region;
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -703,6 +705,13 @@ impl Sketch {
     pub fn profile_with_entities(&self) -> Result<(Profile, Vec<EntityId>), SketchError> {
         profile::extract_with_entities(self)
     }
+
+    /// The profile region: one outer loop plus inner loops (holes), each with its
+    /// generating entities. A single-loop sketch gives a region without holes;
+    /// see the `region` module docs for the nesting rules.
+    pub fn profile_region(&self) -> Result<Region, SketchError> {
+        region::extract_region(self)
+    }
 }
 
 #[cfg(test)]
@@ -716,3 +725,5 @@ mod tests_arc;
 
 #[cfg(test)]
 mod tests_lines;
+#[cfg(test)]
+mod tests_region;
