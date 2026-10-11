@@ -46,6 +46,8 @@ pub struct Uniforms {
 
 /// Per-vertex flag bits (second mesh vertex buffer).
 pub const FLAG_SELECTED: u32 = 1;
+/// Bits 8..11 of the flag word: body tint palette index (0 = base colour).
+pub const TINT_SHIFT: u32 = 8;
 
 struct Target {
     size: [u32; 2],

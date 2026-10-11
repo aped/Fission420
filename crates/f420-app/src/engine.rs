@@ -75,13 +75,52 @@ pub enum ExecMode {
     Sync,
 }
 
+/// One visible body inside a [`DisplayScene`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayBody {
+    pub id: f420_document::BodyId,
+    /// Triangle-mesh body (STL import), not an exact B-rep.
+    pub mesh_body: bool,
+    /// Display face groups of this body in the combined mesh.
+    pub groups: std::ops::Range<u32>,
+    /// Viewport tint palette index (see `Viewport::set_group_tints`).
+    pub tint: u8,
+}
+
+/// Combined display tessellation of every visible body. Group ids are offset
+/// per body so they never collide; hidden bodies are absent (not drawn, not
+/// pickable, not part of Fit).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DisplayScene {
+    pub mesh: RenderMesh,
+    pub bodies: Vec<DisplayBody>,
+}
+
+impl DisplayScene {
+    /// Body owning display group `g`.
+    pub fn body_of(&self, g: u32) -> Option<&DisplayBody> {
+        self.bodies.iter().find(|b| b.groups.contains(&g))
+    }
+
+    /// Tint table for the viewport.
+    pub fn tints(&self) -> Vec<(std::ops::Range<u32>, u8)> {
+        self.bodies
+            .iter()
+            .map(|b| (b.groups.clone(), b.tint))
+            .collect()
+    }
+}
+
+/// Mesh-body tint palette index.
+pub const MESH_TINT: u8 = 7;
+
 /// What the display mesh should become after a command.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MeshUpdate {
     /// Geometry did not change.
     Unchanged,
-    /// New body tessellation (empty mesh = no body).
-    Replace(RenderMesh),
+    /// New tessellation of all visible bodies (empty mesh = no visible body).
+    Replace(DisplayScene),
     /// Body exists but display tessellation failed.
     Failed(String),
 }
@@ -203,13 +242,76 @@ pub fn execute(session: &mut Session, cmd: Command) -> Reply {
 }
 
 fn display_mesh(session: &Session) -> MeshUpdate {
-    let Some(body) = session.model().and_then(|m| m.evaluation().body.as_ref()) else {
-        return MeshUpdate::Replace(RenderMesh::default());
+    let Some(m) = session.model() else {
+        return MeshUpdate::Replace(DisplayScene::default());
     };
-    match f420_kernel::tessellate_display(body, DISPLAY_CHORD) {
-        Ok(tm) => MeshUpdate::Replace(to_render_mesh(&tm)),
-        Err(e) => MeshUpdate::Failed(e.to_string()),
+    match display_scene(m.evaluation()) {
+        Ok(s) => MeshUpdate::Replace(s),
+        Err(e) => MeshUpdate::Failed(e),
     }
+}
+
+/// Tessellate every visible body into one mesh with per-body group ranges.
+/// B-rep bodies get one group per B-rep face; a mesh body is one group.
+/// Tints follow the body's position in creation order (stable under
+/// visibility changes); mesh bodies use [`MESH_TINT`].
+pub fn display_scene(ev: &f420_document::Evaluation) -> Result<DisplayScene, String> {
+    use f420_document::BodyGeometry;
+    let mut scene = DisplayScene::default();
+    let mut next_group = 0u32;
+    for (i, b) in ev.bodies.iter().enumerate() {
+        if !b.visible {
+            continue;
+        }
+        let (tm, mesh_body) = match &b.geometry {
+            BodyGeometry::Brep(body) => (
+                f420_kernel::tessellate_display(body, DISPLAY_CHORD)
+                    .map_err(|e| format!("{}: {e}", b.name))?,
+                false,
+            ),
+            BodyGeometry::Mesh(mb) => (mb.mesh.clone(), true),
+        };
+        let rm = to_render_mesh(&tm);
+        let groups = if mesh_body {
+            1
+        } else {
+            rm.tri_group.iter().max().map_or(0, |g| g.saturating_add(1))
+        };
+        let base = u32::try_from(scene.mesh.positions.len())
+            .map_err(|_| "display mesh too large".to_string())?;
+        scene.mesh.positions.extend(&rm.positions);
+        if rm.normals.len() == rm.positions.len() {
+            scene.mesh.normals.extend(&rm.normals);
+        } else {
+            // Keep normals aligned with positions (flat shading fallback).
+            scene.mesh.normals.clear();
+        }
+        scene
+            .mesh
+            .indices
+            .extend(rm.indices.iter().map(|i| i + base));
+        scene.mesh.tri_group.extend(
+            rm.tri_group
+                .iter()
+                .map(|g| next_group + if mesh_body { 0 } else { *g }),
+        );
+        let end = next_group.saturating_add(groups.max(1));
+        scene.bodies.push(DisplayBody {
+            id: b.id,
+            mesh_body,
+            groups: next_group..end,
+            tint: if mesh_body {
+                MESH_TINT
+            } else {
+                (i % 6) as u8 + 1
+            },
+        });
+        next_group = end;
+    }
+    if scene.mesh.normals.len() != scene.mesh.positions.len() {
+        scene.mesh.normals.clear();
+    }
+    Ok(scene)
 }
 
 /// Convert the kernel's f64 display tessellation to the viewport's f32 mesh.
@@ -906,7 +1008,7 @@ mod tests {
         assert_ne!(last.doc_id, base.doc_id);
         assert!(last.open && last.features.is_empty());
         assert_eq!(last.revision, 0);
-        assert_eq!(r[3].mesh, MeshUpdate::Replace(RenderMesh::default()));
+        assert_eq!(r[3].mesh, MeshUpdate::Replace(DisplayScene::default()));
     }
 
     #[test]

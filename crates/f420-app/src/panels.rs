@@ -90,6 +90,15 @@ impl F420App {
                 });
             }
             if ui
+                .add_enabled(open, egui::Button::new("Import…"))
+                .probe("Import…")
+                .on_hover_text("Import STEP / STL / DXF into this document (one undoable step)")
+                .on_disabled_hover_text("Open or create a document first")
+                .clicked()
+            {
+                self.open_import_dialog();
+            }
+            if ui
                 .add_enabled(open, egui::Button::new("Close"))
                 .probe("Close")
                 .clicked()
@@ -105,6 +114,7 @@ impl F420App {
                     self.dialog = Some(Dialog::ExportStl {
                         path: self.default_path("stl"),
                         chord: "0.01".into(),
+                        scope: self.default_export_scope(),
                     });
                     ui.close();
                 }
@@ -115,6 +125,71 @@ impl F420App {
                 {
                     self.dialog = Some(Dialog::ExportStep {
                         path: self.default_path("step"),
+                        scope: self.default_export_scope(),
+                    });
+                    ui.close();
+                }
+                let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
+                if ui
+                    .add_enabled(
+                        open && has_sketch,
+                        egui::Button::new("Export DXF (sketch)…"),
+                    )
+                    .probe("Export DXF (sketch)…")
+                    .on_disabled_hover_text("Needs a sketch")
+                    .clicked()
+                {
+                    let sketch = self
+                        .selected
+                        .filter(|id| {
+                            self.summary
+                                .features
+                                .iter()
+                                .any(|f| f.id == *id && f.kind == "sketch")
+                        })
+                        .or_else(|| self.unused_sketch());
+                    self.dialog = Some(Dialog::ExportDxf {
+                        path: self.default_path("dxf"),
+                        sketch,
+                        svg: false,
+                    });
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        open && has_sketch,
+                        egui::Button::new("Export SVG (sketch)…"),
+                    )
+                    .probe("Export SVG (sketch)…")
+                    .on_disabled_hover_text("Needs a sketch")
+                    .clicked()
+                {
+                    let sketch = self
+                        .selected
+                        .filter(|id| {
+                            self.summary
+                                .features
+                                .iter()
+                                .any(|f| f.id == *id && f.kind == "sketch")
+                        })
+                        .or_else(|| self.unused_sketch());
+                    self.dialog = Some(Dialog::ExportDxf {
+                        path: self.default_path("svg"),
+                        sketch,
+                        svg: true,
+                    });
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(open, egui::Button::new("Export 3MF…"))
+                    .probe("Export 3MF…")
+                    .clicked()
+                {
+                    self.dialog = Some(Dialog::Export3mf {
+                        path: self.default_path("3mf"),
+                        chord: "0.01".into(),
+                        scope: self.default_export_scope(),
+                        unit: f420_exchange::threemf::ThreeMfUnit::Millimeter,
                     });
                     ui.close();
                 }
@@ -230,8 +305,6 @@ impl F420App {
         let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
         let extrude_block = if !has_sketch {
             Some("Create a sketch with a closed profile first".to_string())
-        } else if self.has_body() {
-            Some("Only one base body per document is supported (product limit)".to_string())
         } else {
             sketch_sel.as_ref().and_then(|s| self.extrude_blocker(s))
         };
@@ -240,10 +313,9 @@ impl F420App {
                 .as_ref()
                 .map(|s| s.id)
                 .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Extrude {
-                sketch,
-                distance: "10".into(),
-            });
+            self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
+                self, sketch,
+            )));
         }
         let cut_block = if !has_sketch {
             Some("Create a circle sketch on a cap face first".to_string())
@@ -265,8 +337,6 @@ impl F420App {
         }
         let revolve_block = if !has_sketch {
             Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
-        } else if self.has_body() {
-            Some("Only one base body per document is supported (product limit)".to_string())
         } else {
             sketch_sel
                 .as_ref()
@@ -492,6 +562,10 @@ impl F420App {
             ui.weak("No document open. Use New or Open….");
             return;
         }
+        self.bodies_browser(ui);
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new("History").strong());
         if self.summary.features.is_empty() {
             ui.weak("Empty document. Use Create Sketch to start.");
         }
@@ -512,6 +586,10 @@ impl F420App {
                 "revolve" => "Revolve",
                 "cut_through_all" => "Cut",
                 "pocket" => "Pocket",
+                "linear_pattern" | "circular_pattern" => "Pattern",
+                "mirror" => "Mirror",
+                "chamfer" => "Chamfer",
+                "import_step" | "import_mesh" => "Import",
                 k => k,
             };
             ui.horizontal(|ui| {
@@ -608,6 +686,12 @@ impl F420App {
             }
             ui.separator();
         }
+        if self.selected.is_none()
+            && let Some(b) = self.selected_body
+        {
+            self.body_inspector(ui, b);
+            return;
+        }
         let Some(id) = self.selected else {
             ui.weak("Select a feature in the browser, or a face in the view.");
             if self.summary.open && !self.summary.features.is_empty() {
@@ -658,10 +742,18 @@ impl F420App {
                     }
                     let eb = self.extrude_blocker(&f);
                     if action(ui, "Extrude this sketch…", eb.as_deref()) {
-                        self.dialog = Some(Dialog::Extrude {
-                            sketch: Some(f.id),
-                            distance: "10".into(),
-                        });
+                        self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
+                            self,
+                            Some(f.id),
+                        )));
+                    }
+                    if ui
+                        .button("Re-attach…")
+                        .probe("Re-attach…")
+                        .on_hover_text("Move this sketch to another face or plane (repair a broken support); one undo step")
+                        .clicked()
+                    {
+                        self.start_reattach(f.id);
                     }
                     let cb = self.cut_blocker(&f);
                     if action(ui, "Cut with this sketch…", cb.as_deref()) {
@@ -689,6 +781,21 @@ impl F420App {
                 }
             }
             "extrude" => {
+                if matches!(f.operation, Some(f420_document::Operation::Cut { .. }))
+                    && ui
+                        .button("Pattern…")
+                        .probe("Pattern…")
+                        .on_hover_text("Repeat this cut in a row along its sketch's X or Y axis (editable count and spacing)")
+                        .clicked()
+                {
+                    self.dialog = Some(Dialog::Pattern {
+                        feature: f.id,
+                        count: "3".into(),
+                        spacing: "10".into(),
+                        along_y: false,
+                        reverse: false,
+                    });
+                }
                 ui.horizontal_wrapped(|ui| {
                     for fs in &f.faces {
                         let label =
@@ -804,6 +911,23 @@ impl F420App {
     }
 
     pub(crate) fn sketch_inspector(&mut self, ui: &mut egui::Ui) {
+        if let Some(b) = self.broken_sketch {
+            ui.colored_label(
+                BAD_COLOR,
+                format!(
+                    "{} lost its support face (edit refused). Re-attach it, then Finish again.",
+                    self.feature_name(b)
+                ),
+            );
+            if ui
+                .button("Re-attach sketch…")
+                .probe("Re-attach sketch…")
+                .clicked()
+            {
+                self.start_reattach(b);
+            }
+            ui.separator();
+        }
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
@@ -999,6 +1123,37 @@ impl F420App {
                         .italics()
                         .weak(),
                 );
+            } else if self.summary.bodies.len() > 1
+                || self.summary.bodies.iter().any(|b| b.kind == "mesh")
+            {
+                // Several bodies: one compact entry per body (never a fused total).
+                let n_vis = self.summary.bodies.iter().filter(|b| b.visible).count();
+                let parts: Vec<String> = self
+                    .summary
+                    .bodies
+                    .iter()
+                    .map(|b| {
+                        let v = match (&b.measurements, &b.mesh) {
+                            (Some(m), _) => match &m.volume {
+                                VolumeResult::Value { volume, .. } => format!("{volume:.2} mm³"),
+                                VolumeResult::Unavailable { .. } => "volume n/a".into(),
+                            },
+                            (None, Some(d)) => format!("mesh {} tris", d.triangles),
+                            (None, None) => "…".into(),
+                        };
+                        format!("{}{} {v}", b.name, if b.visible { "" } else { " (hidden)" })
+                    })
+                    .collect();
+                let text = format!(
+                    "Bodies {} ({n_vis} visible) · {}",
+                    self.summary.bodies.len(),
+                    parts.join(" · ")
+                );
+                if stale {
+                    ui.label(RichText::new(format!("(pending) {text}")).weak().italics());
+                } else {
+                    ui.label(text);
+                }
             } else {
             match &self.measurements {
                 Some(m) => {
@@ -1089,6 +1244,7 @@ impl F420App {
         let extrudes: Vec<&FeatureSummary> =
             features.iter().filter(|f| f.kind == "extrude").collect();
         let mut ok = false;
+        let mut ok_allowed = true;
         let mut cancel = false;
         let mut error: Option<String> = None;
         let opened = self.last_dialog != Some(dlg.title());
@@ -1104,7 +1260,19 @@ impl F420App {
         egui::Window::new(dlg.title())
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .anchor(
+                if matches!(dlg, Dialog::Extrude(_)) {
+                    // Beside the browser, clear of the model and its preview.
+                    egui::Align2::LEFT_TOP
+                } else {
+                    egui::Align2::CENTER_TOP
+                },
+                if matches!(dlg, Dialog::Extrude(_)) {
+                    [self.view_rect.map_or(270.0, |r| r.min.x + 8.0), 40.0]
+                } else {
+                    [0.0, 60.0]
+                },
+            )
             .show(ctx, |ui| {
                 match &mut dlg {
                     Dialog::Rectangle {
@@ -1119,16 +1287,7 @@ impl F420App {
                         num_field(ui, "Rectangle center Y (mm)", cy);
                         ui.small("Centre in world XY coordinates.");
                     }
-                    Dialog::Extrude { sketch, distance } => {
-                        feature_combo(ui, "Profile sketch", sketch, &sketches);
-                        num_field(ui, "Extrude distance (mm)", distance);
-                        if let Some(e) = sketch
-                            .and_then(|id| sketches.iter().find(|s| s.id == id))
-                            .and_then(|s| s.profile_error.clone())
-                        {
-                            ui.colored_label(BAD_COLOR, format!("This sketch's profile is not usable: {e}"));
-                        }
-                    }
+                    Dialog::Extrude(form) => self.extrude_form_ui(ui, form),
                     Dialog::RectangleXz {
                         width,
                         height,
@@ -1180,9 +1339,10 @@ impl F420App {
                     Dialog::SaveAs { path } | Dialog::Open { path } => {
                         text_field(ui, "File path", path);
                     }
-                    Dialog::ExportStl { path, chord } => {
+                    Dialog::ExportStl { path, chord, scope } => {
                         text_field(ui, "STL path", path);
                         num_field(ui, "Chord tolerance (mm)", chord);
+                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
                         ui.small("Exports the last committed model revision (queued after pending edits).");
                         if let Some(mc) = &self.last_export {
                             ui.label(format!(
@@ -1193,24 +1353,71 @@ impl F420App {
                             ));
                         }
                     }
-                    Dialog::ExportStep { path } => {
+                    Dialog::ExportStep { path, scope } => {
                         text_field(ui, "STEP path", path);
+                        ok_allowed &= self.export_scope_ui(ui, scope, true).is_none();
                         ui.label(
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
                         );
                         ui.small("Exports the last committed model revision (queued after pending edits).");
                     }
+                    Dialog::Pattern {
+                        feature,
+                        count,
+                        spacing,
+                        along_y,
+                        reverse,
+                    } => {
+                        ui.label(format!("Seed: {}", self.feature_name(*feature)));
+                        num_field(ui, "Pattern count", count);
+                        num_field(ui, "Pattern spacing (mm)", spacing);
+                        ui.horizontal(|ui| {
+                            ui.label("Direction");
+                            ui.radio_value(along_y, false, "Sketch X");
+                            ui.radio_value(along_y, true, "Sketch Y");
+                            ui.checkbox(reverse, "Reverse");
+                        });
+                        ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances cut the same target. Count and spacing stay editable parameters.");
+                    }
+                    Dialog::ExportDxf { path, sketch, svg } => {
+                        ok_allowed &= self.export_dxf_ui(ui, path, sketch, *svg);
+                    }
+                    Dialog::Export3mf {
+                        path,
+                        chord,
+                        scope,
+                        unit,
+                    } => {
+                        use f420_exchange::threemf::ThreeMfUnit as U;
+                        text_field(ui, "3MF path", path);
+                        num_field(ui, "3MF chord tolerance (mm)", chord);
+                        egui::ComboBox::from_label("3MF file unit")
+                            .selected_text(format!("{unit:?}"))
+                            .show_ui(ui, |ui| {
+                                for u in [U::Millimeter, U::Centimeter, U::Meter, U::Inch, U::Foot, U::Micron] {
+                                    ui.selectable_value(unit, u, format!("{u:?}"));
+                                }
+                            });
+                        ui.small("Each body is one mesh object (B-rep bodies tessellated at the chord tolerance, watertightness checked; mesh bodies as imported). Coordinates are written in the chosen unit; no materials or colours.");
+                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
+                    }
+                    Dialog::Import(form) => {
+                        ok_allowed &= self.import_form_ui(ui, form);
+                        if form.pending {
+                            ui.small("Cancel closes this dialog only: a running import still completes, and Undo removes it.");
+                        }
+                    }
                 }
                 ui.horizontal(|ui| {
                     ok = ui
-                        .add_enabled(!busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
+                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
                         .clicked();
                     cancel = ui.button("Cancel").probe("Cancel").clicked();
                 });
                 ui.weak("Enter = OK · Esc = Cancel");
             });
         AUTOFOCUS.with(|a| a.set(false));
-        ok |= enter && !opened && !busy_blocks(&dlg, busy);
+        ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
         if cancel {
             self.last_dialog = None;
@@ -1224,7 +1431,11 @@ impl F420App {
                     return;
                 }
                 Ok(cmd) => {
-                    let keep = matches!(dlg, Dialog::ExportStl { .. });
+                    let keep = matches!(dlg, Dialog::ExportStl { .. } | Dialog::Import(_));
+                    if let Dialog::Import(f) = &mut dlg {
+                        f.pending = true;
+                        f.error = None;
+                    }
                     self.request(cmd);
                     if keep {
                         self.dialog = Some(dlg);

@@ -36,7 +36,7 @@ pub use overlay::{
 pub use triad::{axis_triad_origin, axis_triad_shapes};
 
 use eframe::egui;
-use gpu::{FLAG_SELECTED, Gpu, LineVertex, MeshVertex, Uniforms};
+use gpu::{FLAG_SELECTED, Gpu, LineVertex, MeshVertex, TINT_SHIFT, Uniforms};
 use grid::GridSpec;
 use math::Vec3;
 
@@ -76,6 +76,8 @@ pub struct Viewport {
     highlight: Option<u32>,
     /// Sorted, deduplicated selected groups.
     selection: Vec<u32>,
+    /// Tint palette index per group range (see [`Viewport::set_group_tints`]).
+    tints: Vec<(std::ops::Range<u32>, u8)>,
     dimmed: bool,
     hovered: Option<u32>,
     /// Requested sketch grid plane (orthonormalized); `None` = world XY.
@@ -107,6 +109,7 @@ impl Viewport {
             edges: vec![],
             highlight: None,
             selection: vec![],
+            tints: vec![],
             dimmed: false,
             hovered: None,
             grid_plane: None,
@@ -126,7 +129,7 @@ impl Viewport {
         mesh.validate()?;
         let verts = expand_mesh(mesh);
         self.vertex_groups = verts.iter().map(|v| v.group).collect();
-        let flags = selection_flags(&self.vertex_groups, &self.selection);
+        let flags = self.vertex_flags();
         self.gpu.set_mesh(&verts, &flags);
         self.edges = feature_edges(mesh);
         self.upload_edges();
@@ -155,10 +158,39 @@ impl Viewport {
             return;
         }
         self.selection = sel;
+        self.upload_flags();
+    }
+
+    /// Tint group ranges with a palette colour (`0` = the default body colour,
+    /// `1..=6` distinct body tints, `7` = mesh-body colour). Groups outside every
+    /// range use the default. Used to tell several bodies apart; applies to the
+    /// current and later meshes until changed.
+    pub fn set_group_tints(&mut self, tints: &[(std::ops::Range<u32>, u8)]) {
+        if self.tints.as_slice() == tints {
+            return;
+        }
+        self.tints = tints.to_vec();
+        self.upload_flags();
+    }
+
+    fn upload_flags(&mut self) {
         if !self.vertex_groups.is_empty() {
-            let flags = selection_flags(&self.vertex_groups, &self.selection);
+            let flags = self.vertex_flags();
             self.gpu.set_mesh_flags(&flags);
         }
+    }
+
+    /// Per-vertex flag words: selection bit and tint index (bits 8..11).
+    fn vertex_flags(&self) -> Vec<u32> {
+        let mut flags = selection_flags(&self.vertex_groups, &self.selection);
+        if !self.tints.is_empty() {
+            for (f, g) in flags.iter_mut().zip(&self.vertex_groups) {
+                if let Some((_, t)) = self.tints.iter().find(|(r, _)| r.contains(g)) {
+                    *f |= u32::from(*t & 0x7) << TINT_SHIFT;
+                }
+            }
+        }
+        flags
     }
 
     /// Currently selected groups (sorted, deduplicated).

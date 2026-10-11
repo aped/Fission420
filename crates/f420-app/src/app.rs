@@ -16,11 +16,11 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use f420_commands::{Command, DocSummary, FeatureSummary, SketchTemplate, end_cap_of};
-use f420_document::{DocError, FaceRole, FeatureId, SketchPlane};
+use f420_document::{BodyId, DocError, FaceRole, FeatureId, SketchPlane};
 use f420_kernel::{Measurements, MeshCheck, VolumeResult};
-use f420_viewport::{Camera, RenderMesh, Viewport};
+use f420_viewport::{Camera, Viewport};
 
-use crate::engine::{Engine, ExecMode, MeshUpdate, Reply};
+use crate::engine::{DisplayScene, Engine, ExecMode, MeshUpdate, Reply};
 use crate::place::{self, Phase, Placement, PlaneFrame, Proposal, Tool};
 use crate::sketch_edit::SketchEditor;
 use crate::view3d::FaceInfo;
@@ -59,10 +59,7 @@ pub(crate) enum Dialog {
         cx: String,
         cy: String,
     },
-    Extrude {
-        sketch: Option<FeatureId>,
-        distance: String,
-    },
+    Extrude(crate::extrude::ExtrudeForm),
     CircleOnFace {
         extrude: Option<FeatureId>,
         diameter: String,
@@ -84,9 +81,32 @@ pub(crate) enum Dialog {
     ExportStl {
         path: String,
         chord: String,
+        scope: crate::exchange::ExportScope,
     },
     ExportStep {
         path: String,
+        scope: crate::exchange::ExportScope,
+    },
+    ExportDxf {
+        path: String,
+        sketch: Option<FeatureId>,
+        /// SVG instead of DXF.
+        svg: bool,
+    },
+    Export3mf {
+        path: String,
+        chord: String,
+        scope: crate::exchange::ExportScope,
+        unit: f420_exchange::threemf::ThreeMfUnit,
+    },
+    Import(crate::exchange::ImportForm),
+    /// Linear pattern of an Extrude Cut along its sketch's local X or Y.
+    Pattern {
+        feature: FeatureId,
+        count: String,
+        spacing: String,
+        along_y: bool,
+        reverse: bool,
     },
 }
 
@@ -94,7 +114,7 @@ impl Dialog {
     pub(crate) fn title(&self) -> &'static str {
         match self {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
-            Dialog::Extrude { .. } => "New extrusion",
+            Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
             Dialog::Revolve { .. } => "New revolve (about world Z)",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
@@ -103,6 +123,11 @@ impl Dialog {
             Dialog::Open { .. } => "Open document",
             Dialog::ExportStl { .. } => "Export STL",
             Dialog::ExportStep { .. } => "Export STEP",
+            Dialog::ExportDxf { svg: false, .. } => "Export DXF",
+            Dialog::ExportDxf { svg: true, .. } => "Export SVG",
+            Dialog::Export3mf { .. } => "Export 3MF",
+            Dialog::Import(_) => "Import",
+            Dialog::Pattern { .. } => "Linear pattern",
         }
     }
 }
@@ -228,8 +253,10 @@ pub struct F420App {
     pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
     pub(crate) mesh_triangles: usize,
-    /// Last display mesh (face analysis for selection; display only).
-    pub(crate) display_mesh: RenderMesh,
+    /// Last display scene: all visible bodies (face analysis, picking; display only).
+    pub(crate) scene: DisplayScene,
+    /// Body selected in the browser (or owning the picked face).
+    pub(crate) selected_body: Option<BodyId>,
     pub(crate) faces: Vec<FaceInfo>,
     pub(crate) fitted: bool,
     demo: VecDeque<DemoStep>,
@@ -247,6 +274,8 @@ pub struct F420App {
     pub(crate) after_save: Option<Guarded>,
     pub(crate) exit_confirmed: bool,
     pub(crate) rename: Option<(FeatureId, String)>,
+    /// Inline rename of a body row in the browser.
+    pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -254,6 +283,17 @@ pub struct F420App {
     /// (a newly opened editor selects its text so typing replaces it).
     pub(crate) sketch_dim_opened: Option<usize>,
     pub(crate) show_help: bool,
+    /// Summary of the last successful import (window until closed).
+    pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
+    /// Open "Re-attach sketch" window.
+    pub(crate) reattach: Option<crate::reattach::Reattach>,
+    /// Sketch named by the last BrokenReference refusal (offered for repair).
+    pub(crate) broken_sketch: Option<FeatureId>,
+    /// Scripted screenshot scene (see [`crate::scenes`]).
+    pub(crate) scene_steps: VecDeque<crate::scenes::SceneStep>,
+    pub(crate) scene_fitted: bool,
+    /// Scene finished: report busy until this instant (window fade-ins settle).
+    pub(crate) scene_hold: Option<Instant>,
     /// Commands in flight with their submit time (FIFO; latency measurement).
     in_flight: VecDeque<(String, Instant)>,
     /// Last command round trips (name, latency) for the status bar / report.
@@ -292,7 +332,8 @@ impl F420App {
             last_export: None,
             viewport: None,
             mesh_triangles: 0,
-            display_mesh: RenderMesh::default(),
+            scene: DisplayScene::default(),
+            selected_body: None,
             faces: vec![],
             fitted: false,
             demo: VecDeque::new(),
@@ -310,10 +351,17 @@ impl F420App {
             after_save: None,
             exit_confirmed: false,
             rename: None,
+            body_rename: None,
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
             show_help: false,
+            import_summary: None,
+            reattach: None,
+            broken_sketch: None,
+            scene_steps: VecDeque::new(),
+            scene_fitted: true,
+            scene_hold: None,
             in_flight: VecDeque::new(),
             latencies: VecDeque::new(),
             frame_ema: None,
@@ -352,7 +400,11 @@ impl F420App {
     }
     /// No command in flight, no deferred measurement outstanding, no demo steps left.
     pub fn idle(&self) -> bool {
-        !self.engine.busy() && self.demo.is_empty() && !self.summary.measuring
+        !self.engine.busy()
+            && self.demo.is_empty()
+            && self.scene_steps.is_empty()
+            && self.scene_hold.is_none_or(|t| Instant::now() >= t)
+            && !self.summary.measuring
     }
     pub fn feature_by_name(&self, name: &str) -> Option<&FeatureSummary> {
         self.summary.features.iter().find(|f| f.name == name)
@@ -379,6 +431,10 @@ impl F420App {
     }
     pub fn frame_time(&self) -> Option<Duration> {
         self.frame_ema
+    }
+    /// Summary of the last successful import, while its window is open.
+    pub fn import_summary(&self) -> Option<&crate::exchange::ImportSummary> {
+        self.import_summary.as_ref()
     }
     /// Analysed faces of the current display mesh.
     pub fn faces(&self) -> &[FaceInfo] {
@@ -728,11 +784,22 @@ impl F420App {
                 None => ("Error", "command failed".to_string()),
             };
             let hint = response.error.as_ref().map(next_step).unwrap_or_default();
+            if let Some(DocError::BrokenReference { from, .. }) = &response.error
+                && summary
+                    .features
+                    .iter()
+                    .any(|f| f.id == *from && f.kind == "sketch")
+            {
+                self.broken_sketch = Some(*from);
+            }
             self.diag(
                 true,
                 kind,
                 format!("{} rejected: {msg}{hint}", response.command),
             );
+        }
+        if response.ok && matches!(command, Command::SetSketchPlane { .. }) {
+            self.broken_sketch = None;
         }
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
@@ -741,8 +808,12 @@ impl F420App {
             self.fitted = false;
             self.selected = None;
             self.selected_face = None;
+            self.selected_body = None;
             self.doc_dim_edit = None;
             self.rename = None;
+            self.body_rename = None;
+            self.reattach = None;
+            self.broken_sketch = None;
         }
         // A sketch session belongs to one document; a different document
         // (Open/New/Close completed) ends it without committing.
@@ -842,12 +913,14 @@ impl F420App {
         match mesh {
             MeshUpdate::Unchanged => {}
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
-            MeshUpdate::Replace(m) => {
+            MeshUpdate::Replace(scene) => {
+                let m = &scene.mesh;
                 self.mesh_triangles = m.triangle_count();
                 self.selected_face = None;
                 if let Some(vp) = self.viewport.as_mut() {
-                    match vp.set_mesh(&m) {
+                    match vp.set_mesh(m) {
                         Ok(()) => {
+                            vp.set_group_tints(&scene.tints());
                             if !self.fitted && m.triangle_count() > 0 && self.sketch.is_none() {
                                 vp.fit();
                                 self.fitted = true;
@@ -859,10 +932,17 @@ impl F420App {
                         }
                     }
                 }
-                self.display_mesh = m;
+                self.scene = scene;
             }
         }
-        self.faces = crate::view3d::analyse_faces(&self.display_mesh, &self.summary.features);
+        if let Some(b) = self.selected_body
+            && !self.summary.bodies.iter().any(|x| x.id == b)
+        {
+            self.selected_body = None;
+        }
+        self.faces =
+            crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
+        self.import_reply(&command, &response);
         self.sync_viewport_selection();
     }
 
@@ -906,9 +986,10 @@ impl F420App {
     }
 
     pub(crate) fn select(&mut self, id: Option<FeatureId>) {
-        if self.selected != id || self.selected_face.is_some() {
+        if self.selected != id || self.selected_face.is_some() || self.selected_body.is_some() {
             self.selected = id;
             self.selected_face = None;
+            self.selected_body = None;
             self.doc_dim_edit = None;
             self.reset_inspector();
             self.sync_viewport_selection();
@@ -922,35 +1003,73 @@ impl F420App {
             Some(info) => {
                 self.selected = info.owner;
                 self.selected_face = Some(info.group);
+                self.selected_body = info.body;
                 self.reset_inspector();
             }
             None => {
                 self.selected = None;
                 self.selected_face = None;
+                self.selected_body = None;
                 self.inspector = None;
             }
         }
         self.sync_viewport_selection();
     }
 
-    /// Groups highlighted for the current selection: the picked face, or every
-    /// face whose provenance is reliably the selected feature.
+    /// Select a body (browser): highlights all of its faces; the feature
+    /// selection is cleared (the inspector shows the body).
+    pub fn select_body(&mut self, body: Option<BodyId>) {
+        self.selected = None;
+        self.selected_face = None;
+        self.selected_body = body;
+        self.doc_dim_edit = None;
+        self.inspector = None;
+        self.sync_viewport_selection();
+    }
+
+    /// Selected body (browser selection or the body of the picked face).
+    pub fn selected_body(&self) -> Option<BodyId> {
+        self.selected_body
+    }
+
+    /// Display scene (all visible bodies) as last reported by the engine.
+    pub fn scene(&self) -> &DisplayScene {
+        &self.scene
+    }
+
+    /// Groups highlighted for the current selection: the picked face, every
+    /// face whose provenance is reliably the selected feature, or every face of
+    /// the selected body.
     pub fn highlighted_faces(&self) -> Vec<u32> {
         match (self.selected_face, self.selected) {
             (Some(g), _) => vec![g],
+            (None, None) => match self
+                .selected_body
+                .and_then(|b| self.scene.bodies.iter().find(|d| d.id == b))
+            {
+                Some(d) => self
+                    .faces
+                    .iter()
+                    .filter(|f| d.groups.contains(&f.group))
+                    .map(|f| f.group)
+                    .collect(),
+                None => vec![],
+            },
             (None, Some(id)) => self
                 .faces
                 .iter()
                 .filter(|f| f.owner == Some(id))
                 .map(|f| f.group)
                 .collect(),
-            _ => vec![],
         }
     }
 
-    /// Push the selection highlight to the GPU view.
+    /// Push the selection highlight to the GPU view (the Extrude dialog's
+    /// target body while it is open).
     pub(crate) fn sync_viewport_selection(&mut self) {
-        let groups = self.highlighted_faces();
+        let groups = self
+            .extrude_target_groups()
+            .unwrap_or_else(|| self.highlighted_faces());
         if let Some(vp) = self.viewport.as_mut() {
             vp.set_selection(&groups);
         }
@@ -1213,11 +1332,9 @@ impl F420App {
         self.consumer_of(id).is_some()
     }
 
+    /// The document has an exact (B-rep) body to join to or cut.
     pub(crate) fn has_body(&self) -> bool {
-        self.summary
-            .features
-            .iter()
-            .any(|f| f.kind == "extrude" || f.kind == "revolve")
+        self.summary.bodies.iter().any(|b| b.kind == "brep")
     }
 
     pub(crate) fn feature_name(&self, id: FeatureId) -> String {
@@ -1249,22 +1366,21 @@ impl F420App {
         }
     }
 
-    /// Features that use `id` (deleting `id` is refused while any exist).
+    /// Features that use `id` (deleting `id` is refused while any exist):
+    /// explicit references, and features that modify a body `id` creates.
     pub(crate) fn dependents_of(&self, id: FeatureId) -> Vec<String> {
-        // A base body is used by every cut/pocket even without an explicit
-        // reference (the regenerator cuts the current body).
-        let base = self
+        let creates: Vec<BodyId> = self
             .summary
             .features
             .iter()
-            .any(|f| f.id == id && (f.kind == "extrude" || f.kind == "revolve"));
+            .find(|f| f.id == id)
+            .map(|f| f.creates.clone())
+            .unwrap_or_default();
         self.summary
             .features
             .iter()
-            .filter(|f| {
-                f.depends_on.contains(&id)
-                    || (base && (f.kind == "cut_through_all" || f.kind == "pocket"))
-            })
+            .filter(|f| f.id != id)
+            .filter(|f| f.depends_on.contains(&id) || f.body.is_some_and(|b| creates.contains(&b)))
             .map(|f| f.name.clone())
             .collect()
     }
@@ -1290,12 +1406,6 @@ impl F420App {
 
     /// Why Extrude is unavailable for `sketch`, or None if it can run.
     pub(crate) fn extrude_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
-        if self.has_body() {
-            return Some(
-                "Only one base body per document is supported (product limit); use Cut Through All for holes"
-                    .into(),
-            );
-        }
         if let Some(e) = &sketch.profile_error {
             return Some(format!("Profile is not usable: {e}"));
         }
@@ -1441,6 +1551,10 @@ impl F420App {
             self.handle_reply(r);
         }
         self.advance_demo();
+        self.advance_scene();
+        if !self.scene_steps.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
         if self.engine.mode() == ExecMode::Sync && !self.demo.is_empty() {
             ctx.request_repaint();
         }
@@ -1503,9 +1617,12 @@ impl F420App {
         ) {
             self.held_preview = None;
         }
+        self.sync_viewport_selection();
         self.confirm_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
+        self.import_summary_ui(&ctx);
+        self.reattach_ui(&ctx);
         if busy || self.summary.measuring {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -1520,7 +1637,11 @@ impl F420App {
     /// never triggers modelling commands.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
-        if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.rename.is_some() {
+        if ctx.egui_wants_keyboard_input()
+            || self.confirm.is_some()
+            || self.rename.is_some()
+            || self.body_rename.is_some()
+        {
             return;
         }
         let sc = |m: Modifiers, k: Key| {
@@ -1713,11 +1834,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
         },
-        Dialog::Extrude { sketch, distance } => Command::extrude(
-            None,
-            need(sketch, "profile sketch")?,
-            parse_num("distance", distance)?,
-        ),
+        Dialog::Extrude(form) => form.command()?,
         Dialog::CircleOnFace {
             extrude,
             diameter,
@@ -1755,15 +1872,65 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::Open { path } => Command::Open {
             path: nonempty_path(path)?,
         },
-        Dialog::ExportStl { path, chord } => Command::ExportStl {
+        Dialog::ExportStl { path, chord, scope } => Command::ExportStl {
             path: nonempty_path(path)?,
             chord: Some(parse_num("chord", chord)?),
-            bodies: None,
+            bodies: scope.bodies(),
         },
-        Dialog::ExportStep { path } => Command::ExportStep {
+        Dialog::ExportStep { path, scope } => Command::ExportStep {
             path: nonempty_path(path)?,
-            bodies: None,
+            bodies: scope.bodies(),
         },
+        Dialog::ExportDxf {
+            path,
+            sketch,
+            svg: false,
+        } => Command::ExportDxf {
+            path: nonempty_path(path)?,
+            sketch: need(sketch, "sketch")?,
+        },
+        Dialog::ExportDxf {
+            path,
+            sketch,
+            svg: true,
+        } => Command::ExportSvg {
+            path: nonempty_path(path)?,
+            sketch: need(sketch, "sketch")?,
+        },
+        Dialog::Export3mf {
+            path,
+            chord,
+            scope,
+            unit,
+        } => Command::Export3mf {
+            path: nonempty_path(path)?,
+            chord: Some(parse_num("chord", chord)?),
+            bodies: scope.bodies(),
+            unit: Some(*unit),
+        },
+        Dialog::Import(form) => form.command()?,
+        Dialog::Pattern {
+            feature,
+            count,
+            spacing,
+            along_y,
+            reverse,
+        } => {
+            let n = parse_num("count", count)?;
+            if !(n.is_finite() && n >= 2.0 && n.fract() == 0.0 && n <= 1000.0) {
+                return Err(format!(
+                    "count must be a whole number from 2 to 1000, got {n}"
+                ));
+            }
+            let s = if *reverse { -1.0 } else { 1.0 };
+            Command::LinearPattern {
+                name: None,
+                feature: *feature,
+                count: n as u32,
+                spacing: parse_num("spacing", spacing)?,
+                direction: if *along_y { [0.0, s] } else { [s, 0.0] },
+            }
+        }
     })
 }
 
@@ -1798,7 +1965,7 @@ pub fn next_step(e: &DocError) -> String {
         DocError::Validation(_) => "Check the value and try again; the model is unchanged.",
         DocError::ProductLimit(_) => "This is a current product limit; the model is unchanged.",
         DocError::BrokenReference { .. } => {
-            "The referenced feature/face is gone; edit the sketch plane or undo."
+            "The referenced face is gone or no longer unique; the model is unchanged. Re-attach the sketch to another face or plane (Re-attach sketch…), then repeat the edit."
         }
         DocError::SketchSolve { .. } => {
             "Edit the sketch and delete or change one of the conflicting constraints."

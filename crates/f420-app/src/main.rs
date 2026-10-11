@@ -32,6 +32,7 @@ struct Args {
     shot_dir: Option<PathBuf>,
     /// Start maximized (window coordinates = monitor coordinates in a headless compositor).
     maximized: bool,
+    scene: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -43,6 +44,7 @@ fn parse_args() -> Result<Args, String> {
         sync: false,
         shot_dir: None,
         maximized: false,
+        scene: None,
     };
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -57,6 +59,12 @@ fn parse_args() -> Result<Args, String> {
             Some("--demo-place-preview") => out.demo_place = Some(true),
             Some("--sync") => out.sync = true,
             Some("--maximized") => out.maximized = true,
+            Some("--scene") => {
+                let s = args
+                    .next()
+                    .ok_or_else(|| "--scene requires a name".to_string())?;
+                out.scene = Some(s.to_string_lossy().into_owned());
+            }
             Some("--shot-dir") => {
                 let p = args
                     .next()
@@ -66,7 +74,8 @@ fn parse_args() -> Result<Args, String> {
             Some("-h" | "--help") => {
                 return Err(
                     "usage: f420-app [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
-                     [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)]"
+                     [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)] \
+                     [--scene multibody|extrude|step|sideface|import|export]"
                         .to_string(),
                 );
             }
@@ -364,6 +373,10 @@ fn main() -> ExitCode {
                 app.start_demo(std::env::temp_dir().join("fission420-demo"));
             } else if let Some(stop) = args.demo_place {
                 app.start_demo_place(stop);
+            } else if let Some(s) = &args.scene
+                && !app.start_scene(s)
+            {
+                eprintln!("unknown scene '{s}'; known: {:?}", f420_app::scenes::SCENES);
             }
             Ok(Box::new(Shell {
                 app,

@@ -814,6 +814,7 @@ dependencies = [
  "egui_kittest",
  "f420-commands",
  "f420-document",
+ "f420-exchange",
  "f420-kernel",
  "f420-sketch",
  "f420-viewport",

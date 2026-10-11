@@ -5,10 +5,15 @@
 //! renders the last reported document summary and sends [`f420_commands::Command`]s.
 
 pub mod app;
+pub mod bodies;
 pub mod engine;
+pub mod exchange;
+pub mod extrude;
 pub mod panels;
 pub mod place;
 pub mod probe;
+pub mod reattach;
+pub mod scenes;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod view3d;
