@@ -1,6 +1,47 @@
-//! `cargo xtask check`: formatting, lints, tests (release), headless acceptance.
-//! Exits non-zero on the first failing stage; never masks failures.
+//! `cargo xtask check`: repository layout, formatting, lints, tests (release),
+//! headless acceptance. Exits non-zero on the first failing stage; never masks failures.
+use std::path::Path;
 use std::process::{Command, ExitCode};
+
+/// Run records belong under `runs/` (see `runs/README.md`), not in the root.
+/// Returns the offending root entries.
+fn stray_run_files(root: &Path) -> std::io::Result<Vec<String>> {
+    const EXACT: &[&str] = &["GOAL.md", "PLAN.md", "KICKOFF.md", "STATUS.md", "plan"];
+    const PREFIX: &[&str] = &["SESSION_", "NIGHT_", "MORNING_REPORT"];
+    let mut stray = Vec::new();
+    for entry in std::fs::read_dir(root)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if EXACT.contains(&name.as_str()) || PREFIX.iter().any(|p| name.starts_with(p)) {
+            stray.push(name);
+        }
+    }
+    stray.sort();
+    Ok(stray)
+}
+
+fn check_layout() -> bool {
+    eprintln!("==> layout: run records under runs/");
+    // xtask lives one level below the workspace root.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    match stray_run_files(&root) {
+        Ok(stray) if stray.is_empty() => {
+            eprintln!("<== layout: ok");
+            true
+        }
+        Ok(stray) => {
+            eprintln!(
+                "<== layout: FAILED: run files in the repository root: {}\n    \
+                 move them to runs/run-N/ (status: runs/STATUS.md); see runs/README.md",
+                stray.join(", ")
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("<== layout: FAILED: cannot list the repository root: {e}");
+            false
+        }
+    }
+}
 
 fn run(stage: &str, args: &[&str]) -> bool {
     eprintln!("==> {stage}: cargo {}", args.join(" "));
@@ -23,6 +64,9 @@ fn main() -> ExitCode {
     if task != "check" {
         eprintln!("usage: cargo xtask check");
         return ExitCode::from(64);
+    }
+    if !check_layout() {
+        return ExitCode::FAILURE;
     }
     let stages: &[(&str, &[&str])] = &[
         ("fmt", &["fmt", "--all", "--check"]),

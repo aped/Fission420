@@ -1,3 +1,4 @@
 target/
 artifacts/
 .claude/
+spikes/*/Cargo.lock

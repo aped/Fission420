@@ -43,20 +43,20 @@ tools/live_walkthrough.sh                      # real-input UI walkthroughs in a
 
 | file | contents |
 |---|---|
-| `MORNING_REPORT_RUN_2.md` | latest run: what works, evidence, limitations, walkthrough |
-| `MORNING_REPORT.md` | run 1 report |
+| `runs/run-2/MORNING_REPORT_RUN_2.md` | latest run: what works, evidence, limitations, walkthrough |
+| `runs/` | run specs, status log and reports for every run (see `runs/README.md`) |
 | `docs/behavior/sketching.md` | sketch editor behaviour (tools, snapping, drags, undo) |
 | `docs/COMMANDS.md` | command API and native format |
 | `docs/TOLERANCES.md` | every tolerance and why |
 | `docs/behavior/timings.md` | measured timings and the kernel bottleneck analysis |
 | `docs/adr/` | architecture decisions (kernel choice, exact boolean edges) |
 | `docs/DEPENDENCIES.md` | dependency licences |
-| `plan/STATUS.md` | task log and current state |
+| `runs/STATUS.md` | task log and current state |
 
 ## Limits (prototype)
 
 One base body per document; cuts and pockets are circular; sketches attach to the world planes
-or to extrusion caps; no fillets, assemblies or drawings. See the morning report for the full,
+or to extrusion caps; no fillets, assemblies or drawings. See the latest run report for the full,
 current list.
 
 Licence: MIT OR Apache-2.0.
