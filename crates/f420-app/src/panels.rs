@@ -586,7 +586,9 @@ impl F420App {
                 "revolve" => "Revolve",
                 "cut_through_all" => "Cut",
                 "pocket" => "Pocket",
-                "linear_pattern" => "Pattern",
+                "linear_pattern" | "circular_pattern" => "Pattern",
+                "mirror" => "Mirror",
+                "chamfer" => "Chamfer",
                 "import_step" | "import_mesh" => "Import",
                 k => k,
             };
