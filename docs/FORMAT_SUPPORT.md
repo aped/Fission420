@@ -158,8 +158,11 @@ file as base64 blobs, so a document reopens after the source file is moved or de
 (scenario C.3, D.6, D.11 delete the sources before reopening and compare the whole document
 and every body). v1 and v2 files migrate on load (first solid feature gets body B1; feature
 ids unchanged); newer versions are refused. Evidence: `native_formats.rs` opens the v1
-fixture and every committed v2/v3 example, checks the analytic volume, re-saves as v3 and
-reopens to an identical document. Size limit 256 MiB per file, 128 MiB per import source.
+fixture, frozen copies of the five run-2 v2 documents
+(`crates/f420-commands/tests/fixtures/native_v2/`; the committed `examples/*.f420.json` are
+re-saved as v3 whenever their workflows replay, e.g. in `cargo xtask check`), and every
+committed example, checks the analytic volume, re-saves as v3 and reopens to an identical
+document. Size limit 256 MiB per file, 128 MiB per import source.
 
 ## Evidence
 
@@ -176,10 +179,10 @@ tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures
 
 | Evidence | Where | Result (2026-10-10) |
 |---|---|---|
-| Acceptance C.1-C.8, D.1-D.11 | `crates/f420-commands/src/acceptance/formats.rs`; report `artifacts/acceptance_formats/acceptance_report.json` | all checks PASS (650 total with A/B/P/R) |
-| FreeCAD validation of C/D exports | `tools/check_formats.sh`; logs `artifacts/acceptance_formats/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`, `artifacts/external_validation_formats.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
+| Acceptance C.1-C.8, D.1-D.11 | `crates/f420-commands/src/acceptance/formats.rs`; report `artifacts/acceptance/acceptance_report.json` (log `artifacts/acceptance.log`) | all checks PASS (650 total with A/B/P/R) |
+| FreeCAD validation of C/D exports | `tools/check_formats.sh`; logs `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`, `artifacts/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
 | Command-level import edge cases | `crates/f420-commands/tests/imports.rs` | 10 pass, 2 ignored (backend issues below) |
-| Native v1/v2/v3 | `crates/f420-commands/tests/native_formats.rs` | 7 pass |
+| Native v1/v2/v3 | `crates/f420-commands/tests/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |
 | Kernel STEP import/export | `crates/f420-kernel/tests/step_import.rs`, `step_export_multi.rs`; `artifacts/format_tests_kernel_exchange.log` | 13 + 4 pass |
 | STL/DXF adapters | `crates/f420-exchange/tests/{stl,dxf}_*`; `artifacts/format_tests_exchange.log` | 35 pass |
 | 3MF adapter | `crates/f420-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/threemf_validate_writer.log` | 9 + 6 pass; writer PASS (Python stdlib reader and FreeCAD) |
