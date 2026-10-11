@@ -263,6 +263,127 @@ pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
     }
 }
 
+/// How a trim/extend end was joined to the curve it was cut at.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CutEnd {
+    /// An existing point already lies there: its id is shared, so profiles close.
+    Shared,
+    /// New point held on the cutting line with `PointOnLine`.
+    OnLine,
+    /// New point on a circle/arc (no point-on-curve constraint exists).
+    Free,
+}
+
+/// End point for a trim/extend cut at `x`. Reuses an existing point there (other
+/// than `own`, the edited curve's points), else adds one and keeps it on the
+/// cutting line (any line not in `skip` whose segment holds `x`).
+pub(crate) fn cut_point(
+    sk: &mut Sketch,
+    x: [f64; 2],
+    own: &[PointId],
+    skip: &[EntityId],
+) -> (PointId, CutEnd) {
+    let tol = f420_sketch::solve_tolerance(sk.scale());
+    let used = |sk: &Sketch, p: PointId| {
+        sk.origin == Some(p)
+            || sk
+                .entities
+                .iter()
+                .any(|e| !skip.contains(&e.id()) && e.points().contains(&p))
+    };
+    if let Some(p) = sk
+        .points
+        .iter()
+        .filter(|q| !own.contains(&q.id) && dist([q.x, q.y], x) <= tol)
+        .map(|q| q.id)
+        .find(|&q| used(sk, q))
+    {
+        return (p, CutEnd::Shared);
+    }
+    let line = sk.entities.iter().find_map(|e| match e {
+        Entity::Line { id, a, b } if !skip.contains(id) => {
+            let (pa, pb) = (sk.point_xy(*a)?, sk.point_xy(*b)?);
+            (seg_dist(x, pa, pb) <= tol && dist(x, pa) > tol && dist(x, pb) > tol).then_some(*id)
+        }
+        _ => None,
+    });
+    let n = sk.add_point(x[0], x[1]);
+    match line {
+        Some(line) => {
+            sk.constraints
+                .push(Constraint::PointOnLine { point: n, line });
+            (n, CutEnd::OnLine)
+        }
+        None => (n, CutEnd::Free),
+    }
+}
+
+/// Drop `PointOnLine` constraints whose point has become an end of that line
+/// (implied, and degenerate for the solver).
+fn drop_implied_on_line(sk: &mut Sketch) {
+    let ends = |sk: &Sketch, l: EntityId| sk.entity(l).map(|x| x.points()).unwrap_or_default();
+    let keep: Vec<bool> = sk
+        .constraints
+        .iter()
+        .map(|c| match c {
+            Constraint::PointOnLine { point, line } => !ends(sk, *line).contains(point),
+            _ => true,
+        })
+        .collect();
+    let mut it = keep.into_iter();
+    sk.constraints.retain(|_| it.next().unwrap_or(true));
+}
+
+/// After `e` was shortened/split into `e` + `piece`: a Tangent naming `e` stays
+/// with whichever piece still ends at the tangent point, else it is dropped.
+/// Returns the number dropped.
+fn retarget_tangents(sk: &mut Sketch, e: EntityId, piece: Option<EntityId>) -> usize {
+    let pts = |sk: &Sketch, id: EntityId| sk.entity(id).map(|x| x.points()).unwrap_or_default();
+    let shares = |sk: &Sketch, u: EntityId, v: EntityId| {
+        let pv = pts(sk, v);
+        pts(sk, u).iter().any(|p| pv.contains(p))
+    };
+    let before = sk.constraints.len();
+    let old = std::mem::take(&mut sk.constraints);
+    let mut keep = Vec::with_capacity(old.len());
+    for c in old {
+        let Constraint::Tangent { line, arc } = c else {
+            keep.push(c);
+            continue;
+        };
+        if line != e && arc != e {
+            keep.push(c);
+            continue;
+        }
+        let other = if line == e { arc } else { line };
+        let swap = |id: EntityId| {
+            if line == e {
+                Constraint::Tangent { line: id, arc }
+            } else {
+                Constraint::Tangent { line, arc: id }
+            }
+        };
+        if shares(sk, e, other) {
+            keep.push(c);
+        } else if let Some(pc) = piece.filter(|pc| shares(sk, *pc, other)) {
+            keep.push(swap(pc));
+        }
+    }
+    sk.constraints = keep;
+    before - sk.constraints.len()
+}
+
+/// Status line suffix for ends that could not be attached.
+fn free_note(free: usize) -> String {
+    if free == 0 {
+        String::new()
+    } else {
+        format!(
+            " {free} new end(s) on a circle/arc are not held on it (no point-on-arc constraint)."
+        )
+    }
+}
+
 /// Distance from `p` to an arc (to the nearest end outside its angular span).
 pub fn arc_distance(g: &f420_sketch::ArcGeometry, p: [f64; 2]) -> f64 {
     let ang = (p[1] - g.center[1]).atan2(p[0] - g.center[0]);
@@ -1229,7 +1350,8 @@ impl SketchEditor {
     fn line_hits(&self, line: EntityId, p: [f64; 2], q: [f64; 2], beyond: bool) -> Vec<f64> {
         let d = [q[0] - p[0], q[1] - p[1]];
         let len2 = d[0] * d[0] + d[1] * d[1];
-        let eps = f420_sketch::solve_tolerance(self.sketch.scale()) / len2.sqrt().max(1e-12);
+        let tol = f420_sketch::solve_tolerance(self.sketch.scale());
+        let eps = tol / len2.sqrt().max(1e-12);
         let inside = |t: f64| {
             if beyond {
                 t < -eps || t > 1.0 + eps
@@ -1288,7 +1410,9 @@ impl SketchEditor {
                         let x = [p[0] + t * d[0], p[1] + t * d[1]];
                         let ang = (x[1] - g.center[1]).atan2(x[0] - g.center[0]);
                         let rel = (ang - g.start_angle).rem_euclid(std::f64::consts::TAU);
-                        if inside(t) && rel <= g.sweep + 1e-9 {
+                        // Tolerant at both ends (rel just below 0 wraps to ~2π).
+                        let ae = tol / g.radius;
+                        if inside(t) && (rel <= g.sweep + ae || rel >= std::f64::consts::TAU - ae) {
                             ts.push(t);
                         }
                     }
@@ -1371,6 +1495,7 @@ impl SketchEditor {
         let x = [p[0] + t * d[0], p[1] + t * d[1]];
         let origin = self.sketch.origin;
         let mut dropped = 0usize;
+        let mut free = 0usize;
         let ok = self.try_change(false, |sk| {
             let before = sk.constraints.len();
             sk.constraints.retain(|c| {
@@ -1378,7 +1503,8 @@ impl SketchEditor {
                     && !(Some(end) != origin && constraint_mentions(c, end))
             });
             dropped += before - sk.constraints.len();
-            let n = sk.add_point(x[0], x[1]);
+            let (n, how) = cut_point(sk, x, &[a, b], &[e]);
+            free += usize::from(how == CutEnd::Free);
             if let Some(Entity::Line { a, b, .. }) = sk.entities.iter_mut().find(|x| x.id() == e) {
                 if at_b {
                     *b = n;
@@ -1389,15 +1515,17 @@ impl SketchEditor {
             if Some(end) != origin {
                 sk.points.retain(|x| x.id != end);
             }
+            drop_implied_on_line(sk);
             Ok(())
         });
         if ok {
             self.selection.clear();
-            self.info(if dropped > 0 {
-                format!("Extended; {dropped} constraint(s) on the old end were removed. The new end is unconstrained.")
+            let base = if dropped > 0 {
+                format!("Extended; {dropped} constraint(s) on the old end were removed.")
             } else {
-                "Extended. The new end is unconstrained.".into()
-            });
+                "Extended.".into()
+            };
+            self.info(format!("{base}{}", free_note(free)));
         }
     }
 
@@ -1409,7 +1537,8 @@ impl SketchEditor {
         let on_arc = |g: &f420_sketch::ArcGeometry, x: [f64; 2]| {
             let rel = ((x[1] - g.center[1]).atan2(x[0] - g.center[0]) - g.start_angle)
                 .rem_euclid(std::f64::consts::TAU);
-            rel <= g.sweep + 1e-9
+            let ae = tol / g.radius;
+            rel <= g.sweep + ae || rel >= std::f64::consts::TAU - ae
         };
         let circle_circle = |c2: [f64; 2], r2: f64| -> Vec<[f64; 2]> {
             let dx = [c2[0] - c[0], c2[1] - c[1]];
@@ -1516,6 +1645,7 @@ impl SketchEditor {
         let on = |t: f64| [c[0] + r * (start + t).cos(), c[1] + r * (start + t).sin()];
         let origin = self.sketch.origin;
         let mut dropped = 0usize;
+        let mut free = 0usize;
         let ok = if is_circle {
             if cuts.len() < 2 {
                 if cuts.is_empty() {
@@ -1543,11 +1673,14 @@ impl SketchEditor {
                 self.try_change(false, |sk| {
                     // Keep the arc CCW from hi to lo (+ 2π).
                     let (ps, pe) = (on(hi), on(lo));
-                    let s_id = sk.add_point(ps[0], ps[1]);
-                    let e_id = sk.add_point(pe[0], pe[1]);
+                    let (s_id, h0) = cut_point(sk, ps, &[], &[e]);
+                    let (e_id, h1) = cut_point(sk, pe, &[], &[e]);
+                    free += usize::from(h0 == CutEnd::Free) + usize::from(h1 == CutEnd::Free);
                     let new = sk.next_entity_id();
                     sk.entities.retain(|x| x.id() != e);
-                    sk.construction.remove(&e);
+                    if sk.construction.remove(&e) {
+                        sk.construction.insert(new);
+                    }
                     sk.retired_entity_ids = sk.retired_entity_ids.max(e.0 + 1);
                     sk.entities.push(Entity::Arc {
                         id: new,
@@ -1577,6 +1710,7 @@ impl SketchEditor {
                     }
                     sk.constraints = keep;
                     dropped += before.saturating_sub(sk.constraints.len());
+                    drop_implied_on_line(sk);
                     Ok(())
                 })
             }
@@ -1598,9 +1732,7 @@ impl SketchEditor {
                     sk.remove_entity(e);
                     return Ok(());
                 }
-                let before = sk.constraints.len();
-                sk.constraints
-                    .retain(|k| !matches!(k, Constraint::Tangent { arc, .. } if *arc == e));
+                let mut piece = None;
                 let set = |sk: &mut Sketch, s: PointId, t: PointId| {
                     if let Some(Entity::Arc { start, end, .. }) =
                         sk.entities.iter_mut().find(|x| x.id() == e)
@@ -1609,20 +1741,23 @@ impl SketchEditor {
                     }
                 };
                 let mut freed = Vec::new();
+                let own = [sp, ep];
+                let mut point = |sk: &mut Sketch, t: f64| {
+                    let (n, how) = cut_point(sk, on(t), &own, &[e]);
+                    free += usize::from(how == CutEnd::Free);
+                    n
+                };
                 if lo <= 0.0 {
-                    let p = on(hi);
-                    let n = sk.add_point(p[0], p[1]);
+                    let n = point(sk, hi);
                     set(sk, n, ep);
                     freed.push(sp);
                 } else if hi >= sweep {
-                    let p = on(lo);
-                    let n = sk.add_point(p[0], p[1]);
+                    let n = point(sk, lo);
                     set(sk, sp, n);
                     freed.push(ep);
                 } else {
-                    let (p0, p1) = (on(lo), on(hi));
-                    let n0 = sk.add_point(p0[0], p0[1]);
-                    let n1 = sk.add_point(p1[0], p1[1]);
+                    let n0 = point(sk, lo);
+                    let n1 = point(sk, hi);
                     set(sk, sp, n0);
                     let id = sk.next_entity_id();
                     sk.entities.push(Entity::Arc {
@@ -1631,26 +1766,38 @@ impl SketchEditor {
                         start: n1,
                         end: ep,
                     });
+                    if sk.is_construction(e) {
+                        sk.construction.insert(id);
+                    }
                     sk.constraints.push(Constraint::EqualRadius { a: e, b: id });
+                    piece = Some(id);
                 }
+                dropped += retarget_tangents(sk, e, piece);
+                drop_implied_on_line(sk);
                 for pt in freed {
                     if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
+                        let before = sk.constraints.len();
                         sk.constraints.retain(|k| !constraint_mentions(k, pt));
+                        dropped += before - sk.constraints.len();
                         sk.points.retain(|x| x.id != pt);
                     }
                 }
-                dropped += before.saturating_sub(sk.constraints.len());
                 Ok(())
             })
         };
         if ok {
             self.selection.clear();
-            self.info(if dropped > 0 {
-                format!("Trimmed; {dropped} constraint(s) that no longer applied were removed. New endpoints are unconstrained.")
-            } else {
-                "Trimmed. New endpoints are unconstrained.".into()
-            });
+            self.trimmed_info(dropped, free);
         }
+    }
+
+    fn trimmed_info(&mut self, dropped: usize, free: usize) {
+        let base = if dropped > 0 {
+            format!("Trimmed; {dropped} constraint(s) that no longer applied were removed.")
+        } else {
+            "Trimmed.".into()
+        };
+        self.info(format!("{base}{}", free_note(free)));
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
@@ -1673,6 +1820,7 @@ impl SketchEditor {
         let hi = cuts.iter().copied().filter(|t| *t > tc).fold(1.0, f64::min);
         let at = |t: f64| [p[0] + t * d[0], p[1] + t * d[1]];
         let mut dropped = 0usize;
+        let mut free = 0usize;
         let origin = self.sketch.origin;
         let ok = self.try_change(false, |sk| {
             if lo <= 0.0 && hi >= 1.0 {
@@ -1681,11 +1829,16 @@ impl SketchEditor {
             }
             // Constraints whose meaning depends on this line's extent.
             let before = sk.constraints.len();
-            sk.constraints.retain(|c| {
-                !matches!(c, Constraint::EqualLength { a: x, b: y } if *x == e || *y == e)
-                    && !matches!(c, Constraint::Tangent { line, .. } if *line == e)
-            });
+            sk.constraints.retain(
+                |c| !matches!(c, Constraint::EqualLength { a: x, b: y } if *x == e || *y == e),
+            );
             dropped += before - sk.constraints.len();
+            let mut piece = None;
+            let mut point = |sk: &mut Sketch, t: f64| {
+                let (n, how) = cut_point(sk, at(t), &[a, b], &[e]);
+                free += usize::from(how == CutEnd::Free);
+                n
+            };
             let set_ends = |sk: &mut Sketch, na: PointId, nb: PointId| {
                 if let Some(Entity::Line { a, b, .. }) =
                     sk.entities.iter_mut().find(|x| x.id() == e)
@@ -1695,18 +1848,22 @@ impl SketchEditor {
             };
             let mut freed = Vec::new();
             if lo <= 0.0 {
-                let n = sk.add_point(at(hi)[0], at(hi)[1]);
+                let n = point(sk, hi);
                 set_ends(sk, n, b);
                 freed.push(a);
             } else if hi >= 1.0 {
-                let n = sk.add_point(at(lo)[0], at(lo)[1]);
+                let n = point(sk, lo);
                 set_ends(sk, a, n);
                 freed.push(b);
             } else {
-                let n0 = sk.add_point(at(lo)[0], at(lo)[1]);
-                let n1 = sk.add_point(at(hi)[0], at(hi)[1]);
+                let n0 = point(sk, lo);
+                let n1 = point(sk, hi);
                 set_ends(sk, a, n0);
                 let l2 = sk.add_line(n1, b);
+                if sk.is_construction(e) {
+                    sk.construction.insert(l2);
+                }
+                piece = Some(l2);
                 let hv: Vec<Constraint> = sk
                     .constraints
                     .iter()
@@ -1722,6 +1879,8 @@ impl SketchEditor {
                     .collect();
                 sk.constraints.extend(hv);
             }
+            dropped += retarget_tangents(sk, e, piece);
+            drop_implied_on_line(sk);
             // A detached endpoint used by nothing else goes, with its constraints.
             for pt in freed {
                 if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
@@ -1735,13 +1894,7 @@ impl SketchEditor {
         });
         if ok {
             self.selection.clear();
-            self.info(if dropped > 0 {
-                format!(
-                    "Trimmed; {dropped} constraint(s) that no longer applied were removed. New endpoints are unconstrained."
-                )
-            } else {
-                "Trimmed. New endpoints are unconstrained.".into()
-            });
+            self.trimmed_info(dropped, free);
         }
     }
 
@@ -3047,5 +3200,148 @@ mod tests {
         assert!(ed.sketch.entities.is_empty());
         assert_eq!(ed.sketch.points.len(), 1);
         assert_eq!(ed.sketch.origin, Some(origin));
+    }
+
+    /// Review run 3 #2: trimmed ends share the cutting curve's point, so the
+    /// left half of a rectangle cut by a vertical line closes into a profile.
+    #[test]
+    fn trimmed_ends_attach_and_the_profile_closes() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [40.0, 20.0]);
+        let right = *ed
+            .sketch
+            .entities
+            .iter()
+            .filter(|e| matches!(e, Entity::Line { .. }))
+            .map(|e| e.id())
+            .collect::<Vec<_>>()
+            .iter()
+            .find(|l| {
+                let (p, q) = line_ends(&ed, **l);
+                (p[0] - 40.0).abs() < 1e-9 && (q[0] - 40.0).abs() < 1e-9
+            })
+            .unwrap();
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [20.0, -5.0]);
+        click(&mut ed, [20.0, 25.0]);
+        ed.escape();
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [20.0, 22.0]);
+        click(&mut ed, [20.0, -2.5]);
+        // The trimmed ends are held on the top/bottom edges.
+        let on_line = ed
+            .sketch
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::PointOnLine { .. }))
+            .count();
+        assert_eq!(on_line, 2, "{:?}", ed.sketch.constraints);
+        ed.sketch.remove_entity(right);
+        click(&mut ed, [30.0, 20.0]);
+        click(&mut ed, [30.0, 0.0]);
+        let prof = ed.sketch.profile();
+        let Ok(f420_sketch::Profile::Polygon(poly)) = &prof else {
+            panic!("{prof:?} / {:?}", ed.feedback);
+        };
+        let area = poly
+            .iter()
+            .zip(poly.iter().cycle().skip(1))
+            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
+            .sum::<f64>()
+            / 2.0;
+        assert!((area - 400.0).abs() < 1e-6, "{area}");
+        assert!(ed.sketch.solve().is_success());
+    }
+
+    /// Review run 3 #5: a split construction line stays construction.
+    #[test]
+    fn trim_keeps_the_construction_flag() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        for (a, b) in [
+            ([0.0, 0.0], [30.0, 0.0]),
+            ([10.0, -5.0], [10.0, 5.0]),
+            ([20.0, -5.0], [20.0, 5.0]),
+        ] {
+            click(&mut ed, a);
+            click(&mut ed, b);
+            ed.escape();
+        }
+        let h = ed.sketch.entities[0].id();
+        ed.sketch.set_construction(h, true);
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [15.0, 0.0]);
+        let horizontal: Vec<EntityId> = ed
+            .sketch
+            .entities
+            .iter()
+            .filter(|e| {
+                let (p, q) = line_ends(&ed, e.id());
+                p[1].abs() < 1e-9 && q[1].abs() < 1e-9
+            })
+            .map(|e| e.id())
+            .collect();
+        assert_eq!(horizontal.len(), 2, "{:?}", ed.feedback);
+        assert!(horizontal.iter().all(|l| ed.sketch.is_construction(*l)));
+    }
+
+    /// Review run 3 #6: a line through an arc's start point sees the arc,
+    /// whatever the start angle (rounding used to wrap it to ~2π).
+    #[test]
+    fn arc_start_point_crossings_are_found_at_every_angle() {
+        for k in 0..360 {
+            let th = (k as f64).to_radians();
+            let mut sk = Sketch::default();
+            let at = |a: f64, r: f64| [r * a.cos(), r * a.sin()];
+            let s0 = sk.add_point(at(th, 10.0)[0], at(th, 10.0)[1]);
+            let e0 = sk.add_point(at(th + 1.5, 10.0)[0], at(th + 1.5, 10.0)[1]);
+            sk.add_arc_3pt(s0, e0, at(th + 0.75, 10.0)).unwrap();
+            // Radial line through the arc's start point (not sharing it).
+            let a = sk.add_point(at(th, 5.0)[0], at(th, 5.0)[1]);
+            let b = sk.add_point(at(th, 15.0)[0], at(th, 15.0)[1]);
+            let l = sk.add_line(a, b);
+            let ed = SketchEditor::new(sk);
+            let hits = ed.line_cuts(l, at(th, 5.0), at(th, 15.0));
+            assert!(
+                hits.iter().any(|t| (t - 0.5).abs() < 1e-9),
+                "{k} deg: {hits:?}"
+            );
+        }
+    }
+
+    /// Review run 3 #7: a Tangent at the end of the line that is kept survives.
+    #[test]
+    fn trim_keeps_a_tangent_at_the_kept_end() {
+        let mut sk = Sketch::default();
+        let p0 = sk.add_point(0.0, 0.0);
+        let p1 = sk.add_point(20.0, 0.0);
+        let line = sk.add_line(p0, p1);
+        // Arc tangent to the line at (0, 0): centre (0, 10).
+        let p2 = sk.add_point(-10.0, 10.0);
+        let arc = sk
+            .add_arc_3pt(p2, p0, [-(50f64.sqrt()), 10.0 - 50f64.sqrt()])
+            .unwrap();
+        sk.constraints.push(Constraint::Tangent { line, arc });
+        let c0 = sk.add_point(15.0, -5.0);
+        let c1 = sk.add_point(15.0, 5.0);
+        sk.add_line(c0, c1);
+        let mut ed = SketchEditor::new(sk);
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [17.5, 0.0]);
+        let (p, q) = line_ends(&ed, line);
+        assert!(
+            (p[0].max(q[0]) - 15.0).abs() < 1e-9,
+            "{p:?} {q:?} {:?}",
+            ed.feedback
+        );
+        assert!(
+            ed.sketch
+                .constraints
+                .contains(&Constraint::Tangent { line, arc }),
+            "{:?}",
+            ed.feedback
+        );
     }
 }

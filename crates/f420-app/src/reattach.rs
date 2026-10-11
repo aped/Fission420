@@ -29,7 +29,9 @@ impl F420App {
         let picked = self
             .selected_face()
             .and_then(|f| f.reference)
-            .map(SketchPlane::Face);
+            .map(SketchPlane::Face)
+            // Only a face the window offers (not one of a later feature: cycle).
+            .filter(|p| self.support_options(sketch).iter().any(|(o, _)| o == p));
         self.reattach = Some(Reattach {
             sketch,
             choice: picked,

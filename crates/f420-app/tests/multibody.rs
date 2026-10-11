@@ -435,3 +435,31 @@ fn preview_direction_matches_regeneration_on_coplanar_world_plane() {
     type_into(&mut h, "Extrude distance (mm)", "2");
     assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, 2.0]);
 }
+
+/// Review run 3 #3/#4: an open body rename whose body disappears (toolbar Undo)
+/// closes, so keyboard shortcuts work again; a reply that selects a feature
+/// clears the body selection (no hidden "Selected [A]" export default).
+#[test]
+fn undo_closes_a_rename_of_a_vanished_body() {
+    let mut h = harness();
+    let (a, _b) = two_bodies(&mut h);
+    let name_b = h.state().summary().bodies[1].name.clone();
+    click(&mut h, &name_b);
+    click(&mut h, "Rename body…");
+    assert!(h.query_by_label("Body name").is_some());
+    click(&mut h, "Undo");
+    settle(&mut h);
+    assert_eq!(h.state().summary().bodies.len(), 1);
+    assert!(h.query_by_label("Body name").is_none());
+    // Shortcuts are live again: Ctrl+Z undoes B's sketch.
+    let rev = h.state().summary().revision;
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    settle(&mut h);
+    assert_ne!(h.state().summary().revision, rev, "Ctrl+Z ignored");
+    // Body selected in the browser, then a command that selects its feature.
+    let name_a = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name_a);
+    assert_eq!(h.state().selected_body(), Some(a));
+    rect_xy(&mut h, "10", "10", "20", "15");
+    assert_eq!(h.state().selected_body(), None);
+}

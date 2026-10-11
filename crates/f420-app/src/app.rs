@@ -844,6 +844,12 @@ impl F420App {
             self.body_rename = None;
             self.reattach = None;
             self.broken_sketch = None;
+            // Dialogs hold ids of the old document (ids restart per document);
+            // a pending import is the exception: its reply is this one.
+            if !matches!(&self.dialog, Some(Dialog::Import(f)) if f.pending) {
+                self.dialog = None;
+            }
+            self.import_summary = None;
         }
         // A sketch session belongs to one document; a different document
         // (Open/New/Close completed) ends it without committing.
@@ -873,6 +879,18 @@ impl F420App {
         {
             self.selected = None;
         }
+        // An inline rename whose target is gone (Undo, Delete) would keep
+        // keyboard shortcuts suspended with no field drawn.
+        if let Some((f, _)) = &self.rename
+            && !self.summary.features.iter().any(|x| x.id == *f)
+        {
+            self.rename = None;
+        }
+        if let Some(r) = &self.body_rename
+            && !self.summary.bodies.iter().any(|b| b.id == r.body)
+        {
+            self.body_rename = None;
+        }
         // Sketch commit replies close (or keep, on failure) the session.
         let commit_reply = matches!(
             command,
@@ -888,6 +906,7 @@ impl F420App {
                 if let Some(f) = response.feature {
                     self.selected = Some(f);
                     self.selected_face = None;
+                    self.selected_body = None;
                 }
             } else if let Some(s) = &mut self.sketch {
                 s.committing = false;
@@ -910,6 +929,7 @@ impl F420App {
         {
             self.selected = Some(f);
             self.selected_face = None;
+            self.selected_body = None;
         }
         // Continue a guarded action once its pre-save succeeded.
         if matches!(command, Command::Save { .. })
@@ -945,8 +965,7 @@ impl F420App {
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
             MeshUpdate::Replace(scene) => {
                 let m = &scene.mesh;
-                self.mesh_triangles = m.triangle_count();
-                self.selected_face = None;
+                let mut accepted = true;
                 if let Some(vp) = self.viewport.as_mut() {
                     match vp.set_mesh(m) {
                         Ok(()) => {
@@ -957,12 +976,18 @@ impl F420App {
                             }
                         }
                         Err(e) => {
+                            accepted = false;
                             let t = format!("display mesh rejected: {e}");
                             self.diag(true, "Display", t);
                         }
                     }
                 }
-                self.scene = scene;
+                // CPU picking must use the mesh the GPU draws.
+                if accepted {
+                    self.mesh_triangles = scene.mesh.triangle_count();
+                    self.selected_face = None;
+                    self.scene = scene;
+                }
             }
         }
         if let Some(b) = self.selected_body
