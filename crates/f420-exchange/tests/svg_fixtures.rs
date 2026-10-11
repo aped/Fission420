@@ -446,6 +446,23 @@ fn near_equal_radii_and_near_similarity_transforms_are_accepted() {
         "{} vs {want}",
         region_area(&s)
     );
+    // Same factor rounded to 6 significant digits (non-uniform by 3.8e-6) is
+    // still a similarity; a clearly non-uniform scale (1e-4) is an ellipse.
+    for (t, ok) in [
+        ("scale(0.264583,0.264584)", true),
+        ("scale(0.2646,0.26463)", false),
+    ] {
+        let doc = page(&format!(
+            r#"<g transform="{t}"><circle cx="100" cy="100" r="20"/></g>"#
+        ));
+        let imp = import(&doc, &SvgImportOptions::default());
+        if ok {
+            let imp = imp.unwrap_or_else(|e| panic!("{t}: {e}"));
+            assert!(imp.skipped.is_empty(), "{t}: {:?}", imp.skipped);
+        } else {
+            assert!(imp.is_err_and(|e| e.to_string().contains("ellip")), "{t}");
+        }
+    }
     // Inkscape-style px -> mm factor rounded to 8 digits (non-uniform by 4e-8)
     // around a circle and a closed D shape (arc + line sharing endpoints).
     let (kx, ky) = (0.26458333f64, 0.26458334f64);

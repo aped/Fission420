@@ -258,21 +258,19 @@ fn adopted_measurement_is_reused_on_redo() {
 
 // ---------------------------------------------------------------- finding 3
 
-/// Exact geometry, or (Truck 0.6 cannot cut with a cap coplanar to a partial
-/// face) a structured product-limit refusal naming the problem. Never a
-/// plausible wrong volume.
-fn exact_or_refused(r: Result<Evaluation>, expected: f64, why: &str) -> Option<Evaluation> {
+/// Truck 0.6 cannot cut with a cap coplanar to a partial face: the case is
+/// refused with a structured product-limit error naming the problem, never a
+/// plausible wrong volume. (These cases used to cut `wrong` mm^3.)
+fn refused(r: Result<Evaluation>, why: &str, wrong: f64) {
     match r {
-        Ok(e) => {
-            let v = body_vol(&e);
-            assert!((v - expected).abs() < VOL_TOL, "{v} vs {expected}");
-            Some(e)
-        }
         Err(DocError::ProductLimit(msg)) => {
             assert!(msg.contains(why) && msg.contains("coplanar"), "{msg}");
-            None
         }
-        Err(e) => panic!("expected {expected} or a product-limit refusal, got {e:?}"),
+        Ok(e) => panic!(
+            "expected a refusal, got volume {} (old wrong {wrong})",
+            body_vol(&e)
+        ),
+        Err(e) => panic!("expected a product-limit refusal, got {e:?}"),
     }
 }
 
@@ -323,10 +321,8 @@ fn cut_from_face_does_not_gouge_material_above_the_plane() {
         rect(10.0, 6.0, 10.0, 5.0),
     );
     cut(&mut d, s3, 3.0, b);
-    if let Some(e) = exact_or_refused(regenerate(&d), 2720.0 - 180.0, "rises") {
-        let bb = &e.bodies[0].measurements.as_ref().unwrap().bounds;
-        assert!((bb.max[2] - 20.0).abs() < 1e-9, "{bb:?}");
-    }
+    // Exact would be 2720 - 180 = 2540; the cutter cannot start on the plane.
+    refused(regenerate(&d), "rises", 2495.0);
 }
 
 /// Normal case: a cut fully inside the open part of the face is unchanged.
@@ -341,6 +337,56 @@ fn cut_from_face_inside_the_face_still_works() {
     cut(&mut d, s3, 3.0, b);
     let v = body_vol(&regenerate(&d).unwrap());
     assert!((v - (2720.0 - 72.0)).abs() < VOL_TOL, "{v}");
+}
+
+/// Post-fix review: an edge notch on the lower face (x -2..4, running off the
+/// x = 0 edge) with the raised step elsewhere on the body. The air above the
+/// notch is free, so the cut works: 2720 - 4x6x3 = 2648. The cut-probe slab in
+/// air made Truck return an empty result, which was taken for material and
+/// refused the cut.
+#[test]
+fn edge_notch_beside_a_raised_step_still_cuts() {
+    let (mut d, e1, b) = stepped_base();
+    let s3 = sketch(
+        &mut d,
+        face(e1, FaceRole::ExtrudeEndCap),
+        rect(6.0, 6.0, 1.0, 5.0),
+    );
+    cut(&mut d, s3, 3.0, b);
+    let v = body_vol(&regenerate(&d).expect("notch must cut, not be refused"));
+    assert!((v - 2648.0).abs() < VOL_TOL, "{v}");
+}
+
+/// Post-fix review: a Join on world XY coplanar with the block's bottom face
+/// (outward normal -Z). Builds before the "Join goes away from the material"
+/// rule needed `reverse: true` here and saved it; such files must still
+/// regenerate, and `reverse` makes no difference. 20x20x10 + 4x4x3 = 4048,
+/// boss below z = 0.
+#[test]
+fn join_on_a_face_ignores_reverse_so_old_files_still_load() {
+    for reverse in [false, true] {
+        let mut d = Document::new();
+        let s1 = sketch(&mut d, SketchPlane::WorldXY, rect(20.0, 20.0, 0.0, 0.0));
+        d.push_extrude("E1", s1, 10.0);
+        let s2 = sketch(&mut d, SketchPlane::WorldXY, rect(4.0, 4.0, 0.0, 0.0));
+        d.push(
+            "J",
+            FeatureKind::Extrude {
+                sketch: s2,
+                distance: 3.0,
+                operation: Operation::Join { target: BodyId(1) },
+                extent: Extent::Distance,
+                reverse,
+            },
+        );
+        let e = regenerate(&d).unwrap_or_else(|e| panic!("reverse={reverse}: {e}"));
+        assert!((body_vol(&e) - 4048.0).abs() < VOL_TOL, "{}", body_vol(&e));
+        let bb = &e.bodies[0].measurements.as_ref().unwrap().bounds;
+        assert!(
+            (bb.min[2] + 3.0).abs() < 1e-9 && (bb.max[2] - 10.0).abs() < 1e-9,
+            "{bb:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------- finding 4
@@ -367,7 +413,8 @@ fn blind_cut_floor_on_a_partial_face_does_not_overcut() {
         rect(10.0, 6.0, 10.0, 5.0),
     );
     cut(&mut d, s3, 10.0, b);
-    exact_or_refused(regenerate(&d), 1760.0, "floor");
+    // Exact would be 1760; the floor cannot stay on the partial face.
+    refused(regenerate(&d), "floor", 1719.6);
 }
 
 /// Normal case: a full-thickness blind cut on a plain block still goes through
@@ -428,7 +475,8 @@ fn pattern_copy_floor_is_rederived_where_it_lands() {
     let v = body_vol(&plate_with_boss_and_pattern(10.0).unwrap());
     assert!((v - 4080.0).abs() < VOL_TOL, "{v}");
     // The copy at x 28..32 sits over the boss: exact (stop at z = 0) or refused.
-    exact_or_refused(plate_with_boss_and_pattern(24.0), 4080.0, "floor");
+    let v = body_vol(&plate_with_boss_and_pattern(24.0).expect("copy cuts"));
+    assert!((v - 4080.0).abs() < VOL_TOL, "{v}");
 }
 
 // ---------------------------------------------------------------- finding 5

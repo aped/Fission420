@@ -763,13 +763,13 @@ impl F420App {
                 );
             }
             if same {
-                if r.response.ok {
-                    self.measurements = r.measurements;
-                    // Per-body (and per-feature) measurements of the same
-                    // revision: the document itself is unchanged.
-                    self.summary.bodies = r.summary.bodies;
-                    self.summary.features = r.summary.features;
-                } else if let Some(e) = &r.response.error {
+                // Per-body (and per-feature) measurements of the same revision:
+                // the document itself is unchanged. Applied on a failure too,
+                // which still carries the bodies that did measure.
+                self.measurements = r.measurements;
+                self.summary.bodies = r.summary.bodies;
+                self.summary.features = r.summary.features;
+                if let (false, Some(e)) = (r.response.ok, &r.response.error) {
                     self.diag(true, error_kind(e), e.to_string());
                 }
                 self.summary.measuring = r.summary.measuring;
@@ -2077,4 +2077,50 @@ pub fn next_step(e: &DocError) -> String {
 /// Shortest representation that round-trips (so unchanged fields compare equal).
 pub(crate) fn fmt_num(v: f64) -> String {
     format!("{v}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use f420_commands::{Response, Session};
+
+    /// Review run 3 #17 (UI side): a measurement follow-up that reports one
+    /// failed body still delivers the bodies that did measure.
+    #[test]
+    fn failed_measurement_followup_still_applies_measured_bodies() {
+        let mut s = Session::new();
+        s.set_defer_measurements(true);
+        s.execute(&Command::NewDocument);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../f420-kernel/tests/fixtures/step/two_boxes_compound_mm.step");
+        let r = s.execute(&Command::ImportStep {
+            path,
+            units_to_mm: None,
+        });
+        assert!(r.ok, "{:?}", r.error);
+        let mut app = F420App::new(ExecMode::Sync, None);
+        app.summary = s.summary();
+        let (doc, rev, bodies) = s.pending_measurement().expect("pending");
+        let (good, bad) = (bodies[0].0, bodies[1].0);
+        let m = f420_kernel::measure(&bodies[0].1).unwrap();
+        assert!(s.adopt_measurements(doc, rev, vec![(good, m)]));
+        assert!(s.fail_measurements(doc, rev));
+        app.handle_reply(Reply {
+            command: Command::Measure,
+            response: Response {
+                ok: false,
+                command: "measure".into(),
+                error: Some(DocError::Validation(format!("body {bad}: injected"))),
+                ..Default::default()
+            },
+            summary: s.summary(),
+            measurements: None,
+            mesh: MeshUpdate::Unchanged,
+            followup: true,
+        });
+        let body = |id| app.summary.bodies.iter().find(|b| b.id == id).unwrap();
+        assert!(body(good).measurements.is_some());
+        assert!(body(bad).measurements.is_none());
+        assert!(app.diagnostics().last().is_some_and(|d| d.error));
+    }
 }

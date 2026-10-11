@@ -897,15 +897,21 @@ fn extrude_feature(
         Some((_, t)) => k::coplanar_face_side(t, &frame).map_err(kernel(id))?,
         None => None,
     };
-    // Direction semantics (ADR 0003): along the sketch normal, except that a Cut
-    // sketched on a face of its target goes into the material by default.
-    // `reverse` flips the default.
+    // Direction semantics (ADR 0003): along the sketch normal, except when the
+    // sketch plane holds a face of the target. A Cut then goes into the material
+    // by default (`reverse` flips it). A Join goes away from the material and
+    // ignores `reverse`: the other way only adds nothing, and documents saved
+    // before this rule set `reverse` exactly when it pointed away.
     let base = match (operation, side) {
         (Operation::Cut { .. }, Some(side)) => -side,
         (Operation::Join { .. }, Some(side)) => side,
         _ => 1.0,
     };
-    let dir = if reverse { -base } else { base };
+    let dir = match (operation, side) {
+        (Operation::Join { .. }, Some(side)) => side,
+        _ if reverse => -base,
+        _ => base,
+    };
     // Tool = prism of the profile over [a, b] along the sketch normal.
     let (mut a, mut b) = if dir > 0.0 {
         (0.0, distance)
@@ -972,12 +978,6 @@ fn extrude_feature(
                         "{id}: a Join sketched on a face of the target must lie inside that face \
                          (the profile crosses the face boundary or a hole); use New Body, or \
                          sketch on another plane"
-                    )));
-                }
-                if dir * side < 0.0 {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the join points into the material of {target} and adds nothing; \
-                         clear 'reverse'"
                     )));
                 }
                 // Material is on the -side of the face's outward normal. Keep the
@@ -1135,10 +1135,19 @@ fn margin_is_free(
         return Ok(false);
     }
     let start = plane.offset(if beyond > 0.0 { gap } else { -margin });
-    Ok(matches!(
-        k::cut_prism(t, kp, &start, margin - gap),
-        Err(k::KernelError::InvalidInput(_))
-    ))
+    match k::cut_prism(t, kp, &start, margin - gap) {
+        // Bounds miss, or a cut that removes nothing: free.
+        Err(k::KernelError::InvalidInput(_)) => Ok(true),
+        // Truck can also return an empty or failed result for a slab lying
+        // wholly in air. Confirm with a union: a slab that touches no material
+        // is reported as a disconnected result. Anything else is taken as
+        // material (a conservative refusal, never a gouge).
+        Err(k::KernelError::InvalidResult(_) | k::KernelError::BooleanFailed(_)) => Ok(matches!(
+            k::join_prism(t, kp, &start, margin - gap),
+            Err(k::KernelError::InvalidResult(m)) if m.contains("disconnected")
+        )),
+        _ => Ok(false),
+    }
 }
 
 /// A cut whose end had to stay on a coplanar face failed in the kernel: say why.

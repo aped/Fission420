@@ -305,7 +305,7 @@ fn check_against_oracle(s: &Sketch, outer: &[[f64; 2]], hole: &[[f64; 2]]) -> Op
     match (&got, expect) {
         (Ok(r), true) => assert_eq!(r.holes.len(), 1, "expected one hole"),
         (Err(e), false) => assert!(
-            e.to_string().contains("separate outer loops"),
+            e.to_string().contains("2 separate outer loops"),
             "unexpected error {e}"
         ),
         _ => panic!(

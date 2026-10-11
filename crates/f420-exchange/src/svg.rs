@@ -53,9 +53,11 @@ const FMT: &str = "SVG";
 /// CSS absolute units in user units (px).
 const PX_PER_MM: f64 = 96.0 / 25.4;
 /// Relative tolerance for "equal radii" (`rx`/`ry`) and "similarity transform":
-/// files round to 6-8 significant digits. Near-equal radii use their mean; arc
-/// centres are re-derived so both endpoints stay exactly on the arc.
-const SIMILAR_REL: f64 = 1e-6;
+/// files round to 6-8 significant digits (6 digits: up to ~4e-6 apart, e.g.
+/// 0.264583 vs 0.264584). Near-equal radii use their mean (shape error at most
+/// half this, 0.5 um at r = 100 mm); arc centres are re-derived so both
+/// endpoints stay exactly on the arc.
+const SIMILAR_REL: f64 = 1e-5;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SvgImportOptions {
@@ -135,9 +137,11 @@ impl Affine {
     /// the square root of |det|, the geometric mean of the two axis scales.
     fn similarity_scale(&self) -> Option<f64> {
         let [a, b, c, d, ..] = self.0;
-        let (n1, n2) = (a * a + b * b, c * c + d * d);
-        let tol = SIMILAR_REL * n1.max(n2);
-        ((n1 - n2).abs() <= tol && (a * c + b * d).abs() <= tol && n1 > 0.0)
+        // Column lengths equal and columns orthogonal, both relative to the
+        // lengths themselves (not their squares, which doubles the error).
+        let (l1, l2) = ((a * a + b * b).sqrt(), (c * c + d * d).sqrt());
+        let tol = SIMILAR_REL * l1.max(l2);
+        ((l1 - l2).abs() <= tol && (a * c + b * d).abs() <= tol * l1.min(l2) && l1 > 0.0)
             .then(|| (a * d - b * c).abs().sqrt())
     }
 }
