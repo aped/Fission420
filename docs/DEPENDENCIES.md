@@ -61,3 +61,17 @@ truck-stepio's re-export (`truck_stepio::r#in::ruststep`), so there is no direct
 Test fixtures under `crates/f420-kernel/tests/fixtures/step/` were generated with FreeCAD 1.1.4
 (LGPL-2.1, external tool, not linked) from primitives in our own script
 (`tools/fixtures/step/generate.py`); they contain no third-party design data.
+
+## 3MF adapter (run 3, `f420-exchange::threemf`)
+
+New *direct* dependencies of `f420-exchange`; all three were already in `Cargo.lock`
+(transitively via `image`/`png` and `wayland-scanner`), so no new crate enters the build.
+
+| crate | version (Cargo.lock) | license | source | used for |
+|---|---|---|---|---|
+| miniz_oxide | 0.8.9 (default `with-alloc`) | MIT OR Zlib OR Apache-2.0 | https://crates.io/crates/miniz_oxide | raw deflate/inflate of ZIP entries (bounded `decompress_to_vec_with_limit`) |
+| crc32fast | 1.5.2 | MIT OR Apache-2.0 | https://crates.io/crates/crc32fast | ZIP entry CRC-32 |
+| quick-xml | 0.41.0 (`default-features = false`) | MIT | https://crates.io/crates/quick-xml | streaming XML tokenizer + namespace resolution for the 3MF model and OPC relationships |
+
+The ZIP container code (`f420-exchange/src/zip.rs`) and the 3MF model handling are our own.
+Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tools/fixtures/threemf/`.

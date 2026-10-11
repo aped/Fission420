@@ -859,7 +859,10 @@ dependencies = [
 name = "f420-exchange"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "f420-sketch",
+ "miniz_oxide 0.8.9",
+ "quick-xml 0.41.0",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

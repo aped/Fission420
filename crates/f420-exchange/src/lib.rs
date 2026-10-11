@@ -4,16 +4,20 @@
 //! * [`mesh`]: topology/geometry diagnostics of an indexed triangle mesh.
 //! * [`dxf`]: ASCII DXF import to an unconstrained [`f420_sketch::Sketch`] and export of a
 //!   sketch's lines, arcs and circles.
+//! * [`threemf`]: 3MF core-subset multi-object mesh import (units, item/component
+//!   transforms, object colours) and export, over a bounded ZIP reader/writer.
 //!
 //! Every reader is a pure function from bytes to a typed result, enforces byte and
 //! entity/triangle limits, and reports malformed or unsupported input as an
 //! [`ExchangeError`]; no input can make it panic. Lengths are millimetres after conversion;
 //! the conversion factor is always reported back. Supported subsets, limits and known
-//! losses: `docs/formats/stl.md`, `docs/formats/dxf.md`.
+//! losses: `docs/formats/stl.md`, `docs/formats/dxf.md`, `docs/formats/threemf.md`.
 
 pub mod dxf;
 pub mod mesh;
 pub mod stl;
+pub mod threemf;
+mod zip;
 
 use serde::{Deserialize, Serialize};
 
