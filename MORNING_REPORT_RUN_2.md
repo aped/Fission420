@@ -35,7 +35,8 @@ bracket) still works and still passes its tests.
   Truck's implicit intersection edges cost ~118 µs per evaluation. After every boolean the
   kernel now replaces those edges with exact, verified NURBS (ADR 0002): a plate-with-hole
   dimension edit takes **209 ms end to end including measurements** (was 2395 ms), undo 2 ms,
-  the bracket example 2.7 s (was 69 s), `cargo xtask check` 40 s (was 5 min). Measurement is
+  the bracket example 2.7 s (was 69 s), `cargo xtask check` ~40 s (was 2m58s at the start of
+  the run, ~5 min mid-run as tests grew). Measurement is
   additionally deferred to a background thread tagged by document id + revision, so slow cases
   never block geometry and never show stale numbers. Sketch interaction is local and
   sub-millisecond.
@@ -51,8 +52,8 @@ bracket) still works and still passes its tests.
   (`loginctl … LockedHint=yes`), so all window evidence comes from a *private headless GNOME
   compositor* (`mutter --headless`) running the real release binary, with **real Wayland
   pointer/keyboard input** injected through that compositor's own RemoteDesktop D-Bus API.
-  Four scripted walkthroughs assert document state after every step and pass
-  (`tools/live_walkthrough.sh`).
+  Six scripted walkthroughs (`tools/live/*.txt`: scenarios A, B, C, arcs, pocket/rename/delete,
+  constraints) assert document state after their steps and pass (`tools/live_walkthrough.sh`).
 
 ## 2. Build, launch, demo, test commands (all run tonight)
 
@@ -112,8 +113,8 @@ Limitations (honest list):
   extrusion, from a cap sketch, and must lie inside the host profile (exact containment check
   for line/arc hosts).
 * Only extrusion caps can host sketches; side faces and cut faces explain that they cannot.
-* No construction geometry, no point-on-line / midpoint / parallel / perpendicular / angle
-  constraints; arc radius changes only through its points or a Radius dimension.
+* No angle dimension, offset, trim/extend, fillet-in-sketch or pattern tools; Parallel accepts
+  anti-parallel lines; an arc's radius changes only through its points or a Radius dimension.
 * Sketch overlays are drawn on top of the body (no depth test) in the model view.
 * STEP writes cylinders/arcs as exact rational B-splines (other tools show splines).
 * The Truck boolean itself costs ~150–190 ms per cut; holes crossing holes or angled planes keep
@@ -129,6 +130,14 @@ Limitations (honest list):
   a physical display (where mutter's clock follows vblank) is **unverified** — the desktop was
   locked all night.
 * The glyphs ▾ ◐ → ● are missing from egui's default fonts and were replaced with ASCII.
+
+Bugs found tonight by driving the real window with real input (all fixed, each with a test or
+a live script): the toolbar shifting under the pointer when the Undo label changed; inline
+dimension editors not selecting their text (typing appended); glyphs missing from the UI font;
+**sketch clicks misplaced or dropped when a slow frame batched a release with the next
+movement** (clicks are now derived from raw press/release events); **a cross-thread race on
+Truck geometry** (shallow `Body` clones share mutex-protected curves; the measurement thread
+now gets a deep copy); measurements left "pending" forever after a failure.
 
 Known regressions vs run 1: none known. Behaviour changes: template dialogs moved into a
 Templates menu, exports into an Export menu; Undo/Redo show the action in the tooltip (fixed
@@ -154,7 +163,8 @@ binaries refuse).
 7. **Undo** / **Redo** (Ctrl+Z / Ctrl+Shift+Z). **Ctrl+Shift+S** to save, **Close**, **Ctrl+O**.
 8. Try failures: in a sketch, dimension the top edge of the rectangle again (rejected, culprit
    named); type `abc` into a dimension (stays open, error); drag a dimensioned corner (blocked,
-   explained). Close the window with unsaved changes → **Save / Discard changes / Keep editing**.
+   explained). Close the window with unsaved changes → **Save first / Discard changes / Keep
+   editing**.
 9. Arcs: **Create Sketch**, **L** line from (−20,0) to (20,0), **Esc**; **A**, click the two ends,
    then a point above; **D** on the arc → radius; **Finish Sketch**, **Extrude…**.
 10. Navigation: middle-drag orbit, right-drag pan, wheel zoom to cursor, **F** fit, **7/1/3/0**
