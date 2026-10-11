@@ -25,7 +25,7 @@ pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
 pub use edit::{DragOutcome, DragResult, fmt_mm};
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use profile::{LoopSegment, Profile};
 
@@ -166,6 +166,19 @@ pub enum Constraint {
         b: PointId,
         dim: Dimension,
     },
+    /// Two distinct lines are parallel (or anti-parallel). 1 equation,
+    /// `S · (u_a × u_b) = 0` with `u` the unit directions and `S` the sketch
+    /// scale (mm, constant during a solve) so the residual is in mm.
+    Parallel { a: EntityId, b: EntityId },
+    /// Two distinct lines are perpendicular. 1 equation, `S · (u_a · u_b) = 0`
+    /// (same scaling as [`Constraint::Parallel`]).
+    Perpendicular { a: EntityId, b: EntityId },
+    /// Two distinct lines have equal length. 1 equation, `|a| − |b| = 0` (mm).
+    EqualLength { a: EntityId, b: EntityId },
+    /// `point` lies on the infinite line through `line`'s endpoints. 1
+    /// equation, the signed distance `u × (p − a) = 0` (mm). The point may not
+    /// be one of the line's own endpoints.
+    PointOnLine { point: PointId, line: EntityId },
 }
 
 impl Constraint {
@@ -283,6 +296,10 @@ pub struct Sketch {
     /// movable anchor (`center_x` / `center_y`). Absent in format-v1 files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<PointId>,
+    /// Construction (reference) entities: solved and constrained like any other
+    /// entity but ignored by profile extraction. Absent when empty.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub construction: BTreeSet<EntityId>,
 }
 
 fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
@@ -339,6 +356,7 @@ impl Sketch {
         };
         let s = Sketch {
             origin: None,
+            construction: BTreeSet::new(),
             points: vec![
                 p(0, 0.0, 0.0),
                 p(1, -hw, -hh),
@@ -383,6 +401,7 @@ impl Sketch {
         check_dim_value("diameter", diameter)?;
         let s = Sketch {
             origin: None,
+            construction: BTreeSet::new(),
             points: vec![
                 SketchPoint {
                     id: PointId(0),
@@ -571,6 +590,28 @@ impl Sketch {
                         SketchError::InvalidValue(format!("constraint {i}: {why}"))
                     })?;
                 }
+                Constraint::Parallel { a, b }
+                | Constraint::Perpendicular { a, b }
+                | Constraint::EqualLength { a, b } => {
+                    need_entity(i, a, "line")?;
+                    need_entity(i, b, "line")?;
+                    if a == b {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: needs two different lines"
+                        )));
+                    }
+                }
+                Constraint::PointOnLine { point, line } => {
+                    need_point(point)?;
+                    if let Entity::Line { a, b, .. } = need_entity(i, line, "line")?
+                        && (point == a || point == b)
+                    {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: point {point:?} is an endpoint of line {line:?} \
+                             (point-on-line needs a separate point)"
+                        )));
+                    }
+                }
             }
             if let Some(d) = c.dimension() {
                 check_dim_value(&d.name, d.value)?;
@@ -581,6 +622,9 @@ impl Sketch {
         }
         if let Some(o) = &self.origin {
             need_point(o)?;
+        }
+        if let Some(c) = self.construction.iter().find(|c| !kinds.contains_key(c)) {
+            return Err(SketchError::MissingEntity(*c));
         }
         let unknowns = self.unknown_count();
         if unknowns > MAX_UNKNOWNS {
@@ -651,3 +695,6 @@ mod tests_edit;
 
 #[cfg(test)]
 mod tests_arc;
+
+#[cfg(test)]
+mod tests_lines;

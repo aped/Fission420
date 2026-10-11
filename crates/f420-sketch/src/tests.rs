@@ -235,6 +235,7 @@ fn profile_rejects_open_and_mixed_geometry() {
 fn profile_ccw_even_when_lines_drawn_clockwise() {
     // Triangle drawn clockwise; no constraints, so the current state is "solved".
     let s = Sketch {
+        construction: Default::default(),
         origin: None,
         points: vec![
             SketchPoint {
@@ -282,6 +283,7 @@ fn profile_ccw_even_when_lines_drawn_clockwise() {
 fn profile_rejects_self_intersecting_bowtie() {
     let pts = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)];
     let s = Sketch {
+        construction: Default::default(),
         origin: None,
         points: pts
             .iter()

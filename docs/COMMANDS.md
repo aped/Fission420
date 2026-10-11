@@ -63,7 +63,8 @@ variable the same test fails when the committed JSON is stale, and it replays th
 (x = world X, y = world Z) or `{"Face":{"feature":N,"role":"ExtrudeEndCap"|"ExtrudeStartCap"}}`.
 
 A usable profile is one circle, or one closed loop of lines and arcs (shared endpoints or
-`Coincident` points, every vertex joining exactly two curves). A sketch whose geometry is not
+`Coincident` points, every vertex joining exactly two curves); construction entities are
+skipped first. A sketch whose geometry is not
 a single closed profile (open polyline or arc chain, extra dangling curve, self-intersection
 including arc-line and arc-arc crossings or touching, zero-length line, zero-sweep arc, more
 than one loop, lines/arcs mixed with circles) is still created; its
@@ -75,8 +76,13 @@ than one loop, lines/arcs mixed with circles) is still created; its
 `constraints` (`FixedPoint`, `Horizontal`, `Vertical`, `HorizontalDistance`,
 `VerticalDistance`, `Distance` (aligned length, nonlinear), `SymmetricAboutPoint`, `Diameter`,
 `Coincident`, `Radius` (`{entity, dim}`, arc or circle), `Tangent` (`{line, arc}`, sharing one
-endpoint id), `EqualRadius` (`{a, b}`, arcs/circles); dimensions carry `{"name", "value"}`,
-names unique per sketch), optional `origin` (the point fixed at (0, 0)).
+endpoint id), `EqualRadius` (`{a, b}`, arcs/circles), `Parallel` / `Perpendicular` /
+`EqualLength` (`{a, b}`, two different lines; parallel includes anti-parallel), `PointOnLine`
+(`{point, line}`, the point lies on the infinite line through the line's endpoints and may not be
+one of them); dimensions carry `{"name", "value"}`, names unique per sketch), optional `origin`
+(the point fixed at (0, 0)), optional `construction` (array of entity ids: construction geometry,
+solved and constrained like any entity but ignored by profile extraction, so a construction
+centre line or reference circle does not break the profile; omitted when empty).
 
 Arcs: an `Arc` runs counter-clockwise from `start` to `end` about `center` (sweep in
 (0, 2π)); all three are ordinary points. The entity always implies
@@ -116,7 +122,8 @@ extrusions the referenceable `faces` with their current frames.
 
 `{"format": "fission420", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
 optional sketch `origin`, the `Distance` constraint and the `Pocket` feature; later run-2
-additions (the `Arc` entity, `Radius` / `Tangent` / `EqualRadius` constraints) are serde-additive
+additions (the `Arc` entity, `Radius` / `Tangent` / `EqualRadius` / `Parallel` / `Perpendicular` /
+`EqualLength` / `PointOnLine` constraints, the sketch `construction` set) are serde-additive
 and keep version 2, so a v2 file that uses them cannot be read by a run-1 or early run-2 binary
 (it fails with a `File` parse error; nothing is overwritten). **Migration:** version-1 files are a
 strict subset and load unchanged (identity migration); saving writes version 2. Files claiming
