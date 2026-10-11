@@ -20,8 +20,14 @@ to get monitor pixels.
     type TEXT  (ASCII letters, digits, '.', '-', '/', '_', space)
     scroll X Y STEPS              sleep MS
     shot                          (F12: the app saves --shot-dir/shot_NNN.png)
+    sclick X Y / smove X Y / sdrag X1 Y1 X2 Y2 [button]   sketch-plane mm
+    wclick X Y Z                  world mm
+      (s*/w* commands need the app started with F420_PROBE=<state>/probe.json;
+       they project with the app's own camera, see crates/f420-app/src/main.rs)
     # comment
 """
+import json
+import math
 import os
 import sys
 import time
@@ -115,7 +121,51 @@ class Driver:
         time.sleep(0.05)
 
 
-def run(driver, lines):
+class Probe:
+    """Mirror of f420_viewport::Camera::project (Z-up orbit camera)."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def load(self):
+        for _ in range(20):
+            try:
+                with open(self.path) as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                time.sleep(0.05)
+        raise RuntimeError(f"no probe at {self.path}")
+
+    def world(self, p):
+        d = self.load()
+        c, (x0, y0, x1, y1) = d["camera"], d["rect"]
+        w, h = x1 - x0, y1 - y0
+        sp, cp = math.sin(c["pitch"]), math.cos(c["pitch"])
+        sy, cy = math.sin(c["yaw"]), math.cos(c["yaw"])
+        back = (cp * cy, cp * sy, sp)
+        eye = [c["target"][i] + back[i] * c["distance"] for i in range(3)]
+        fwd = [-b for b in back]
+        r = (fwd[1] * 1 - fwd[2] * 0, fwd[2] * 0 - fwd[0] * 1, 0.0)
+        n = math.hypot(r[0], r[1]) or 1.0
+        r = (r[0] / n, r[1] / n, 0.0)
+        u = (r[1] * fwd[2] - r[2] * fwd[1], r[2] * fwd[0] - r[0] * fwd[2], r[0] * fwd[1] - r[1] * fwd[0])
+        rel = [p[i] - eye[i] for i in range(3)]
+        dot = lambda a, b: sum(a[i] * b[i] for i in range(3))
+        z = dot(rel, fwd)
+        t = math.tan(0.5 * c["fov_y"])
+        nx = dot(rel, r) / (z * t * (w / h))
+        ny = dot(rel, u) / (z * t)
+        return (x0 + (nx + 1) * 0.5 * w, y0 + (1 - ny) * 0.5 * h)
+
+    def sketch(self, x, y):
+        s = self.load()["sketch"]
+        if s is None:
+            raise RuntimeError("no sketch session open")
+        p = [s["origin"][i] + x * s["x"][i] + y * s["y"][i] for i in range(3)]
+        return self.world(p)
+
+
+def run(driver, lines, probe=None):
     for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -158,6 +208,26 @@ def run(driver, lines):
             driver.scroll(int(args[2]))
         elif op == "sleep":
             time.sleep(float(args[0]) / 1000.0)
+        elif op in ("sclick", "smove", "wclick"):
+            v = list(map(float, args))
+            sx, sy = probe.world(v[:3]) if op == "wclick" else probe.sketch(v[0], v[1])
+            driver.move(sx, sy)
+            if op != "smove":
+                time.sleep(0.05)
+                driver.button("left", True)
+                driver.button("left", False)
+                time.sleep(0.1)
+        elif op == "sdrag":
+            x1, y1, x2, y2 = map(float, args[:4])
+            b = args[4] if len(args) > 4 else "left"
+            (ax, ay), (bx, by) = probe.sketch(x1, y1), probe.sketch(x2, y2)
+            driver.move(ax, ay)
+            driver.button(b, True)
+            for k in range(1, 13):
+                t = k / 12
+                driver.move(ax + (bx - ax) * t, ay + (by - ay) * t)
+            driver.button(b, False)
+            time.sleep(0.1)
         elif op == "shot":
             driver.chord("F12")
             time.sleep(0.8)
@@ -174,7 +244,7 @@ def main():
     with open(os.path.join(state, "bus")) as f:
         bus = f.read().strip()
     lines = sys.stdin.read().splitlines() if script == "-" else open(script).read().splitlines()
-    run(Driver(bus), lines)
+    run(Driver(bus), lines, Probe(os.path.join(state, "probe.json")))
 
 
 if __name__ == "__main__":

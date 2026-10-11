@@ -91,6 +91,8 @@ struct Shell {
     f12_pending: bool,
     title: String,
     trace_input: bool,
+    probe: Option<PathBuf>,
+    probe_last: String,
     result: Arc<Mutex<Result<(), String>>>,
 }
 
@@ -213,6 +215,44 @@ fn trace_input(ctx: &egui::Context) {
     });
 }
 
+/// `F420_PROBE=<file>`: after each frame whose projection changed, write the view
+/// rect, camera and open sketch frame as JSON, so an external input driver
+/// (tools/live_input.py) can target sketch-plane and world coordinates with
+/// the same projection the app uses.
+fn write_probe(path: &std::path::Path, app: &F420App, last: &mut String) {
+    let (cam, _) = app.view_camera();
+    let Some(r) = app.view_rect() else { return };
+    let f = |v: [f64; 3]| format!("[{},{},{}]", v[0], v[1], v[2]);
+    let sketch = app.sketch_session().map_or("null".to_string(), |s| {
+        format!(
+            "{{\"origin\":{},\"x\":{},\"y\":{}}}",
+            f(s.frame.origin),
+            f(s.frame.x),
+            f(s.frame.y)
+        )
+    });
+    let json = format!(
+        "{{\"rect\":[{},{},{},{}],\"camera\":{{\"target\":[{},{},{}],\"distance\":{},\"yaw\":{},\"pitch\":{},\"fov_y\":{}}},\"sketch\":{sketch}}}",
+        r.min.x,
+        r.min.y,
+        r.max.x,
+        r.max.y,
+        cam.target[0],
+        cam.target[1],
+        cam.target[2],
+        cam.distance,
+        cam.yaw,
+        cam.pitch,
+        cam.fov_y
+    );
+    if json != *last {
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, &json).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+            *last = json;
+        }
+    }
+}
+
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -229,6 +269,9 @@ impl eframe::App for Shell {
             self.title = title;
         }
         self.app.ui(ui);
+        if let Some(p) = self.probe.clone() {
+            write_probe(&p, &self.app, &mut self.probe_last);
+        }
         self.drive_screenshot(&ctx);
         self.drive_f12(&ctx);
     }
@@ -285,6 +328,8 @@ fn main() -> ExitCode {
                 f12_pending: false,
                 title: String::new(),
                 trace_input: std::env::var_os("F420_TRACE_INPUT").is_some_and(|v| v == "1"),
+                probe: std::env::var_os("F420_PROBE").map(PathBuf::from),
+                probe_last: String::new(),
                 result: result_app,
             }))
         }),

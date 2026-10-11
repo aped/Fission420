@@ -1,4 +1,57 @@
-# STATUS — Fission420 run 1
+# STATUS — Fission420 run 2 (spec: SESSION_2.md)
+
+## Run budget (recorded once; do not reset on resume)
+- Start: 2026-10-10T16:23:57-07:00 (branch work/run-2 from work/run-1 @ 68aba09)
+- Deadline: 2026-10-11T00:23:57-07:00 (8 h)
+- Integration reserve begins: 2026-10-10T22:53-07:00 (final ~90 min: no new features)
+- Supersedes: GOAL.md acceptance (run 1, kept passing) as the *primary* target; SESSION_2.md scenarios A/B/C are this run's acceptance. AGENTS.md rules unchanged.
+- Workers: max 3 agents incl. coordinator (GOAL.md). Isolated git worktrees, merged by the coordinator.
+
+## Baseline (observed at start)
+- `cargo xtask check`: PASS, 78 tests, acceptance 96/96, 2m58s (artifacts/run2/baseline_xtask.log)
+- Screenshots: artifacts/run2/before_empty.png, artifacts/run2/before_demo.png (scripted, real window via --screenshot)
+
+## Plan and ownership
+| Area | Owner | Files | Acceptance |
+|---|---|---|---|
+| Backend API skeleton (origin, Distance, drag, optional profiles, EditSketch/Rename/Polygon/Custom, doc_id, format v2) | coordinator | f420-sketch, f420-document, f420-commands | DONE 57273b8; existing tests green; scenario B headless 11750 mm^3 |
+| Backend hardening, headless scenarios A/B, examples, engine coalescing + timings, (stretch: blind pocket) | worker "backend" | f420-sketch/document/commands/cli tests, engine.rs, examples, docs | sketch/doc/engine tests; `f420-cli acceptance` A./B. steps |
+| Viewport: view presets, axis triad, selection highlight sets, feature edges, adaptive sketch-plane grid, zoom-to-cursor | worker "viewport" | f420-viewport | unit tests; screenshot |
+| Sketch editor + UI restructure (command bar / tree / inspector / status), selection sync, contextual commands, shortcuts, dirty handling, help, empty state | coordinator | f420-app (app.rs, new sketch_edit.rs, sketch_view.rs) | egui_kittest UI tests for A, B, C; screenshots |
+
+## Design decisions (material)
+- Sketch edit session is UI-local: Create/Edit Sketch copies the sketch; tools mutate the copy and solve locally (µs–ms, UI thread); Finish sends ONE command (create_sketch template=custom, or edit_sketch) → one document undo entry. Cancel discards. Inside the editor Ctrl+Z/Ctrl+Shift+Z walk a local snapshot stack.
+- Editor sketches carry an explicit fixed `origin` point; templates keep their movable anchor (center_x/center_y). Template sketches open in the same editor (no conversion needed: they are ordinary constraint sketches).
+- Snapping to points reuses the point id (shared endpoint = implicit coincidence, visible as a merged vertex); H/V snapping while drawing adds explicit Horizontal/Vertical constraints (shown as glyphs). Grid snap does not create constraints.
+- Sketches whose geometry is not a single closed profile are kept (profile_error recorded) and refused by extrude/cut with a structured error; nothing is auto-closed.
+- Drags never bypass constraints: pin target → else slide on one axis → else blocked with the blocking constraints named.
+- Face → sketch: viewport pick is matched against the semantic faces (extrude end/start caps) the document reports; other faces explain why they cannot host a sketch. The regenerator re-validates the semantic reference.
+- Native format v2 (additive); v1 files load unchanged; serde_json float_roundtrip for exact reloads.
+
+## Progress log
+| time | item | result |
+|---|---|---|
+| 16:24 | baseline xtask | PASS |
+| 16:35 | backend skeleton 57273b8 | PASS (sketch/doc/commands tests, acceptance) |
+| 16:45 | viewport worker merged (578f23e) | 36 viewport tests |
+| 16:50 | sketch editor core 7d96ae8 | 7 unit tests |
+| 16:58 | UI restructure ca4b332 | run-1 UI tests updated + pass |
+| 17:02 | scenario A/B/C kittest suite 965894b | 6/6 pass |
+| 17:20 | live-window input (headless mutter + RemoteDesktop) d788d6e; fixes found live | scenario A executed live, screenshots artifacts/run2/live_a/shots |
+
+## Next
+- Merge backend worker (headless A/B acceptance, engine coalescing, timings).
+- Live scenario B/C walkthrough; regeneration latency (2.4 s plate+hole set_parameter) profiling.
+- Integration reserve from 22:53: xtask check, external validation, report.
+
+## Evidence locations (run 2)
+- UI tests: crates/f420-app/tests/sketch_workflow.rs (A/B/C), ui_workflow.rs + placement.rs (run 1, updated)
+- Live real-input sessions: tools/headless_session.sh + tools/live_input.py; artifacts/run2/live_a/{a*.txt scripts, app.log input trace, shots/}
+- Desktop session is locked (loginctl LockedHint=yes) so --screenshot on the user's display hangs; all window captures use a private headless mutter.
+
+---
+
+# (archived) STATUS — Fission420 run 1
 
 ## Run budget (recorded once; do not reset on resume)
 - Start: 2026-10-10T00:34:03-07:00
