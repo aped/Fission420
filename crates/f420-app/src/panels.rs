@@ -644,7 +644,7 @@ impl F420App {
                     .strong()
                     .size(16.0),
             );
-            if ui.small_button("Rename…").clicked() {
+            if ui.small_button("Rename…").probe("Rename…").clicked() {
                 self.rename = Some((f.id, f.name.clone()));
             }
             let users = self.dependents_of(f.id);
@@ -1140,8 +1140,10 @@ impl F420App {
                     } => {
                         feature_combo(ui, "Cut profile sketch", sketch, &sketches);
                         ui.horizontal(|ui| {
-                            ui.radio_value(blind, false, "Through all");
-                            ui.radio_value(blind, true, "Blind depth");
+                            ui.radio_value(blind, false, "Through all")
+                                .probe("Through all");
+                            ui.radio_value(blind, true, "Blind depth")
+                                .probe("Blind depth");
                         });
                         if *blind {
                             num_field(ui, "Pocket depth (mm)", depth);
@@ -1281,7 +1283,8 @@ impl F420App {
                 let l = ui.label("New name");
                 let r = ui
                     .add(egui::TextEdit::singleline(&mut buf).desired_width(220.0))
-                    .labelled_by(l.id);
+                    .labelled_by(l.id)
+                    .probe("New name");
                 if !r.has_focus() && !ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     r.request_focus();
                 }

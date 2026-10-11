@@ -1,0 +1,59 @@
+# Stretch 1 + browser actions: blind pocket, rename, delete (Del) and undo, views, help
+clickw New Sketch on XY
+wait_idle
+key r
+sclick 0.3 0.2
+sclick 40 25
+key d
+sclick 0 -25
+type 80
+key Return
+sclick 40 5
+type 50
+key Return
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+key Return
+wait_idle
+expect volume 40000 0.01
+wclick 15 8 10
+clickw Create Sketch
+key c
+sclick 0.3 0.2
+sclick 5 0
+key d
+sclick 0 5
+type 10
+key Return
+clickw Finish Sketch
+wait_idle
+clickw Cut through all…
+clickw Blind depth
+typew Pocket depth (mm) | 4
+key Return
+wait_idle
+expect features 4
+# 80*50*10 - pi*5^2*4
+expect volume 39685.8407 0.01
+shot
+clickw Rename…
+typew New name | Counterbore
+key Return
+wait_idle
+expect features 4
+key Delete
+wait_idle
+expect features 3
+expect volume 40000 0.01
+key ctrl+z
+wait_idle
+expect features 4
+expect volume 39685.8407 0.01
+key 7
+key f
+shot
+key 0
+key F1
+shot
+key F1
