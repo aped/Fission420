@@ -38,3 +38,11 @@ Full transitive license audit: see `artifacts/licenses.txt` (generated) / sectio
 No package lacks a permissive option (`artifacts/licenses.txt`).
 | egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | f420-app UI interaction tests |
 | kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | f420-app UI interaction tests |
+
+## f420-exchange (run 3, STL/DXF adapters)
+
+No new third-party crates: `f420-exchange` depends only on `f420-sketch`, `serde` 1.0.229 and
+`thiserror` 2.0.21 (both already listed), plus `serde_json` 1.0.151 as a dev-dependency.
+External tools used only to generate/validate fixtures (not linked, not shipped, not a project
+dependency): FreeCAD 1.1.4 flatpak (LGPL-2.1, `Mesh`, `Import.writeDXFShape`/`readDXF`) and
+ezdxf 1.4.2 (MIT, https://github.com/mozman/ezdxf) in a throwaway venv under `artifacts/venv`.
