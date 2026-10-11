@@ -47,9 +47,9 @@ impl Format {
 
     pub fn label(self) -> &'static str {
         match self {
-            Format::Step => "STEP (exact solids → B-rep bodies)",
-            Format::Stl => "STL (triangle mesh → mesh body)",
-            Format::Dxf => "DXF (2D lines/arcs/circles/polylines → unconstrained sketch)",
+            Format::Step => "STEP: exact solids as B-rep bodies",
+            Format::Stl => "STL: triangle mesh as a mesh body",
+            Format::Dxf => "DXF: 2D lines/arcs/circles/polylines as an unconstrained sketch",
         }
     }
 }
@@ -410,6 +410,29 @@ impl F420App {
             ExportScope::AllVisible => visible.clone(),
             ExportScope::Selected(ids) => bodies.iter().filter(|b| ids.contains(&b.id)).collect(),
         };
+        // STEP of all visible bodies skips mesh bodies (named in the result);
+        // an explicit selection containing a mesh body is refused.
+        let all = matches!(scope, ExportScope::AllVisible);
+        let skipped: Vec<&str> = if step && all {
+            chosen
+                .iter()
+                .filter(|b| b.kind == "mesh")
+                .map(|b| b.name.as_str())
+                .collect()
+        } else {
+            vec![]
+        };
+        let chosen: Vec<_> = if step && all {
+            chosen.into_iter().filter(|b| b.kind != "mesh").collect()
+        } else {
+            chosen
+        };
+        if !skipped.is_empty() {
+            ui.small(format!(
+                "Mesh bodies are skipped for STEP (no exact geometry): {}",
+                skipped.join(", ")
+            ));
+        }
         let blocker = if chosen.is_empty() {
             Some("No body chosen for export".to_string())
         } else if step && let Some(m) = chosen.iter().find(|b| b.kind == "mesh") {
@@ -445,14 +468,19 @@ impl F420App {
         egui::Window::new("Import summary")
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::RIGHT_TOP, [-310.0, 60.0])
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-310.0, -40.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new(&s.file).strong());
                 ui.label(format!("Format: {}", s.format.label()));
                 if !s.bodies.is_empty() {
                     ui.label(format!("Bodies ({}): {}", s.bodies.len(), s.bodies.join(", ")));
                 }
-                for n in &s.notes {
+                let has_skipped = s.notes.iter().any(|n| n.starts_with("skipped"));
+                for n in s
+                    .notes
+                    .iter()
+                    .filter(|n| !(has_skipped && n.starts_with("warning: skipped")))
+                {
                     let warn = n.starts_with("warning") || n.starts_with("skipped");
                     if warn {
                         ui.colored_label(Color32::from_rgb(255, 200, 120), n);

@@ -13,6 +13,7 @@ pub mod panels;
 pub mod place;
 pub mod probe;
 pub mod reattach;
+pub mod scenes;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod view3d;

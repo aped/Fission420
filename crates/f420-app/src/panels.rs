@@ -1082,6 +1082,37 @@ impl F420App {
                         .italics()
                         .weak(),
                 );
+            } else if self.summary.bodies.len() > 1
+                || self.summary.bodies.iter().any(|b| b.kind == "mesh")
+            {
+                // Several bodies: one compact entry per body (never a fused total).
+                let n_vis = self.summary.bodies.iter().filter(|b| b.visible).count();
+                let parts: Vec<String> = self
+                    .summary
+                    .bodies
+                    .iter()
+                    .map(|b| {
+                        let v = match (&b.measurements, &b.mesh) {
+                            (Some(m), _) => match &m.volume {
+                                VolumeResult::Value { volume, .. } => format!("{volume:.2} mm³"),
+                                VolumeResult::Unavailable { .. } => "volume n/a".into(),
+                            },
+                            (None, Some(d)) => format!("mesh {} tris", d.triangles),
+                            (None, None) => "…".into(),
+                        };
+                        format!("{}{} {v}", b.name, if b.visible { "" } else { " (hidden)" })
+                    })
+                    .collect();
+                let text = format!(
+                    "Bodies {} ({n_vis} visible) · {}",
+                    self.summary.bodies.len(),
+                    parts.join(" · ")
+                );
+                if stale {
+                    ui.label(RichText::new(format!("(pending) {text}")).weak().italics());
+                } else {
+                    ui.label(text);
+                }
             } else {
             match &self.measurements {
                 Some(m) => {
@@ -1188,7 +1219,19 @@ impl F420App {
         egui::Window::new(dlg.title())
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .anchor(
+                if matches!(dlg, Dialog::Extrude(_)) {
+                    // Beside the browser, clear of the model and its preview.
+                    egui::Align2::LEFT_TOP
+                } else {
+                    egui::Align2::CENTER_TOP
+                },
+                if matches!(dlg, Dialog::Extrude(_)) {
+                    [self.view_rect.map_or(270.0, |r| r.min.x + 8.0), 40.0]
+                } else {
+                    [0.0, 60.0]
+                },
+            )
             .show(ctx, |ui| {
                 match &mut dlg {
                     Dialog::Rectangle {

@@ -279,6 +279,11 @@ pub struct F420App {
     pub(crate) reattach: Option<crate::reattach::Reattach>,
     /// Sketch named by the last BrokenReference refusal (offered for repair).
     pub(crate) broken_sketch: Option<FeatureId>,
+    /// Scripted screenshot scene (see [`crate::scenes`]).
+    pub(crate) scene_steps: VecDeque<crate::scenes::SceneStep>,
+    pub(crate) scene_fitted: bool,
+    /// Scene finished: report busy until this instant (window fade-ins settle).
+    pub(crate) scene_hold: Option<Instant>,
     /// Commands in flight with their submit time (FIFO; latency measurement).
     in_flight: VecDeque<(String, Instant)>,
     /// Last command round trips (name, latency) for the status bar / report.
@@ -344,6 +349,9 @@ impl F420App {
             import_summary: None,
             reattach: None,
             broken_sketch: None,
+            scene_steps: VecDeque::new(),
+            scene_fitted: true,
+            scene_hold: None,
             in_flight: VecDeque::new(),
             latencies: VecDeque::new(),
             frame_ema: None,
@@ -382,7 +390,11 @@ impl F420App {
     }
     /// No command in flight, no deferred measurement outstanding, no demo steps left.
     pub fn idle(&self) -> bool {
-        !self.engine.busy() && self.demo.is_empty() && !self.summary.measuring
+        !self.engine.busy()
+            && self.demo.is_empty()
+            && self.scene_steps.is_empty()
+            && self.scene_hold.is_none_or(|t| Instant::now() >= t)
+            && !self.summary.measuring
     }
     pub fn feature_by_name(&self, name: &str) -> Option<&FeatureSummary> {
         self.summary.features.iter().find(|f| f.name == name)
@@ -1529,6 +1541,10 @@ impl F420App {
             self.handle_reply(r);
         }
         self.advance_demo();
+        self.advance_scene();
+        if !self.scene_steps.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
         if self.engine.mode() == ExecMode::Sync && !self.demo.is_empty() {
             ctx.request_repaint();
         }

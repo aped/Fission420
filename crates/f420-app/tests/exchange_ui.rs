@@ -258,9 +258,9 @@ fn export_selection_policy_and_dxf() {
     let _ = h.try_run();
     click(&mut h, "Export STEP…");
     assert!(h.get_by_label("OK").accesskit_node().is_disabled());
-    // All visible bodies still include the mesh: refused too.
+    // All visible bodies: the mesh body is skipped (stated), the rest export.
     click(&mut h, "All visible bodies (3)");
-    assert!(h.get_by_label("OK").accesskit_node().is_disabled());
+    assert!(!h.get_by_label("OK").accesskit_node().is_disabled());
     click(&mut h, "Cancel");
     // Select the first STEP body and export just it.
     let first = bodies[0].name.clone();
