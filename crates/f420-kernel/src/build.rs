@@ -97,6 +97,9 @@ fn loop_wire(segs: &[LoopSegment], frame: &Frame) -> Result<Wire> {
 /// span with its end point (world). The first and last control points are exactly
 /// the loop vertices. Control points are mapped through the (affine) frame, which is
 /// exact for NURBS.
+/// Relative slack (in units of quarter turns) when counting arc spans.
+const ARC_SPAN_SLACK: f64 = 1e-9;
+
 pub(crate) fn arc_spans(
     start: [f64; 2],
     end: [f64; 2],
@@ -107,7 +110,10 @@ pub(crate) fn arc_spans(
     let r = (start[0] - center[0]).hypot(start[1] - center[1]);
     let sweep = arc_signed_sweep(start, end, center, ccw);
     let a0 = (start[1] - center[1]).atan2(start[0] - center[0]);
-    let k = ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).max(1);
+    // A quarter arc from solved sketch coordinates has a sweep of pi/2 only up
+    // to rounding; the slack keeps it one span (a span of pi/2 * (1 + 1e-9) is
+    // still far from the pi limit of a positive middle weight).
+    let k = ((sweep.abs() / std::f64::consts::FRAC_PI_2 - ARC_SPAN_SLACK).ceil() as usize).max(1);
     let phi = sweep / k as f64;
     let w = (phi / 2.0).cos();
     let on = |t: f64, rr: f64| [center[0] + rr * t.cos(), center[1] + rr * t.sin()];

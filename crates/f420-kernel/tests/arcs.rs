@@ -249,3 +249,28 @@ fn revolve_of_loop_respects_axis_side() {
         Err(KernelError::InvalidInput(_))
     ));
 }
+
+/// Quarter-arc corners whose sweep is pi/2 only up to rounding (as from a
+/// solved sketch) still make one edge each: 10 faces, 24 edges, 16 vertices.
+#[test]
+fn nearly_quarter_arcs_stay_single_edges() {
+    let Profile::Loop(mut segs) = rounded_rect(80.0, 50.0, 8.0) else {
+        unreachable!()
+    };
+    // Rotate every arc start back by 1e-12 rad about its centre: each CCW sweep
+    // becomes pi/2 + 1e-12.
+    let t = -1e-12_f64;
+    for s in &mut segs {
+        if let LoopSegment::Arc { start, center, .. } = s {
+            let (x, y) = (start[0] - center[0], start[1] - center[1]);
+            *start = [
+                center[0] + x * t.cos() - y * t.sin(),
+                center[1] + x * t.sin() + y * t.cos(),
+            ];
+        }
+    }
+    let p = Profile::Loop(segs);
+    let body = extrude(&p, &Frame::XY, 10.0).unwrap();
+    let m = measure(&body).unwrap();
+    assert_eq!([m.face_count, m.edge_count, m.vertex_count], [10, 24, 16]);
+}
