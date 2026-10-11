@@ -947,6 +947,16 @@ impl F420App {
         let mut ok = false;
         let mut cancel = false;
         let mut error: Option<String> = None;
+        let opened = self.last_dialog != Some(dlg.title());
+        self.last_dialog = Some(dlg.title());
+        AUTOFOCUS.with(|a| a.set(opened));
+        // Enter confirms and Escape cancels (also while a field has focus).
+        let (enter, esc) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
         egui::Window::new(dlg.title())
             .collapsible(false)
             .resizable(false)
@@ -1032,14 +1042,22 @@ impl F420App {
                     }
                 }
                 ui.horizontal(|ui| {
-                    ok = ui.add_enabled(!busy || !matches!(dlg, Dialog::Open { .. }), egui::Button::new("OK")).clicked();
+                    ok = ui
+                        .add_enabled(!busy_blocks(&dlg, busy), egui::Button::new("OK"))
+                        .clicked();
                     cancel = ui.button("Cancel").clicked();
                 });
+                ui.weak("Enter = OK · Esc = Cancel");
             });
+        AUTOFOCUS.with(|a| a.set(false));
+        ok |= enter && !opened && !busy_blocks(&dlg, busy);
+        cancel |= esc;
         if cancel {
+            self.last_dialog = None;
             return; // dialog dropped; nothing created
         }
         if ok {
+            self.last_dialog = None;
             match build_command(&dlg) {
                 Ok(Command::Open { path }) => {
                     self.guarded(Guarded::Open(path));
@@ -1185,20 +1203,34 @@ impl F420App {
     }
 }
 
-pub(crate) fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
+thread_local! {
+    /// Set when a dialog opens: the first text field drawn takes keyboard focus.
+    static AUTOFOCUS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32) {
     ui.horizontal(|ui| {
         let l = ui.label(label);
-        ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
+        let r = ui
+            .add(egui::TextEdit::singleline(buf).desired_width(width))
             .labelled_by(l.id);
+        if AUTOFOCUS.with(|a| a.replace(false)) {
+            r.request_focus();
+        }
     });
 }
 
+pub(crate) fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
+    field(ui, label, buf, 90.0);
+}
+
 pub(crate) fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
-    ui.horizontal(|ui| {
-        let l = ui.label(label);
-        ui.add(egui::TextEdit::singleline(buf).desired_width(320.0))
-            .labelled_by(l.id);
-    });
+    field(ui, label, buf, 320.0);
+}
+
+/// Opening a document waits for pending work (other commands just queue).
+fn busy_blocks(d: &Dialog, busy: bool) -> bool {
+    busy && matches!(d, Dialog::Open { .. })
 }
 
 pub(crate) fn feature_combo(

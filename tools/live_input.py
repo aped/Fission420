@@ -41,6 +41,7 @@ KEYSYMS = {
     "escape": 0xFF1B, "return": 0xFF0D, "enter": 0xFF0D, "tab": 0xFF09,
     "backspace": 0xFF08, "delete": 0xFFFF, "f1": 0xFFBE, "f9": 0xFFC6, "f12": 0xFFC9,
     "ctrl": 0xFFE3, "shift": 0xFFE1, "alt": 0xFFE9, "space": 0x20,
+    "plus": 0x2B, "equal": 0x3D, "minus": 0x2D,
 }
 
 
@@ -48,6 +49,8 @@ def keysym(name):
     n = name.lower()
     if n in KEYSYMS:
         return KEYSYMS[n]
+    if n.startswith("f") and n[1:].isdigit() and 1 <= int(n[1:]) <= 12:
+        return 0xFFBE + int(n[1:]) - 1
     if len(name) == 1:
         return ord(name)
     raise ValueError(f"unknown key {name!r}")

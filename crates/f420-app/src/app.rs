@@ -209,6 +209,8 @@ pub struct F420App {
     pub(crate) selected_face: Option<u32>,
     pub(crate) inspector: Option<Inspector>,
     pub(crate) dialog: Option<Dialog>,
+    /// Title of the dialog shown last frame (detects a newly opened dialog).
+    pub(crate) last_dialog: Option<&'static str>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Latest error shown as a banner over the 3D view until dismissed.
     pub(crate) banner: Option<Diagnostic>,
@@ -271,6 +273,7 @@ impl F420App {
             selected_face: None,
             inspector: None,
             dialog: None,
+            last_dialog: None,
             diagnostics: vec![],
             banner: None,
             last_export: None,
@@ -1386,6 +1389,9 @@ impl F420App {
             });
         egui::CentralPanel::no_frame().show(ui, |ui| self.view_ui(ui));
         self.dialog_ui(&ctx, busy);
+        if self.dialog.is_none() {
+            self.last_dialog = None;
+        }
         if !matches!(
             self.dialog,
             Some(Dialog::Rectangle { .. } | Dialog::CircleOnFace { .. })

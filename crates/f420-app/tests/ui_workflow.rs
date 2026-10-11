@@ -52,7 +52,6 @@ fn click(h: &mut Harness<'_, F420App>, label: &str) {
     settle(h);
 }
 
-
 /// Focus the text field labelled `label`, select all, type `text`.
 fn type_into(h: &mut Harness<'_, F420App>, label: &str, text: &str) {
     h.get_by_label(label).focus();
