@@ -17,7 +17,7 @@ pub use measure::{
     planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
-pub use step::export_step;
+pub use step::{export_step, export_step_bodies};
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;
