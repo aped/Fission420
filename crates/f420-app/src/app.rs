@@ -1546,7 +1546,18 @@ impl F420App {
         } else if sc(Modifiers::NONE, Key::F) {
             self.fit_view();
         } else if sc(Modifiers::NONE, Key::Delete) {
-            self.delete_selected_feature();
+            if self.selected_face.is_some() {
+                // A picked face selects its owner too; deleting the whole feature
+                // from a face pick would be surprising.
+                self.diag(
+                    false,
+                    "info",
+                    "faces cannot be deleted; select the feature in the browser to delete it"
+                        .into(),
+                );
+            } else {
+                self.delete_selected_feature();
+            }
         } else if sc(Modifiers::NONE, Key::Escape) {
             if self.placement.is_some() {
                 self.cancel_tool();
