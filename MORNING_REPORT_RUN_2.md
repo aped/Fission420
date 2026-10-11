@@ -1,8 +1,12 @@
 # Fission420 — morning report, run 2
 
 Spec: `SESSION_2.md` (Night 2). Branch **`work/run-2`** (from run 1's `work/run-1` @ 68aba09).
-Final commit: **TBD** (see `git log -1`). Run window: started 2026-10-10 16:23:57 PDT,
-deadline 2026-10-11 00:23:57 PDT; finished **TBD** (elapsed **TBD**).
+Final commit: the commit that adds this report's final edit (see `git log -1`; verification
+below was run at 7c9a323). Run window: started 2026-10-10 16:23:57 PDT, deadline
+2026-10-11 00:23:57 PDT; finished at about 19:45 PDT (elapsed ≈ 3 h 20 min). The core
+acceptance scenarios and all three stretch items were complete and verified, and the remaining
+candidates (generalised face references, multi-body) are explicitly deferred by `SESSION_2.md`,
+so the run stopped early rather than filling time.
 Machine: AMD Ryzen 7 9800X3D (16 threads), RX 7900 GRE, 32 GB, Bazzite (Fedora 44 atomic),
 kernel 7.2.7, GNOME/Wayland, rustc 1.99.0, release builds unless noted.
 
@@ -219,12 +223,16 @@ All raw captures (≈80 PNGs) with the scripts and logs that produced them are u
 
 ## 9. Tests and checks run
 
-* `cargo xtask check`: **TBD final** (last run: 200 passed, 0 failed, 2 ignored timing harnesses;
-  acceptance 440/440; 5 example replays) — `artifacts/run2/xtask_arcs.log`.
-* External: `tools/external_validation.sh` — 8 models, all PASS (Python STL, FreeCAD STL, FreeCAD
-  STEP: 1 valid solid each, volume error ≤ 1.4e-6 mm³) — `artifacts/run2/external_validation.log`.
-* Live real-input walkthroughs: 5/5 PASS on the final build (scenario A, B, C, arcs, pocket /
-  rename / delete) — logs per script under `artifacts/run2/live_final*/`
+* `cargo xtask check` (final, 7c9a323): fmt, clippy `-D warnings`, **233 tests passed, 0 failed,
+  2 ignored** (timing harnesses, run separately), acceptance **440 passed / 0 failed**, 5 example
+  replays, 35.6 s — `artifacts/run2/xtask_final3.log`. Baseline at the start: 78 tests, 96/96,
+  2m58s — `artifacts/run2/baseline_xtask.log`.
+* External: `tools/external_validation.sh` on the final acceptance outputs — 8 models, all PASS
+  (Python STL parser, FreeCAD 1.1 STL and STEP import: 1 valid solid each, STEP volume error
+  ≤ 1.4e-6 mm³ against analytic values) — `artifacts/run2/external_validation_handoff.log`.
+* Live real-input walkthroughs: **6/6 PASS on two consecutive runs** of the final build
+  (scenario A, B, C, arcs, pocket / rename / delete, constraints; ~94 s per run) — logs per
+  script under `artifacts/run2/live_handoff_{A,B}/`
   (`script.txt`, `result.log` with every assertion, `app.log` with the input trace, `shots/`).
 * Independent code review of the app (13 findings): 12 fixed with tests, 1 (stuck measuring
   after a failed measurement) fixed earlier; a concurrency bug found while tracing (shallow
@@ -252,3 +260,14 @@ Decisions for you:
 * Persist undo history in files (still not done by design)?
 * Patch/vendor Truck (boolean fragility, STEP surfaces as B-splines)? Not needed for tonight's
   fixes; exact edge rebuilds live in the adapter (ADR 0002).
+
+## 11. Housekeeping
+
+* The five subagent worktrees under `.claude/worktrees/` (≈ 19 GB, mostly `target/` build
+  caches) are fully merged into `work/run-2` and can be removed when convenient:
+  `git worktree list`, then `git worktree remove --force <path>` and
+  `git branch -d worktree-agent-<id>` for each. I left them in place rather than deleting them.
+* Running FreeCAD validation rewrites the tracked `tools/__pycache__/*.pyc` files; restore with
+  `git checkout -- tools/__pycache__` (consider untracking them).
+* `SESSION_2.md` and `spikes/truck_spike/Cargo.lock` were untracked at the start and were left as
+  they are.

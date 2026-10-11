@@ -1,4 +1,4 @@
-# STATUS — Fission420 run 2 (spec: SESSION_2.md)
+# STATUS — Fission420 run 2 (spec: SESSION_2.md) — CLOSED 19:45, see MORNING_REPORT_RUN_2.md
 
 ## Run budget (recorded once; do not reset on resume)
 - Start: 2026-10-10T16:23:57-07:00 (branch work/run-2 from work/run-1 @ 68aba09)
@@ -50,9 +50,13 @@
 | 19:08 | independent review: 13 findings, 12 fixed (+ #7 earlier), unit test | |
 | 19:12 | delete feature (command + UI), Midpoint constraint, README, live script e (pocket/rename/delete) | 5/5 live PASS |
 
-## Next
-- Constraints worker (Parallel/Perpendicular/EqualLength/PointOnLine + construction geometry, sketch crate) running; then editor UI for them.
-- Integration reserve from 22:53 (start earlier if done): xtask check, external validation, live walkthrough x2, finalize MORNING_REPORT_RUN_2.md.
+| 19:20 | constraints worker merged (Parallel/Perpendicular/EqualLength/PointOnLine, construction) + UI; raw-event click handling (fixes misplaced/dropped clicks in slow frames) | live 6/6 |
+| 19:35 | second review: 7 findings fixed with tests | xtask 233 passed, acceptance 440/0 |
+| 19:38 | handoff verification | live 6/6 twice, FreeCAD 8/8 |
+| 19:45 | run closed early: core + stretch 1-3 complete; see MORNING_REPORT_RUN_2.md | |
+
+## Next (new run)
+See MORNING_REPORT_RUN_2.md §10: semantic references beyond caps (ADR), physical-display verification of frame pacing, more modelling (multi-body, patterns, non-circular cuts).
 
 ## Known issues
 - Headless-compositor frame pacing: eframe on Wayland repaints only after a compositor frame callback (egui #8326); in the private headless mutter the frame clock occasionally goes quiet while the app waits for a worker reply, so replies are applied only at the next input event. The live harness nudges the pointer while waiting. Not verified on a physical display (desktop locked all night).
