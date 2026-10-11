@@ -1,0 +1,76 @@
+# SESSION_2 scenario A through real compositor input (see tools/live_walkthrough.sh)
+clickw New Sketch on XY
+wait_idle
+key r
+sclick 0.4 0.3
+smove 40 25
+sclick 40 25
+key d
+sclick 0 -25
+type 80
+key Return
+sclick 40 5
+type 50
+key Return
+expect editing.status FullyConstrained
+expect editing.dims 2
+shot
+clickw Finish Sketch
+wait_idle
+expect features 1
+clickw Extrude…
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 40000 0.01
+wclick 15 8 10
+clickw Create Sketch
+key c
+sclick 0.3 0.2
+sclick 5 0
+key d
+sclick 0 5
+type 10
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Cut through all…
+key Return
+wait_idle
+expect features 4
+expect volume 39214.6018 0.01
+shot
+clickw Sketch1
+clickdim width
+type 100
+key Return
+wait_idle
+expect volume 49214.6018 0.01
+shot
+clickw Extrude1
+typew distance (mm) | 12
+clickw Apply
+wait_idle
+expect volume 59057.5222 0.01
+clickw Undo
+wait_idle
+expect volume 49214.6018 0.01
+clickw Redo
+wait_idle
+expect volume 59057.5222 0.01
+key ctrl+shift+s
+typew File path | @OUT@/plate.f420.json
+key Return
+wait_idle
+expect dirty false
+clickw Close
+wait_idle
+expect open false
+key ctrl+o
+typew File path | @OUT@/plate.f420.json
+key Return
+wait_idle
+expect features 4
+expect volume 59057.5222 0.01
+shot

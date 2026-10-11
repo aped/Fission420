@@ -1,0 +1,25 @@
+# Stretch 2: line + three-point arc D-shape, radius dimension, extrude
+clickw New Sketch on XY
+wait_idle
+key l
+sclick -20 0
+sclick 20 0
+key Escape
+key a
+sclick 20 0
+sclick -20 0
+smove 3 18
+sclick 0 20
+key d
+sclick 0 20
+type 20
+key Return
+shot
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 6283.1853 0.01
+shot

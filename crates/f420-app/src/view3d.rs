@@ -22,6 +22,7 @@ use f420_viewport::{Camera, GridPlane, Ray, RenderMesh, ViewPreset};
 
 use crate::app::{DocDimEdit, F420App, SketchTarget};
 use crate::place::{Phase, PlaneFrame};
+use crate::probe::Probe as _;
 use crate::sketch_edit::{Item, SketchTool, StateKind, View};
 use crate::sketch_view::{self, PALETTE, Projector, SketchStyle};
 
@@ -924,6 +925,7 @@ impl F420App {
             ui.horizontal(|ui| {
                 if ui
                     .button("New Sketch on XY")
+                    .probe("New Sketch on XY")
                     .on_hover_text("Create a sketch on the world XY plane")
                     .clicked()
                 {
@@ -935,7 +937,11 @@ impl F420App {
                         self.guarded(crate::app::Guarded::NewAndSketch);
                     }
                 }
-                if ui.button("Open Document…").clicked() {
+                if ui
+                    .button("Open Document…")
+                    .probe("Open Document…")
+                    .clicked()
+                {
                     self.dialog = Some(crate::app::Dialog::Open {
                         path: self.default_path("f420.json"),
                     });

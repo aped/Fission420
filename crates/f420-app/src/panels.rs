@@ -268,7 +268,10 @@ impl F420App {
         } else if self.has_body() {
             Some("Only one base body per document is supported (product limit)".to_string())
         } else {
-            None
+            sketch_sel
+                .as_ref()
+                .and_then(|s| s.profile_error.as_ref())
+                .map(|e| format!("Profile is not usable: {e}"))
         };
         if action(ui, "Revolve…", revolve_block.as_deref()) {
             self.dialog = Some(Dialog::Revolve {

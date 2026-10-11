@@ -22,6 +22,12 @@ to get monitor pixels.
     shot                          (F12: the app saves --shot-dir/shot_NNN.png)
     sclick X Y / smove X Y / sdrag X1 Y1 X2 Y2 [button]   sketch-plane mm
     wclick X Y Z                  world mm
+    clickw LABEL                  click the widget the app registered as LABEL
+    typew LABEL | TEXT            click a text field by label, select all, type
+    clickdim NAME                 click the dimension label NAME (sketch or selected sketch)
+    wait_idle [MS]                until the probe reports no work in flight / measuring
+    expect PATH VALUE [TOL]       assert probe "doc" field (dotted path), e.g.
+                                  expect volume 39214.6018 0.01 / expect editing.status FullyConstrained
       (s*/w* commands need the app started with F420_PROBE=<state>/probe.json;
        they project with the app's own camera, see crates/f420-app/src/main.rs)
     # comment
@@ -129,6 +135,26 @@ class Probe:
 
     def __init__(self, path):
         self.path = path
+        self.failures = []
+
+    def widget(self, key, timeout=3.0):
+        deadline = time.time() + timeout
+        while True:
+            w = self.load().get("widgets", {})
+            if key in w:
+                x0, y0, x1, y1 = w[key]
+                return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            if time.time() > deadline:
+                raise RuntimeError(f"widget {key!r} not on screen; have {sorted(w)[:40]}")
+            time.sleep(0.05)
+
+    def doc_value(self, path):
+        v = self.load().get("doc")
+        for part in path.split("."):
+            if not isinstance(v, dict) or part not in v:
+                return None
+            v = v[part]
+        return v
 
     def load(self):
         for _ in range(20):
@@ -231,6 +257,59 @@ def run(driver, lines, probe=None):
                 driver.move(ax + (bx - ax) * t, ay + (by - ay) * t)
             driver.button(b, False)
             time.sleep(0.1)
+        elif op in ("clickw", "clickdim"):
+            key = a[0].strip() if a else ""
+            if op == "clickdim":
+                key = "dim:" + key
+            x, y = probe.widget(key)
+            driver.move(x, y)
+            time.sleep(0.05)
+            driver.button("left", True)
+            driver.button("left", False)
+            time.sleep(0.15)
+        elif op == "typew":
+            label, text = (a[0].split("|", 1) + [""])[:2]
+            x, y = probe.widget(label.strip())
+            driver.move(x, y)
+            time.sleep(0.05)
+            driver.button("left", True)
+            driver.button("left", False)
+            time.sleep(0.1)
+            driver.chord("ctrl+a")
+            for ch in text.strip():
+                driver.chord("space" if ch == " " else ch)
+            time.sleep(0.1)
+        elif op == "wait_idle":
+            deadline = time.time() + (float(args[0]) / 1000.0 if args else 60.0)
+            time.sleep(0.2)
+            while True:
+                d = probe.load().get("doc", {})
+                if not d.get("busy") and not d.get("measuring"):
+                    break
+                if time.time() > deadline:
+                    raise RuntimeError("timed out waiting for idle")
+                time.sleep(0.05)
+            time.sleep(0.2)
+        elif op == "expect":
+            path, want = args[0], args[1]
+            tol = float(args[2]) if len(args) > 2 else None
+            got = probe.doc_value(path)
+            if want == "null":
+                ok = got is None
+            elif want in ("true", "false"):
+                ok = got is (want == "true")
+            elif tol is not None or isinstance(got, (int, float)):
+                try:
+                    ok = got is not None and abs(float(got) - float(want)) <= (tol or 0.0)
+                except ValueError:
+                    ok = False
+            else:
+                ok = str(got) == want
+            status = "PASS" if ok else "FAIL"
+            print(f"{status} expect {path} {want}{'' if tol is None else ' ±' + str(tol)} (got {got})", flush=True)
+            if not ok:
+                probe.failures.append(line)
+            continue
         elif op == "shot":
             driver.chord("F12")
             time.sleep(0.8)
@@ -247,7 +326,11 @@ def main():
     with open(os.path.join(state, "bus")) as f:
         bus = f.read().strip()
     lines = sys.stdin.read().splitlines() if script == "-" else open(script).read().splitlines()
-    run(Driver(bus), lines, Probe(os.path.join(state, "probe.json")))
+    probe = Probe(os.path.join(state, "probe.json"))
+    run(Driver(bus), lines, probe)
+    if probe.failures:
+        print(f"{len(probe.failures)} expectation(s) failed", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

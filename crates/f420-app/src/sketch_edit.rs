@@ -867,12 +867,16 @@ impl SketchEditor {
                 self.gesture = Gesture::ArcEnd { start, end };
             }
             Gesture::ArcEnd { start, end } => {
-                // The pass-through point only shapes the arc: no point snapping.
-                let via = Snap {
-                    pos,
-                    kind: SnapKind::Free,
-                    align: None,
-                };
+                // The pass-through point only shapes the arc: grid snapping like
+                // every other click, but never merged with an existing point.
+                let mut via = self.snap(pos, None, None, view);
+                if matches!(via.kind, SnapKind::Point(_)) {
+                    via = Snap {
+                        pos,
+                        kind: SnapKind::Free,
+                        align: None,
+                    };
+                }
                 self.gesture = Gesture::Idle;
                 let ok = self.try_change(true, |sk| {
                     let mut pid = |s: &Snap| match s.kind {

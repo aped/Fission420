@@ -1,0 +1,52 @@
+# SESSION_2 scenario B: line loop, extrude, vertex drag, driving dimension, invalid loop
+clickw New Sketch on XY
+wait_idle
+key l
+sclick 0 0
+sclick 60 0
+sclick 60 30
+sclick 50 40
+sclick 0 40
+sclick 0 0
+expect editing.entities 5
+shot
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 5
+key Return
+wait_idle
+expect volume 11750 0.01
+clickw Sketch1
+clickw Edit Sketch
+key s
+sdrag 50 40 40 40
+shot
+clickw Finish Sketch
+wait_idle
+expect volume 11500 0.01
+clickw Edit Sketch
+key d
+sclick 20 40
+type 45
+key Return
+clickw Finish Sketch
+wait_idle
+expect volume 11625 0.01
+shot
+# an open polyline is kept as a sketch but cannot be extruded
+key ctrl+n
+wait_idle
+clickw Discard changes
+wait_idle
+clickw New Sketch on XY
+wait_idle
+key l
+sclick 0 0
+sclick 30 0
+sclick 30 20
+key Escape
+clickw Finish Sketch
+wait_idle
+expect features 1
+shot
