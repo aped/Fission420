@@ -68,9 +68,11 @@ Edge ordering therefore never flips axes.
   `max(1 mm, 5 % of the target bbox diagonal)` on each side, so caps are never coplanar).
 * Direction: along the sketch normal, except when the sketch plane holds a face of the target
   (whatever plane the sketch was made on): a Cut then goes into the material and a Join away
-  from it (along the face's outward normal) by default. `reverse` flips the default; a
-  reversed blind Cut or Join from a face (pointing into air / into the material) is refused,
-  so in that case Reverse has no valid use and the UI disables it.
+  from it (along the face's outward normal). For a Cut, `reverse` flips the default and a
+  reversed blind Cut from a face (pointing into air) is refused. A Join from a face ignores
+  `reverse` (into the material it would add nothing); documents saved before this rule set
+  `reverse` exactly where it pointed away, so they regenerate unchanged. The UI disables
+  Reverse for a blind Cut or Join from a face.
 * Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured,
   spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2, depth/2)` *into* the
   support side, where `depth` is the target's extent below the face (so the overlap cannot

@@ -1,10 +1,11 @@
 # Format support
 
-Status: run 3, 2026-10-10/11, branch `work/run-3` (format-verification worker on top of
-`fa738cc`). This page claims only what a test or an independent validation listed under
+Status: run 3, 2026-10-11, branch `work/run-3` (checked against the code at `e703fbe`). This
+page claims only what a test or an independent validation listed under
 **Evidence** proves. A file extension in a dialog is not evidence. Per-format details:
 [`formats/step.md`](formats/step.md), [`formats/stl.md`](formats/stl.md),
-[`formats/dxf.md`](formats/dxf.md); design: ADR 0003 (bodies, face references) and
+[`formats/dxf.md`](formats/dxf.md), [`formats/threemf.md`](formats/threemf.md),
+[`formats/svg.md`](formats/svg.md); design: ADR 0003 (bodies, face references) and
 ADR 0004 (format adapters).
 
 ## Matrix
@@ -14,16 +15,21 @@ ADR 0004 (format adapters).
 | Native `.f420.json` v1 | **yes** (migrated to v3 on load) | no (always saves v3) | parametric history | mm | `Open` |
 | Native v2 (run 2) | **yes** (migrated) | no | parametric history | mm | `Open` |
 | Native v3 (run 3) | **yes** | **yes** | history + bodies + embedded import sources | mm | `Open` / `Save` |
-| STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step` |
-| STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl` |
-| DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf` |
-| 3MF `.3mf` | **yes** (command/CLI; no UI dialog yet), core subset → one mesh body per build item | **yes** (command/CLI), one object per body (B-rep tessellated, watertight-checked; meshes as imported) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf` |
-| SVG `.svg` | **yes** (command/CLI; no UI dialog yet): lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes** (command/CLI): sketch lines/arcs/circles | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg` ([formats/svg.md](formats/svg.md)) |
+| STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step`; UI Import…, Export STEP… |
+| STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl`; UI Import…, Export STL… |
+| DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf`; UI Import…, Export DXF (sketch)… |
+| 3MF `.3mf` | **yes**, core subset → one mesh body per build item | **yes**, one object per body (B-rep tessellated, watertight-checked; meshes as imported) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf`; UI Import…, Export 3MF… |
+| SVG `.svg` | **yes**: lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes**: sketch lines/arcs/circles | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg`; UI Import…, Export SVG (sketch)… |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
 "Reachable through" lists the typed command (`crates/f420-commands`, also `f420-cli run`).
-At commit `fa738cc` the desktop app exposes Export STL/STEP dialogs but **no import
-dialogs**; UI import is tracked separately and is not claimed here.
+The desktop app's Import… dialog (`crates/f420-app/src/exchange.rs`) accepts `.step/.stp`,
+`.stl`, `.3mf`, `.dxf` and `.svg`, asks for units only when needed (always for STL; for
+STEP/DXF/SVG after the file declared none; never for 3MF) and a plane for DXF/SVG. The Export
+menu has STL, STEP, 3MF (body selection), DXF and SVG (one sketch) dialogs (docs/UI.md rows
+Import/Export). App tests (`crates/f420-app/tests/exchange_ui.rs`) drive import of all five
+formats and export of STEP, STL, DXF and 3MF; Export SVG… is not driven by an app test (the
+command is covered by acceptance 3S).
 
 Not supported, by design: renaming a file to another extension, a hidden external converter
 (FreeCAD/OpenCascade is used only as an independent validator, never at runtime), mesh to
@@ -64,6 +70,16 @@ the first unsupported entity aborts with its type and `#id`. Unsupported (explic
 `BREP_WITH_VOIDS`, open shells, faceted/surface models, `MAPPED_ITEM`, offset/extrusion/
 revolution surfaces, `TRIMMED_CURVE`, polylines, pcurve-only edges, non-rigid placements.
 Assemblies are not supported as assemblies: placed solids become independent bodies.
+
+Implemented is not the same as tested. Entities that occur in the committed third-party
+fixtures (`crates/f420-kernel/tests/fixtures/step/*.step`): `PLANE`, `CYLINDRICAL_SURFACE`
+(cylinder, plate_hole), `SPHERICAL_SURFACE` (sphere), `TOROIDAL_SURFACE` (torus), `LINE`,
+`CIRCLE`, `ITEM_DEFINED_TRANSFORMATION` (two_boxes_assembly). Rational B-spline surfaces and
+curves are read only from our own export, re-imported in
+`step_import.rs::imported_box_can_be_cut_measured_and_exported` (not independent).
+Implemented in `crates/f420-kernel/src/step_in/geom.rs` but exercised by no fixture or test:
+`CONICAL_SURFACE`, `ELLIPSE`, `SURFACE_CURVE`/`SEAM_CURVE`, and B-spline curves/surfaces
+from any other writer (including the non-rational simple-entity forms).
 
 Tested fixtures (all FreeCAD 1.1.4 / OpenCascade 7.8.1 generated, provenance in
 `crates/f420-kernel/tests/fixtures/step/README.md`), each through the command API (scenario C):
@@ -122,6 +138,12 @@ are joined; no constraints are inferred, so the sketch reports `UnderConstrained
 Export: R12 ASCII LINE/ARC/CIRCLE in local sketch coordinates (mm); construction geometry
 omitted; no placement, constraints or dimensions.
 
+Fixtures (`crates/f420-exchange/tests/fixtures/dxf/`, provenance in
+`tools/fixtures/dxf/README.md`) are FreeCAD-written (`slot_freecad_r14.dxf`,
+`notch_freecad_r12.dxf`) or hand-written from the public group-code reference; ezdxf 1.4.2 is
+used only as a second reader of our exports and the fixtures (`ezdxf_check.py`), next to
+FreeCAD's DXF importer (`validate_export.sh`).
+
 Scenario D evidence: FreeCAD `slot_freecad_r14.dxf` imports to 3 lines + 1 arc at the
 analytic coordinates (error 0); edited (left edge moved to x = −10) and extruded 5 mm:
 V = 5(800 + 50π) exact; STEP export validated by FreeCAD; DXF export read back by our
@@ -141,7 +163,8 @@ the coordinator as `import_3mf` (base feature `Import3mf`, source embedded, one 
 build item, display/export only) and `export_3mf` (`bodies` default all visible, `unit`,
 `chord`). Command-level evidence: `crates/f420-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
 (FreeCAD two-box fixture imported; three-body export in inch re-imported with exact
-volumes). No UI dialog in this build.
+volumes). UI: Import… and Export 3MF… (`exchange_ui.rs::threemf_import_export_and_svg_sketch`
+imports the FreeCAD two-box fixture without a unit prompt and exports all visible bodies).
 Read: ZIP stored/deflate, `_rels/.rels` start part, units micron..meter converted to mm, one
 mesh per build item with item and nested component transforms (mirrors reverse winding),
 object-level base-material colours; per-triangle colours, colour groups, textures and other
@@ -151,8 +174,38 @@ item/depth/output limits; DOCTYPE refused. Write: one object + build item per me
 vertices, chosen unit, optional object colours. Evidence: FreeCAD-written two-object file and
 hand-written packages (inch + rotated item, components + mirror, colours, malformed,
 decompression bomb, lying size header); writer read back by FreeCAD and an independent Python
-reader. FreeCAD's own 3MF reader ignores the `unit` attribute and does not flatten
-components (observed), so units/components are checked by the Python reader instead.
+reader. FreeCAD 1.1.4's 3MF reader ignores the `unit` attribute and does not flatten
+components (observed, `tools/fixtures/threemf/README.md`), so units/components are checked by
+the Python reader (`check_3mf.py`) instead.
+
+## SVG
+
+`f420_exchange::svg` ([`formats/svg.md`](formats/svg.md)), commands `import_svg` (new
+unconstrained sketch on a plane or planar face) and `export_svg` (one sketch). Import:
+`line`, `rect` (not rounded), `circle`/`ellipse` with `rx ≈ ry`, `polyline`/`polygon`, `path`
+`M L H V Z` and circular `A`; `g` transforms. Accepted to 1e-5 relative: `rx`/`ry` that differ
+by rounding (mean radius) and near-similarity transforms on circles/arcs. Units: root
+`width`/`height` (> 0, `mm cm in pt pc`, exponents such as `1e2mm`) with `viewBox`;
+`preserveAspectRatio` any alignment with `meet` (smaller ratio) or `slice` (larger ratio),
+`none` only when both ratios agree; a missing/`auto` width or height follows the other through
+the viewBox aspect ratio; no physical size → unit choice required. Refused: a non-identity
+`transform` on the root `svg` (it applies in the embedding page's CSS space), DOCTYPE with an
+internal subset, data after `Z` in a path. Unsupported and reported (import refused unless
+`allow_partial`): Béziers, elliptical arcs, `use`, `text`, `image`, nested `svg`, circles/arcs
+under a non-similarity transform, and shapes whose geometry uses relative lengths (`% em ex rem ch vw vh vmin vmax auto`); such a length
+skips only its own element. Ignored silently: `defs`, metadata, styles and any element in a
+non-SVG namespace (Inkscape `sodipodi:`/`inkscape:`, RDF). Export: lines, arcs, circles in
+local sketch coordinates, mm, y negated; construction geometry and constraints are not
+written.
+
+Evidence: `crates/f420-exchange/tests/svg_fixtures.rs` (15 tests: hand-written `plate_mm.svg`,
+FreeCAD-generated `freecad_plate.svg`, the review fixes above); acceptance 3S (FreeCAD SVG →
+sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_run3_steps.sh`
+(FreeCAD validates the 3S STEP and reads the exported SVG with `importSVG`: total edge length
+220 + 20π, 60 × 40); UI import in `exchange_ui.rs::threemf_import_export_and_svg_sketch`.
+
+**Known losses**: Béziers, elliptical arcs, text, styling (fill/stroke are not read; export is
+stroke only), design intent (constraints); sketch placement on export.
 
 ## Native format
 
@@ -174,21 +227,29 @@ Reproduce (from the repository root):
 ```sh
 cargo run --release -p f420-cli -- acceptance --out artifacts/acceptance   # scenarios C and D are the "C." / "D." steps
 tools/external_validation.sh artifacts/acceptance                          # FreeCAD checks incl. tools/check_formats.sh
-cargo test --release -p f420-commands --test imports --test native_formats
+tools/check_run3_steps.sh                                                  # run-3 STEP exports incl. 3S + exported SVG via FreeCAD
+cargo test --release -p f420-commands --test imports --test native_formats --test bodies
 cargo test --release -p f420-kernel --test step_import --test step_export_multi
 cargo test --release -p f420-exchange
+cargo test --release -p f420-app --test exchange_ui
 tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures/dxf/validate_export.sh
+tools/fixtures/threemf/validate_writer.sh
 ```
 
-| Evidence | Where | Result (2026-10-10) |
+Test results below are from `cargo xtask check` (log `artifacts/run3/verify/xtask.log`).
+
+| Evidence | Where | Result (2026-10-11) |
 |---|---|---|
-| Acceptance C.1-C.8, D.1-D.11 | `crates/f420-commands/src/acceptance/formats.rs`; report `artifacts/acceptance/acceptance_report.json` (log `artifacts/acceptance.log`) | all checks PASS (650 total with A/B/P/R) |
-| FreeCAD validation of C/D exports | `tools/check_formats.sh`; logs `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`, `artifacts/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
-| Command-level import edge cases | `crates/f420-commands/tests/imports.rs` | 10 pass, 2 ignored (backend issues below) |
+| Acceptance C.1-C.8, D.1-D.11, 3S | `crates/f420-commands/src/acceptance/formats.rs`, `bodies.rs` (`scenario_svg`); reports `artifacts/acceptance/acceptance_report.json` (written by `cargo xtask check`) and `artifacts/run3/acceptance/acceptance_report.json` (a separate run, same results) | all checks PASS (855 total, all scenarios; C 120, D 90, 3S 10) |
+| FreeCAD validation of C/D exports | `tools/check_formats.sh` (called by `tools/external_validation.sh`); per-file results `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`; log `artifacts/run3/verify/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
+| FreeCAD validation of 3S (SVG) | `tools/check_run3_steps.sh`; log `artifacts/run3/verify/check_run3_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
+| Command-level import edge cases | `crates/f420-commands/tests/imports.rs`; 3MF: `bodies.rs::threemf_import_and_multi_body_export_round_trip` | 12 + 8 pass |
+| UI import/export dialogs | `crates/f420-app/tests/exchange_ui.rs` | 6 pass |
 | Native v1/v2/v3 | `crates/f420-commands/tests/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |
-| Kernel STEP import/export | `crates/f420-kernel/tests/step_import.rs`, `step_export_multi.rs`; `artifacts/format_tests_kernel_exchange.log` | 13 + 4 pass |
-| STL/DXF adapters | `crates/f420-exchange/tests/{stl,dxf}_*`; `artifacts/format_tests_exchange.log` | 35 pass |
-| 3MF adapter | `crates/f420-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/threemf_validate_writer.log` | 9 + 6 pass; writer PASS (Python stdlib reader and FreeCAD) |
+| Kernel STEP import/export | `crates/f420-kernel/tests/step_import.rs`, `step_export_multi.rs` | 13 + 4 pass (1 ignored: artifact writer for `tools/check_step_multi.sh`) |
+| STL/DXF adapters | `crates/f420-exchange/tests/stl_fixtures.rs`, `dxf_fixtures.rs`, `dxf_scale.rs` + unit tests in `src/{stl,mesh,dxf}`; validators `tools/fixtures/stl/validate_writer.sh`, `tools/fixtures/dxf/validate_export.sh`, logs `artifacts/run3/verify/stl_validate.log`, `artifacts/run3/verify/dxf_validate.log` | 7 + 13 + 2 pass |
+| 3MF adapter | `crates/f420-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/run3/verify/threemf_validate.log` | 9 + 6 pass; writer checked by the Python stdlib reader and FreeCAD |
+| SVG adapter | `crates/f420-exchange/tests/svg_fixtures.rs` | 15 pass |
 | Replayable workflows | `examples/imported_step_hole_workflow.json`, `examples/dxf_stl_import_workflow.json` (`f420-cli run`, from the repository root) with saved documents `examples/*.f420.json` | replayed by `imports.rs` |
 
 `artifacts/` is not versioned; rerun the commands above to regenerate the logs.

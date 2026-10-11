@@ -9,10 +9,10 @@ implementation notes F.6.5); XML tokenizing by `quick-xml` (already a dependency
 |---|---|---|
 | `line` | line | any affine transform |
 | `rect` | 4 lines | `rx`/`ry` > 0 (rounded) unsupported; zero size skipped as degenerate |
-| `circle`, `ellipse` with `rx == ry` (1e-6 relative; mean radius) | circle | similarity transforms only (1e-6 relative) |
+| `circle`, `ellipse` with `rx == ry` (1e-5 relative; mean radius) | circle | similarity transforms only (1e-5 relative) |
 | `polyline`, `polygon` | lines | polygon closed; an odd trailing coordinate is dropped and reported |
 | `path` `M L H V Z` (abs/rel) | lines | must start with M/m; numbers after `Z` are malformed |
-| `path` `A` with `rx == ry` (1e-6 relative) | arc | endpoint → centre (F.6.5), radius scaled up when too small; similarity transforms only (1e-6 relative; the mapped centre is moved onto the end points' bisector); re-oriented CCW after the full transform |
+| `path` `A` with `rx == ry` (1e-5 relative) | arc | endpoint → centre (F.6.5), radius scaled up when too small; similarity transforms only (1e-5 relative; the mapped centre is moved onto the end points' bisector); re-oriented CCW after the full transform |
 | `g` | transforms | `matrix translate scale rotate(a[,cx,cy]) skewX skewY`; a non-identity `transform` on the root `svg` is refused (it applies in the embedding page's CSS space) |
 | `C S Q T`, elliptical `A`, `use`, `text`, `image`, nested `svg`, `foreignObject`, `switch`, `a`; shapes with relative lengths (`% em ex rem ch vw vh vmin vmax auto`) | **unsupported** | listed per element type with a reason; the import is refused unless `allow_partial` |
 | `defs symbol clipPath mask pattern marker style script metadata title desc` gradients, filters; any element in a non-SVG namespace (`sodipodi:namedview`, `inkscape:*`, RDF) | ignored | draw nothing by themselves |

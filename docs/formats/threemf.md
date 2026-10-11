@@ -1,7 +1,8 @@
 # 3MF support (`f420_exchange::threemf`)
 
 Status: run 3. Wired into commands (`import_3mf`, `export_3mf`; document base feature
-`Import3mf`, mesh bodies) by the coordinator; no UI dialog yet. The section "Command
+`Import3mf`, mesh bodies) by the coordinator; desktop UI: Import… and Export 3MF…
+(`crates/f420-app/src/exchange.rs`, test `exchange_ui.rs::threemf_import_export_and_svg_sketch`). The section "Command
 integration" below records the original proposal, implemented as written (no colours: the
 document has no body colour yet).
 

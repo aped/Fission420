@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Wall-time of representative imports/exports through the release CLI (one fresh process per
-# file; includes regeneration and measurement). Writes artifacts/run3/bench_imports.txt.
+# file; includes regeneration and measurement). Prints a table on stdout.
 # usage: tools/bench/imports.sh
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -32,5 +32,5 @@ run stl_binary '[{"cmd":"new_document"},{"cmd":"import_stl","path":"'"$F"'/f420-
 run dxf_slot '[{"cmd":"new_document"},{"cmd":"import_dxf","path":"'"$F"'/f420-exchange/tests/fixtures/dxf/slot_freecad_r14.dxf","plane":"WorldXY","units_to_mm":1}]'
 run svg_plate '[{"cmd":"new_document"},{"cmd":"import_svg","path":"'"$F"'/f420-exchange/tests/fixtures/svg/freecad_plate.svg","plane":"WorldXY"},{"cmd":"extrude","sketch":1,"distance":5}]'
 run threemf_two_boxes '[{"cmd":"new_document"},{"cmd":"import_3mf","path":"'"$F"'/f420-exchange/tests/fixtures/threemf/freecad_two_boxes.3mf"},{"cmd":"export_3mf","path":"'"$OUT"'/two.3mf"}]'
-# A larger mesh: tessellate a 120-hole plate (pattern) at 0.01 mm chord and export STL + 3MF.
+# A larger model: a 200x100x5 plate with a row of 19 Ø4 holes (seed + linear pattern count 19), exported as STL, 3MF and STEP.
 run large_pattern '[{"cmd":"new_document"},{"cmd":"create_sketch","plane":"WorldXY","template":"polygon","vertices":[[0,0],[200,0],[200,100],[0,100]]},{"cmd":"extrude","sketch":1,"distance":5},{"cmd":"create_sketch","plane":{"Face":{"feature":2,"role":"ExtrudeEndCap"}},"template":"centered_circle","diameter":4,"center":[10,10]},{"cmd":"extrude","sketch":3,"op":"cut","through_all":true},{"cmd":"linear_pattern","feature":4,"count":19,"spacing":10,"direction":[1,0]},{"cmd":"export_stl","path":"'"$OUT"'/large.stl"},{"cmd":"export_3mf","path":"'"$OUT"'/large.3mf"},{"cmd":"export_step","path":"'"$OUT"'/large.step"}]'
