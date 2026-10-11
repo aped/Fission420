@@ -460,6 +460,13 @@ impl F420App {
             }
             let targets = sketch_view::paint_sketch(painter, &pr, &shown, &style);
             if selected {
+                for (it, r) in &targets {
+                    if let Item::Constraint(i) = it
+                        && let Some(d) = sk.constraints.get(*i).and_then(|c| c.dimension())
+                    {
+                        crate::probe::note(format!("dim:{}", d.name), *r);
+                    }
+                }
                 self.doc_dim_targets = targets
                     .into_iter()
                     .filter_map(|(it, r)| match it {
@@ -740,6 +747,13 @@ impl F420App {
             alpha: 1.0,
         };
         let targets = sketch_view::paint_sketch(painter, &pr, &ed.sketch, &style);
+        for (it, r) in &targets {
+            if let Item::Constraint(i) = it
+                && let Some(d) = ed.sketch.constraints.get(*i).and_then(|c| c.dimension())
+            {
+                crate::probe::note(format!("dim:{}", d.name), *r);
+            }
+        }
         sketch_view::paint_preview(painter, &pr, ed);
         s.editor.set_screen_targets(targets);
     }

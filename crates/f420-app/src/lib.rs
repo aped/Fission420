@@ -8,6 +8,7 @@ pub mod app;
 pub mod engine;
 pub mod panels;
 pub mod place;
+pub mod probe;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod view3d;

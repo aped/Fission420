@@ -231,8 +231,43 @@ fn write_probe(path: &std::path::Path, app: &F420App, last: &mut String) {
             f(s.frame.y)
         )
     });
+    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
+    let widgets: Vec<String> = f420_app::probe::rects()
+        .iter()
+        .map(|(k, r)| {
+            format!(
+                "\"{}\":[{},{},{},{}]",
+                esc(k),
+                r.min.x,
+                r.min.y,
+                r.max.x,
+                r.max.y
+            )
+        })
+        .collect();
+    let s = app.summary();
+    let volume = app.volume().map_or("null".to_string(), |v| v.to_string());
+    let editing = app.sketch_session().map_or("null".to_string(), |ss| {
+        format!(
+            "{{\"status\":\"{:?}\",\"dof\":{},\"entities\":{},\"dims\":{}}}",
+            ss.editor.report.status,
+            ss.editor.report.dof,
+            ss.editor.sketch.entities.len(),
+            ss.editor.sketch.dimensions().len()
+        )
+    });
+    let doc = format!(
+        "{{\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing}}}",
+        s.open,
+        s.revision,
+        s.features.len(),
+        s.dirty,
+        app.busy(),
+        s.measuring,
+        app.pending_confirmation().is_some()
+    );
     let json = format!(
-        "{{\"rect\":[{},{},{},{}],\"camera\":{{\"target\":[{},{},{}],\"distance\":{},\"yaw\":{},\"pitch\":{},\"fov_y\":{}}},\"sketch\":{sketch}}}",
+        "{{\"rect\":[{},{},{},{}],\"camera\":{{\"target\":[{},{},{}],\"distance\":{},\"yaw\":{},\"pitch\":{},\"fov_y\":{}}},\"sketch\":{sketch},\"doc\":{doc},\"widgets\":{{{}}}}}",
         r.min.x,
         r.min.y,
         r.max.x,
@@ -243,7 +278,8 @@ fn write_probe(path: &std::path::Path, app: &F420App, last: &mut String) {
         cam.distance,
         cam.yaw,
         cam.pitch,
-        cam.fov_y
+        cam.fov_y,
+        widgets.join(",")
     );
     if json != *last {
         let tmp = path.with_extension("tmp");
@@ -267,6 +303,9 @@ impl eframe::App for Shell {
         if title != self.title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
+        }
+        if self.probe.is_some() {
+            f420_app::probe::begin_frame();
         }
         self.app.ui(ui);
         if let Some(p) = self.probe.clone() {
@@ -309,6 +348,9 @@ fn main() -> ExitCode {
             };
             let ctx = cc.egui_ctx.clone();
             let mut app = F420App::new(mode, Some(Box::new(move || ctx.request_repaint())));
+            if std::env::var_os("F420_PROBE").is_some() {
+                f420_app::probe::enable();
+            }
             app.viewport = Viewport::new(cc);
             if args.demo {
                 app.start_demo(std::env::temp_dir().join("fission420-demo"));

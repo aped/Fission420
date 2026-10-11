@@ -13,6 +13,7 @@ use f420_sketch::SolveStatus;
 
 use crate::app::{ConfirmAnswer, Dialog, F420App, Guarded, SketchTarget, build_command};
 use crate::place::Tool;
+use crate::probe::Probe as _;
 use crate::sketch_edit::{Item, SketchTool};
 
 const OK_COLOR: Color32 = Color32::from_rgb(120, 220, 120);
@@ -21,7 +22,9 @@ const BAD_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 
 /// Button that is disabled with a visible reason on hover.
 fn action(ui: &mut egui::Ui, label: &str, blocker: Option<&str>) -> bool {
-    let r = ui.add_enabled(blocker.is_none(), egui::Button::new(label));
+    let r = ui
+        .add_enabled(blocker.is_none(), egui::Button::new(label))
+        .probe(label);
     let r = match blocker {
         Some(why) => r.on_disabled_hover_text(why),
         None => r,
@@ -58,13 +61,19 @@ impl F420App {
             {
                 self.guarded(Guarded::New);
             }
-            if ui.button("Open…").on_hover_text("Open (Ctrl+O)").clicked() {
+            if ui
+                .button("Open…")
+                .probe("Open…")
+                .on_hover_text("Open (Ctrl+O)")
+                .clicked()
+            {
                 self.dialog = Some(Dialog::Open {
                     path: self.default_path("f420.json"),
                 });
             }
             if ui
                 .add_enabled(open, egui::Button::new("Save"))
+                .probe("Save")
                 .on_hover_text("Save (Ctrl+S)")
                 .clicked()
             {
@@ -72,6 +81,7 @@ impl F420App {
             }
             if ui
                 .add_enabled(open, egui::Button::new("Save As…"))
+                .probe("Save As…")
                 .on_hover_text("Save as (Ctrl+Shift+S)")
                 .clicked()
             {
@@ -79,12 +89,17 @@ impl F420App {
                     path: self.default_path("f420.json"),
                 });
             }
-            if ui.add_enabled(open, egui::Button::new("Close")).clicked() {
+            if ui
+                .add_enabled(open, egui::Button::new("Close"))
+                .probe("Close")
+                .clicked()
+            {
                 self.guarded(Guarded::Close);
             }
-            ui.menu_button("Export", |ui| {
+            let export = ui.menu_button("Export", |ui| {
                 if ui
                     .add_enabled(open, egui::Button::new("Export STL…"))
+                    .probe("Export STL…")
                     .clicked()
                 {
                     self.dialog = Some(Dialog::ExportStl {
@@ -95,6 +110,7 @@ impl F420App {
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("Export STEP…"))
+                    .probe("Export STEP…")
                     .clicked()
                 {
                     self.dialog = Some(Dialog::ExportStep {
@@ -103,6 +119,7 @@ impl F420App {
                     ui.close();
                 }
             });
+            crate::probe::note("Export", export.response.rect);
             ui.separator();
             // Fixed labels so the bar never shifts; the action is in the tooltip.
             let undo_tip = match &self.summary.can_undo {
@@ -111,6 +128,7 @@ impl F420App {
             };
             if ui
                 .add_enabled(self.summary.can_undo.is_some(), egui::Button::new("Undo"))
+                .probe("Undo")
                 .on_hover_text(&undo_tip)
                 .on_disabled_hover_text(&undo_tip)
                 .clicked()
@@ -123,6 +141,7 @@ impl F420App {
             };
             if ui
                 .add_enabled(self.summary.can_redo.is_some(), egui::Button::new("Redo"))
+                .probe("Redo")
                 .on_hover_text(&redo_tip)
                 .on_disabled_hover_text(&redo_tip)
                 .clicked()
@@ -133,7 +152,7 @@ impl F420App {
             self.modeling_buttons(ui, busy);
             ui.separator();
             ui.menu_button("View", |ui| {
-                if ui.button("Fit (F)").clicked() {
+                if ui.button("Fit (F)").probe("Fit (F)").clicked() {
                     self.fit_view();
                     ui.close();
                 }
@@ -147,10 +166,20 @@ impl F420App {
                     }
                 }
             });
-            if ui.button("Fit view").on_hover_text("F").clicked() {
+            if ui
+                .button("Fit view")
+                .probe("Fit view")
+                .on_hover_text("F")
+                .clicked()
+            {
                 self.fit_view();
             }
-            if ui.button("Help").on_hover_text("F1").clicked() {
+            if ui
+                .button("Help")
+                .probe("Help")
+                .on_hover_text("F1")
+                .clicked()
+            {
                 self.show_help = !self.show_help;
             }
             if busy {
@@ -181,7 +210,9 @@ impl F420App {
             Some(SketchPlane::Face(_)) => "Sketch on the selected face",
             _ => "Sketch on the world XY plane (select a cap face first to sketch on it)",
         };
-        let r = ui.add_enabled(blocker.is_none(), egui::Button::new("Create Sketch"));
+        let r = ui
+            .add_enabled(blocker.is_none(), egui::Button::new("Create Sketch"))
+            .probe("Create Sketch");
         let r = match &blocker {
             Some(b) => r.on_disabled_hover_text(b),
             None => r.on_hover_text(hover),
@@ -246,10 +277,11 @@ impl F420App {
             });
         }
         let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
-        ui.menu_button("Templates", |ui| {
+        let templates = ui.menu_button("Templates", |ui| {
             ui.weak("Dimensioned sketch templates (dialogs)");
             if ui
                 .add_enabled(open, egui::Button::new("Rectangle on XY…"))
+                .probe("Rectangle on XY…")
                 .clicked()
             {
                 self.dialog = Some(Dialog::Rectangle {
@@ -262,6 +294,7 @@ impl F420App {
             }
             if ui
                 .add_enabled(open, egui::Button::new("Rectangle on XZ…"))
+                .probe("Rectangle on XZ…")
                 .clicked()
             {
                 self.dialog = Some(Dialog::RectangleXz {
@@ -274,6 +307,7 @@ impl F420App {
             }
             if ui
                 .add_enabled(has_extrude, egui::Button::new("Circle on face…"))
+                .probe("Circle on face…")
                 .on_disabled_hover_text("Needs an extrusion")
                 .clicked()
             {
@@ -306,6 +340,7 @@ impl F420App {
             }
             if ui
                 .add_enabled(has_extrude, egui::Button::new("Place hole"))
+                .probe("Place hole")
                 .on_disabled_hover_text("Needs an extrusion")
                 .clicked()
             {
@@ -322,6 +357,7 @@ impl F420App {
                 ui.close();
             }
         });
+        crate::probe::note("Templates", templates.response.rect);
         if let Some(Tool::Hole { extrude }) = self.placement.as_ref().map(|p| p.tool) {
             let extrudes: Vec<FeatureSummary> = self
                 .summary
@@ -339,7 +375,12 @@ impl F420App {
                 self.start_tool(Tool::Hole { extrude: e });
             }
         }
-        if self.placement.is_some() && ui.button("Cancel placement").clicked() {
+        if self.placement.is_some()
+            && ui
+                .button("Cancel placement")
+                .probe("Cancel placement")
+                .clicked()
+        {
             self.cancel_tool();
         }
     }
@@ -366,6 +407,7 @@ impl F420App {
                 ] {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
+                        .probe(t.label())
                         .on_hover_text(format!("{} ({})", t.hint(), t.shortcut()))
                         .clicked()
                     {
@@ -393,6 +435,7 @@ impl F420App {
                 ui.separator();
                 if ui
                     .add_enabled(ed.can_undo(), egui::Button::new("Undo step"))
+                    .probe("Undo step")
                     .on_hover_text("Undo inside this sketch (Ctrl+Z)")
                     .clicked()
                 {
@@ -400,6 +443,7 @@ impl F420App {
                 }
                 if ui
                     .add_enabled(ed.can_redo(), egui::Button::new("Redo step"))
+                    .probe("Redo step")
                     .on_hover_text("Ctrl+Shift+Z")
                     .clicked()
                 {
@@ -413,6 +457,7 @@ impl F420App {
                     egui::Button::new(RichText::new("Finish Sketch").strong())
                         .fill(Color32::from_rgb(40, 90, 50)),
                 )
+                .probe("Finish Sketch")
                 .on_hover_text("Commit the sketch as one undoable document step")
                 .clicked()
             {
@@ -420,12 +465,13 @@ impl F420App {
             }
             if ui
                 .add_enabled(!committing, egui::Button::new("Cancel Sketch"))
+                .probe("Cancel Sketch")
                 .on_hover_text("Discard all changes made in this sketch session")
                 .clicked()
             {
                 cancel = true;
             }
-            if ui.button("Help").clicked() {
+            if ui.button("Help").probe("Help").clicked() {
                 self.show_help = !self.show_help;
             }
             if committing {
@@ -476,7 +522,7 @@ impl F420App {
                         .weak()
                         .small(),
                 );
-                let r = ui.selectable_label(sel, &f.name);
+                let r = ui.selectable_label(sel, &f.name).probe(&f.name);
                 if r.clicked() {
                     clicked = Some(f.id);
                 }
@@ -484,11 +530,12 @@ impl F420App {
                     edit = Some(f.id);
                 }
                 r.context_menu(|ui| {
-                    if f.kind == "sketch" && ui.button("Edit Sketch").clicked() {
+                    if f.kind == "sketch" && ui.button("Edit Sketch").probe("Edit Sketch").clicked()
+                    {
                         edit = Some(f.id);
                         ui.close();
                     }
-                    if ui.button("Rename…").clicked() {
+                    if ui.button("Rename…").probe("Rename…").clicked() {
                         rename = Some(f.id);
                         ui.close();
                     }
@@ -535,14 +582,19 @@ impl F420App {
             ui.label(&info.description);
             match (info.reference, info.sketch_blocker()) {
                 (Some(r), _) => {
-                    if ui.button("Create Sketch on this face").clicked() {
+                    if ui
+                        .button("Create Sketch on this face")
+                        .probe("Create Sketch on this face")
+                        .clicked()
+                    {
                         self.begin_sketch(SketchTarget::New {
                             plane: SketchPlane::Face(r),
                         });
                     }
                 }
                 (None, Some(why)) => {
-                    ui.add_enabled(false, egui::Button::new("Create Sketch on this face"));
+                    ui.add_enabled(false, egui::Button::new("Create Sketch on this face"))
+                        .probe("Create Sketch on this face");
                     ui.label(RichText::new(why).weak().small());
                 }
                 _ => {}
@@ -581,7 +633,7 @@ impl F420App {
         match f.kind.as_str() {
             "sketch" => {
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Edit Sketch").clicked() {
+                    if ui.button("Edit Sketch").probe("Edit Sketch").clicked() {
                         self.begin_sketch(SketchTarget::Existing(f.id));
                     }
                     let eb = self.extrude_blocker(&f);
@@ -682,7 +734,8 @@ impl F420App {
                     let unit = if pname.ends_with("_deg") { "deg" } else { "mm" };
                     let l = ui.label(format!("{pname} ({unit})"));
                     ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
-                        .labelled_by(l.id);
+                        .labelled_by(l.id)
+                        .probe(&format!("{pname} ({unit})"));
                     ui.end_row();
                 }
             });
@@ -695,9 +748,11 @@ impl F420App {
         ui.horizontal(|ui| {
             apply = ui
                 .add_enabled(modified, egui::Button::new("Apply"))
+                .probe("Apply")
                 .clicked();
             cancel = ui
                 .add_enabled(modified, egui::Button::new("Cancel edits"))
+                .probe("Cancel edits")
                 .clicked();
         });
         if modified {
@@ -1075,9 +1130,9 @@ impl F420App {
                 }
                 ui.horizontal(|ui| {
                     ok = ui
-                        .add_enabled(!busy_blocks(&dlg, busy), egui::Button::new("OK"))
+                        .add_enabled(!busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
                         .clicked();
-                    cancel = ui.button("Cancel").clicked();
+                    cancel = ui.button("Cancel").probe("Cancel").clicked();
                 });
                 ui.weak("Enter = OK · Esc = Cancel");
             });
@@ -1143,10 +1198,14 @@ impl F420App {
                     if ui.button(save_label).clicked() {
                         answer = Some(ConfirmAnswer::Save);
                     }
-                    if ui.button("Discard changes").clicked() {
+                    if ui
+                        .button("Discard changes")
+                        .probe("Discard changes")
+                        .clicked()
+                    {
                         answer = Some(ConfirmAnswer::Discard);
                     }
-                    if ui.button("Keep editing").clicked() {
+                    if ui.button("Keep editing").probe("Keep editing").clicked() {
                         answer = Some(ConfirmAnswer::Cancel);
                     }
                 });
@@ -1187,10 +1246,10 @@ impl F420App {
                     done = Some(false);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Rename").clicked() {
+                    if ui.button("Rename").probe("Rename").clicked() {
                         done = Some(true);
                     }
-                    if ui.button("Cancel rename").clicked() {
+                    if ui.button("Cancel rename").probe("Cancel rename").clicked() {
                         done = Some(false);
                     }
                 });
@@ -1245,7 +1304,8 @@ fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32) {
         let l = ui.label(label);
         let r = ui
             .add(egui::TextEdit::singleline(buf).desired_width(width))
-            .labelled_by(l.id);
+            .labelled_by(l.id)
+            .probe(label);
         if AUTOFOCUS.with(|a| a.replace(false)) {
             r.request_focus();
         }
