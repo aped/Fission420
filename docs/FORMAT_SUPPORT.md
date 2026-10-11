@@ -17,7 +17,7 @@ ADR 0004 (format adapters).
 | STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step` |
 | STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl` |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf` |
-| 3MF `.3mf` | no (continuation backlog) | no | (would be mesh) | | |
+| 3MF `.3mf` | **adapter only**: core-subset reader (not reachable from commands/UI) | **adapter only**: multi-object mesh writer | triangle meshes, one per build item | declared unit honoured (default mm); writer takes a unit | `f420_exchange::threemf` (Rust API, no command) |
 | SVG `.svg` | no (later backlog) | no | | | |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
@@ -134,6 +134,23 @@ imported STEP face cuts the imported body (`imports.rs`).
 **Known losses**: splines/ellipses/text/dimensions/hatches/blocks, widths, thickness,
 linetype and colour; design intent (constraints); sketch placement on export.
 
+## 3MF (adapter only)
+
+`f420_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)).
+**Not reachable from the command API, the CLI or the UI yet**, so a user cannot import or
+export 3MF in this build; the proposed commands are in that page.
+Read: ZIP stored/deflate, `_rels/.rels` start part, units micron..meter converted to mm, one
+mesh per build item with item and nested component transforms (mirrors reverse winding),
+object-level base-material colours; per-triangle colours, colour groups, textures and other
+extension content are reported as warnings, required extensions other than materials and any
+production-extension reference are refused; bounded archive/decompression/vertex/triangle/
+item/depth/output limits; DOCTYPE refused. Write: one object + build item per mesh, welded
+vertices, chosen unit, optional object colours. Evidence: FreeCAD-written two-object file and
+hand-written packages (inch + rotated item, components + mirror, colours, malformed,
+decompression bomb, lying size header); writer read back by FreeCAD and an independent Python
+reader. FreeCAD's own 3MF reader ignores the `unit` attribute and does not flatten
+components (observed), so units/components are checked by the Python reader instead.
+
 ## Native format
 
 v3 stores features, bodies (id, name, visibility, source) and the bytes of every imported
@@ -164,7 +181,8 @@ tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures
 | Command-level import edge cases | `crates/f420-commands/tests/imports.rs` | 10 pass, 2 ignored (backend issues below) |
 | Native v1/v2/v3 | `crates/f420-commands/tests/native_formats.rs` | 7 pass |
 | Kernel STEP import/export | `crates/f420-kernel/tests/step_import.rs`, `step_export_multi.rs`; `artifacts/format_tests_kernel_exchange.log` | 13 + 4 pass |
-| STL/DXF adapters | `crates/f420-exchange/tests/*`; `artifacts/format_tests_exchange.log` | 35 pass |
+| STL/DXF adapters | `crates/f420-exchange/tests/{stl,dxf}_*`; `artifacts/format_tests_exchange.log` | 35 pass |
+| 3MF adapter | `crates/f420-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/threemf_validate_writer.log` | 9 + 6 pass; writer PASS (Python stdlib reader and FreeCAD) |
 | Replayable workflows | `examples/imported_step_hole_workflow.json`, `examples/dxf_stl_import_workflow.json` (`f420-cli run`, from the repository root) with saved documents `examples/*.f420.json` | replayed by `imports.rs` |
 
 `artifacts/` is not versioned; rerun the commands above to regenerate the logs.
