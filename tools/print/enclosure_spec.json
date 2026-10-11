@@ -1,0 +1,43 @@
+{
+  "_comment": "Expected values for tools/print/enclosure_print_workflow.json exports (analytic, SESSION_4 6.A/6.B formulas). Placed exports: lid plate-down (lip up), base on its floor, laid out along X with 10 mm gaps centred on the P1S bed (256x256, height 250).",
+  "files": {
+    "baseline_as_modeled.3mf": {
+      "unit": "millimeter", "objects": 2, "names": ["Base", "Lid"], "closed": true,
+      "per_object": {
+        "Base": {"volume": [19592, 0.5], "bounds": [[0, 0, 0], [80, 50, 25], 1e-4]},
+        "Lid": {"volume": [9404, 0.5], "bounds": [[-40, -25, -3], [40, 25, 2], 1e-4]}
+      }
+    },
+    "baseline-Base.stl": {"objects": 1, "closed": true, "volume": [19592, 0.5], "dims": [[80, 50, 25], 1e-4], "min_z": [0, 1e-4],
+      "bounds": [[43, 103, 0], [123, 153, 25], 1e-4], "within_bed": [[0, 0], [256, 256], 250]},
+    "baseline-Lid.stl": {"objects": 1, "closed": true, "volume": [9404, 0.5], "dims": [[80, 50, 5], 1e-4], "min_z": [0, 1e-4],
+      "bounds": [[133, 103, 0], [213, 153, 5], 1e-4], "within_bed": [[0, 0], [256, 256], 250]},
+    "baseline.3mf": {
+      "unit": "millimeter", "objects": 2, "names": ["Base", "Lid"], "closed": true, "min_z": [0, 1e-4],
+      "within_bed": [[0, 0], [256, 256], 250],
+      "per_object": {
+        "Base": {"volume": [19592, 0.5], "dims": [[80, 50, 25], 1e-4], "min_z": [0, 1e-4], "bounds": [[43, 103, 0], [123, 153, 25], 1e-4]},
+        "Lid": {"volume": [9404, 0.5], "dims": [[80, 50, 5], 1e-4], "min_z": [0, 1e-4], "bounds": [[133, 103, 0], [213, 153, 5], 1e-4]}
+      }
+    },
+    "variant-Base.stl": {"objects": 1, "closed": true, "volume": [36823.296, 0.5], "dims": [[100, 65, 30], 1e-4], "min_z": [0, 1e-4],
+      "bounds": [[23, 95.5, 0], [123, 160.5, 30], 1e-4], "within_bed": [[0, 0], [256, 256], 250]},
+    "variant-Lid.stl": {"objects": 1, "closed": true, "volume": [15148.48, 0.5], "dims": [[100, 65, 5], 1e-4], "min_z": [0, 1e-4],
+      "bounds": [[133, 95.5, 0], [233, 160.5, 5], 1e-4], "within_bed": [[0, 0], [256, 256], 250]},
+    "variant.3mf": {
+      "unit": "millimeter", "objects": 2, "names": ["Base", "Lid"], "closed": true, "min_z": [0, 1e-4],
+      "within_bed": [[0, 0], [256, 256], 250],
+      "per_object": {
+        "Base": {"volume": [36823.296, 0.5], "dims": [[100, 65, 30], 1e-4]},
+        "Lid": {"volume": [15148.48, 0.5], "dims": [[100, 65, 5], 1e-4]}
+      }
+    },
+    "cylinder_c0.02.stl": {"objects": 1, "closed": true, "min_z": [0, 1e-4],
+      "circle": {"center": [0, 0], "r": 10, "z": [0, 10], "chord": 0.02}},
+    "cylinder_c0.005.stl": {"objects": 1, "closed": true, "min_z": [0, 1e-4],
+      "circle": {"center": [0, 0], "r": 10, "z": [0, 10], "chord": 0.005}},
+    "cylinder_placed.stl": {"objects": 1, "closed": true, "min_z": [0, 1e-4],
+      "circle": {"center": [128, 128], "r": 10, "z": [0, 10], "chord": 0.02},
+      "within_bed": [[0, 0], [256, 256], 250]}
+  }
+}

@@ -52,7 +52,7 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `import_stl` | `path`, `units_to_mm` (required: STL is unitless) | ASCII/binary → one mesh body (display, hide/show, save, STL export; exact operations and STEP export refused); diagnostics in `summary.bodies[].mesh`; bytes embedded |
 | `import_dxf` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?`, `layers?` | 2D subset (docs/formats/dxf.md) → a new unconstrained sketch on `plane`; unitless files need `units_to_mm`; unsupported entities refuse the import unless `allow_partial` (then listed in the message) |
 | `import_3mf` | `path` | every build item of a 3MF package (subset: docs/formats/threemf.md) → one mesh body each (units from the file, transforms applied); bytes embedded; colours/extensions reported, not kept |
-| `export_3mf` | `path`, `chord?`, `bodies?`, `unit?` (`millimeter` default, `micron`…`meter`) | one object per body (default all visible): B-rep tessellated and checked watertight, mesh bodies as imported; never fused |
+| `export_3mf` | `path`, `chord?`, `bodies?`, `unit?` (`millimeter` default, `micron`…`meter`), print fields (below) | one object per body (default all visible; hidden bodies only when listed, named in the message): B-rep tessellated and required to be a valid closed outward solid, mesh bodies as imported (must be valid solids unless `allow_open_meshes`); never fused; geometry only (no Bambu printer/process/filament settings); `separate_files` refused; report in `response.export` |
 | `import_svg` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?` | SVG planar paths (subset: docs/formats/svg.md) → a new unconstrained sketch on `plane`; files without a physical size need `units_to_mm` (mm per user unit); y flipped (SVG y points down) |
 | `export_svg` | `path`, `sketch` | the solved sketch's lines/arcs/circles, local 2D coordinates in mm with y negated |
 | `export_dxf` | `path`, `sketch` | the solved sketch's lines/arcs/circles in its local 2D coordinates, mm, R12 ASCII |
@@ -61,9 +61,25 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `save` | `path` | atomic (temp file + fsync + rename); always writes the current format version |
 | `open` | `path` | validates format/version/references, regenerates, compares with saved cache |
 | `close` | | |
-| `export_stl` | `path`, `chord?` (mm, default 0.01), `bodies?` | binary STL of `bodies` (default: all visible bodies), each B-rep tessellated and checked watertight, mesh bodies written as imported; bodies are separate shells in one file, never fused; message names the committed revision |
+| `export_stl` | `path`, `chord?` (mm, default 0.01), `bodies?`, print fields (below) | binary STL in mm (STL has no unit field; the slicer must read mm) of `bodies` (default: all visible bodies; hidden ones only when listed, named in the message), B-rep tessellations and mesh bodies checked as for 3MF; bodies are separate shells in one file (or one file each with `separate_files`), never fused; message names the committed revision; report in `response.export` |
 | `export_step` | `path`, `bodies?` | AP214 via truck-stepio with exact NURBS edge rebuild, one solid per body (default: all visible bodies); mesh bodies refused; refused when an edge can't be written exactly |
 | `measure` / `inspect` | | measurements / full `summary` |
+
+### Print export fields (`export_stl`, `export_3mf`; all optional, docs/PRINT_EXPORT.md)
+
+| field | JSON | meaning |
+|---|---|---|
+| `angle_deg` | number in (0, 90) | max angle between adjacent facet normals within a curved face; the chord is refined until the measured angle meets it, refused if that needs a chord below the kernel minimum |
+| `placement` | `{"bodies": [{"body": 2, "orient": {"face_down": {"feature": 6, "role": "ExtrudeEndCap"}}}, {"body": 1, "orient": "as_modeled"}], "layout": {"gap": 10}}` | export-only: proper rotation putting the face on the bed, lowest point to z = 0, optional side-by-side layout along X centred on the bed; the document is not changed. Absent: document coordinates |
+| `bed` | `{"preset": "bambu_p1s"}` or `{"width": 256, "depth": 256, "height": 250}` | fit report per body and for the layout (P1S values from the installed Bambu Studio profile, incl. its excluded corner) |
+| `separate_files` | bool (STL only) | one file per body: `<stem>-<sanitized body name>.stl` next to `path` |
+| `allow_open_meshes` | bool | export imported meshes that are not valid solids, labelled "open reference mesh" |
+
+`response.export` (`ExportReport`): `format`, `units`, `revision`, `chord`, `angle_deg`,
+`selection`, `placement`, `bodies[]` (`id`, `name`, `kind` solid|mesh, `visible`, `label`,
+`triangles`, `chord`, `max_facet_angle_deg`, `transform`, `bounds_min/max`, `dims`,
+`mesh_check`, `fit`, `file`), `files[]` (`path`, `bytes`, `bodies`), `bed`, `layout_fit`,
+`warnings`. Refusals write nothing and put the failing `mesh_check` on the response.
 
 ### Sketch templates (`create_sketch`)
 

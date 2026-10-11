@@ -1,0 +1,22 @@
+{
+ "_comment": "Probes (plate frame, mm) for the placed baseline exports of tools/print/enclosure_print_workflow.json sliced with --arrange 0: Base x[43,123] y[103,153] z[0,25] (wall/floor 2, cavity x[45,121] y[105,151]); Lid plate-down x[133,213] y[103,153], plate z[0,2], lip ring z[2,5] outer x[135.25,210.75] y[105.25,150.75], wall 2 (centre lines x 136.25/209.75, y 106.25/149.75), opening x[137.25,208.75] y[107.25,148.75].",
+ "probes": [
+  {"name": "layer count 125 (25 mm / 0.2)", "kind": "layer_count", "equals": 125},
+  {"name": "top layer z=25", "kind": "max_z", "value": 25.0},
+  {"name": "base wall -X at z12.5", "kind": "extrusion_near", "frame": "plate", "z": 12.5, "xy": [44.0, 128.0], "radius": 1.0},
+  {"name": "base wall +X at z12.5", "kind": "extrusion_near", "frame": "plate", "z": 12.5, "xy": [122.0, 128.0], "radius": 1.0},
+  {"name": "base wall -Y at z12.5", "kind": "extrusion_near", "frame": "plate", "z": 12.5, "xy": [83.0, 104.0], "radius": 1.0},
+  {"name": "base wall +Y at z12.5", "kind": "extrusion_near", "frame": "plate", "z": 12.5, "xy": [83.0, 152.0], "radius": 1.0},
+  {"name": "base cavity open (no extrusion) z2.2..25", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [2.2, 25], "rect": [47, 107, 119, 149]},
+  {"name": "base floor footprint covered (union z<=2)", "kind": "filled_rect", "frame": "plate", "z_range": [0, 2.0], "rect": [47, 107, 119, 149], "min_coverage": 0.99, "mode": "union"},
+  {"name": "base bottom shell solid (first 3 layers)", "kind": "filled_rect", "frame": "plate", "z_range": [0, 0.6], "rect": [47, 107, 119, 149], "min_coverage": 0.95, "mode": "each"},
+  {"name": "lid plate covered (union z<=2)", "kind": "filled_rect", "frame": "plate", "z_range": [0, 2.0], "rect": [135, 105, 211, 151], "min_coverage": 0.99, "mode": "union"},
+  {"name": "lid lip wall -X at z3.5", "kind": "extrusion_near", "frame": "plate", "z": 3.5, "xy": [136.25, 128.0], "radius": 0.8},
+  {"name": "lid lip wall +X at z3.5", "kind": "extrusion_near", "frame": "plate", "z": 3.5, "xy": [209.75, 128.0], "radius": 0.8},
+  {"name": "lid lip wall -Y at z3.5", "kind": "extrusion_near", "frame": "plate", "z": 3.5, "xy": [173.0, 106.25], "radius": 0.8},
+  {"name": "lid lip wall +Y at z3.5", "kind": "extrusion_near", "frame": "plate", "z": 3.5, "xy": [173.0, 149.75], "radius": 0.8},
+  {"name": "lid lip opening empty z2.2..5", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [2.2, 5], "rect": [139.5, 109.5, 206.5, 146.5]},
+  {"name": "lid clearance step outside lip empty (-X band) z2.2..5", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [2.2, 5], "rect": [133.3, 110, 134.8, 146]},
+  {"name": "lid clearance step outside lip empty (+Y band) z2.2..5", "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": [2.2, 5], "rect": [140, 151.2, 206, 152.7]}
+ ]
+}
