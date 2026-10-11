@@ -403,6 +403,7 @@ impl F420App {
                     SketchTool::CenterRectangle,
                     SketchTool::CornerRectangle,
                     SketchTool::Circle,
+                    SketchTool::Arc,
                     SketchTool::Dimension,
                 ] {
                     if ui
@@ -424,6 +425,12 @@ impl F420App {
                 }
                 if action(ui, "Coincident", ed.coincident_disabled_reason()) {
                     ed.constrain_coincident();
+                }
+                if action(ui, "Tangent", ed.tangent_disabled_reason()) {
+                    ed.constrain_tangent();
+                }
+                if action(ui, "Equal", ed.equal_disabled_reason()) {
+                    ed.constrain_equal_radius();
                 }
                 let del = ed
                     .selection
@@ -866,8 +873,17 @@ impl F420App {
                     Some(f420_sketch::Entity::Circle { radius, .. }) => {
                         format!("Circle C{} Ø{} mm", e.0, f420_sketch::fmt_mm(2.0 * radius))
                     }
-                    // TODO(arc-ui): arc inspector text.
-                    Some(f420_sketch::Entity::Arc { .. }) => format!("Arc A{}", e.0),
+                    Some(f420_sketch::Entity::Arc { .. }) => {
+                        match s.editor.sketch.arc_geometry(e) {
+                            Some(g) => format!(
+                                "Arc A{} R{} mm, sweep {}°",
+                                e.0,
+                                f420_sketch::fmt_mm(g.radius),
+                                f420_sketch::fmt_mm(g.sweep.to_degrees())
+                            ),
+                            None => format!("Arc A{}", e.0),
+                        }
+                    }
                     None => continue,
                 },
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),
@@ -1285,7 +1301,8 @@ impl F420App {
                 ui.label("Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo");
                 ui.separator();
                 ui.label(RichText::new("Sketch").strong());
-                ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · D dimension");
+                ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · A 3-point arc · D dimension");
+                ui.label("Constraints: select lines for Horizontal/Vertical, two points for Coincident, a line + arc sharing an end for Tangent, two arcs/circles for Equal radius.");
                 ui.label("Del delete · Enter end line chain · Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
                 ui.label("Snaps: existing points (shared endpoint), horizontal/vertical alignment (adds an H/V constraint), grid (position only).");
                 ui.label("Ctrl+Z inside a sketch undoes sketch steps; Finish Sketch records one document undo step; Cancel Sketch discards the session.");

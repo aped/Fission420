@@ -40,6 +40,8 @@ pub enum SketchTool {
     CenterRectangle,
     CornerRectangle,
     Circle,
+    /// Three-point arc: start, end, then a point the arc passes through.
+    Arc,
     Dimension,
 }
 
@@ -51,6 +53,7 @@ impl SketchTool {
             SketchTool::CenterRectangle => "Center Rect",
             SketchTool::CornerRectangle => "2-Point Rect",
             SketchTool::Circle => "Circle",
+            SketchTool::Arc => "3-Point Arc",
             SketchTool::Dimension => "Dimension",
         }
     }
@@ -62,6 +65,7 @@ impl SketchTool {
             SketchTool::CenterRectangle => "R",
             SketchTool::CornerRectangle => "Shift+R",
             SketchTool::Circle => "C",
+            SketchTool::Arc => "A",
             SketchTool::Dimension => "D",
         }
     }
@@ -81,8 +85,11 @@ impl SketchTool {
                 "Click one corner, then the opposite corner · Esc cancels"
             }
             SketchTool::Circle => "Click the centre, then a point on the rim · Esc cancels",
+            SketchTool::Arc => {
+                "Click the start point, the end point, then a point on the arc · Esc cancels"
+            }
             SketchTool::Dimension => {
-                "Click a line (length), circle (diameter), or two points (horizontal/vertical distance)"
+                "Click a line (length), circle (diameter), arc (radius), or two points (horizontal/vertical distance)"
             }
         }
     }
@@ -149,8 +156,13 @@ enum Gesture {
         first: PointId,
         last: PointId,
     },
-    /// First click of a rectangle (centre or corner) or circle (centre).
+    /// First click of a rectangle (centre or corner), circle (centre) or arc (start).
     FirstClick(Snap),
+    /// Arc tool: start and end chosen, waiting for the point on the arc.
+    ArcEnd {
+        start: Snap,
+        end: Snap,
+    },
     Drag {
         item: DragItem,
         before: Box<Sketch>,
@@ -215,6 +227,50 @@ pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     }
     let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
     dist(p, [a[0] + t * dx, a[1] + t * dy])
+}
+
+/// Distance from `p` to an arc (to the nearest end outside its angular span).
+pub fn arc_distance(g: &f420_sketch::ArcGeometry, p: [f64; 2]) -> f64 {
+    let ang = (p[1] - g.center[1]).atan2(p[0] - g.center[0]);
+    let rel = (ang - g.start_angle).rem_euclid(std::f64::consts::TAU);
+    if rel <= g.sweep {
+        return (dist(p, g.center) - g.radius).abs();
+    }
+    let at = |a: f64| {
+        [
+            g.center[0] + g.radius * a.cos(),
+            g.center[1] + g.radius * a.sin(),
+        ]
+    };
+    dist(p, at(g.start_angle)).min(dist(p, at(g.start_angle + g.sweep)))
+}
+
+/// Exact area of a closed line/arc loop: shoelace over the chords plus the
+/// signed circular segments of the arcs.
+pub fn loop_area(segs: &[f420_sketch::LoopSegment]) -> f64 {
+    use f420_sketch::LoopSegment;
+    let n = segs.len();
+    let mut area = 0.0;
+    for i in 0..n {
+        let a = segs[i].start();
+        let b = segs[(i + 1) % n].start();
+        area += 0.5 * (a[0] * b[1] - b[0] * a[1]);
+        if let LoopSegment::Arc { center, ccw, .. } = &segs[i] {
+            let r = dist(a, *center);
+            let (a0, a1) = (
+                (a[1] - center[1]).atan2(a[0] - center[0]),
+                (b[1] - center[1]).atan2(b[0] - center[0]),
+            );
+            let sweep = if *ccw {
+                (a1 - a0).rem_euclid(std::f64::consts::TAU)
+            } else {
+                (a0 - a1).rem_euclid(std::f64::consts::TAU)
+            };
+            let seg = 0.5 * r * r * (sweep - sweep.sin());
+            area += if *ccw { seg } else { -seg };
+        }
+    }
+    area
 }
 
 impl SketchEditor {
@@ -291,6 +347,7 @@ impl SketchEditor {
         match &self.gesture {
             Gesture::Line { last, .. } => self.sketch.point_xy(*last),
             Gesture::FirstClick(s) => Some(s.pos),
+            Gesture::ArcEnd { start, .. } => Some(start.pos),
             Gesture::DimFirst(p) => self.sketch.point_xy(*p),
             _ => None,
         }
@@ -363,8 +420,11 @@ impl SketchEditor {
             Ok(f420_sketch::Profile::Circle { radius, .. }) => {
                 Ok(format!("circle Ø{} mm", f420_sketch::fmt_mm(2.0 * radius)))
             }
-            // TODO(arc-ui): area / wording for line+arc loops.
-            Ok(f420_sketch::Profile::Loop(v)) => Ok(format!("closed loop, {} edges", v.len())),
+            Ok(f420_sketch::Profile::Loop(v)) => Ok(format!(
+                "closed loop, {} lines/arcs, area {} mm²",
+                v.len(),
+                f420_sketch::fmt_mm(loop_area(&v))
+            )),
             Err(e) => Err(e.to_string()),
         }
     }
@@ -401,7 +461,7 @@ impl SketchEditor {
                     Entity::Circle { center, radius, .. } => {
                         (dist(pos, self.sketch.point_xy(*center)?) - radius).abs()
                     }
-                    Entity::Arc { .. } => return None, // TODO(arc-ui): arc picking
+                    Entity::Arc { id, .. } => arc_distance(&self.sketch.arc_geometry(*id)?, pos),
                 };
                 (d <= tol).then_some((e.id(), d))
             })
@@ -492,7 +552,7 @@ impl SketchEditor {
             || self.sketch.entities.iter().any(|e| match e {
                 Entity::Line { a, b, .. } => *a == id || *b == id,
                 Entity::Circle { center, .. } => *center == id,
-                Entity::Arc { .. } => e.points().contains(&id), // TODO(arc-ui)
+                Entity::Arc { .. } => e.points().contains(&id),
             })
     }
 
@@ -783,7 +843,60 @@ impl SketchEditor {
                     _ => self.gesture = Gesture::FirstClick(s),
                 }
             }
+            SketchTool::Arc => self.arc_click(pos, view),
             SketchTool::Dimension => self.dimension_click(pos, screen, view),
+        }
+    }
+
+    /// Start and end of the arc being placed (for the preview).
+    pub fn arc_ends(&self) -> Option<([f64; 2], [f64; 2])> {
+        match &self.gesture {
+            Gesture::ArcEnd { start, end } => Some((start.pos, end.pos)),
+            _ => None,
+        }
+    }
+
+    fn arc_click(&mut self, pos: [f64; 2], view: &View) {
+        match self.gesture.clone() {
+            Gesture::FirstClick(start) => {
+                let end = self.snap(pos, Some(start.pos), None, view);
+                if dist(start.pos, end.pos) <= view.mm(2.0) {
+                    self.fail("Arc end must differ from its start: click another point.".into());
+                    return;
+                }
+                self.gesture = Gesture::ArcEnd { start, end };
+            }
+            Gesture::ArcEnd { start, end } => {
+                // The pass-through point only shapes the arc: no point snapping.
+                let via = Snap {
+                    pos,
+                    kind: SnapKind::Free,
+                    align: None,
+                };
+                self.gesture = Gesture::Idle;
+                let ok = self.try_change(true, |sk| {
+                    let mut pid = |s: &Snap| match s.kind {
+                        SnapKind::Point(id) if sk.point(id).is_some() => id,
+                        _ => sk.add_point(s.pos[0], s.pos[1]),
+                    };
+                    let (a, b) = (pid(&start), pid(&end));
+                    if a == b {
+                        return Err("arc start and end are the same point".into());
+                    }
+                    sk.add_arc_3pt(a, b, via.pos).map(|_| ()).map_err(|e| {
+                        format!("{e}; click a point that is not in line with the ends")
+                    })
+                });
+                if ok {
+                    self.info(
+                        "Arc added. Dimension (D) its radius; Tangent/Equal constrain it.".into(),
+                    );
+                }
+            }
+            _ => {
+                let s = self.snap(pos, None, None, view);
+                self.gesture = Gesture::FirstClick(s);
+            }
         }
     }
 
@@ -996,7 +1109,15 @@ impl SketchEditor {
             return;
         };
         let c = match ent {
-            Entity::Arc { .. } => return, // TODO(arc-ui): Radius dimension on arcs
+            Entity::Arc { id, .. } => {
+                let Some(g) = self.sketch.arc_geometry(id) else {
+                    return;
+                };
+                Constraint::Radius {
+                    entity: id,
+                    dim: Dimension::new(self.sketch.unique_dimension_name("radius"), g.radius),
+                }
+            }
             Entity::Circle { radius, .. } => Constraint::Diameter {
                 circle: e,
                 dim: Dimension::new(self.sketch.unique_dimension_name("diameter"), 2.0 * radius),
@@ -1217,6 +1338,74 @@ impl SketchEditor {
                     Constraint::Horizontal { line }
                 });
             }
+            Ok(())
+        });
+    }
+
+    fn selected_entities(&self) -> Vec<EntityId> {
+        self.selection
+            .iter()
+            .filter_map(|i| match i {
+                Item::Entity(e) => Some(*e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A (line, arc) pair sharing an endpoint, if that is the selection.
+    fn tangent_pair(&self) -> Option<(EntityId, EntityId)> {
+        let es = self.selected_entities();
+        if es.len() != 2 {
+            return None;
+        }
+        let kind = |e: EntityId| self.sketch.entity(e).cloned();
+        let (line, arc) = match (kind(es[0])?, kind(es[1])?) {
+            (l @ Entity::Line { .. }, a @ Entity::Arc { .. }) => (l, a),
+            (a @ Entity::Arc { .. }, l @ Entity::Line { .. }) => (l, a),
+            _ => return None,
+        };
+        let shared = line
+            .points()
+            .iter()
+            .any(|p| matches!(arc, Entity::Arc { start, end, .. } if *p == start || *p == end));
+        shared.then_some((line.id(), arc.id()))
+    }
+
+    pub fn tangent_disabled_reason(&self) -> Option<&'static str> {
+        self.tangent_pair()
+            .is_none()
+            .then_some("Select a line and an arc that share an endpoint")
+    }
+
+    pub fn equal_disabled_reason(&self) -> Option<&'static str> {
+        let es = self.selected_entities();
+        let round = es.iter().all(|e| {
+            matches!(
+                self.sketch.entity(*e),
+                Some(Entity::Arc { .. } | Entity::Circle { .. })
+            )
+        });
+        (es.len() != 2 || !round).then_some("Select exactly two arcs/circles")
+    }
+
+    pub fn constrain_tangent(&mut self) {
+        let Some((line, arc)) = self.tangent_pair() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Tangent { line, arc });
+            Ok(())
+        });
+    }
+
+    pub fn constrain_equal_radius(&mut self) {
+        let es = self.selected_entities();
+        if self.equal_disabled_reason().is_some() {
+            return;
+        }
+        self.try_change(true, |sk| {
+            sk.constraints
+                .push(Constraint::EqualRadius { a: es[0], b: es[1] });
             Ok(())
         });
     }
@@ -1485,6 +1674,56 @@ mod tests {
         ed.pointer_move([12.0, 0.0], None, &view());
         ed.release();
         assert!((r(&ed) - 8.0).abs() < 1e-9);
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+    }
+
+    #[test]
+    fn three_point_arc_closes_a_d_shape_and_takes_a_radius_dimension() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [-10.0, 0.0]);
+        click(&mut ed, [10.0, 0.0]);
+        assert!(ed.escape(), "end the chain");
+        ed.set_tool(SketchTool::Arc);
+        click(&mut ed, [10.2, 0.1]); // snaps to the line end
+        click(&mut ed, [-9.9, -0.2]); // snaps to the other end
+        assert!(ed.arc_ends().is_some());
+        click(&mut ed, [0.0, 10.0]); // pass-through point
+        assert!(
+            ed.feedback.as_ref().is_some_and(|f| !f.error),
+            "{:?}",
+            ed.feedback
+        );
+        let state = ed.profile_state().expect("closed loop");
+        // Half disc of radius 10: area = π·10²/2, derived independently.
+        let want = std::f64::consts::PI * 50.0;
+        let got: f64 = state
+            .split("area ")
+            .nth(1)
+            .and_then(|t| t.trim_end_matches(" mm²").parse().ok())
+            .expect("area in profile text");
+        assert!((got - want).abs() < 1e-3, "{state}");
+        // Radius dimension on the arc drives it.
+        ed.set_tool(SketchTool::Dimension);
+        click(&mut ed, [0.0, 10.0]);
+        let e = ed.dim_edit.clone().expect("radius editor");
+        assert!(e.fresh);
+        assert_eq!(ed.sketch.dimensions()[0].0, "radius");
+        ed.dim_edit.as_mut().unwrap().buffer = "10".into();
+        assert!(ed.apply_dim_edit());
+        // Tangent needs a line + arc sharing an end; Equal needs two round curves.
+        let line = ed.sketch.entities[0].id();
+        let arc = ed.sketch.entities[1].id();
+        ed.selection = vec![Item::Entity(line), Item::Entity(arc)];
+        assert!(ed.tangent_disabled_reason().is_none());
+        assert!(ed.equal_disabled_reason().is_some());
+        // A collinear pass-through point is rejected without changing the sketch.
+        let before = ed.sketch.clone();
+        ed.set_tool(SketchTool::Arc);
+        click(&mut ed, [20.0, 20.0]);
+        click(&mut ed, [40.0, 20.0]);
+        click(&mut ed, [30.0, 20.0]);
+        assert_eq!(ed.sketch, before);
         assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
     }
 

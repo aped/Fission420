@@ -157,7 +157,7 @@ fn extents(s: &f420_sketch::Sketch) -> ([f64; 2], [f64; 2]) {
         .flat_map(|e| match e {
             f420_sketch::Entity::Line { a, b, .. } => vec![*a, *b],
             f420_sketch::Entity::Circle { center, .. } => vec![*center],
-            f420_sketch::Entity::Arc { .. } => e.points(), // TODO(arc-ui)
+            f420_sketch::Entity::Arc { start, end, .. } => vec![*start, *end],
         })
         .filter_map(|p| s.point_xy(p))
         .collect();
@@ -837,4 +837,45 @@ fn template_sketch_is_editable_in_the_sketch_editor() {
     assert_volume(&h, 60.0 * 50.0 * 10.0);
     let b = h.state().measurements().unwrap().bounds;
     assert!((b.min[0] + 20.0).abs() < 1e-6 && (b.max[0] - 40.0).abs() < 1e-6);
+}
+
+/// Stretch 2: a line + three-point arc D-shape drawn with real pointer events,
+/// its radius dimensioned through the inline editor, extruded and edited.
+#[test]
+fn three_point_arc_d_shape_extrudes() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    click(&mut h, "Create Sketch");
+    click(&mut h, "Line");
+    sk_click(&mut h, [-20.0, 0.0]);
+    sk_click(&mut h, [20.0, 0.0]);
+    h.key_press(Key::Escape);
+    let _ = h.try_run();
+    click(&mut h, "3-Point Arc");
+    sk_click(&mut h, [20.0, 0.0]);
+    sk_click(&mut h, [-20.0, 0.0]);
+    sk_click(&mut h, [0.0, 20.0]);
+    let s = session_sketch(&h);
+    assert_eq!(s.entities.len(), 2, "{:?}", s.entities);
+    click(&mut h, "Dimension");
+    sk_click(&mut h, [0.0, 20.0]);
+    enter_dimension(&mut h, "radius", "25");
+    click(&mut h, "Finish Sketch");
+    let sk = h.state().summary().features[0].clone();
+    assert!(sk.profile_error.is_none(), "{:?}", sk.profile_error);
+    assert_eq!(sk.parameters, vec![("radius".to_string(), 25.0)]);
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    // Half disc r = 25 (the chord grows with the radius: line ends follow the
+    // arc), area π r²/2, extruded 10 mm.
+    let area = PI * 25.0 * 25.0 / 2.0;
+    assert_volume(&h, area * 10.0);
+    let m = h.state().measurements().unwrap();
+    assert_eq!(m.shell_count, 1);
+    assert!(m.all_shells_closed);
+    // Radius is a document parameter: edit it from the inspector.
+    click(&mut h, &sk.name);
+    type_into(&mut h, "radius (mm)", "15");
+    click(&mut h, "Apply");
+    assert_volume(&h, PI * 15.0 * 15.0 / 2.0 * 10.0);
 }

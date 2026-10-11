@@ -1520,6 +1520,8 @@ impl F420App {
             ed.set_tool(T::Line);
         } else if sc(Modifiers::NONE, Key::C) {
             ed.set_tool(T::Circle);
+        } else if sc(Modifiers::NONE, Key::A) {
+            ed.set_tool(T::Arc);
         } else if sc(Modifiers::NONE, Key::D) {
             ed.set_tool(T::Dimension);
         } else if sc(Modifiers::NONE, Key::S) {

@@ -112,12 +112,10 @@ fn bbox(s: &Sketch) -> Option<([f64; 2], [f64; 2])> {
                 .point_xy(*center)
                 .map(|q| vec![(q, *radius)])
                 .unwrap_or_default(),
-            // TODO(arc-ui): arc extents (points only for now).
-            Entity::Arc { .. } => e
-                .points()
-                .iter()
-                .filter_map(|p| s.point_xy(*p).map(|q| (q, 0.0)))
-                .collect(),
+            Entity::Arc { id, .. } => s
+                .arc_geometry(*id)
+                .map(|g| arc_points(&g, 32).into_iter().map(|q| (q, 0.0)).collect())
+                .unwrap_or_default(),
         };
         for (p, r) in pts {
             any = true;
@@ -128,6 +126,24 @@ fn bbox(s: &Sketch) -> Option<([f64; 2], [f64; 2])> {
         }
     }
     any.then_some((lo, hi))
+}
+
+/// Points along an arc, start to end (CCW), `n` segments.
+pub fn arc_points(g: &f420_sketch::ArcGeometry, n: usize) -> Vec<[f64; 2]> {
+    let n = n.max(1);
+    (0..=n)
+        .map(|i| {
+            let t = g.start_angle + g.sweep * i as f64 / n as f64;
+            [
+                g.center[0] + g.radius * t.cos(),
+                g.center[1] + g.radius * t.sin(),
+            ]
+        })
+        .collect()
+}
+
+fn arc_segments(g: &f420_sketch::ArcGeometry) -> usize {
+    ((g.sweep / std::f64::consts::TAU) * CIRCLE_SEGMENTS as f64).ceil() as usize + 2
 }
 
 /// Sketch-plane bounding box of the curves, if any.
@@ -231,7 +247,15 @@ pub fn paint_sketch(
                     .collect();
                 painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
             }
-            Entity::Arc { .. } => {} // TODO(arc-ui): draw arcs
+            Entity::Arc { id, .. } => {
+                if let Some(g) = s.arc_geometry(*id) {
+                    let pts: Vec<Pos2> = arc_points(&g, arc_segments(&g))
+                        .into_iter()
+                        .filter_map(|q| pr.screen(q))
+                        .collect();
+                    painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
+                }
+            }
         }
     }
     // Points: entity endpoints and centres; construction points as small x.
@@ -241,7 +265,8 @@ pub fn paint_sketch(
         .flat_map(|e| match e {
             Entity::Line { a, b, .. } => vec![*a, *b],
             Entity::Circle { center, .. } => vec![*center],
-            Entity::Arc { .. } => e.points(), // TODO(arc-ui)
+            // Arc centres are construction points (drawn as a small x).
+            Entity::Arc { start, end, .. } => vec![*start, *end],
         })
         .collect();
     for p in &s.points {
@@ -340,6 +365,38 @@ pub fn paint_sketch(
                 };
                 targets.push((item, glyph(t, sm + off)));
             }
+            Constraint::Tangent { line, arc } => {
+                let shared = match (s.entity(*line), s.entity(*arc)) {
+                    (Some(l), Some(Entity::Arc { start, end, .. })) => {
+                        l.points().into_iter().find(|p| p == start || p == end)
+                    }
+                    _ => None,
+                };
+                if let Some(sp) = shared
+                    .and_then(|p| s.point_xy(p))
+                    .and_then(|q| pr.screen(q))
+                {
+                    targets.push((item, glyph("T", sp + egui::vec2(-12.0, -12.0))));
+                }
+            }
+            Constraint::EqualRadius { a, b } => {
+                for e in [a, b] {
+                    let at = match s.entity(*e) {
+                        Some(Entity::Arc { id, .. }) => s.arc_geometry(*id).map(|g| {
+                            let m = g.start_angle + 0.5 * g.sweep;
+                            [
+                                g.center[0] + g.radius * 0.6 * m.cos(),
+                                g.center[1] + g.radius * 0.6 * m.sin(),
+                            ]
+                        }),
+                        Some(Entity::Circle { center, .. }) => s.point_xy(*center),
+                        _ => None,
+                    };
+                    if let Some(sp) = at.and_then(|q| pr.screen(q)) {
+                        targets.push((item, glyph("=", sp)));
+                    }
+                }
+            }
             Constraint::Coincident { a, .. } => {
                 if let Some(sp) = s.point_xy(*a).and_then(|p| pr.screen(p)) {
                     targets.push((item, glyph("C", sp + egui::vec2(11.0, -11.0))));
@@ -373,6 +430,7 @@ fn paint_dimension(
     let d = c.dimension()?;
     let text = match c {
         Constraint::Diameter { .. } => format!("Ø{} mm", f420_sketch::fmt_mm(d.value)),
+        Constraint::Radius { .. } => format!("R{} mm", f420_sketch::fmt_mm(d.value)),
         _ => format!("{} mm", f420_sketch::fmt_mm(d.value)),
     };
     let stroke = Stroke::new(1.2, col);
@@ -434,6 +492,29 @@ fn paint_dimension(
             arrow(painter, sqa, sqb, col);
             arrow(painter, sqb, sqa, col);
             Some(label(painter, sqa + (sqb - sqa) * 0.5, text, col, editing))
+        }
+        Constraint::Radius { entity, .. } => {
+            // Leader from the centre through the arc's (or circle's) midpoint.
+            let (c, r, mid_ang) = match s.entity(*entity)? {
+                Entity::Arc { id, .. } => {
+                    let g = s.arc_geometry(*id)?;
+                    (g.center, g.radius, g.start_angle + 0.5 * g.sweep)
+                }
+                Entity::Circle { center, radius, .. } => {
+                    (s.point_xy(*center)?, *radius, std::f64::consts::FRAC_PI_4)
+                }
+                _ => return None,
+            };
+            let (u, v) = (mid_ang.cos(), mid_ang.sin());
+            let rim = [c[0] + r * u, c[1] + r * v];
+            let off = DIM_OFFSET_PX / pr.px_per_mm(rim);
+            let out = [rim[0] + off * u, rim[1] + off * v];
+            let (sc, sr, so) = (pr.screen(c)?, pr.screen(rim)?, pr.screen(out)?);
+            painter.line_segment([sc, so], stroke);
+            arrow(painter, sr, sc, col);
+            let half = 4.0 * text.chars().count() as f32;
+            let dir = (so - sc).normalized();
+            Some(label(painter, so + dir * (half + 6.0), text, col, editing))
         }
         Constraint::Diameter { circle, .. } => {
             let Some(Entity::Circle { center, radius, .. }) = s.entity(*circle) else {
@@ -586,6 +667,39 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
                     false,
                 );
             }
+            SketchTool::Arc => match ed.arc_ends() {
+                None => dashed(vec![sf, sc]),
+                Some((a, b)) => match f420_sketch::arc_through_3_points(a, b, cur.pos) {
+                    Some((center, r, ccw)) => {
+                        let (from, to) = if ccw { (a, b) } else { (b, a) };
+                        let a0 = (from[1] - center[1]).atan2(from[0] - center[0]);
+                        let a1 = (to[1] - center[1]).atan2(to[0] - center[0]);
+                        let g = f420_sketch::ArcGeometry {
+                            center,
+                            radius: r,
+                            start_angle: a0,
+                            sweep: (a1 - a0).rem_euclid(std::f64::consts::TAU),
+                        };
+                        let pts: Vec<Pos2> = arc_points(&g, 64)
+                            .into_iter()
+                            .filter_map(|q| pr.screen(q))
+                            .collect();
+                        dashed(pts);
+                        label(
+                            painter,
+                            sc + egui::vec2(50.0, 18.0),
+                            format!("R{} mm", f420_sketch::fmt_mm(r)),
+                            col,
+                            false,
+                        );
+                    }
+                    None => {
+                        if let (Some(pa), Some(pb)) = (pr.screen(a), pr.screen(b)) {
+                            dashed(vec![pa, pb]);
+                        }
+                    }
+                },
+            },
             SketchTool::Dimension => dashed(vec![sf, sc]),
             SketchTool::Select => {}
         }
