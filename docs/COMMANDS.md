@@ -41,6 +41,7 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
+| `delete_feature` | `feature` | removes a feature nothing depends on (one undo step); refused naming the dependents otherwise |
 | `undo` / `redo` | | document-level snapshots |
 | `save` | `path` | atomic (temp file + fsync + rename); always writes the current format version |
 | `open` | `path` | validates format/version/references, regenerates, compares with saved cache |

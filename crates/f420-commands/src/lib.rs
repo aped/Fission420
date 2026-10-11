@@ -94,6 +94,11 @@ pub enum Command {
         feature: FeatureId,
         name: String,
     },
+    /// Remove a feature that nothing depends on (one undoable step). Refused
+    /// with the dependent features named otherwise.
+    DeleteFeature {
+        feature: FeatureId,
+    },
     Undo,
     Redo,
     Save {
@@ -129,6 +134,7 @@ impl Command {
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
+            Command::DeleteFeature { .. } => "delete_feature",
             Command::Undo => "undo",
             Command::Redo => "redo",
             Command::Save { .. } => "save",
@@ -485,6 +491,29 @@ impl Session {
                     }
                 })?;
                 r.feature = Some(feature);
+            }
+            Command::DeleteFeature { feature } => {
+                let feature = *feature;
+                let m = self.model_mut()?;
+                let doc = m.document();
+                let name = doc.feature(feature)?.name.clone();
+                let dependents: Vec<String> = doc
+                    .features
+                    .iter()
+                    .filter(|f| f.dependencies().contains(&feature))
+                    .map(|f| format!("{} {}", f.id, f.name))
+                    .collect();
+                if !dependents.is_empty() {
+                    return Err(DocError::Validation(format!(
+                        "{name} is used by {}; delete those first",
+                        dependents.join(", ")
+                    )));
+                }
+                m.transact(&format!("Delete {name}"), |d| {
+                    d.features.retain(|f| f.id != feature);
+                    Ok(())
+                })?;
+                r.message = Some(format!("deleted {feature} {name}"));
             }
             Command::RenameFeature { feature, name } => {
                 let (feature, name) = (*feature, name.trim().to_string());

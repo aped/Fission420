@@ -1232,6 +1232,35 @@ impl F420App {
         }
     }
 
+    /// Features that use `id` (deleting `id` is refused while any exist).
+    pub(crate) fn dependents_of(&self, id: FeatureId) -> Vec<String> {
+        self.summary
+            .features
+            .iter()
+            .filter(|f| f.depends_on.contains(&id))
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Delete the selected feature (one undoable step), or explain why not.
+    pub(crate) fn delete_selected_feature(&mut self) {
+        let Some(id) = self.selected else { return };
+        let users = self.dependents_of(id);
+        if !users.is_empty() {
+            self.diag(
+                true,
+                "Delete",
+                format!(
+                    "{} is used by {}; delete those first",
+                    self.feature_name(id),
+                    users.join(", ")
+                ),
+            );
+            return;
+        }
+        self.request(Command::DeleteFeature { feature: id });
+    }
+
     /// Why Extrude is unavailable for `sketch`, or None if it can run.
     pub(crate) fn extrude_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
         if self.has_body() {
@@ -1507,6 +1536,8 @@ impl F420App {
             }
         } else if sc(Modifiers::NONE, Key::F) {
             self.fit_view();
+        } else if sc(Modifiers::NONE, Key::Delete) {
+            self.delete_selected_feature();
         } else if sc(Modifiers::NONE, Key::Escape) {
             if self.placement.is_some() {
                 self.cancel_tool();

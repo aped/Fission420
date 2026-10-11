@@ -514,6 +514,7 @@ impl F420App {
         let mut clicked = None;
         let mut edit = None;
         let mut rename = None;
+        let mut delete = None;
         let feats = self.summary.features.clone();
         for f in &feats {
             let sel = self.selected == Some(f.id);
@@ -549,6 +550,10 @@ impl F420App {
                         rename = Some(f.id);
                         ui.close();
                     }
+                    if ui.button("Delete feature").clicked() {
+                        delete = Some(f.id);
+                        ui.close();
+                    }
                 });
                 if editing == Some(f.id) {
                     ui.label(RichText::new("editing").color(Color32::from_rgb(255, 200, 90)));
@@ -579,6 +584,10 @@ impl F420App {
             }
             if let Some(id) = rename {
                 self.rename = Some((id, self.feature_name(id)));
+            }
+            if let Some(id) = delete {
+                self.select(Some(id));
+                self.delete_selected_feature();
             }
         }
     }
@@ -634,6 +643,19 @@ impl F420App {
             );
             if ui.small_button("Rename…").clicked() {
                 self.rename = Some((f.id, f.name.clone()));
+            }
+            let users = self.dependents_of(f.id);
+            let why = (!users.is_empty())
+                .then(|| format!("Used by {}; delete those first", users.join(", ")));
+            let r = ui
+                .add_enabled(why.is_none(), egui::Button::new("Delete").small())
+                .probe("Delete feature");
+            let r = match &why {
+                Some(w) => r.on_disabled_hover_text(w),
+                None => r.on_hover_text("Delete this feature (Del); Undo restores it"),
+            };
+            if r.clicked() {
+                self.delete_selected_feature();
             }
         });
         if let Some((t, c)) = state_text(&f) {

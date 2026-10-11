@@ -879,3 +879,33 @@ fn three_point_arc_d_shape_extrudes() {
     click(&mut h, "Apply");
     assert_volume(&h, PI * 15.0 * 15.0 / 2.0 * 10.0);
 }
+
+/// Deleting features: refused (disabled with a reason) while something depends
+/// on them; Del deletes a leaf feature as one undoable step.
+#[test]
+fn delete_feature_from_browser_and_keyboard() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Rectangle on XY…");
+    click(&mut h, "OK");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    let base = h.state().summary().features[0].name.clone();
+    let ext = h.state().summary().features[1].name.clone();
+    click(&mut h, &base);
+    assert!(
+        h.get_by_label("Delete").accesskit_node().is_disabled(),
+        "sketch is used"
+    );
+    click(&mut h, &ext);
+    h.key_press(Key::Delete);
+    settle(&mut h);
+    assert_eq!(h.state().summary().features.len(), 1);
+    assert!(h.state().volume().is_none(), "no body any more");
+    h.get_by_label("Undo").click();
+    settle(&mut h);
+    assert_eq!(h.state().summary().features.len(), 2);
+    assert_volume(&h, 80.0 * 50.0 * 10.0);
+}
