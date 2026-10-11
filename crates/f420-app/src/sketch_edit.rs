@@ -45,6 +45,8 @@ pub enum SketchTool {
     Dimension,
     /// Remove the clicked part of a line between its nearest intersections.
     Trim,
+    /// Extend a line's free end to the nearest curve along its direction.
+    Extend,
 }
 
 impl SketchTool {
@@ -58,6 +60,7 @@ impl SketchTool {
             SketchTool::Arc => "3-Point Arc",
             SketchTool::Dimension => "Dimension",
             SketchTool::Trim => "Trim",
+            SketchTool::Extend => "Extend",
         }
     }
 
@@ -71,6 +74,7 @@ impl SketchTool {
             SketchTool::Arc => "A",
             SketchTool::Dimension => "D",
             SketchTool::Trim => "T",
+            SketchTool::Extend => "E",
         }
     }
 
@@ -98,6 +102,9 @@ impl SketchTool {
             SketchTool::Trim => {
                 "Click the part of a line to remove: it is cut at the nearest intersections with other \
                  curves (a line with none is deleted) · lines only"
+            }
+            SketchTool::Extend => {
+                "Click a line near its free end: the end moves along the line to the nearest curve it would cross · lines only"
             }
         }
     }
@@ -800,7 +807,7 @@ impl SketchEditor {
         self.cursor = Some(s);
         self.hover = if matches!(
             self.tool,
-            SketchTool::Select | SketchTool::Dimension | SketchTool::Trim
+            SketchTool::Select | SketchTool::Dimension | SketchTool::Trim | SketchTool::Extend
         ) {
             self.pick(pos, screen, view)
         } else {
@@ -928,6 +935,7 @@ impl SketchEditor {
             SketchTool::Arc => self.arc_click(pos, view),
             SketchTool::Dimension => self.dimension_click(pos, screen, view),
             SketchTool::Trim => self.trim_click(pos, screen, view),
+            SketchTool::Extend => self.extend_click(pos, screen, view),
         }
     }
 
@@ -1213,10 +1221,22 @@ impl SketchEditor {
 
     /// Parameters t in (0, 1) along line `p -> q` where other curves cross it.
     fn line_cuts(&self, line: EntityId, p: [f64; 2], q: [f64; 2]) -> Vec<f64> {
+        self.line_hits(line, p, q, false)
+    }
+
+    /// Parameters t along the line through `p -> q` (t = 0 at p, 1 at q) where
+    /// other curves cross it: inside the segment, or (`beyond`) outside it.
+    fn line_hits(&self, line: EntityId, p: [f64; 2], q: [f64; 2], beyond: bool) -> Vec<f64> {
         let d = [q[0] - p[0], q[1] - p[1]];
         let len2 = d[0] * d[0] + d[1] * d[1];
         let eps = f420_sketch::solve_tolerance(self.sketch.scale()) / len2.sqrt().max(1e-12);
-        let inside = |t: f64| t > eps && t < 1.0 - eps;
+        let inside = |t: f64| {
+            if beyond {
+                t < -eps || t > 1.0 + eps
+            } else {
+                t > eps && t < 1.0 - eps
+            }
+        };
         let mut ts = Vec::new();
         let circle_hits = |c: [f64; 2], r: f64| -> Vec<f64> {
             // |p + t d - c|^2 = r^2
@@ -1277,6 +1297,108 @@ impl SketchEditor {
         }
         ts.sort_by(f64::total_cmp);
         ts
+    }
+
+    /// Extend the line end nearest to the click along the line to the nearest
+    /// curve it would cross. The end must be free (used by no other curve).
+    fn extend_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        // A line, or the end point of exactly one line.
+        let (e, picked_end) = match self.pick(pos, screen, view) {
+            Some(Item::Entity(e)) => (e, None),
+            Some(Item::Point(pt)) => {
+                let lines: Vec<EntityId> = self
+                    .sketch
+                    .entities
+                    .iter()
+                    .filter(|x| matches!(x, Entity::Line { .. }) && x.points().contains(&pt))
+                    .map(|x| x.id())
+                    .collect();
+                match lines.as_slice() {
+                    [l] => (*l, Some(pt)),
+                    _ => {
+                        self.fail(
+                            "That end is connected to another curve; only a free end can be extended."
+                                .into(),
+                        );
+                        return;
+                    }
+                }
+            }
+            _ => {
+                self.fail("Click a line near the end to extend.".into());
+                return;
+            }
+        };
+        let Some(Entity::Line { a, b, .. }) = self.sketch.entity(e).cloned() else {
+            self.fail("Extend works on lines only.".into());
+            return;
+        };
+        let (Some(p), Some(q)) = (self.sketch.point_xy(a), self.sketch.point_xy(b)) else {
+            return;
+        };
+        let d = [q[0] - p[0], q[1] - p[1]];
+        let len2 = d[0] * d[0] + d[1] * d[1];
+        let tc = ((pos[0] - p[0]) * d[0] + (pos[1] - p[1]) * d[1]) / len2;
+        let at_b = picked_end.map_or(tc >= 0.5, |pt| pt == b);
+        let end = if at_b { b } else { a };
+        let shared = self
+            .sketch
+            .entities
+            .iter()
+            .any(|x| x.id() != e && x.points().contains(&end));
+        if shared {
+            self.fail(
+                "That end is connected to another curve; only a free end can be extended.".into(),
+            );
+            return;
+        }
+        let hits = self.line_hits(e, p, q, true);
+        let t = if at_b {
+            hits.iter()
+                .copied()
+                .filter(|t| *t > 1.0)
+                .fold(f64::INFINITY, f64::min)
+        } else {
+            hits.iter()
+                .copied()
+                .filter(|t| *t < 0.0)
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        if !t.is_finite() {
+            self.fail("Nothing to extend to: no curve crosses the line's extension.".into());
+            return;
+        }
+        let x = [p[0] + t * d[0], p[1] + t * d[1]];
+        let origin = self.sketch.origin;
+        let mut dropped = 0usize;
+        let ok = self.try_change(false, |sk| {
+            let before = sk.constraints.len();
+            sk.constraints.retain(|c| {
+                !matches!(c, Constraint::EqualLength { a: u, b: v } if *u == e || *v == e)
+                    && !(Some(end) != origin && constraint_mentions(c, end))
+            });
+            dropped += before - sk.constraints.len();
+            let n = sk.add_point(x[0], x[1]);
+            if let Some(Entity::Line { a, b, .. }) = sk.entities.iter_mut().find(|x| x.id() == e) {
+                if at_b {
+                    *b = n;
+                } else {
+                    *a = n;
+                }
+            }
+            if Some(end) != origin {
+                sk.points.retain(|x| x.id != end);
+            }
+            Ok(())
+        });
+        if ok {
+            self.selection.clear();
+            self.info(if dropped > 0 {
+                format!("Extended; {dropped} constraint(s) on the old end were removed. The new end is unconstrained.")
+            } else {
+                "Extended. The new end is unconstrained.".into()
+            });
+        }
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
@@ -2414,6 +2536,47 @@ mod tests {
             ed.sketch.point_xy(*a).unwrap(),
             ed.sketch.point_xy(*b).unwrap(),
         )
+    }
+
+    #[test]
+    fn extend_free_ends_to_the_nearest_curve() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [40.0, 20.0]);
+        let corner_line = ed.sketch.entities[0].id();
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [5.0, 10.0]);
+        click(&mut ed, [15.0, 10.0]);
+        ed.escape();
+        let l = ed.sketch.entities.last().unwrap().id();
+        let n_points = ed.sketch.points.len();
+        ed.set_tool(SketchTool::Extend);
+        click(&mut ed, [13.0, 10.0]);
+        let (p, q) = line_ends(&ed, l);
+        assert!(
+            (p[0] - 5.0).abs() < 1e-9 && (q[0] - 40.0).abs() < 1e-9,
+            "{p:?} {q:?} {:?}",
+            ed.feedback
+        );
+        click(&mut ed, [8.0, 10.0]);
+        let (p, q) = line_ends(&ed, l);
+        assert!(
+            p[0].abs() < 1e-9 && (q[0] - 40.0).abs() < 1e-9,
+            "{p:?} {q:?}"
+        );
+        assert_eq!(
+            ed.sketch.points.len(),
+            n_points,
+            "old ends replaced, not added"
+        );
+        // A connected end is refused, sketch unchanged.
+        let before = ed.sketch.clone();
+        let (p, q) = line_ends(&ed, corner_line);
+        let near = [p[0] + 0.8 * (q[0] - p[0]), p[1] + 0.8 * (q[1] - p[1])];
+        click(&mut ed, near);
+        assert_eq!(ed.sketch, before);
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
     }
 
     #[test]

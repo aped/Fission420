@@ -781,7 +781,7 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
                 },
             },
             SketchTool::Dimension => dashed(vec![sf, sc]),
-            SketchTool::Select | SketchTool::Trim => {}
+            SketchTool::Select | SketchTool::Trim | SketchTool::Extend => {}
         }
     }
 }

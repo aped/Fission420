@@ -1779,6 +1779,8 @@ impl F420App {
             ed.set_tool(T::Dimension);
         } else if sc(Modifiers::NONE, Key::T) {
             ed.set_tool(T::Trim);
+        } else if sc(Modifiers::NONE, Key::E) {
+            ed.set_tool(T::Extend);
         } else if sc(Modifiers::NONE, Key::S) {
             ed.set_tool(T::Select);
         } else if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {
