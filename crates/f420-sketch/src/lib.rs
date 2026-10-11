@@ -300,6 +300,15 @@ pub struct Sketch {
     /// entity but ignored by profile extraction. Absent when empty.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub construction: BTreeSet<EntityId>,
+    /// Entity ids below this were used by removed entities and are never
+    /// reallocated (face references name sketch entities by id, ADR 0003).
+    /// Only raised by [`Sketch::remove_entity`]; absent (0) otherwise.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub retired_entity_ids: u32,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
@@ -357,6 +366,7 @@ impl Sketch {
         let s = Sketch {
             origin: None,
             construction: BTreeSet::new(),
+            retired_entity_ids: 0,
             points: vec![
                 p(0, 0.0, 0.0),
                 p(1, -hw, -hh),
@@ -402,6 +412,7 @@ impl Sketch {
         let s = Sketch {
             origin: None,
             construction: BTreeSet::new(),
+            retired_entity_ids: 0,
             points: vec![
                 SketchPoint {
                     id: PointId(0),

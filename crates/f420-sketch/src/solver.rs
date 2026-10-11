@@ -701,6 +701,7 @@ mod tests {
         let s = Sketch {
             origin: None,
             construction: Default::default(),
+            retired_entity_ids: 0,
             points: vec![
                 pt(0, 0.3, -0.2),
                 pt(1, 4.1, 1.7),
@@ -806,6 +807,7 @@ mod tests {
         let s = Sketch {
             origin: None,
             construction: Default::default(),
+            retired_entity_ids: 0,
             points: vec![
                 pt(0, 0.4, -0.3),
                 pt(1, 9.1, 1.2),
@@ -903,6 +905,7 @@ mod tests {
         let s = Sketch {
             origin: None,
             construction: Default::default(),
+            retired_entity_ids: 0,
             points: vec![
                 SketchPoint {
                     id: PointId(0),

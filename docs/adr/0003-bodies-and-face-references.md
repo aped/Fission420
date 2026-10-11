@@ -52,9 +52,11 @@ split into N faces"). No nearest-centroid or index guess is ever used. Repair is
 sketch's local coordinates are kept, and the UI previews the new frame first).
 
 Frames are right-handed and depend only on definition data:
-* side face of line a→b (in profile CCW order): origin = a on the start plane,
-  x = (b − a)/|b − a|, z = outward normal (x × extrusion direction for CCW... see code),
-  y = z × x (along the extrusion direction for New/Join);
+* side face of line a→b (in the profile's CCW order about the sketch normal n): origin = a
+  on the sketch plane, x = (b − a)/|b − a|, z = outward normal x × n (negated for a Cut: the
+  wall of the removed region faces into the cavity), y = z × x (along n for New/Join);
+* extrusion caps: origin = sketch origin offset along the extrusion direction, x = sketch x,
+  z = outward normal (cut floor: pointing back toward the opening);
 * imported planar face: origin = face area centroid at import, z = outward normal,
   x = the world axis least aligned with z projected into the plane, y = z × x.
 Edge ordering therefore never flips axes.
@@ -64,13 +66,18 @@ Edge ordering therefore never flips axes.
 * `extent`: `Distance` (uses `distance`) or `ThroughAll` (Cut only; both sides of the sketch
   plane along its normal, cutter length = target extent along the normal + margin
   `max(1 mm, 5 % of the target bbox diagonal)` on each side, so caps are never coplanar).
-* `reverse`: extrude along −normal instead of +normal.
+* Direction: along the sketch normal, except that a Cut sketched on a face of its target goes
+  into the material by default. `reverse` flips the default. A blind Cut from a face that
+  points away from the material, or a Join from a face that points into it, is refused.
 * Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured,
   spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2)` *into* the support
   side. This is only correct when the profile lies inside the support face; the regenerator
   checks the profile against the face region and refuses otherwise (product limit, explicit).
 * Blind cut from a face sketch starts a margin outside the face (run-2 rule) and ends exactly at
-  depth.
+  depth, except when the floor lands exactly on a face whose material lies on the tool's side
+  (a cut through the full thickness): the floor then moves a margin past it, which removes
+  exactly the same material and avoids a coplanar boolean.
+* A Join that does not touch the target is reported as such before the face-containment rule.
 * A Join/Cut tool whose bounds do not overlap the target is refused ("does not intersect").
   Results must be one closed shell; a multi-shell result is refused (no silent split bodies).
   On failure the document keeps the last valid model.
@@ -79,3 +86,9 @@ Edge ordering therefore never flips axes.
 * A coplanar Join flush with a face edge, or a cut that splits a referenced face, produces an
   explicit reference error; the user re-attaches.
 * Measurements become per body.
+
+### Sketch entity ids are persistent names
+Side-face references name sketch entities by id. Removing an entity retires its id
+(`Sketch::retired_entity_ids`, only serialized when non-zero); new entities never reuse a
+retired id, and `EditSketch` refuses a sketch that gives an existing or retired id to an entity
+of a different kind. An edited line keeps its identity when its endpoints change.

@@ -593,10 +593,10 @@ pub fn regenerate_cached_opts(
                 m
             }
         };
-        if let Some(r) = st.results.iter_mut().find(|r| r.id == bs.last_feature) {
-            if r.body == Some(*bid) || r.measurements.is_none() {
-                r.measurements = measurements.clone();
-            }
+        if let Some(r) = st.results.iter_mut().find(|r| r.id == bs.last_feature)
+            && (r.body == Some(*bid) || r.measurements.is_none())
+        {
+            r.measurements = measurements.clone();
         }
         bodies.push(EvalBody {
             id: *bid,
@@ -747,12 +747,31 @@ fn extrude_feature(
     let (profile, entities) = s.usable(id, sketch)?.clone();
     let kp = to_kernel(&profile);
     let frame = s.frame;
-    let dir = if reverse { -1.0 } else { 1.0 };
     if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
         return Err(DocError::Validation(format!(
             "{id}.distance: extrusion distance must be > 0 mm, got {distance}"
         )));
     }
+    let target = match operation {
+        Operation::NewBody { .. } => None,
+        Operation::Join { target } | Operation::Cut { target } => {
+            Some((target, brep_target(st, id, target)?))
+        }
+    };
+    // Sketch on a face of the target: +1/-1 when the face's outward normal is
+    // along/against the sketch normal (material lies on the other side).
+    let side = match &target {
+        Some((_, t)) => k::coplanar_face_side(t, &frame).map_err(kernel(id))?,
+        None => None,
+    };
+    // Direction semantics (ADR 0003): along the sketch normal, except that a Cut
+    // sketched on a face of its target goes into the material by default.
+    // `reverse` flips the default.
+    let base = match (operation, side) {
+        (Operation::Cut { .. }, Some(side)) => -side,
+        _ => 1.0,
+    };
+    let dir = if reverse { -base } else { base };
     // Tool = prism of the profile over [a, b] along the sketch normal.
     let (mut a, mut b) = if dir > 0.0 {
         (0.0, distance)
@@ -770,8 +789,8 @@ fn extrude_feature(
         joined: false,
         body: BodyId(0),
     };
-    match operation {
-        Operation::NewBody { body } => {
+    match (operation, target) {
+        (Operation::NewBody { body }, _) => {
             if extent == Extent::ThroughAll {
                 return Err(DocError::Validation(format!(
                     "{id}: 'through all' needs a Cut target body"
@@ -781,18 +800,32 @@ fn extrude_feature(
             create_body(st, id, body, BodyGeometry::Brep(solid), BodySource::Modeled)?;
             out.body = body;
         }
-        Operation::Join { target } => {
+        (Operation::Join { .. }, Some((target, t))) => {
             if extent == Extent::ThroughAll {
                 return Err(DocError::Validation(format!(
                     "{id}: 'through all' is only available for Cut"
                 )));
             }
-            let t = brep_target(st, id, target)?;
             // A tool end lying on a face of the target would make coplanar boolean
             // faces (Truck 0.6 returns no result): move that end into the material
             // by a small overlap, which is only exact when the profile lies on the
             // face (material under the whole profile).
-            if let Some(side) = k::coplanar_face_side(&t, &frame).map_err(kernel(id))? {
+            if let Some(side) = side {
+                // Report a tool that misses the target as such, before the
+                // face-containment rule (the sketch plane may merely be coplanar
+                // with some face of the target).
+                let tool = k::extrude(&kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+                let (tb, ob) = (
+                    k::bounds(&t).map_err(kernel(id))?,
+                    k::bounds(&tool).map_err(kernel(id))?,
+                );
+                let eps = k::tol::KERNEL_LINEAR;
+                if (0..3).any(|i| ob.min[i] > tb.max[i] + eps || ob.max[i] < tb.min[i] - eps) {
+                    return Err(DocError::Kernel {
+                        feature: id,
+                        detail: "join: the extrusion does not touch the target body".into(),
+                    });
+                }
                 if !k::profile_within_face(&t, &frame, &kp).map_err(kernel(id))? {
                     return Err(DocError::ProductLimit(format!(
                         "{id}: a Join sketched on a face of the target must lie inside that face \
@@ -800,17 +833,18 @@ fn extrude_feature(
                          sketch on another plane"
                     )));
                 }
+                if dir * side < 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the join points into the material of {target} and adds nothing; \
+                         clear 'reverse'"
+                    )));
+                }
                 let delta = JOIN_OVERLAP.min(distance / 2.0);
                 // Material is on the -side of the face's outward normal.
                 if dir > 0.0 {
-                    a -= side * delta;
+                    a = -side * delta;
                 } else {
-                    b -= side * delta;
-                }
-                if a >= b {
-                    return Err(DocError::Validation(format!(
-                        "{id}: extrusion distance too small for a join on a face"
-                    )));
+                    b = -side * delta;
                 }
             }
             let joined = k::join_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
@@ -818,30 +852,47 @@ fn extrude_feature(
             out.body = target;
             out.joined = true;
         }
-        Operation::Cut { target } => {
-            let t = brep_target(st, id, target)?;
+        (Operation::Cut { .. }, Some((target, t))) => {
             out.removes = true;
             let margin = k::through_all_margin(&t).map_err(kernel(id))?;
             if extent == Extent::ThroughAll {
                 let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
                 (a, b) = (lo - margin, hi + margin);
-            } else if let Some(side) = k::coplanar_face_side(&t, &frame).map_err(kernel(id))? {
+            } else if let Some(side) = side {
+                if dir * side > 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the cut points away from the material of {target}; clear 'reverse'"
+                    )));
+                }
                 // Start the cutter a margin outside the face so its cap is never
                 // coplanar with it (run-2 rule).
                 if dir > 0.0 {
-                    a += side * margin;
+                    a = side * margin;
                 } else {
-                    b += side * margin;
+                    b = side * margin;
                 }
-                if a >= b {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the cut points away from the material of {target}; reverse it"
-                    )));
+            }
+            if extent == Extent::Distance {
+                // A blind cut whose floor lands exactly on a face of the target
+                // whose material lies on the tool's side (e.g. the bottom face for
+                // a cut through the full thickness) would leave coplanar faces
+                // (Truck 0.6 returns no result). Material ends there, so moving
+                // the floor a margin past it removes exactly the same material.
+                let far = if dir > 0.0 { b } else { a };
+                if let Ok(Some(side_far)) = k::coplanar_face_side(&t, &frame.offset(far)) {
+                    if dir > 0.0 && side_far > 0.0 {
+                        b += margin;
+                    } else if dir < 0.0 && side_far < 0.0 {
+                        a -= margin;
+                    }
                 }
             }
             let cut = k::cut_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
             replace_body(st, id, target, cut);
             out.body = target;
+        }
+        (Operation::Join { .. } | Operation::Cut { .. }, None) => {
+            return Err(DocError::Validation(format!("{id}: missing target body")));
         }
     }
     Ok(out)
