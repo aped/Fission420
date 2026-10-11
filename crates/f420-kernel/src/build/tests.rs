@@ -199,14 +199,14 @@ fn unsupported_intersections_keep_original_curve() {
 }
 
 /// Preserved fragile case (run-1 MORNING_REPORT): on a 120 x 60 x 8 plate, a corner
-/// Ø6.5 hole at (50, 20) followed by a centred Ø20 hole. Truck 0.6's
-/// `truck_shapeops::and` returns None for the second cut with the first seam angle
-/// at every tolerance tried, whether the first hole's rims are Truck's intersection
-/// curves or our exact replacements. The adapter's retries (other seam angles, same
-/// exact geometry) succeed. If a Truck upgrade makes the single attempt succeed,
-/// this test fails on purpose so the fragility notes can be revisited.
+/// Ø6.5 hole at (50, 20) followed by a centred Ø20 hole. With Truck 0.6,
+/// `truck_shapeops::and` returns None for the second cut with the first seam angle at
+/// every tolerance tried (measured in runs 1-2); the adapter's retries (other seam
+/// angles, same exact geometry) succeed. The correctness contract is the public API's
+/// result (exact volume, no implicit edges, watertight); how many first-seam attempts
+/// fail is printed as a diagnostic only, so an upstream fix cannot break this test.
 #[test]
-fn fragile_corner_then_centre_hole_needs_retry() {
+fn fragile_corner_then_centre_hole_is_cut_exactly() {
     let (w, h, d) = (120.0, 60.0, 8.0);
     let top = Frame::XY.offset(d);
     let plate = extrude(&rect(w, h), &Frame::XY, d).unwrap();
@@ -217,13 +217,17 @@ fn fragile_corner_then_centre_hole_needs_retry() {
     assert_eq!(count_intersection_edges(&first_exact), 0);
     for (label, first) in [("raw", &first_raw), ("exact", &first_exact)] {
         let (start, length) = through_all_cutter(first, &top).unwrap();
-        for btol in BOOLEAN_TOLS {
-            let r = subtract_attempt(first, &centre, &[], &start, length, 0.0, btol, "cut");
-            assert!(
-                matches!(r, Err(KernelError::BooleanFailed(_))),
-                "{label} first-seam attempt at tol {btol} unexpectedly gave {r:?}"
-            );
-        }
+        let failed = BOOLEAN_TOLS
+            .iter()
+            .filter(|&&btol| {
+                subtract_attempt(first, &centre, &[], &start, length, 0.0, btol, "cut").is_err()
+            })
+            .count();
+        eprintln!(
+            "diagnostic: {label} first hole, first seam: {failed}/{} boolean attempts failed \
+             (Truck 0.6 measured: all)",
+            BOOLEAN_TOLS.len()
+        );
     }
     // With retries (the public API) it succeeds, exactly.
     let first = cut_through_all(&plate, &corner, &top).unwrap();
