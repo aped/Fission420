@@ -108,6 +108,31 @@ pub fn host_body(features: &[FeatureSummary], sketch: &FeatureSummary) -> Option
         .map(|fs| fs.body)
 }
 
+/// Mirror of the regenerator's `coplanar_face_side`: +1/-1 when the sketch plane
+/// holds a (semantic) planar face of `target` whose outward normal is along /
+/// against the sketch normal; None when no face of the target lies in it.
+pub fn face_side(
+    features: &[FeatureSummary],
+    sketch: &FeatureSummary,
+    target: Option<BodyId>,
+) -> Option<f64> {
+    let (target, f) = (target?, sketch.frame?);
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    features
+        .iter()
+        .flat_map(|x| x.faces.iter())
+        .filter(|fs| fs.body == target)
+        .find_map(|fs| {
+            let c = dot(fs.frame.z, f.z);
+            let d = [
+                fs.frame.origin[0] - f.origin[0],
+                fs.frame.origin[1] - f.origin[1],
+                fs.frame.origin[2] - f.origin[2],
+            ];
+            ((c.abs() - 1.0).abs() < 1e-9 && dot(d, f.z).abs() < 1e-6).then_some(c.signum())
+        })
+}
+
 /// Default target: the body the sketch is on, else the only B-rep body.
 pub fn default_target(
     features: &[FeatureSummary],
@@ -168,17 +193,23 @@ impl ExtrudeForm {
         })
     }
 
-    /// +1 along the sketch normal, -1 against it (see module docs).
-    pub fn direction(&self, features: &[FeatureSummary]) -> f64 {
-        let on_target = self
+    /// The sketch plane holds a face of the target (+1/-1 as in [`face_side`]).
+    pub fn side(&self, features: &[FeatureSummary]) -> Option<f64> {
+        let s = self
             .sketch
-            .and_then(|id| features.iter().find(|f| f.id == id))
-            .and_then(|s| host_body(features, s))
-            .is_some_and(|b| Some(b) == self.target);
-        let base = if self.op == ExtrudeOp::Cut && on_target {
-            -1.0
-        } else {
-            1.0
+            .and_then(|id| features.iter().find(|f| f.id == id))?;
+        (self.op != ExtrudeOp::NewBody)
+            .then(|| face_side(features, s, self.target))
+            .flatten()
+    }
+
+    /// +1 along the sketch normal, -1 against it: the regenerator's rule (a
+    /// Cut from a face of the target goes into the material, a Join away from it).
+    pub fn direction(&self, features: &[FeatureSummary]) -> f64 {
+        let base = match (self.op, self.side(features)) {
+            (ExtrudeOp::Cut, Some(side)) => -side,
+            (ExtrudeOp::Join, Some(side)) => side,
+            _ => 1.0,
         };
         if self.reverse { -base } else { base }
     }
@@ -414,17 +445,23 @@ impl F420App {
         } else {
             crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
         }
-        ui.checkbox(&mut form.reverse, "Reverse direction")
-            .probe("Reverse direction");
+        let on_face = !form.through_all && form.side(features).is_some();
+        if on_face {
+            // Reversing a blind cut/join from a face points into air / into the
+            // material: the regenerator refuses it, so it is not offered.
+            form.reverse = false;
+        }
+        ui.add_enabled(!on_face, egui::Checkbox::new(&mut form.reverse, "Reverse direction"))
+            .probe("Reverse direction")
+            .on_disabled_hover_text("The sketch is on a face of the target: the direction is set by the face (Cut into the material, Join away from it)");
         if !form.through_all {
             let dir = form.direction(features);
-            let on_target = s
-                .and_then(|s| host_body(features, s))
-                .is_some_and(|b| Some(b) == form.target);
-            let base = if form.op == ExtrudeOp::Cut && on_target {
-                "Cut from a face of the target goes into the material (against the face normal)"
-            } else {
-                "Extrudes along the sketch normal"
+            let base = match (form.op, on_face) {
+                (ExtrudeOp::Cut, true) => "Cut from a face of the target goes into the material",
+                (ExtrudeOp::Join, true) => {
+                    "Join on a face of the target goes away from the material"
+                }
+                _ => "Extrudes along the sketch normal",
             };
             ui.small(format!(
                 "{base}{}; tool runs {} the sketch normal.",

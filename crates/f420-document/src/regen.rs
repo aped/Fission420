@@ -877,6 +877,7 @@ fn extrude_feature(
     // `reverse` flips the default.
     let base = match (operation, side) {
         (Operation::Cut { .. }, Some(side)) => -side,
+        (Operation::Join { .. }, Some(side)) => side,
         _ => 1.0,
     };
     let dir = if reverse { -base } else { base };

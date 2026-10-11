@@ -7,7 +7,10 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Key, Modifiers, PointerButton, Pos2};
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use f420_app::{ExecMode, F420App};
 use f420_commands::{Command, SketchTemplate, end_cap_of};
 use f420_document::{BodyId, FaceRole, SketchPlane};
@@ -259,9 +262,12 @@ fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
     type_into(&mut h, "Extrude distance (mm)", "3");
     let pv = h.state().extrude_preview().unwrap();
     assert_eq!(pv.z_range, [0.0, -3.0]);
-    click(&mut h, "Reverse direction");
-    assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, 3.0]);
-    click(&mut h, "Reverse direction");
+    // Reversing a blind cut from a face would point into air: not offered.
+    assert!(
+        h.get_by_label("Reverse direction")
+            .accesskit_node()
+            .is_disabled()
+    );
     click(&mut h, "Through All");
     let pv = h.state().extrude_preview().unwrap();
     // Both sides of the plane z=10, through A's extent (z 0..15) + margin.
@@ -386,4 +392,46 @@ fn chamfer_edge_from_a_picked_face() {
     let last = h.state().summary().features.last().unwrap().clone();
     assert_eq!(last.kind, "chamfer", "{:?}", h.state().diagnostics().last());
     assert_close(body_volume(&h, b), 12000.0 - 80.0);
+}
+
+/// The preview follows the regenerator's rule even when the sketch is on a world
+/// plane that merely holds a face of the target (no explicit face reference):
+/// body below XY (reversed extrude), Cut from XY goes down into it, Join up.
+#[test]
+fn preview_direction_matches_regeneration_on_coplanar_world_plane() {
+    let mut h = harness();
+    click(&mut h, "New");
+    rect_xy(&mut h, "40", "30", "20", "15");
+    let sk = h.state().summary().features.last().unwrap().id;
+    h.state_mut().request(Command::Extrude {
+        name: None,
+        sketch: sk,
+        distance: 10.0,
+        op: f420_commands::ExtrudeOp::NewBody,
+        target: None,
+        through_all: false,
+        reverse: true,
+        body_name: None,
+    });
+    settle(&mut h);
+    let b = h.state().summary().bodies[0].id;
+    rect_xy(&mut h, "10", "10", "20", "15");
+    let s2 = h.state().summary().features.last().unwrap().id;
+    let n = fname(&h, s2);
+    click(&mut h, &n);
+    click(&mut h, "Extrude this sketch…");
+    h.get_by_label("Cut").click();
+    let _ = h.try_run();
+    type_into(&mut h, "Extrude distance (mm)", "3");
+    assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, -3.0]);
+    click(&mut h, "OK");
+    assert_close(body_volume(&h, b), 12000.0 - 300.0);
+    // Join on the same plane goes up, away from the material (bottom face is z = -10,
+    // top face z = 0 holds the sketch plane with outward normal +Z).
+    click(&mut h, &n);
+    click(&mut h, "Extrude this sketch…");
+    h.get_by_label("Join").click();
+    let _ = h.try_run();
+    type_into(&mut h, "Extrude distance (mm)", "2");
+    assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, 2.0]);
 }

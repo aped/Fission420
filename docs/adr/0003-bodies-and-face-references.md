@@ -66,9 +66,11 @@ Edge ordering therefore never flips axes.
 * `extent`: `Distance` (uses `distance`) or `ThroughAll` (Cut only; both sides of the sketch
   plane along its normal, cutter length = target extent along the normal + margin
   `max(1 mm, 5 % of the target bbox diagonal)` on each side, so caps are never coplanar).
-* Direction: along the sketch normal, except that a Cut sketched on a face of its target goes
-  into the material by default. `reverse` flips the default. A blind Cut from a face that
-  points away from the material, or a Join from a face that points into it, is refused.
+* Direction: along the sketch normal, except when the sketch plane holds a face of the target
+  (whatever plane the sketch was made on): a Cut then goes into the material and a Join away
+  from it (along the face's outward normal) by default. `reverse` flips the default; a
+  reversed blind Cut or Join from a face (pointing into air / into the material) is refused,
+  so in that case Reverse has no valid use and the UI disables it.
 * Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured,
   spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2)` *into* the support
   side. This is only correct when the profile lies inside the support face; the regenerator
