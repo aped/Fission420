@@ -1,6 +1,7 @@
 //! Solid construction: extrusion and through-all cut.
 use crate::{
-    Body, Frame, KernelError, LoopSegment, Profile, Result, arc_signed_sweep, guarded, measure, tol,
+    Body, Frame, KernelError, LoopSegment, Profile, Result, arc_signed_sweep, exact, guarded,
+    measure, tol,
 };
 use truck_modeling::*;
 
@@ -174,6 +175,12 @@ pub fn extrude(profile: &Profile, frame: &Frame, distance: f64) -> Result<Body> 
 pub fn cut_through_all(target: &Body, profile: &Profile, frame: &Frame) -> Result<Body> {
     frame.validate()?;
     profile.validate()?;
+    let (start, length) = through_all_cutter(target, frame)?;
+    subtract_prism(target, profile, &start, length, "cut")
+}
+
+/// Start frame and length of a through-all cutter on `frame` for `target`.
+fn through_all_cutter(target: &Body, frame: &Frame) -> Result<(Frame, f64)> {
     let m = measure::raw_bounds(&target.solid)?;
     let z = v3(frame.z);
     let o = p3(frame.origin);
@@ -196,38 +203,7 @@ pub fn cut_through_all(target: &Body, profile: &Profile, frame: &Frame) -> Resul
     let margin = tol::THROUGH_ALL_MARGIN_ABS.max(diag * tol::THROUGH_ALL_MARGIN_REL);
     let start = frame.offset(lo - margin);
     let length = hi - lo + 2.0 * margin;
-    let seams: &[f64] = match profile {
-        Profile::Circle { .. } => &SEAM_ANGLES,
-        Profile::Polygon(_) | Profile::Loop(_) => &SEAM_ANGLES[..1],
-    };
-    let mut failures = Vec::new();
-    let attempts = seams
-        .iter()
-        .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
-    for (seam, btol) in attempts {
-        let tool = guarded("cut tool", || -> Result<Solid> {
-            let face = profile_face_seam(profile, &start, seam)?;
-            Ok(builder::tsweep(&face, v3(start.z) * length))
-        })??;
-        let attempt = guarded("cut", || {
-            let mut t = tool.clone();
-            t.not();
-            truck_shapeops::and(&target.solid, &t, btol)
-        });
-        let seam = format!("{seam}/tol {btol}");
-        match attempt {
-            Ok(Some(solid)) => {
-                let body = Body { solid };
-                match check_single_closed(&body, "cut") {
-                    Ok(()) => return Ok(body),
-                    Err(e) => failures.push(format!("seam {seam}: {e}")),
-                }
-            }
-            Ok(None) => failures.push(format!("seam {seam}: truck_shapeops::and returned None")),
-            Err(e) => failures.push(format!("seam {seam}: {e}")),
-        }
-    }
-    Err(KernelError::BooleanFailed(failures.join("; ")))
+    Ok((start, length))
 }
 
 /// Blind cut (pocket): remove the prism of `profile` from the sketch plane of
@@ -253,6 +229,20 @@ pub fn cut_blind(target: &Body, profile: &Profile, frame: &Frame, depth: f64) ->
     let margin = tol::THROUGH_ALL_MARGIN_ABS.max(diag * tol::THROUGH_ALL_MARGIN_REL);
     let start = frame.offset(-depth);
     let length = depth + margin;
+    subtract_prism(target, profile, &start, length, "pocket")
+}
+
+/// Subtract the prism of `profile` swept from `start` by `length` along `start.z`
+/// from `target`, retrying Truck's boolean over [`SEAM_ANGLES`] x [`BOOLEAN_TOLS`]
+/// (same exact geometry each time). The first single closed result is returned with
+/// its intersection edges made explicit ([`with_exact_edges`]).
+fn subtract_prism(
+    target: &Body,
+    profile: &Profile,
+    start: &Frame,
+    length: f64,
+    what: &str,
+) -> Result<Body> {
     let seams: &[f64] = match profile {
         Profile::Circle { .. } => &SEAM_ANGLES,
         Profile::Polygon(_) | Profile::Loop(_) => &SEAM_ANGLES[..1],
@@ -262,29 +252,55 @@ pub fn cut_blind(target: &Body, profile: &Profile, frame: &Frame, depth: f64) ->
         .iter()
         .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
     for (seam, btol) in attempts {
-        let tool = guarded("pocket tool", || -> Result<Solid> {
-            let face = profile_face_seam(profile, &start, seam)?;
-            Ok(builder::tsweep(&face, v3(start.z) * length))
-        })??;
-        let attempt = guarded("pocket", || {
-            let mut t = tool.clone();
-            t.not();
-            truck_shapeops::and(&target.solid, &t, btol)
-        });
-        let seam = format!("{seam}/tol {btol}");
-        match attempt {
-            Ok(Some(solid)) => {
-                let body = Body { solid };
-                match check_single_closed(&body, "pocket") {
-                    Ok(()) => return Ok(body),
-                    Err(e) => failures.push(format!("seam {seam}: {e}")),
-                }
-            }
-            Ok(None) => failures.push(format!("seam {seam}: truck_shapeops::and returned None")),
-            Err(e) => failures.push(format!("seam {seam}: {e}")),
+        match subtract_attempt(target, profile, start, length, seam, btol, what) {
+            Ok(body) => return Ok(with_exact_edges(body)),
+            Err(e) => failures.push(format!("seam {seam}/tol {btol}: {e}")),
         }
     }
     Err(KernelError::BooleanFailed(failures.join("; ")))
+}
+
+/// One boolean attempt of [`subtract_prism`] with a given circle seam angle and
+/// boolean tolerance; the result is checked to be a single closed shell.
+fn subtract_attempt(
+    target: &Body,
+    profile: &Profile,
+    start: &Frame,
+    length: f64,
+    seam: f64,
+    btol: f64,
+    what: &str,
+) -> Result<Body> {
+    let tool = guarded(what, || -> Result<Solid> {
+        let face = profile_face_seam(profile, start, seam)?;
+        Ok(builder::tsweep(&face, v3(start.z) * length))
+    })??;
+    let solid = guarded(what, || {
+        let mut t = tool;
+        t.not();
+        truck_shapeops::and(&target.solid, &t, btol)
+    })?
+    .ok_or_else(|| KernelError::BooleanFailed("truck_shapeops::and returned None".into()))?;
+    let body = Body { solid };
+    check_single_closed(&body, what)?;
+    Ok(body)
+}
+
+/// Replace the boolean's implicit intersection edges with verified exact curves where
+/// supported (see `crate::exact`). Falls back to the unchanged body if nothing was
+/// replaced or the rebuilt solid is not a single closed shell.
+fn with_exact_edges(body: Body) -> Body {
+    match exact::exactify(&body.solid) {
+        (Some(solid), _) => {
+            let rebuilt = Body { solid };
+            if check_single_closed(&rebuilt, "exact edges").is_ok() {
+                rebuilt
+            } else {
+                body
+            }
+        }
+        (None, _) => body,
+    }
 }
 
 fn check_single_closed(body: &Body, what: &str) -> Result<()> {
@@ -376,3 +392,6 @@ pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
     }
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests;

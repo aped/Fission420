@@ -6,6 +6,7 @@
 //! `docs/TOLERANCES.md` for the tolerance policy.
 
 mod build;
+mod exact;
 mod measure;
 mod mesh;
 mod step;

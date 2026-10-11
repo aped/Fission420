@@ -49,6 +49,8 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
   49214.6018371 (err 5e-7 mm³) for the 100x50x10 plate (`tools/external_validation.sh`).
   Cylinder faces are exported as rational B-spline surfaces (exact circle representation), not
   CYLINDRICAL_SURFACE.
+  Run 2: the same rebuild (generalised to any plane normal, with stronger verification) now runs
+  once after every boolean, so stored bodies carry exact explicit curves; see ADR 0002.
 - No persistent topological naming in Truck; the document layer resolves semantic references
   from feature parameters and validates them against the B-rep (see docs/behavior/plate-workflow.md).
 
