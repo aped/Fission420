@@ -99,6 +99,18 @@ fn main() -> ExitCode {
                 "examples/scenario_b_workflow.json",
             ],
         ),
+        (
+            "scenario R example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/scenario_r_workflow.json",
+            ],
+        ),
     ];
     for (name, args) in stages {
         if !run(name, args) {

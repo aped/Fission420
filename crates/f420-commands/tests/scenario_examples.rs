@@ -1,4 +1,4 @@
-//! The committed replayable workflows `examples/scenario_{a,b}_workflow.json`
+//! The committed replayable workflows `examples/scenario_{a,b,r}_workflow.json`
 //! are generated from `f420_commands::scenarios`. This test fails if they are
 //! out of date; regenerate with
 //! `F420_WRITE_EXAMPLES=1 cargo test -p f420-commands --test scenario_examples`.
@@ -76,4 +76,24 @@ fn scenario_b_example_is_current_and_replays() {
     let s = replay(&steps);
     assert_eq!(s.summary().features.len(), 2);
     assert!(dir.path().join("scenario_b.stl").exists());
+}
+
+#[test]
+fn scenario_r_example_is_current_and_replays() {
+    let doc = Path::new("examples/scenario_r.f420.json");
+    sync(
+        "scenario_r_workflow.json",
+        &scenarios::scenario_r_workflow(doc, Path::new("artifacts")).unwrap(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let steps =
+        scenarios::scenario_r_workflow(&dir.path().join("r.f420.json"), dir.path()).unwrap();
+    let s = replay(&steps);
+    // Last document: the two refused-profile sketches (kept, not extruded).
+    let sum = s.summary();
+    assert_eq!(sum.features.len(), 2);
+    assert!(sum.features.iter().all(|f| f.profile_error.is_some()));
+    for f in ["scenario_r.step", "scenario_r.stl", "scenario_r_slot.step"] {
+        assert!(dir.path().join(f).exists(), "{f}");
+    }
 }

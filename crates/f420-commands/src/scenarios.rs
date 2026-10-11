@@ -326,3 +326,152 @@ pub fn workflow_json(steps: &[Step]) -> Result<serde_json::Value, ScenarioError>
         .collect::<Result<Vec<_>, _>>()
         .map(serde_json::Value::Array)
 }
+
+// ---------------------------------------------------------------- scenario R
+
+/// Scenario R rounded rectangle: width, height, initial corner radius,
+/// thickness (mm).
+pub const ROUNDED_PLATE: [f64; 4] = [80.0, 50.0, 8.0, 10.0];
+/// Corner radius the scenario edits to.
+pub const ROUNDED_RADIUS_EDIT: f64 = 12.0;
+/// Hole centre near the top-right corner: a Ø10 circle there fits inside the
+/// 80 x 50 bounding rectangle (5.5 mm to both sides > 5) but crosses the
+/// rounded corner (corner arc centre (40 - r, 25 - r)).
+pub const CORNER_HOLE_CENTER: [f64; 2] = [34.5, 19.5];
+/// Scenario R slot: length between cap centres, radius, thickness (mm).
+pub const SLOT_PLATE: [f64; 3] = [60.0, 10.0, 5.0];
+
+/// Loop (0,0) -> (20,0) -> arc to (0,10) through (10,-4) -> (0,0): the arc
+/// leaves (20,0) below the x axis and must cross the first line again to
+/// reach (0,10).
+pub fn self_intersecting_arc_loop() -> Result<Sketch, ScenarioError> {
+    let mut s = Sketch::default();
+    s.ensure_origin();
+    let a = s.add_point(0.0, 0.0);
+    let b = s.add_point(20.0, 0.0);
+    let c = s.add_point(0.0, 10.0);
+    s.add_line(a, b);
+    s.add_arc_3pt(b, c, [10.0, -4.0]).map_err(e)?;
+    s.add_line(c, a);
+    Ok(s)
+}
+
+/// Two chained arcs (0,0) -> (10,0) -> (20,0), not closed.
+pub fn open_arc_chain() -> Result<Sketch, ScenarioError> {
+    let mut s = Sketch::default();
+    s.ensure_origin();
+    let a = s.add_point(0.0, 0.0);
+    let b = s.add_point(10.0, 0.0);
+    let c = s.add_point(20.0, 0.0);
+    s.add_arc_3pt(a, b, [5.0, 5.0]).map_err(e)?;
+    s.add_arc_3pt(b, c, [15.0, -5.0]).map_err(e)?;
+    Ok(s)
+}
+
+/// Scenario R (three-point arcs) as a command script: rounded-rectangle plate,
+/// radius edit, centred through hole, a corner hole refused by the containment
+/// check, save/reopen/export; then a slot plate; then, in a new document, two
+/// refused profiles (self-intersecting line+arc loop, open arc chain). Exports
+/// `scenario_r.{stl,step}` and `scenario_r_slot.{stl,step}` under `out`.
+pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, ScenarioError> {
+    let [w, h, r, t] = ROUNDED_PLATE;
+    let (base, _) = sketches::rounded_rectangle(w, h, r).map_err(e)?;
+    let hole = hole_circle(10.0)?;
+    let [cx, cy] = CORNER_HOLE_CENTER;
+    let (corner, _) = sketches::offset_circle(10.0, cx, cy).map_err(e)?;
+    let [len, sr, st] = SLOT_PLATE;
+    let (slot, _) = sketches::slot(len, sr).map_err(e)?;
+    let (s1, e1, s2, s3) = (FeatureId(1), FeatureId(2), FeatureId(3), FeatureId(5));
+    Ok(vec![
+        ok(Command::NewDocument),
+        ok(Command::CreateSketch {
+            name: Some("Rounded base".into()),
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom { sketch: base },
+        }),
+        ok(Command::Extrude {
+            name: Some("Rounded plate".into()),
+            sketch: s1,
+            distance: t,
+        }),
+        ok(Command::SetParameter {
+            feature: s1,
+            name: "radius".into(),
+            value: ROUNDED_RADIUS_EDIT,
+        }),
+        ok(Command::CreateSketch {
+            name: Some("Hole sketch".into()),
+            plane: end_cap_of(e1),
+            template: SketchTemplate::Custom { sketch: hole },
+        }),
+        ok(Command::CutThroughAll {
+            name: Some("Hole".into()),
+            sketch: s2,
+        }),
+        ok(Command::CreateSketch {
+            name: Some("Corner hole sketch".into()),
+            plane: end_cap_of(e1),
+            template: SketchTemplate::Custom { sketch: corner },
+        }),
+        fails(Command::CutThroughAll {
+            name: Some("Corner hole".into()),
+            sketch: s3,
+        }),
+        ok(Command::Undo),
+        ok(Command::Save { path: doc.into() }),
+        ok(Command::Close),
+        ok(Command::Open { path: doc.into() }),
+        ok(Command::ExportStl {
+            path: out.join("scenario_r.stl"),
+            chord: Some(0.01),
+        }),
+        ok(Command::ExportStep {
+            path: out.join("scenario_r.step"),
+        }),
+        ok(Command::Inspect),
+        ok(Command::NewDocument),
+        ok(Command::CreateSketch {
+            name: Some("Slot".into()),
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom { sketch: slot },
+        }),
+        ok(Command::Extrude {
+            name: Some("Slot plate".into()),
+            sketch: FeatureId(1),
+            distance: st,
+        }),
+        ok(Command::ExportStl {
+            path: out.join("scenario_r_slot.stl"),
+            chord: Some(0.01),
+        }),
+        ok(Command::ExportStep {
+            path: out.join("scenario_r_slot.step"),
+        }),
+        ok(Command::NewDocument),
+        ok(Command::CreateSketch {
+            name: Some("Crossing arc".into()),
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom {
+                sketch: self_intersecting_arc_loop()?,
+            },
+        }),
+        fails(Command::Extrude {
+            name: None,
+            sketch: FeatureId(1),
+            distance: 5.0,
+        }),
+        ok(Command::CreateSketch {
+            name: Some("Open arcs".into()),
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom {
+                sketch: open_arc_chain()?,
+            },
+        }),
+        fails(Command::Extrude {
+            name: None,
+            sketch: FeatureId(2),
+            distance: 5.0,
+        }),
+        ok(Command::Inspect),
+    ])
+}

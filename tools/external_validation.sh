@@ -3,8 +3,9 @@
 #   - tools/check_stl.py (pure-Python STL parser)
 #   - FreeCAD 1.1 flatpak (OpenCascade) for STL mesh + STEP solid import, if installed.
 # usage: tools/external_validation.sh [DIR]
-# DIR (default artifacts/acceptance) must contain plate.stl/plate.step; scenario_a.* and
-# scenario_b.* (from `f420-cli acceptance`) are checked too when present.
+# DIR (default artifacts/acceptance) must contain plate.stl/plate.step; scenario_a.*,
+# scenario_b.*, pocket.* and scenario_r*.* (from `f420-cli acceptance`) are checked too
+# when present.
 # Expected volumes are analytic (computed here, not read from Fission420 output):
 #   plate      100 x 50 x 10, centred Ø10 through hole: 50000 - 250*pi
 #   scenario_a 100 x 50 x 12, centred Ø10 through hole: 60000 - 300*pi
@@ -72,4 +73,10 @@ fi
 [ -f "$DIR/scenario_b.stl" ] && check_stem scenario_b "5*(2400 - 5*math.sqrt(44))"
 # Stretch: 80 x 50 x 12 plate with a centred Ø10 blind pocket 6 deep.
 [ -f "$DIR/pocket.stl" ] && check_stem pocket "80*50*12 - math.pi*25*6"
+# Stretch (arcs): 80 x 50 rounded rectangle, area 80*50 - (4 - pi)*r^2, 10 thick;
+# r = 8 initially, r = 12 with a centred Ø10 through hole; slot 60 between cap
+# centres, r = 10, 5 thick: area 60*20 + pi*10^2.
+[ -f "$DIR/scenario_r_initial.stl" ] && check_stem scenario_r_initial "10*(80*50 - (4 - math.pi)*8**2)"
+[ -f "$DIR/scenario_r.stl" ] && check_stem scenario_r "10*(80*50 - (4 - math.pi)*12**2 - math.pi*25)"
+[ -f "$DIR/scenario_r_slot.stl" ] && check_stem scenario_r_slot "5*(60*20 + math.pi*10**2)"
 exit $status

@@ -1,0 +1,766 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Rounded base",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 5
+          }
+        },
+        {
+          "Vertical": {
+            "line": 3
+          }
+        },
+        {
+          "Vertical": {
+            "line": 7
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 2,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 2,
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 4,
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 4,
+            "line": 5
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 5
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 7
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 8,
+            "line": 7
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 8,
+            "line": 1
+          }
+        },
+        {
+          "SymmetricAboutPoint": {
+            "a": 12,
+            "b": 10,
+            "center": 0
+          }
+        },
+        {
+          "EqualRadius": {
+            "a": 8,
+            "b": 2
+          }
+        },
+        {
+          "EqualRadius": {
+            "a": 8,
+            "b": 4
+          }
+        },
+        {
+          "EqualRadius": {
+            "a": 8,
+            "b": 6
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 7,
+            "b": 3,
+            "dim": {
+              "name": "width",
+              "value": 80.0
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 1,
+            "b": 5,
+            "dim": {
+              "name": "height",
+              "value": 50.0
+            }
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "radius",
+              "value": 8.0
+            },
+            "entity": 8
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Arc": {
+            "center": 9,
+            "end": 3,
+            "id": 2,
+            "start": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Arc": {
+            "center": 10,
+            "end": 5,
+            "id": 4,
+            "start": 4
+          }
+        },
+        {
+          "Line": {
+            "a": 5,
+            "b": 6,
+            "id": 5
+          }
+        },
+        {
+          "Arc": {
+            "center": 11,
+            "end": 7,
+            "id": 6,
+            "start": 6
+          }
+        },
+        {
+          "Line": {
+            "a": 7,
+            "b": 8,
+            "id": 7
+          }
+        },
+        {
+          "Arc": {
+            "center": 12,
+            "end": 1,
+            "id": 8,
+            "start": 8
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": -32.0,
+          "y": -25.0
+        },
+        {
+          "id": 2,
+          "x": 32.0,
+          "y": -25.0
+        },
+        {
+          "id": 3,
+          "x": 40.0,
+          "y": -17.0
+        },
+        {
+          "id": 4,
+          "x": 40.0,
+          "y": 17.0
+        },
+        {
+          "id": 5,
+          "x": 32.0,
+          "y": 25.0
+        },
+        {
+          "id": 6,
+          "x": -32.0,
+          "y": 25.0
+        },
+        {
+          "id": 7,
+          "x": -40.0,
+          "y": 17.0
+        },
+        {
+          "id": 8,
+          "x": -40.0,
+          "y": -17.0
+        },
+        {
+          "id": 9,
+          "x": 32.00000000000001,
+          "y": -17.000000000000004
+        },
+        {
+          "id": 10,
+          "x": 32.00000000000001,
+          "y": 17.000000000000004
+        },
+        {
+          "id": 11,
+          "x": -32.00000000000001,
+          "y": 17.000000000000004
+        },
+        {
+          "id": 12,
+          "x": -32.00000000000001,
+          "y": -17.000000000000004
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 10.0,
+    "name": "Rounded plate",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_parameter",
+    "feature": 1,
+    "name": "radius",
+    "value": 12.0
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Hole sketch",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Diameter": {
+            "circle": 1,
+            "dim": {
+              "name": "diameter",
+              "value": 10.0
+            }
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Circle": {
+            "center": 0,
+            "id": 1,
+            "radius": 5.0
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "cut_through_all",
+    "name": "Hole",
+    "sketch": 3
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Corner hole sketch",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 0,
+            "b": 1,
+            "dim": {
+              "name": "x",
+              "value": 34.5
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 0,
+            "b": 1,
+            "dim": {
+              "name": "y",
+              "value": 19.5
+            }
+          }
+        },
+        {
+          "Diameter": {
+            "circle": 1,
+            "dim": {
+              "name": "diameter",
+              "value": 10.0
+            }
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Circle": {
+            "center": 1,
+            "id": 1,
+            "radius": 5.0
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 34.5,
+          "y": 19.5
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "cut_through_all",
+    "expect_ok": false,
+    "name": "Corner hole",
+    "sketch": 5
+  },
+  {
+    "cmd": "undo"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/scenario_r.f420.json"
+  },
+  {
+    "cmd": "close"
+  },
+  {
+    "cmd": "open",
+    "path": "examples/scenario_r.f420.json"
+  },
+  {
+    "chord": 0.01,
+    "cmd": "export_stl",
+    "path": "artifacts/scenario_r.stl"
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/scenario_r.step"
+  },
+  {
+    "cmd": "inspect"
+  },
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Slot",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 2,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 2,
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 4,
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 4,
+            "line": 1
+          }
+        },
+        {
+          "SymmetricAboutPoint": {
+            "a": 6,
+            "b": 5,
+            "center": 0
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 6,
+            "b": 5,
+            "dim": {
+              "name": "length",
+              "value": 60.0
+            }
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "radius",
+              "value": 10.0
+            },
+            "entity": 2
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Arc": {
+            "center": 5,
+            "end": 3,
+            "id": 2,
+            "start": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Arc": {
+            "center": 6,
+            "end": 1,
+            "id": 4,
+            "start": 4
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": -30.0,
+          "y": -10.0
+        },
+        {
+          "id": 2,
+          "x": 30.0,
+          "y": -10.0
+        },
+        {
+          "id": 3,
+          "x": 30.0,
+          "y": 10.0
+        },
+        {
+          "id": 4,
+          "x": -30.0,
+          "y": 10.0
+        },
+        {
+          "id": 5,
+          "x": 30.0,
+          "y": 0.0
+        },
+        {
+          "id": 6,
+          "x": -30.0,
+          "y": 0.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 5.0,
+    "name": "Slot plate",
+    "sketch": 1
+  },
+  {
+    "chord": 0.01,
+    "cmd": "export_stl",
+    "path": "artifacts/scenario_r_slot.stl"
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/scenario_r_slot.step"
+  },
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Crossing arc",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Arc": {
+            "center": 4,
+            "end": 2,
+            "id": 2,
+            "start": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 1,
+            "id": 3
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 20.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 0.0,
+          "y": 10.0
+        },
+        {
+          "id": 4,
+          "x": 11.222222222222221,
+          "y": 7.444444444444445
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 5.0,
+    "expect_ok": false,
+    "name": null,
+    "sketch": 1
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Open arcs",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Arc": {
+            "center": 4,
+            "end": 1,
+            "id": 1,
+            "start": 2
+          }
+        },
+        {
+          "Arc": {
+            "center": 5,
+            "end": 3,
+            "id": 2,
+            "start": 2
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 10.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 20.0,
+          "y": 0.0
+        },
+        {
+          "id": 4,
+          "x": 5.0,
+          "y": 0.0
+        },
+        {
+          "id": 5,
+          "x": 15.0,
+          "y": 0.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 5.0,
+    "expect_ok": false,
+    "name": null,
+    "sketch": 2
+  },
+  {
+    "cmd": "inspect"
+  }
+]
