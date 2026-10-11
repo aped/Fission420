@@ -1,0 +1,375 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base outside, X",
+    "expression": "80",
+    "name": "outer_length",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base outside, Y",
+    "expression": "50",
+    "name": "outer_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base outside, Z (floor + cavity depth)",
+    "expression": "25",
+    "name": "outer_height",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "side wall thickness (base walls and lid lip wall)",
+    "expression": "2",
+    "name": "wall",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base floor thickness",
+    "expression": "2",
+    "name": "floor",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "lid plate thickness",
+    "expression": "2",
+    "name": "lid_thickness",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "locating lip height below the lid plate",
+    "expression": "3",
+    "name": "lip_depth",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "PER SIDE gap between lip and cavity wall (diametral = 2x); calibrate with the clearance coupon",
+    "expression": "0.25",
+    "name": "fit_clearance",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "modeling layout only: lid distance from the base",
+    "expression": "10",
+    "name": "lid_gap",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "outer_length - 2 * wall",
+    "name": "cavity_length",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "outer_width - 2 * wall",
+    "name": "cavity_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "outer_height - floor",
+    "name": "cavity_depth",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "lip wall tracks the base wall",
+    "expression": "wall",
+    "name": "lip_wall",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "cavity_length - 2 * fit_clearance",
+    "name": "lip_length",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "cavity_width - 2 * fit_clearance",
+    "name": "lip_width",
+    "unit": "mm"
+  },
+  {
+    "center": [
+      40.0,
+      25.0
+    ],
+    "cmd": "create_sketch",
+    "height": 50.0,
+    "name": "Base outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 80.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width",
+    "feature": 1,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length / 2",
+    "feature": 1,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width / 2",
+    "feature": 1,
+    "name": "center_y"
+  },
+  {
+    "body_name": "Enclosure base",
+    "cmd": "extrude",
+    "distance": 25.0,
+    "name": "Base",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_height",
+    "feature": 2,
+    "name": "distance"
+  },
+  {
+    "center": [
+      40.0,
+      25.0
+    ],
+    "cmd": "create_sketch",
+    "height": 46.0,
+    "name": "Cavity outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 76.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_length",
+    "feature": 3,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_width",
+    "feature": 3,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length / 2",
+    "feature": 3,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width / 2",
+    "feature": 3,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 23.0,
+    "name": "Cavity",
+    "op": "cut",
+    "sketch": 3,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_depth",
+    "feature": 4,
+    "name": "distance"
+  },
+  {
+    "center": [
+      40.0,
+      -35.0
+    ],
+    "cmd": "create_sketch",
+    "height": 50.0,
+    "name": "Lid outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 80.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length",
+    "feature": 5,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width",
+    "feature": 5,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length / 2",
+    "feature": 5,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "-(outer_width / 2 + lid_gap)",
+    "feature": 5,
+    "name": "center_y"
+  },
+  {
+    "body_name": "Enclosure lid",
+    "cmd": "extrude",
+    "distance": 2.0,
+    "name": "Lid plate",
+    "sketch": 5
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lid_thickness",
+    "feature": 6,
+    "name": "distance"
+  },
+  {
+    "center": [
+      40.0,
+      35.0
+    ],
+    "cmd": "create_sketch",
+    "height": 45.5,
+    "name": "Lip outline",
+    "plane": {
+      "Face": {
+        "feature": 6,
+        "role": "ExtrudeStartCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 75.5
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_length",
+    "feature": 7,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_width",
+    "feature": 7,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length / 2",
+    "feature": 7,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width / 2 + lid_gap",
+    "feature": 7,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 3.0,
+    "name": "Lip",
+    "op": "join",
+    "sketch": 7,
+    "target": 2
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_depth",
+    "feature": 8,
+    "name": "distance"
+  },
+  {
+    "center": [
+      40.0,
+      35.0
+    ],
+    "cmd": "create_sketch",
+    "height": 41.5,
+    "name": "Lip opening outline",
+    "plane": {
+      "Face": {
+        "feature": 8,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 71.5
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_length - 2 * lip_wall",
+    "feature": 9,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_width - 2 * lip_wall",
+    "feature": 9,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_length / 2",
+    "feature": 9,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "outer_width / 2 + lid_gap",
+    "feature": 9,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 3.0,
+    "name": "Lip opening",
+    "op": "cut",
+    "sketch": 9,
+    "target": 2
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "lip_depth",
+    "feature": 10,
+    "name": "distance"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/enclosure.f420.json"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

@@ -34,7 +34,10 @@ pub use step_in::{
     ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
     import_step,
 };
-pub use validate::{BooleanCheck, Prism, PrismOp, clear_depth, verify_prism_boolean};
+pub use validate::{
+    BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
+    verify_prism_boolean,
+};
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;

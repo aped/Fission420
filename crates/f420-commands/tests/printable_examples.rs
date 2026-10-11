@@ -99,3 +99,43 @@ fn coupon_and_bracket_build() {
         v => panic!("{v:?}"),
     }
 }
+
+fn repo() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The committed workflow equals the builder's output (regenerate with
+/// `F420_WRITE_EXAMPLES=1 cargo test -p f420-commands --test printable_examples`).
+fn sync(name: &str, steps: &[f420_commands::scenarios::Step]) {
+    let json = f420_commands::scenarios::workflow_json(steps).unwrap();
+    let path = repo().join("examples").join(name);
+    let text = serde_json::to_string_pretty(&json).unwrap() + "\n";
+    if std::env::var_os("F420_WRITE_EXAMPLES").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    let committed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())),
+    )
+    .unwrap();
+    assert_eq!(
+        committed, json,
+        "{name} is stale; regenerate with F420_WRITE_EXAMPLES=1"
+    );
+}
+
+#[test]
+fn committed_printable_workflows_are_current() {
+    use std::path::Path;
+    sync(
+        "enclosure_workflow.json",
+        &printables::enclosure_workflow(Path::new("examples/enclosure.f420.json")),
+    );
+    sync(
+        "clearance_coupon_workflow.json",
+        &printables::coupon_workflow(Path::new("examples/clearance_coupon.f420.json")),
+    );
+    sync(
+        "mounting_bracket_workflow.json",
+        &printables::bracket_workflow(Path::new("examples/mounting_bracket.f420.json")),
+    );
+}

@@ -548,3 +548,61 @@ fn invasion_depth(p: &[[f64; 3]], poly: &[[f64; 2]], slack: f64) -> Option<f64> 
 
 #[cfg(test)]
 mod tests;
+
+/// Point membership of `points` in `body` (`Some(inside)`, `None` when a point
+/// is too close to the surface to classify), from the generalized winding
+/// number of a fine tessellation. For inspection probes and tests; points must
+/// be farther than the chord (≤ 0.02 mm, relative to the part size) from the
+/// surface to be classified reliably.
+pub fn point_membership(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Option<bool>>> {
+    let b = crate::measure::raw_bounds(&body.solid)?;
+    let chord = check_chord(diag_of(&b));
+    let mesh = tessellate(body, chord)?;
+    if !crate::check_mesh(&mesh).watertight {
+        return Err(KernelError::InvalidResult(
+            "point membership: the tessellation is not closed".into(),
+        ));
+    }
+    guarded("point membership", || {
+        let w = Winding::new(&mesh);
+        points.iter().map(|p| w.classify(*p)).collect()
+    })
+}
+
+/// Whether the prism of `profile` from the plane of `plane` to `depth` beyond
+/// it (`beyond` = +1/-1 along `plane.z`) contains no material of `body`: no
+/// surface of `body` crosses it ([`clear_depth`]; surfaces lying in the plane
+/// itself do not count) and a point inside it is outside the body. Never
+/// calls a boolean.
+pub fn prism_is_empty(
+    body: &Body,
+    plane: &Frame,
+    profile: &Profile,
+    beyond: f64,
+    depth: f64,
+) -> Result<bool> {
+    // clear_depth looks along -face.z.
+    let face = Frame {
+        z: [
+            -beyond * plane.z[0],
+            -beyond * plane.z[1],
+            -beyond * plane.z[2],
+        ],
+        ..*plane
+    };
+    if clear_depth(body, &face, profile, depth)? < depth {
+        return Ok(false);
+    }
+    let poly = profile_polygon(profile);
+    let n = poly.len();
+    let inside = (1..n.saturating_sub(1)).find_map(|i| {
+        let (a, b, c) = (poly[0], poly[i], poly[i + 1]);
+        let q = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+        (point_in_polygon(q, &poly) && dist_to_polygon(q, &poly) > 1e-6).then_some(q)
+    });
+    let Some(q) = inside else {
+        return Ok(false);
+    };
+    let w = plane.offset(beyond * depth / 2.0).to_world(q);
+    Ok(point_membership(body, &[w])?.first().copied().flatten() == Some(false))
+}

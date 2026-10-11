@@ -179,6 +179,42 @@ fn main() -> ExitCode {
                 "examples/dxf_stl_import_workflow.json",
             ],
         ),
+        (
+            "enclosure example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/enclosure_workflow.json",
+            ],
+        ),
+        (
+            "clearance coupon example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/clearance_coupon_workflow.json",
+            ],
+        ),
+        (
+            "mounting bracket example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/mounting_bracket_workflow.json",
+            ],
+        ),
     ];
     for (name, args) in stages {
         if !run(name, args) {

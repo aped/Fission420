@@ -1059,10 +1059,8 @@ fn blind_cut_span(
 /// there without removing anything extra. Cheap sufficient tests first: the
 /// profile lies inside a face of the plane facing `beyond` (air directly past
 /// it; material returning within `margin` is not detected), or nothing of `t`
-/// lies past the plane at all. Otherwise a probe cut of that slab (starting
-/// `MIN_LENGTH` past the plane, so it has no coplanar face): removing material
-/// means it is not free; a probe that fails for another reason counts as not
-/// free.
+/// lies past the plane at all. Otherwise the exact [`k::prism_is_empty`] test
+/// (no surface crosses the slab and it lies in air).
 fn margin_is_free(
     t: &Body,
     plane: &Frame,
@@ -1080,24 +1078,10 @@ fn margin_is_free(
     if (beyond > 0.0 && hi <= eps) || (beyond < 0.0 && lo >= -eps) {
         return Ok(true);
     }
-    let gap = k::tol::MIN_LENGTH;
-    if margin <= gap {
-        return Ok(false);
-    }
-    let start = plane.offset(if beyond > 0.0 { gap } else { -margin });
-    match k::cut_prism(t, kp, &start, margin - gap) {
-        // Bounds miss, or a cut that removes nothing: free.
-        Err(k::KernelError::InvalidInput(_)) => Ok(true),
-        // Truck can also return an empty or failed result for a slab lying
-        // wholly in air. Confirm with a union: a slab that touches no material
-        // is reported as a disconnected result. Anything else is taken as
-        // material (a conservative refusal, never a gouge).
-        Err(k::KernelError::InvalidResult(_) | k::KernelError::BooleanFailed(_)) => Ok(matches!(
-            k::join_prism(t, kp, &start, margin - gap),
-            Err(k::KernelError::InvalidResult(m)) if m.contains("disconnected")
-        )),
-        _ => Ok(false),
-    }
+    // Exact test (no boolean): no surface crosses the slab and it lies in air.
+    // (Run 3 probed with a cut, which Truck can fail or panic on for a slab
+    // wholly in air beside a coplanar face; that refused valid cuts.)
+    k::prism_is_empty(t, plane, kp, beyond, margin)
 }
 
 /// A cut whose end had to stay on a coplanar face failed in the kernel: say why.

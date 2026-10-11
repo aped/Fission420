@@ -1,0 +1,339 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base plate X",
+    "expression": "60",
+    "name": "plate_l",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base plate Y",
+    "expression": "40",
+    "name": "plate_w",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "base plate thickness",
+    "expression": "5",
+    "name": "plate_t",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "upright height above the plate",
+    "expression": "35",
+    "name": "upright_h",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "upright thickness",
+    "expression": "5",
+    "name": "upright_t",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "upright inset from the plate's sides and back",
+    "expression": "5",
+    "name": "inset",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "screw clearance hole (M5)",
+    "expression": "5.5",
+    "name": "hole_d",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole pitch",
+    "expression": "30",
+    "name": "hole_spacing",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "holes per row",
+    "expression": "2",
+    "name": "hole_count",
+    "unit": "unitless"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "front edge chamfer",
+    "expression": "1",
+    "name": "edge_chamfer",
+    "unit": "mm"
+  },
+  {
+    "center": [
+      30.0,
+      20.0
+    ],
+    "cmd": "create_sketch",
+    "height": 40.0,
+    "name": "Plate outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 60.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_l",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_w",
+    "feature": 1,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_l / 2",
+    "feature": 1,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_w / 2",
+    "feature": 1,
+    "name": "center_y"
+  },
+  {
+    "body_name": "Mounting bracket",
+    "cmd": "extrude",
+    "distance": 5.0,
+    "name": "Plate",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_t",
+    "feature": 2,
+    "name": "distance"
+  },
+  {
+    "center": [
+      30.0,
+      32.5
+    ],
+    "cmd": "create_sketch",
+    "height": 5.0,
+    "name": "Upright outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 50.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_l - 2 * inset",
+    "feature": 3,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "upright_t",
+    "feature": 3,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_l / 2",
+    "feature": 3,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_w - inset - upright_t / 2",
+    "feature": 3,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 35.0,
+    "name": "Upright",
+    "op": "join",
+    "sketch": 3,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "upright_h",
+    "feature": 4,
+    "name": "distance"
+  },
+  {
+    "center": [
+      15.0,
+      15.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 5.5,
+    "name": "Plate hole outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_d",
+    "feature": 5,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "(plate_l - hole_spacing) / 2",
+    "feature": 5,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Plate hole",
+    "op": "cut",
+    "sketch": 5,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 2,
+    "direction": [
+      1.0,
+      0.0
+    ],
+    "feature": 6,
+    "name": "Plate holes",
+    "spacing": 30.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_spacing",
+    "feature": 7,
+    "name": "spacing"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_count",
+    "feature": 7,
+    "name": "count"
+  },
+  {
+    "center": [
+      10.0,
+      20.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 5.5,
+    "name": "Upright hole outline",
+    "plane": {
+      "Face": {
+        "feature": 4,
+        "role": {
+          "ExtrudeSide": {
+            "entity": 1
+          }
+        }
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_d",
+    "feature": 8,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "(plate_l - hole_spacing) / 2 - inset",
+    "feature": 8,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "upright_h * 0.6",
+    "feature": 8,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Upright hole",
+    "op": "cut",
+    "sketch": 8,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 2,
+    "direction": [
+      1.0,
+      0.0
+    ],
+    "feature": 9,
+    "name": "Upright holes",
+    "spacing": 30.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_spacing",
+    "feature": 10,
+    "name": "spacing"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_count",
+    "feature": 10,
+    "name": "count"
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": "ExtrudeEndCap"
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "cmd": "chamfer",
+    "distance": 1.0,
+    "name": "Front edge chamfer"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "edge_chamfer",
+    "feature": 11,
+    "name": "distance"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/mounting_bracket.f420.json"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

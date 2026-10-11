@@ -1,0 +1,283 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "peg diameter (nominal)",
+    "expression": "6",
+    "name": "peg_d",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "coupon plate thickness",
+    "expression": "4",
+    "name": "plate_t",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "peg height",
+    "expression": "10",
+    "name": "peg_h",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole centre spacing",
+    "expression": "15",
+    "name": "hole_spacing",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole 1 clearance PER SIDE (hole Ø = peg_d + 2*c1)",
+    "expression": "0.15",
+    "name": "c1",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole 2 clearance per side",
+    "expression": "0.25",
+    "name": "c2",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole 3 clearance per side",
+    "expression": "0.35",
+    "name": "c3",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "hole 4 clearance per side",
+    "expression": "0.45",
+    "name": "c4",
+    "unit": "mm"
+  },
+  {
+    "center": [
+      35.0,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "height": 20.0,
+    "name": "Coupon plate outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 70.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "hole_spacing * 4 + 10",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "(hole_spacing * 4 + 10) / 2",
+    "feature": 1,
+    "name": "center_x"
+  },
+  {
+    "body_name": "Coupon plate (holes c=0.15/0.25/0.35/0.45 per side)",
+    "cmd": "extrude",
+    "distance": 4.0,
+    "name": "Coupon plate",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "plate_t",
+    "feature": 2,
+    "name": "distance"
+  },
+  {
+    "center": [
+      12.5,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 6.3,
+    "name": "Hole 1 outline (c=0.15 per side)",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_d + 2 * c1",
+    "feature": 3,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "5 + hole_spacing / 2 + hole_spacing * 0",
+    "feature": 3,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Hole 1 c=0.15",
+    "op": "cut",
+    "sketch": 3,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "center": [
+      27.5,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 6.5,
+    "name": "Hole 2 outline (c=0.25 per side)",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_d + 2 * c2",
+    "feature": 5,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "5 + hole_spacing / 2 + hole_spacing * 1",
+    "feature": 5,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Hole 2 c=0.25",
+    "op": "cut",
+    "sketch": 5,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "center": [
+      42.5,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 6.7,
+    "name": "Hole 3 outline (c=0.35 per side)",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_d + 2 * c3",
+    "feature": 7,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "5 + hole_spacing / 2 + hole_spacing * 2",
+    "feature": 7,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Hole 3 c=0.35",
+    "op": "cut",
+    "sketch": 7,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "center": [
+      57.5,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 6.9,
+    "name": "Hole 4 outline (c=0.45 per side)",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_d + 2 * c4",
+    "feature": 9,
+    "name": "diameter"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "5 + hole_spacing / 2 + hole_spacing * 3",
+    "feature": 9,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 0.0,
+    "name": "Hole 4 c=0.45",
+    "op": "cut",
+    "sketch": 9,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "center": [
+      35.0,
+      -15.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 6.0,
+    "name": "Peg outline",
+    "plane": "WorldXY",
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_d",
+    "feature": 11,
+    "name": "diameter"
+  },
+  {
+    "body_name": "Peg Ø6 nominal (test in each hole)",
+    "cmd": "extrude",
+    "distance": 10.0,
+    "name": "Peg",
+    "sketch": 11
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "peg_h",
+    "feature": 12,
+    "name": "distance"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/clearance_coupon.f420.json"
+  },
+  {
+    "cmd": "inspect"
+  }
+]
