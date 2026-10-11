@@ -113,6 +113,9 @@ pub struct EvalBody {
     pub source: BodySource,
     /// Exact B-rep measurements (None: deferred, failed, or a mesh body).
     pub measurements: Option<Measurements>,
+    /// Why measuring this geometry failed (stable: not retried until the
+    /// body's geometry changes; never blocks modeling or other bodies).
+    pub measure_error: Option<String>,
 }
 
 /// A planar face that can host a sketch in the final model: its semantic
@@ -184,11 +187,18 @@ impl Evaluation {
         self.refresh_legacy_view();
     }
 
-    /// B-rep bodies still lacking measurements.
+    /// Record that measuring body `id` failed (it is no longer pending).
+    pub fn set_body_failure(&mut self, id: BodyId, why: String) {
+        if let Some(b) = self.bodies.iter_mut().find(|b| b.id == id) {
+            b.measure_error = Some(why);
+        }
+    }
+
+    /// B-rep bodies still lacking measurements (excluding failed ones).
     pub fn unmeasured(&self) -> Vec<(BodyId, &Body)> {
         self.bodies
             .iter()
-            .filter(|b| b.measurements.is_none())
+            .filter(|b| b.measurements.is_none() && b.measure_error.is_none())
             .filter_map(|b| b.geometry.brep().map(|g| (b.id, g)))
             .collect()
     }
@@ -317,6 +327,8 @@ pub struct RegenCache {
     states: HashMap<String, Snapshot>,
     /// Measurements by (prefix key at the body's last feature, body).
     measurements: HashMap<(String, BodyId), Measurements>,
+    /// Measurement failures, keyed like `measurements` (not retried).
+    failed: HashMap<(String, BodyId), String>,
     order: std::collections::VecDeque<String>,
     pub hits: u64,
     pub misses: u64,
@@ -332,6 +344,7 @@ impl RegenCache {
                 if let Some(old) = self.order.pop_front() {
                     self.states.remove(&old);
                     self.measurements.retain(|(k, _), _| k != &old);
+                    self.failed.retain(|(k, _), _| k != &old);
                 }
             }
         }
@@ -352,6 +365,18 @@ impl RegenCache {
             && self.states.contains_key(&key)
         {
             self.measurements.insert((key, body), m);
+        }
+    }
+}
+
+impl RegenCache {
+    /// Remember that measuring body `body` of `eval` failed, under the same
+    /// key as [`RegenCache::store_measurements`].
+    pub fn store_failure(&mut self, doc: &Document, eval: &Evaluation, body: BodyId, why: String) {
+        if let Ok(Some(key)) = body_key(doc, eval, body)
+            && self.states.contains_key(&key)
+        {
+            self.failed.insert((key, body), why);
         }
     }
 }
@@ -694,15 +719,31 @@ pub fn regenerate_cached_opts(
         };
         let info = doc.body(*bid)?;
         let key = (keys[pos[&bs.last_feature]].clone(), *bid);
+        let mut measure_error = cache.as_deref().and_then(|c| c.failed.get(&key).cloned());
         let measurements = match &bs.geometry {
             BodyGeometry::Mesh(_) => None,
+            BodyGeometry::Brep(_) if measure_error.is_some() => None,
             BodyGeometry::Brep(b) => {
                 let cached = cache
                     .as_deref()
                     .and_then(|c| c.measurements.get(&key).cloned());
                 let m = match cached {
                     Some(m) => Some(m),
-                    None if measure_body => Some(measure(bs.last_feature, b)?),
+                    // A failed measurement is a stable per-body state, not a
+                    // failed edit: the geometry itself regenerated.
+                    None if measure_body => match measure(bs.last_feature, b) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            let why = e.to_string();
+                            if let Some(c) = cache.as_deref_mut()
+                                && c.states.contains_key(&key.0)
+                            {
+                                c.failed.insert(key.clone(), why.clone());
+                            }
+                            measure_error = Some(why);
+                            None
+                        }
+                    },
                     None => None,
                 };
                 if let (Some(c), Some(m)) = (cache.as_deref_mut(), &m)
@@ -727,6 +768,7 @@ pub fn regenerate_cached_opts(
             last_feature: bs.last_feature,
             source: bs.source.clone(),
             measurements,
+            measure_error,
         });
     }
     let faces = face_candidates(&st, &order);

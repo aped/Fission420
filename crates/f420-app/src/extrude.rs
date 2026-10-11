@@ -108,29 +108,28 @@ pub fn host_body(features: &[FeatureSummary], sketch: &FeatureSummary) -> Option
         .map(|fs| fs.body)
 }
 
-/// Mirror of the regenerator's `coplanar_face_side`: +1/-1 when the sketch plane
-/// holds a (semantic) planar face of `target` whose outward normal is along /
-/// against the sketch normal; None when no face of the target lies in it.
+/// The regenerator's `coplanar_face_side`, on the planes of every planar face
+/// of `target` (from the document summary, so faces made by patterns, mirrors
+/// and chamfers count too): +1/-1 when the sketch plane holds a face whose
+/// outward normal is along / against the sketch normal; None when it holds no
+/// face of the target.
 pub fn face_side(
-    features: &[FeatureSummary],
+    bodies: &[BodySummary],
     sketch: &FeatureSummary,
     target: Option<BodyId>,
 ) -> Option<f64> {
     let (target, f) = (target?, sketch.frame?);
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    features
-        .iter()
-        .flat_map(|x| x.faces.iter())
-        .filter(|fs| fs.body == target)
-        .find_map(|fs| {
-            let c = dot(fs.frame.z, f.z);
-            let d = [
-                fs.frame.origin[0] - f.origin[0],
-                fs.frame.origin[1] - f.origin[1],
-                fs.frame.origin[2] - f.origin[2],
-            ];
-            ((c.abs() - 1.0).abs() < 1e-9 && dot(d, f.z).abs() < 1e-6).then_some(c.signum())
-        })
+    let b = bodies.iter().find(|b| b.id == target)?;
+    b.planes.iter().find_map(|p| {
+        let c = dot(p.normal, f.z);
+        let d = [
+            p.point[0] - f.origin[0],
+            p.point[1] - f.origin[1],
+            p.point[2] - f.origin[2],
+        ];
+        ((c.abs() - 1.0).abs() < 1e-7 && dot(d, f.z).abs() < 1e-7).then_some(c.signum())
+    })
 }
 
 /// Default target: the body the sketch is on, else the only B-rep body.
@@ -194,19 +193,19 @@ impl ExtrudeForm {
     }
 
     /// The sketch plane holds a face of the target (+1/-1 as in [`face_side`]).
-    pub fn side(&self, features: &[FeatureSummary]) -> Option<f64> {
+    pub fn side(&self, features: &[FeatureSummary], bodies: &[BodySummary]) -> Option<f64> {
         let s = self
             .sketch
             .and_then(|id| features.iter().find(|f| f.id == id))?;
         (self.op != ExtrudeOp::NewBody)
-            .then(|| face_side(features, s, self.target))
+            .then(|| face_side(bodies, s, self.target))
             .flatten()
     }
 
     /// +1 along the sketch normal, -1 against it: the regenerator's rule (a
     /// Cut from a face of the target goes into the material, a Join away from it).
-    pub fn direction(&self, features: &[FeatureSummary]) -> f64 {
-        let base = match (self.op, self.side(features)) {
+    pub fn direction(&self, features: &[FeatureSummary], bodies: &[BodySummary]) -> f64 {
+        let base = match (self.op, self.side(features, bodies)) {
             (ExtrudeOp::Cut, Some(side)) => -side,
             (ExtrudeOp::Join, Some(side)) => side,
             _ => 1.0,
@@ -226,33 +225,27 @@ impl F420App {
         let frame = PlaneFrame::from_kernel(&s.frame?);
         let outline = profile_outline(s.sketch.as_ref()?)?;
         let z_range = if form.through_all && form.op == ExtrudeOp::Cut {
-            let d = self
-                .scene
+            // Exact bounds from the summary (also for a hidden target).
+            let b = self
+                .summary
                 .bodies
                 .iter()
-                .find(|b| Some(b.id) == form.target)?;
-            let m = &self.scene.mesh;
+                .find(|b| Some(b.id) == form.target)?
+                .bounds?;
             let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-            for (t, idx) in m.indices.as_chunks::<3>().0.iter().enumerate() {
-                if !m.tri_group.get(t).is_some_and(|g| d.groups.contains(g)) {
-                    continue;
-                }
-                for &i in idx {
-                    if let Some(p) = m.positions.get(i as usize) {
-                        let p = p.map(f64::from);
+            for x in [b.min[0], b.max[0]] {
+                for y in [b.min[1], b.max[1]] {
+                    for z in [b.min[2], b.max[2]] {
                         let v = [
-                            p[0] - frame.origin[0],
-                            p[1] - frame.origin[1],
-                            p[2] - frame.origin[2],
+                            x - frame.origin[0],
+                            y - frame.origin[1],
+                            z - frame.origin[2],
                         ];
                         let h = v[0] * frame.z[0] + v[1] * frame.z[1] + v[2] * frame.z[2];
                         lo = lo.min(h);
                         hi = hi.max(h);
                     }
                 }
-            }
-            if !lo.is_finite() {
-                return None;
             }
             let margin = THROUGH_MARGIN_MM + THROUGH_MARGIN_REL * (hi - lo);
             [lo.min(0.0) - margin, hi.max(0.0) + margin]
@@ -261,7 +254,7 @@ impl F420App {
             if !(d.is_finite() && d > 0.0) {
                 return None;
             }
-            [0.0, form.direction(fs) * d]
+            [0.0, form.direction(fs, &self.summary.bodies) * d]
         };
         let at = |p: [f64; 2], h: f64| {
             let w = frame.to_world(p);
@@ -445,7 +438,7 @@ impl F420App {
         } else {
             crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
         }
-        let on_face = !form.through_all && form.side(features).is_some();
+        let on_face = !form.through_all && form.side(features, &self.summary.bodies).is_some();
         if on_face {
             // Reversing a blind cut/join from a face points into air / into the
             // material: the regenerator refuses it, so it is not offered.
@@ -455,7 +448,7 @@ impl F420App {
             .probe("Reverse direction")
             .on_disabled_hover_text("The sketch is on a face of the target: the direction is set by the face (Cut into the material, Join away from it)");
         if !form.through_all {
-            let dir = form.direction(features);
+            let dir = form.direction(features, &self.summary.bodies);
             let base = match (form.op, on_face) {
                 (ExtrudeOp::Cut, true) => "Cut from a face of the target goes into the material",
                 (ExtrudeOp::Join, true) => {

@@ -401,6 +401,17 @@ pub struct BodySummary {
     /// Mesh bodies: diagnostics (closed, boundary edges, volume if closed...).
     #[serde(default)]
     pub mesh: Option<f420_document::import::MeshDiagnostics>,
+    /// B-rep bodies: the plane of every planar face (outward normal), for
+    /// clients that must apply regeneration's face rules (extrude preview).
+    #[serde(default)]
+    pub planes: Vec<f420_kernel::FacePlane>,
+    /// B-rep bodies: exact bounds, available even while measurement is
+    /// deferred (inspection, Through All preview of hidden bodies).
+    #[serde(default)]
+    pub bounds: Option<f420_kernel::Bounds>,
+    /// Why measuring this body failed (stable until its geometry changes).
+    #[serde(default)]
+    pub measure_error: Option<String>,
 }
 
 /// Inspectable per-feature state.
@@ -578,19 +589,43 @@ impl Session {
     /// Bodies awaiting deferred measurement: `(doc_id, revision, bodies)`. The
     /// bodies are deep copies (Truck bodies share geometry behind mutexes, so a
     /// shallow clone measured on another thread races with this session's own use).
-    pub fn pending_measurement(&self) -> Option<PendingMeasurement> {
-        let m = self.model.as_ref()?;
+    /// A body that cannot be copied is marked failed (stable, shown in its
+    /// summary) and the others are still returned.
+    pub fn pending_measurement(&mut self) -> Option<PendingMeasurement> {
+        let m = self.model.as_mut()?;
         if !m.measurements_pending() {
             return None;
         }
-        let bodies = m
-            .evaluation()
-            .unmeasured()
-            .into_iter()
-            .map(|(id, b)| b.deep_copy().map(|b| (id, b)))
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        Some((self.doc_id, m.revision, bodies))
+        let mut bodies = Vec::new();
+        let mut failed = Vec::new();
+        for (id, b) in m.evaluation().unmeasured() {
+            match b.deep_copy() {
+                Ok(c) => bodies.push((id, c)),
+                Err(e) => {
+                    failed.push((id, format!("could not copy the body for measurement: {e}")))
+                }
+            }
+        }
+        let revision = m.revision;
+        if !failed.is_empty() {
+            m.fail_body_measurements(revision, failed);
+        }
+        (!bodies.is_empty()).then_some((self.doc_id, revision, bodies))
+    }
+
+    /// Bodies whose deferred measurement failed (see
+    /// `Model::fail_body_measurements`). True when it applied.
+    pub fn fail_body_measurements(
+        &mut self,
+        doc_id: u64,
+        revision: u64,
+        failures: Vec<(BodyId, String)>,
+    ) -> bool {
+        doc_id == self.doc_id
+            && self
+                .model
+                .as_mut()
+                .is_some_and(|m| m.fail_body_measurements(revision, failures))
     }
 
     /// The deferred measurement of `revision` failed: stop reporting it as
@@ -1651,6 +1686,12 @@ impl Session {
                     last_feature: b.last_feature,
                     measurements: b.measurements.clone(),
                     mesh: b.geometry.mesh().map(|mb| mb.diagnostics.clone()),
+                    planes: b.geometry.brep().map(k::face_planes).unwrap_or_default(),
+                    measure_error: b.measure_error.clone(),
+                    bounds: match &b.measurements {
+                        Some(m) => Some(m.bounds),
+                        None => b.geometry.brep().and_then(|g| k::bounds(g).ok()),
+                    },
                 })
                 .collect(),
             parameters: parameter_summaries(m.document()),

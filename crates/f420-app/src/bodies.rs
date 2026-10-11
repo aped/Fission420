@@ -250,6 +250,15 @@ impl F420App {
         match (&b.measurements, &b.mesh) {
             (Some(m), _) => {
                 match &m.volume {
+                    VolumeResult::Value {
+                        volume,
+                        method: f420_kernel::VolumeMethod::TessellationEstimate,
+                        error_estimate,
+                    } => {
+                        ui.label(format!(
+                            "Volume ≈ {volume:.3} mm³ (tessellation estimate, ±{error_estimate:.3})"
+                        ));
+                    }
                     VolumeResult::Value { volume, .. } => {
                         ui.label(format!("Volume {volume:.4} mm³"));
                     }
@@ -258,6 +267,13 @@ impl F420App {
                     }
                 }
                 let (a, c) = (m.bounds.min, m.bounds.max);
+                ui.label(format!(
+                    "Overall size (bounding box) {:.3} × {:.3} × {:.3} mm",
+                    c[0] - a[0],
+                    c[1] - a[1],
+                    c[2] - a[2]
+                ))
+                .on_hover_text("Extent along X, Y, Z. Not a wall or floor thickness: select two parallel faces to measure the distance between them.");
                 ui.small(format!(
                     "Bounds X[{:.3}, {:.3}] Y[{:.3}, {:.3}] Z[{:.3}, {:.3}] mm",
                     a[0], c[0], a[1], c[1], a[2], c[2]
@@ -302,6 +318,23 @@ impl F420App {
                     d.inconsistent_orientation_edges,
                     d.degenerate_triangles
                 ));
+            }
+            (None, None) if b.measure_error.is_some() => {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 170, 90),
+                    format!(
+                        "Measurement failed for this geometry (not retried until the body changes): {}",
+                        b.measure_error.as_deref().unwrap_or_default()
+                    ),
+                );
+                if let Some(bb) = b.bounds {
+                    ui.small(format!(
+                        "Overall size (bounding box) {:.3} × {:.3} × {:.3} mm",
+                        bb.max[0] - bb.min[0],
+                        bb.max[1] - bb.min[1],
+                        bb.max[2] - bb.min[2]
+                    ));
+                }
             }
             (None, None) if self.summary.measuring => {
                 ui.horizontal(|ui| {

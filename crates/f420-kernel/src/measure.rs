@@ -495,6 +495,49 @@ pub fn planar_faces_on(body: &Body, frame: &Frame) -> usize {
         .count()
 }
 
+/// The plane of a planar B-rep face: a point on it and the outward normal.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FacePlane {
+    pub point: [f64; 3],
+    pub normal: [f64; 3],
+}
+
+/// Planes of all planar faces of `body` (outward normals), deduplicated
+/// (coplanar faces with the same normal appear once). Every planar face counts,
+/// including those made by patterns, mirrors and chamfers, so a client can
+/// apply the same "sketch plane holds a face of the target" rule as
+/// regeneration ([`crate::coplanar_face_side`]).
+pub fn face_planes(body: &Body) -> Vec<FacePlane> {
+    let mut out: Vec<FacePlane> = Vec::new();
+    for f in body.solid.face_iter() {
+        let Surface::Plane(pl) = f.surface() else {
+            continue;
+        };
+        let mut n = pl.normal();
+        if !f.orientation() {
+            n = -n;
+        }
+        let o = pl.origin();
+        let fp = FacePlane {
+            point: [o.x, o.y, o.z],
+            normal: [n.x, n.y, n.z],
+        };
+        let same = |q: &FacePlane| {
+            let d = (0..3)
+                .map(|i| (q.normal[i] - fp.normal[i]).powi(2))
+                .sum::<f64>();
+            let off = (0..3)
+                .map(|i| (q.point[i] - fp.point[i]) * fp.normal[i])
+                .sum::<f64>();
+            d.sqrt() < tol::FACE_MATCH && off.abs() < tol::FACE_MATCH
+        };
+        if !out.iter().any(same) {
+            out.push(fp);
+        }
+    }
+    out
+}
+
 /// An inner boundary loop (hole outline) of a planar face perpendicular to Z.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InnerLoop {

@@ -93,6 +93,33 @@ impl Model {
         true
     }
 
+    /// Bodies whose out-of-band measurement of `revision` failed: they get a
+    /// stable error state (shown, not retried until their geometry changes)
+    /// and stop being pending; other bodies are unaffected.
+    pub fn fail_body_measurements(
+        &mut self,
+        revision: u64,
+        failures: Vec<(crate::BodyId, String)>,
+    ) -> bool {
+        if revision != self.revision {
+            return false;
+        }
+        let mut any = false;
+        for (id, why) in failures {
+            let pending = self
+                .eval
+                .body_by_id(id)
+                .is_some_and(|b| b.measurements.is_none() && b.measure_error.is_none());
+            if pending {
+                self.cache
+                    .store_failure(&self.doc, &self.eval, id, why.clone());
+                self.eval.set_body_failure(id, why);
+                any = true;
+            }
+        }
+        any
+    }
+
     /// Install per-body measurements computed out of band for `revision`.
     /// Ignored (false) if the model has moved on or nothing was pending.
     pub fn adopt_measurements(

@@ -18,8 +18,8 @@ mod validate;
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
 pub use measure::{
-    Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
-    planar_faces_on, z_face_inner_loops,
+    Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count,
+    face_planes, measure, planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{
     MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh, check_mesh,

@@ -362,13 +362,13 @@ struct MeasureSlot {
     shutdown: bool,
 }
 
-/// (doc id, revision, bodies measured, failures "body: error"). Bodies are
+/// (doc id, revision, bodies measured, failures (body, error)). Bodies are
 /// measured independently so one failure does not withhold the others.
 type Measured = (
     u64,
     u64,
     Vec<(f420_document::BodyId, Measurements)>,
-    Vec<String>,
+    Vec<(f420_document::BodyId, String)>,
 );
 
 /// `F420_TRACE_ENGINE=1`: log the deferred-measurement pipeline to stderr.
@@ -409,7 +409,7 @@ fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
         for (id, b) in &job.bodies {
             match f420_kernel::measure(b) {
                 Ok(m) => ok.push((*id, m)),
-                Err(e) => failed.push(format!("body {id}: {e}")),
+                Err(e) => failed.push((*id, e.to_string())),
             }
         }
         trace(|| {
@@ -447,15 +447,21 @@ fn adopt(session: &mut Session, (doc_id, revision, ok, failed): Measured) -> Opt
             ..Default::default()
         }
     } else {
-        if !session.fail_measurements(doc_id, revision) && !adopted {
+        let text = failed
+            .iter()
+            .map(|(id, e)| format!("body {id}: {e}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        // Each failing body gets a stable failed state: reported once here,
+        // not retried until its geometry changes.
+        if !session.fail_body_measurements(doc_id, revision, failed) && !adopted {
             return None; // stale failure: nothing to report
         }
         Response {
             ok: false,
             command: "measure".into(),
             error: Some(f420_document::DocError::Validation(format!(
-                "measurement of revision {revision} failed: {}",
-                failed.join("; ")
+                "measurement of revision {revision} failed: {text}"
             ))),
             ..Default::default()
         }
@@ -546,29 +552,6 @@ fn worker(
             Some(k) if last_job != Some(k) => session.pending_measurement(),
             _ => None,
         };
-        if pending.is_none()
-            && let Some(m) = session.model()
-            && m.measurements_pending()
-            && last_job != Some((session.summary().doc_id, m.revision))
-        {
-            // The body could not be copied for the measurement thread: report
-            // the measurement as failed rather than leaving it pending forever.
-            let (doc_id, revision) = (session.summary().doc_id, m.revision);
-            if let Some(r) = adopt(
-                &mut session,
-                (
-                    doc_id,
-                    revision,
-                    Vec::new(),
-                    vec!["could not copy the body for measurement".into()],
-                ),
-            ) {
-                if tx.send(r).is_err() {
-                    break;
-                }
-                notify();
-            }
-        }
         if let Some((doc_id, revision, bodies)) = pending {
             last_job = Some((doc_id, revision));
             trace(|| format!("queue measure doc {doc_id} rev {revision}"));
@@ -767,18 +750,32 @@ mod tests {
                 doc,
                 rev,
                 vec![(good, m)],
-                vec![format!("body {bad}: injected")],
+                vec![(bad, "injected".to_string())],
             ),
         )
         .expect("current revision: reported");
         assert!(!reply.response.ok);
-        let by_id = |id| s.summary().bodies.into_iter().find(|b| b.id == id).unwrap();
-        assert!(by_id(good).measurements.is_some());
-        assert!(by_id(bad).measurements.is_none());
+        fn by(s: &Session, id: f420_document::BodyId) -> f420_commands::BodySummary {
+            s.summary().bodies.into_iter().find(|b| b.id == id).unwrap()
+        }
+        assert!(by(&s, good).measurements.is_some());
+        assert!(by(&s, bad).measurements.is_none());
+        assert_eq!(by(&s, bad).measure_error.as_deref(), Some("injected"));
         assert!(
             !s.model().unwrap().measurements_pending(),
             "not waited on forever"
         );
+        // Run 4: an unrelated edit does not retry the failed body (no new
+        // job, no banner per revision); its failed state stays visible.
+        let r = s.execute(&Command::RenameBody {
+            body: good,
+            name: "renamed".into(),
+        });
+        assert!(r.ok);
+        assert!(!s.model().unwrap().measurements_pending());
+        assert!(s.pending_measurement().is_none());
+        assert_eq!(by(&s, bad).measure_error.as_deref(), Some("injected"));
+        assert!(by(&s, good).measurements.is_some());
     }
 
     thread_local! {
