@@ -429,14 +429,26 @@ impl F420App {
                 if action(ui, "Coincident", ed.coincident_disabled_reason()) {
                     ed.constrain_coincident();
                 }
+                if action(ui, "Parallel", ed.two_lines_disabled_reason()) {
+                    ed.constrain_parallel(false);
+                }
+                if action(ui, "Perpendicular", ed.two_lines_disabled_reason()) {
+                    ed.constrain_parallel(true);
+                }
                 if action(ui, "Midpoint", ed.midpoint_disabled_reason()) {
                     ed.constrain_midpoint();
+                }
+                if action(ui, "On line", ed.on_line_disabled_reason()) {
+                    ed.constrain_on_line();
                 }
                 if action(ui, "Tangent", ed.tangent_disabled_reason()) {
                     ed.constrain_tangent();
                 }
                 if action(ui, "Equal", ed.equal_disabled_reason()) {
                     ed.constrain_equal_radius();
+                }
+                if action(ui, "Construction", ed.construction_disabled_reason()) {
+                    ed.toggle_construction();
                 }
                 let del = ed
                     .selection
@@ -1338,7 +1350,7 @@ impl F420App {
                 ui.separator();
                 ui.label(RichText::new("Sketch").strong());
                 ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · A 3-point arc · D dimension");
-                ui.label("Constraints: select lines for Horizontal/Vertical, two points for Coincident, a line + a point for Midpoint, a line + arc sharing an end for Tangent, two arcs/circles for Equal radius.");
+                ui.label("Constraints: lines for Horizontal/Vertical; two lines for Parallel/Perpendicular/Equal length; two points for Coincident; a line + a point for Midpoint/On line; a line + arc sharing an end for Tangent; two arcs/circles for Equal radius. X toggles construction (reference) geometry, which profiles ignore.");
                 ui.label("Del delete · Enter end line chain · Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
                 ui.label("Snaps: existing points (shared endpoint), horizontal/vertical alignment (adds an H/V constraint), grid (position only).");
                 ui.label("Ctrl+Z inside a sketch undoes sketch steps; Finish Sketch records one document undo step; Cancel Sketch discards the session.");

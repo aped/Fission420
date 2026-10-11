@@ -220,7 +220,25 @@ pub fn paint_sketch(
     // Curves.
     for e in &s.entities {
         let item = Item::Entity(e.id());
-        let c = color_of(item);
+        let construction = s.is_construction(e.id());
+        let c = if construction {
+            fade(color_of(item), 0.6)
+        } else {
+            color_of(item)
+        };
+        // Construction (reference) curves are dashed.
+        let draw = |pts: Vec<Pos2>, w: f32| {
+            if construction {
+                painter.extend(egui::Shape::dashed_line(
+                    &pts,
+                    Stroke::new(w * 0.75, c),
+                    6.0,
+                    4.0,
+                ));
+            } else {
+                painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
+            }
+        };
         let w = if st.selection.contains(&item) || st.hover == Some(item) {
             3.0
         } else {
@@ -232,7 +250,7 @@ pub fn paint_sketch(
                     s.point_xy(*a).and_then(|p| pr.screen(p)),
                     s.point_xy(*b).and_then(|p| pr.screen(p)),
                 ) {
-                    painter.line_segment([pa, pb], Stroke::new(w, c));
+                    draw(vec![pa, pb], w);
                 }
             }
             Entity::Circle { center, radius, .. } => {
@@ -245,7 +263,7 @@ pub fn paint_sketch(
                         pr.screen([cxy[0] + radius * t.cos(), cxy[1] + radius * t.sin()])
                     })
                     .collect();
-                painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
+                draw(pts, w);
             }
             Entity::Arc { id, .. } => {
                 if let Some(g) = s.arc_geometry(*id) {
@@ -253,7 +271,7 @@ pub fn paint_sketch(
                         .into_iter()
                         .filter_map(|q| pr.screen(q))
                         .collect();
-                    painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
+                    draw(pts, w);
                 }
             }
         }
@@ -406,6 +424,29 @@ pub fn paint_sketch(
                     if let Some(sp) = at.and_then(|q| pr.screen(q)) {
                         targets.push((item, glyph("=", sp)));
                     }
+                }
+            }
+            Constraint::Parallel { a, b }
+            | Constraint::Perpendicular { a, b }
+            | Constraint::EqualLength { a, b } => {
+                let t = match c {
+                    Constraint::Parallel { .. } => "//",
+                    Constraint::Perpendicular { .. } => "90",
+                    _ => "=",
+                };
+                for l in [a, b] {
+                    if let Some(Entity::Line { a: p, b: q, .. }) = s.entity(*l)
+                        && let (Some(pp), Some(pq)) = (s.point_xy(*p), s.point_xy(*q))
+                        && let Some(sm) =
+                            pr.screen([0.25 * pp[0] + 0.75 * pq[0], 0.25 * pp[1] + 0.75 * pq[1]])
+                    {
+                        targets.push((item, glyph(t, sm + egui::vec2(0.0, -12.0))));
+                    }
+                }
+            }
+            Constraint::PointOnLine { point, .. } => {
+                if let Some(sp) = s.point_xy(*point).and_then(|p| pr.screen(p)) {
+                    targets.push((item, glyph("On", sp + egui::vec2(14.0, -12.0))));
                 }
             }
             Constraint::Coincident { a, .. } => {

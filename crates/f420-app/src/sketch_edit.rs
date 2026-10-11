@@ -240,6 +240,7 @@ pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => *a == p || *b == p,
         Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
+        Constraint::PointOnLine { point, .. } => *point == p,
         _ => false,
     }
 }
@@ -1470,7 +1471,73 @@ impl SketchEditor {
                 Some(Entity::Arc { .. } | Entity::Circle { .. })
             )
         });
-        (es.len() != 2 || !round).then_some("Select exactly two arcs/circles")
+        let lines = self.selected_lines().len() == 2;
+        (self.selection.len() != 2 || es.len() != 2 || !(round || lines))
+            .then_some("Select two lines (equal length) or two arcs/circles (equal radius)")
+    }
+
+    fn two_lines(&self) -> Option<(EntityId, EntityId)> {
+        let l = self.selected_lines();
+        (self.selection.len() == 2 && l.len() == 2).then(|| (l[0], l[1]))
+    }
+
+    pub fn two_lines_disabled_reason(&self) -> Option<&'static str> {
+        self.two_lines()
+            .is_none()
+            .then_some("Select exactly two lines")
+    }
+
+    pub fn constrain_parallel(&mut self, perpendicular: bool) {
+        let Some((a, b)) = self.two_lines() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(if perpendicular {
+                Constraint::Perpendicular { a, b }
+            } else {
+                Constraint::Parallel { a, b }
+            });
+            Ok(())
+        });
+    }
+
+    pub fn on_line_disabled_reason(&self) -> Option<&'static str> {
+        self.midpoint_pair()
+            .is_none()
+            .then_some("Select one line and one point (not its endpoint)")
+    }
+
+    /// Keep the selected point on the (infinite) selected line.
+    pub fn constrain_on_line(&mut self) {
+        let Some((line, point)) = self.midpoint_pair() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::PointOnLine { point, line });
+            Ok(())
+        });
+    }
+
+    pub fn construction_disabled_reason(&self) -> Option<&'static str> {
+        self.selected_entities()
+            .is_empty()
+            .then_some("Select lines, arcs or circles first")
+    }
+
+    /// Toggle construction (reference) geometry: it still solves and can be
+    /// dimensioned, but profiles ignore it.
+    pub fn toggle_construction(&mut self) {
+        let es = self.selected_entities();
+        if es.is_empty() {
+            return;
+        }
+        let on = !es.iter().all(|e| self.sketch.is_construction(*e));
+        self.try_change(false, |sk| {
+            for e in &es {
+                sk.set_construction(*e, on);
+            }
+            Ok(())
+        });
     }
 
     /// (line, point) when the selection is exactly one line and one point
@@ -1516,14 +1583,19 @@ impl SketchEditor {
         });
     }
 
+    /// Equal length (two lines) or equal radius (two arcs/circles).
     pub fn constrain_equal_radius(&mut self) {
         let es = self.selected_entities();
         if self.equal_disabled_reason().is_some() {
             return;
         }
+        let lines = self.selected_lines().len() == 2;
         self.try_change(true, |sk| {
-            sk.constraints
-                .push(Constraint::EqualRadius { a: es[0], b: es[1] });
+            sk.constraints.push(if lines {
+                Constraint::EqualLength { a: es[0], b: es[1] }
+            } else {
+                Constraint::EqualRadius { a: es[0], b: es[1] }
+            });
             Ok(())
         });
     }
@@ -1936,6 +2008,77 @@ mod tests {
         );
         assert!((c[0] - 0.5 * (pa[0] + pb[0])).abs() <= tol);
         assert!((c[1] - 0.5 * (pa[1] + pb[1])).abs() <= tol);
+    }
+
+    #[test]
+    fn parallel_perpendicular_equal_on_line_and_construction() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [30.0, 7.0]);
+        ed.escape();
+        click(&mut ed, [5.0, 20.0]);
+        click(&mut ed, [20.0, 31.0]);
+        ed.escape();
+        let (l1, l2) = (ed.sketch.entities[0].id(), ed.sketch.entities[1].id());
+        let dir = |ed: &SketchEditor, l: EntityId| {
+            let Some(Entity::Line { a, b, .. }) = ed.sketch.entity(l) else {
+                panic!()
+            };
+            let (p, q) = (
+                ed.sketch.point_xy(*a).unwrap(),
+                ed.sketch.point_xy(*b).unwrap(),
+            );
+            let n = (q[0] - p[0]).hypot(q[1] - p[1]);
+            ([(q[0] - p[0]) / n, (q[1] - p[1]) / n], n)
+        };
+        ed.selection = vec![Item::Entity(l1), Item::Entity(l2)];
+        assert!(ed.two_lines_disabled_reason().is_none());
+        ed.constrain_parallel(false);
+        let ((u1, _), (u2, _)) = (dir(&ed, l1), dir(&ed, l2));
+        assert!((u1[0] * u2[1] - u1[1] * u2[0]).abs() < 1e-9, "parallel");
+        // Equal length on two lines.
+        ed.selection = vec![Item::Entity(l1), Item::Entity(l2)];
+        assert!(ed.equal_disabled_reason().is_none());
+        ed.constrain_equal_radius();
+        let ((_, n1), (_, n2)) = (dir(&ed, l1), dir(&ed, l2));
+        assert!((n1 - n2).abs() < 1e-8, "equal length {n1} {n2}");
+        // Parallel + Perpendicular on the same pair is refused with culprits.
+        let before = ed.sketch.clone();
+        ed.selection = vec![Item::Entity(l1), Item::Entity(l2)];
+        ed.constrain_parallel(true);
+        assert_eq!(ed.sketch, before);
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+        // Point on line: a circle centre onto l1's infinite line.
+        ed.set_tool(SketchTool::Circle);
+        click(&mut ed, [40.0, 30.0]);
+        click(&mut ed, [43.0, 30.0]);
+        let Some(Entity::Circle { center, .. }) = ed.sketch.entities.last().cloned() else {
+            panic!()
+        };
+        ed.set_tool(SketchTool::Select);
+        ed.selection = vec![Item::Entity(l1), Item::Point(center)];
+        assert!(ed.on_line_disabled_reason().is_none());
+        ed.constrain_on_line();
+        let Some(Entity::Line { a, b, .. }) = ed.sketch.entity(l1).cloned() else {
+            panic!()
+        };
+        let (p, q, c) = (
+            ed.sketch.point_xy(a).unwrap(),
+            ed.sketch.point_xy(b).unwrap(),
+            ed.sketch.point_xy(center).unwrap(),
+        );
+        let cross = (q[0] - p[0]) * (c[1] - p[1]) - (q[1] - p[1]) * (c[0] - p[0]);
+        assert!(
+            cross.abs() / (q[0] - p[0]).hypot(q[1] - p[1]) < 1e-8,
+            "on line"
+        );
+        // Construction toggle (and back).
+        ed.selection = vec![Item::Entity(l2)];
+        ed.toggle_construction();
+        assert!(ed.sketch.is_construction(l2));
+        ed.toggle_construction();
+        assert!(!ed.sketch.is_construction(l2));
     }
 
     #[test]
