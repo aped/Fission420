@@ -429,16 +429,20 @@ pub fn paint_sketch(
             Constraint::Parallel { a, b }
             | Constraint::Perpendicular { a, b }
             | Constraint::EqualLength { a, b } => {
-                let t = match c {
-                    Constraint::Parallel { .. } => "//",
-                    Constraint::Perpendicular { .. } => "90",
-                    _ => "=",
+                // Different stations along the line per kind, so glyphs of
+                // several constraints on the same line don't stack.
+                let (t, at) = match c {
+                    Constraint::Parallel { .. } => ("//", 0.78),
+                    Constraint::Perpendicular { .. } => ("90", 0.22),
+                    _ => ("=", 0.62),
                 };
                 for l in [a, b] {
                     if let Some(Entity::Line { a: p, b: q, .. }) = s.entity(*l)
                         && let (Some(pp), Some(pq)) = (s.point_xy(*p), s.point_xy(*q))
-                        && let Some(sm) =
-                            pr.screen([0.25 * pp[0] + 0.75 * pq[0], 0.25 * pp[1] + 0.75 * pq[1]])
+                        && let Some(sm) = pr.screen([
+                            (1.0 - at) * pp[0] + at * pq[0],
+                            (1.0 - at) * pp[1] + at * pq[1],
+                        ])
                     {
                         targets.push((item, glyph(t, sm + egui::vec2(0.0, -12.0))));
                     }

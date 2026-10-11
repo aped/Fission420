@@ -1,0 +1,30 @@
+# Sketch constraints through real input: Parallel, Equal length, construction toggle
+clickw New Sketch on XY
+wait_idle
+key l
+sclick 0 0
+sclick 30 10
+key Escape
+sclick 0 20
+sclick 30 35
+key Escape
+key s
+# line 1 shares the fixed origin: 2 + 4 free coordinates
+expect editing.entities 2
+expect editing.dof 6
+sclick 15 5
+sclickshift 15 27.5
+clickw Parallel
+expect editing.dof 5
+sclick 15 5
+sclickshift 15 27.5
+clickw Equal
+expect editing.dof 4
+shot
+sclick 15 5
+key x
+expect editing.entities 2
+shot
+key ctrl+z
+key ctrl+z
+expect editing.dof 5

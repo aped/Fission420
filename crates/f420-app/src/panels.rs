@@ -419,34 +419,7 @@ impl F420App {
                     }
                 }
                 ui.separator();
-                let hv = ed.hv_disabled_reason();
-                if action(ui, "Horizontal", hv) {
-                    ed.constrain_lines(false);
-                }
-                if action(ui, "Vertical", hv) {
-                    ed.constrain_lines(true);
-                }
-                if action(ui, "Coincident", ed.coincident_disabled_reason()) {
-                    ed.constrain_coincident();
-                }
-                if action(ui, "Parallel", ed.two_lines_disabled_reason()) {
-                    ed.constrain_parallel(false);
-                }
-                if action(ui, "Perpendicular", ed.two_lines_disabled_reason()) {
-                    ed.constrain_parallel(true);
-                }
-                if action(ui, "Midpoint", ed.midpoint_disabled_reason()) {
-                    ed.constrain_midpoint();
-                }
-                if action(ui, "On line", ed.on_line_disabled_reason()) {
-                    ed.constrain_on_line();
-                }
-                if action(ui, "Tangent", ed.tangent_disabled_reason()) {
-                    ed.constrain_tangent();
-                }
-                if action(ui, "Equal", ed.equal_disabled_reason()) {
-                    ed.constrain_equal_radius();
-                }
+                // Constraint actions live in the inspector ("Constrain selection").
                 if action(ui, "Construction", ed.construction_disabled_reason()) {
                     ed.toggle_construction();
                 }
@@ -929,6 +902,48 @@ impl F420App {
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),
             };
             ui.small(text);
+        }
+        ui.separator();
+        ui.label(RichText::new("Constrain selection").strong());
+        {
+            let ed = &mut s.editor;
+            let hv = ed.hv_disabled_reason();
+            egui::Grid::new("constrain_grid")
+                .num_columns(3)
+                .spacing([4.0, 4.0])
+                .show(ui, |ui| {
+                    if action(ui, "Horizontal", hv) {
+                        ed.constrain_lines(false);
+                    }
+                    if action(ui, "Vertical", hv) {
+                        ed.constrain_lines(true);
+                    }
+                    if action(ui, "Coincident", ed.coincident_disabled_reason()) {
+                        ed.constrain_coincident();
+                    }
+                    ui.end_row();
+                    if action(ui, "Parallel", ed.two_lines_disabled_reason()) {
+                        ed.constrain_parallel(false);
+                    }
+                    if action(ui, "Perpendicular", ed.two_lines_disabled_reason()) {
+                        ed.constrain_parallel(true);
+                    }
+                    if action(ui, "Equal", ed.equal_disabled_reason()) {
+                        ed.constrain_equal_radius();
+                    }
+                    ui.end_row();
+                    if action(ui, "Midpoint", ed.midpoint_disabled_reason()) {
+                        ed.constrain_midpoint();
+                    }
+                    if action(ui, "On line", ed.on_line_disabled_reason()) {
+                        ed.constrain_on_line();
+                    }
+                    if action(ui, "Tangent", ed.tangent_disabled_reason()) {
+                        ed.constrain_tangent();
+                    }
+                    ui.end_row();
+                });
+            ui.weak("Hover a disabled button to see what to select.");
         }
         ui.collapsing("Constraints", |ui| {
             for i in 0..s.editor.sketch.constraints.len() {

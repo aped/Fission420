@@ -21,6 +21,7 @@ to get monitor pixels.
     scroll X Y STEPS              sleep MS
     shot                          (F12: the app saves --shot-dir/shot_NNN.png)
     sclick X Y / smove X Y / sdrag X1 Y1 X2 Y2 [button]   sketch-plane mm
+    sclickshift X Y               Shift+click at a sketch-plane point
     wclick X Y Z                  world mm
     clickw LABEL                  click the widget the app registered as LABEL
     typew LABEL | TEXT            click a text field by label, select all, type
@@ -83,6 +84,7 @@ class Driver:
         self.stream = self.call(new_method_call(
             scs, "RecordMonitor", "sa{sv}", (os.environ.get("F420_MONITOR", "Meta-0"), {})))[0]
         self.last = (1.0, 1.0)
+        self.last_input = time.time()
         self.call(new_method_call(self.session, "Start"))
         time.sleep(0.3)
         # The first key event of a new session is dropped while mutter sets up
@@ -106,6 +108,7 @@ class Driver:
 
     def move(self, x, y):
         self.last = (x, y)
+        self.last_input = time.time()
         x, y = x + OFFSET[0], y + OFFSET[1]
         self._s("NotifyPointerMotionAbsolute", "sdd", (self.stream, float(x), float(y)))
         time.sleep(0.02)
@@ -115,6 +118,7 @@ class Driver:
         time.sleep(0.03)
 
     def key(self, ks, down):
+        self.last_input = time.time()
         self._s("NotifyKeyboardKeysym", "ub", (ks, down))
         time.sleep(0.02)
 
@@ -138,6 +142,23 @@ class Probe:
     def __init__(self, path):
         self.path = path
         self.failures = []
+
+    def fresh(self, driver, timeout=3.0):
+        """Wait until the app has rendered a frame after the last injected input
+        (the probe is rewritten every UI frame), nudging the pointer if the
+        compositor's frame clock went quiet (see wait_idle)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if os.stat(self.path).st_mtime > driver.last_input + 0.02:
+                    return
+            except OSError:
+                pass
+            time.sleep(0.05)
+            x, y = driver.last
+            driver.move(x + 1.0, y)
+            driver.move(x, y)
+            time.sleep(0.05)
 
     def widget(self, key, timeout=3.0):
         deadline = time.time() + timeout
@@ -239,7 +260,20 @@ def run(driver, lines, probe=None):
             driver.scroll(int(args[2]))
         elif op == "sleep":
             time.sleep(float(args[0]) / 1000.0)
+        elif op == "sclickshift":
+            # Shift+click at a sketch-plane point (adds to the selection).
+            probe.fresh(driver)
+            v = list(map(float, args))
+            sx, sy = probe.sketch(v[0], v[1])
+            driver.move(sx, sy)
+            driver.key(KEYSYMS["shift"], True)
+            time.sleep(0.05)
+            driver.button("left", True)
+            driver.button("left", False)
+            driver.key(KEYSYMS["shift"], False)
+            time.sleep(0.1)
         elif op in ("sclick", "smove", "wclick"):
+            probe.fresh(driver)
             v = list(map(float, args))
             sx, sy = probe.world(v[:3]) if op == "wclick" else probe.sketch(v[0], v[1])
             driver.move(sx, sy)
@@ -260,6 +294,7 @@ def run(driver, lines, probe=None):
             driver.button(b, False)
             time.sleep(0.1)
         elif op in ("clickw", "clickdim"):
+            probe.fresh(driver)
             key = a[0].strip() if a else ""
             if op == "clickdim":
                 key = "dim:" + key
@@ -270,6 +305,7 @@ def run(driver, lines, probe=None):
             driver.button("left", False)
             time.sleep(0.15)
         elif op == "typew":
+            probe.fresh(driver)
             label, text = (a[0].split("|", 1) + [""])[:2]
             x, y = probe.widget(label.strip())
             driver.move(x, y)
@@ -306,6 +342,7 @@ def run(driver, lines, probe=None):
                 time.sleep(0.25)
             time.sleep(0.2)
         elif op == "expect":
+            probe.fresh(driver)
             path, want = args[0], args[1]
             tol = float(args[2]) if len(args) > 2 else None
             got = probe.doc_value(path)
