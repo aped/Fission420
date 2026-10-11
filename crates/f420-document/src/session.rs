@@ -41,11 +41,7 @@ const MAX_UNDO: usize = 256;
 impl Model {
     pub fn new() -> Self {
         let doc = Document::new();
-        let eval = Evaluation {
-            features: vec![],
-            body: None,
-            measurements: None,
-        };
+        let eval = Evaluation::empty();
         Self {
             doc,
             eval,
@@ -81,11 +77,9 @@ impl Model {
         self.defer_measurements = on;
     }
 
-    /// The current body has not been measured yet (deferred measurement).
+    /// Some B-rep body has not been measured yet (deferred measurement).
     pub fn measurements_pending(&self) -> bool {
-        self.eval.body.is_some()
-            && self.eval.measurements.is_none()
-            && self.measure_failed != Some(self.revision)
+        !self.eval.unmeasured().is_empty() && self.measure_failed != Some(self.revision)
     }
 
     /// Record that the deferred measurement of `revision` failed, so it is no
@@ -98,15 +92,29 @@ impl Model {
         true
     }
 
-    /// Install measurements computed out of band for `revision`. Ignored (false)
-    /// if the model has moved on or already has measurements.
-    pub fn adopt_measurements(&mut self, revision: u64, m: Measurements) -> bool {
+    /// Install per-body measurements computed out of band for `revision`.
+    /// Ignored (false) if the model has moved on or nothing was pending.
+    pub fn adopt_measurements(
+        &mut self,
+        revision: u64,
+        measured: Vec<(crate::BodyId, Measurements)>,
+    ) -> bool {
         if revision != self.revision || !self.measurements_pending() {
             return false;
         }
-        self.cache.store_measurements(&self.doc, m.clone());
-        self.eval.measurements = Some(m);
-        true
+        let mut any = false;
+        for (id, m) in measured {
+            let pending = self
+                .eval
+                .body_by_id(id)
+                .is_some_and(|b| b.measurements.is_none() && b.geometry.brep().is_some());
+            if pending {
+                self.cache.store_measurements(&self.doc, id, m.clone());
+                self.eval.set_body_measurements(id, m);
+                any = true;
+            }
+        }
+        any
     }
 
     /// Measure synchronously if measurement was deferred (Save, Measure).

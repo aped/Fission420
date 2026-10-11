@@ -4,7 +4,9 @@
 //! The [`Document`] (feature definitions + parameters) is authoritative. Geometry
 //! ([`Evaluation`]) is a disposable cache produced by [`regenerate`].
 
+mod blob;
 mod hole;
+pub mod import;
 mod io;
 mod model;
 mod regen;
@@ -15,8 +17,8 @@ pub use io::{
 };
 pub use model::*;
 pub use regen::{
-    Evaluation, FeatureResult, RegenCache, ResolvedFace, regenerate, regenerate_cached,
-    regenerate_cached_opts,
+    BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FeatureResult, MeshBody, RegenCache,
+    ResolvedFace, regenerate, regenerate_cached, regenerate_cached_opts,
 };
 pub use session::{Model, ParamChange};
 

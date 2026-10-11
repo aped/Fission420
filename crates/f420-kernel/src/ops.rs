@@ -118,6 +118,39 @@ pub fn plane_has_face(body: &Body, frame: &Frame) -> bool {
     !coplanar_faces(body, frame).is_empty()
 }
 
+/// Outward-normal side of the planar faces of `body` lying in `frame`'s plane:
+/// `Some(1.0)` when they all face along `frame.z`, `Some(-1.0)` when they all face
+/// against it, `None` when the plane holds no face. Faces of both orientations in
+/// one plane are refused (the material side would be ambiguous).
+pub fn coplanar_face_side(body: &Body, frame: &Frame) -> Result<Option<f64>> {
+    let z = Vector3::new(frame.z[0], frame.z[1], frame.z[2]);
+    let (mut pos, mut neg) = (false, false);
+    for f in coplanar_faces(body, frame) {
+        let Surface::Plane(pl) = f.surface() else {
+            continue;
+        };
+        let mut n = pl.normal();
+        if !f.orientation() {
+            n = -n;
+        }
+        if n.dot(z) > 0.0 {
+            pos = true;
+        } else {
+            neg = true;
+        }
+    }
+    match (pos, neg) {
+        (false, false) => Ok(None),
+        (true, false) => Ok(Some(1.0)),
+        (false, true) => Ok(Some(-1.0)),
+        (true, true) => Err(KernelError::InvalidInput(
+            "the sketch plane holds faces of the body facing both ways; \
+             the material side is ambiguous"
+                .into(),
+        )),
+    }
+}
+
 /// Chord count per edge when polygonizing face boundaries / profiles for the
 /// containment test.
 const REGION_SAMPLES: usize = 64;

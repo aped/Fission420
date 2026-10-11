@@ -1,10 +1,16 @@
-//! Deterministic regeneration of the feature history into B-rep geometry.
+//! Deterministic regeneration of the feature history into per-body geometry
+//! (ADR 0003): B-rep bodies (modelled or imported STEP) and mesh bodies (STL).
 use crate::hole::{check_hole_inside, to_kernel};
-use crate::{DocError, Document, FaceRef, FaceRole, FeatureId, FeatureKind, Result, SketchPlane};
+use crate::import::{self, ImportedPlanarFace};
+use crate::{
+    BodyId, DocError, Document, Extent, FaceRef, FaceRole, FeatureId, FeatureKind, Operation,
+    Result, SketchPlane,
+};
 use f420_kernel::{self as k, Body, Frame, Measurements};
-use f420_sketch::{Profile as SketchProfile, SolveReport};
+use f420_sketch::{EntityId, Profile as SketchProfile, SolveReport};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 /// How a semantic face reference resolved in this evaluation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,9 +18,12 @@ pub struct ResolvedFace {
     pub reference: FaceRef,
     /// Placement frame of the face (normal = outward face normal).
     pub frame: Frame,
-    /// Number of B-rep planar faces matching the frame in the body at the time of
-    /// resolution (must be exactly 1).
+    /// Number of B-rep planar faces of the owning body matching the frame at the
+    /// time of resolution (must be exactly 1).
     pub matching_brep_faces: usize,
+    /// Body the face belongs to.
+    #[serde(default)]
+    pub body: BodyId,
 }
 
 /// Per-feature evaluation result.
@@ -28,7 +37,8 @@ pub struct FeatureResult {
     pub frame: Option<Frame>,
     /// Sketch features on faces: how the reference resolved.
     pub resolved_face: Option<ResolvedFace>,
-    /// Solid-producing features: measurements of the body after this feature.
+    /// Solid-producing features: measurements of the body after this feature
+    /// (filled for the body's last feature only).
     pub measurements: Option<Measurements>,
     /// Sketch features: the solved sketch (display / editor seed; not authoritative).
     #[serde(default)]
@@ -37,26 +47,157 @@ pub struct FeatureResult {
     /// self-intersection, ...). Such sketches are kept but cannot be extruded/cut.
     #[serde(default)]
     pub profile_error: Option<String>,
+    /// Body-producing / modifying features: the body acted on.
+    #[serde(default)]
+    pub body: Option<BodyId>,
+    /// Import features: human-readable notes (units, counts, warnings).
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+/// A triangle-mesh body (STL import). Never treated as an exact solid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshBody {
+    /// Positions in mm; one normal per vertex (flat shading: vertices are not
+    /// shared between triangles), `tri_face` all zero.
+    pub mesh: k::TriMesh,
+    pub diagnostics: import::MeshDiagnostics,
+}
+
+/// Geometry of one body.
+#[derive(Debug, Clone)]
+pub enum BodyGeometry {
+    Brep(Body),
+    Mesh(Arc<MeshBody>),
+}
+
+impl BodyGeometry {
+    pub fn brep(&self) -> Option<&Body> {
+        match self {
+            BodyGeometry::Brep(b) => Some(b),
+            BodyGeometry::Mesh(_) => None,
+        }
+    }
+    pub fn mesh(&self) -> Option<&MeshBody> {
+        match self {
+            BodyGeometry::Brep(_) => None,
+            BodyGeometry::Mesh(m) => Some(m),
+        }
+    }
+}
+
+/// Where a body came from (kept visible in the UI: imported bodies have no
+/// recovered feature history).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BodySource {
+    Modeled,
+    ImportedStep {
+        file_name: String,
+        solid_name: Option<String>,
+    },
+    ImportedMesh {
+        file_name: String,
+    },
+}
+
+/// One evaluated body.
+#[derive(Debug, Clone)]
+pub struct EvalBody {
+    pub id: BodyId,
+    pub name: String,
+    pub visible: bool,
+    pub geometry: BodyGeometry,
+    pub created_by: FeatureId,
+    /// Last feature (in evaluation order) that produced or modified the body.
+    pub last_feature: FeatureId,
+    pub source: BodySource,
+    /// Exact B-rep measurements (None: deferred, failed, or a mesh body).
+    pub measurements: Option<Measurements>,
 }
 
 /// Disposable geometry cache for a document.
 #[derive(Debug, Clone)]
 pub struct Evaluation {
     pub features: Vec<FeatureResult>,
+    /// Bodies in creation order.
+    pub bodies: Vec<EvalBody>,
+    /// Legacy single-body view: the B-rep of the body modified by the last
+    /// solid feature in history (the only body of v1/v2 documents).
     pub body: Option<Body>,
+    /// Measurements of [`Evaluation::body`].
     pub measurements: Option<Measurements>,
+}
+
+impl Evaluation {
+    pub fn body_by_id(&self, id: BodyId) -> Option<&EvalBody> {
+        self.bodies.iter().find(|b| b.id == id)
+    }
+
+    /// Id of the body behind the legacy [`Evaluation::body`] view.
+    pub fn active_body(&self) -> Option<BodyId> {
+        let last = self
+            .features
+            .iter()
+            .rev()
+            .find_map(|r| r.body.filter(|b| self.body_by_id(*b).is_some()))?;
+        Some(last)
+    }
+
+    /// Recompute [`Evaluation::body`] / [`Evaluation::measurements`] from `bodies`.
+    pub fn refresh_legacy_view(&mut self) {
+        let view = self.active_body().and_then(|id| self.body_by_id(id)).and_then(|b| {
+            b.geometry
+                .brep()
+                .map(|body| (body.clone(), b.measurements.clone()))
+        });
+        (self.body, self.measurements) = match view {
+            Some((b, m)) => (Some(b), m),
+            None => (None, None),
+        };
+    }
+
+    /// Install out-of-band measurements of body `id` (also on its last feature).
+    pub fn set_body_measurements(&mut self, id: BodyId, m: Measurements) {
+        let Some(b) = self.bodies.iter_mut().find(|b| b.id == id) else {
+            return;
+        };
+        b.measurements = Some(m.clone());
+        let last = b.last_feature;
+        if let Some(r) = self.features.iter_mut().find(|r| r.id == last) {
+            r.measurements = Some(m);
+        }
+        self.refresh_legacy_view();
+    }
+
+    /// B-rep bodies still lacking measurements.
+    pub fn unmeasured(&self) -> Vec<(BodyId, &Body)> {
+        self.bodies
+            .iter()
+            .filter(|b| b.measurements.is_none())
+            .filter_map(|b| b.geometry.brep().map(|g| (b.id, g)))
+            .collect()
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            features: vec![],
+            bodies: vec![],
+            body: None,
+            measurements: None,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct SketchOut {
     frame: Frame,
     /// `Err(reason)` when the sketch is not a single closed profile.
-    profile: std::result::Result<SketchProfile, String>,
+    profile: std::result::Result<(SketchProfile, Vec<EntityId>), String>,
 }
 
 impl SketchOut {
     /// The profile, or a structured error naming the consuming feature.
-    fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&SketchProfile> {
+    fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&(SketchProfile, Vec<EntityId>)> {
         self.profile.as_ref().map_err(|why| {
             DocError::Validation(format!(
                 "{user}: sketch {sketch} has no usable profile ({why}); \
@@ -66,41 +207,31 @@ impl SketchOut {
     }
 }
 
+/// Definition data of an evaluated extrusion, enough to derive its faces.
 #[derive(Clone)]
 struct ExtrudeOut {
+    /// Sketch frame.
     start: Frame,
+    /// Extrusion distance (unused for through-all).
     distance: f64,
+    /// +1 along the sketch normal, -1 against it.
+    dir: f64,
+    extent: Extent,
     profile: SketchProfile,
+    entities: Vec<EntityId>,
+    /// New/Join (material added) vs Cut (material removed).
+    removes: bool,
+    /// Join: the start cap is not a face of the result (it lies in the support).
+    joined: bool,
+    body: BodyId,
 }
 
-/// Express a circular cut profile (in `cut_frame`) in the host extrusion's start frame.
-/// The cut axis must be parallel to the extrusion direction (product limit).
-fn hole_in_host_frame(
-    hole: &SketchProfile,
-    cut_frame: &Frame,
-    host: &Frame,
-) -> Result<SketchProfile> {
-    let SketchProfile::Circle { center, radius } = hole else {
-        return Err(DocError::ProductLimit(
-            "only circular cuts are supported".into(),
-        ));
-    };
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    if (dot(cut_frame.z, host.z).abs() - 1.0).abs() > 1e-9 {
-        return Err(DocError::ProductLimit(
-            "cut axis must be parallel to the base extrusion direction".into(),
-        ));
-    }
-    let w = cut_frame.to_world(*center);
-    let d = [
-        w[0] - host.origin[0],
-        w[1] - host.origin[1],
-        w[2] - host.origin[2],
-    ];
-    Ok(SketchProfile::Circle {
-        center: [dot(d, host.x), dot(d, host.y)],
-        radius: *radius,
-    })
+#[derive(Clone)]
+struct BodyState {
+    geometry: BodyGeometry,
+    created_by: FeatureId,
+    last_feature: FeatureId,
+    source: BodySource,
 }
 
 /// Regeneration state after a history prefix (cached by [`RegenCache`]).
@@ -108,19 +239,36 @@ fn hole_in_host_frame(
 struct Snapshot {
     sketches: HashMap<FeatureId, SketchOut>,
     extrudes: HashMap<FeatureId, ExtrudeOut>,
-    body: Option<Body>,
-    last_solid: Option<usize>,
+    imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
+    bodies: BTreeMap<BodyId, BodyState>,
+    /// Body ids in creation order.
+    created: Vec<BodyId>,
     results: Vec<FeatureResult>,
+}
+
+impl Snapshot {
+    fn new() -> Self {
+        Self {
+            sketches: HashMap::new(),
+            extrudes: HashMap::new(),
+            imported_faces: HashMap::new(),
+            bodies: BTreeMap::new(),
+            created: Vec::new(),
+            results: Vec::new(),
+        }
+    }
 }
 
 /// Memo of regeneration states keyed by the exact serialized feature definitions of
 /// the evaluated prefix (so any upstream change misses). Bounded FIFO. Results are
 /// identical to uncached regeneration because regeneration is deterministic and
-/// B-rep results are never mutated after creation.
+/// B-rep results are never mutated after creation. Embedded files are referenced
+/// by immutable blob id, so keys stay small.
 #[derive(Default)]
 pub struct RegenCache {
     states: HashMap<String, Snapshot>,
-    measurements: HashMap<String, Measurements>,
+    /// Measurements by (prefix key at the body's last feature, body).
+    measurements: HashMap<(String, BodyId), Measurements>,
     order: std::collections::VecDeque<String>,
     pub hits: u64,
     pub misses: u64,
@@ -135,11 +283,47 @@ impl RegenCache {
             while self.order.len() > REGEN_CACHE_CAPACITY {
                 if let Some(old) = self.order.pop_front() {
                     self.states.remove(&old);
-                    self.measurements.remove(&old);
+                    self.measurements.retain(|(k, _), _| k != &old);
                 }
             }
         }
     }
+
+    /// Remember measurements computed out of band for body `body` of `doc`'s
+    /// current geometry (deferred measurement).
+    pub fn store_measurements(&mut self, doc: &Document, body: BodyId, m: Measurements) {
+        if let Ok(Some(key)) = body_key(doc, body)
+            && self.states.contains_key(&key)
+        {
+            self.measurements.insert((key, body), m);
+        }
+    }
+}
+
+/// Serialized-history keys of every prefix of the evaluation order.
+fn prefix_keys(doc: &Document, order: &[FeatureId]) -> Result<Vec<String>> {
+    let mut keys = Vec::with_capacity(order.len());
+    let mut key = String::new();
+    for id in order {
+        let f = serde_json::to_string(doc.feature(*id)?)
+            .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
+        key.push_str(&f);
+        key.push('\n');
+        keys.push(key.clone());
+    }
+    Ok(keys)
+}
+
+/// Cache key of the prefix ending at the last feature that touches `body`.
+fn body_key(doc: &Document, body: BodyId) -> Result<Option<String>> {
+    let order = doc.evaluation_order()?;
+    let keys = prefix_keys(doc, &order)?;
+    let last = order.iter().rposition(|id| {
+        doc.feature(*id).is_ok_and(|f| {
+            f.created_bodies().contains(&body) || f.target_body() == Some(body)
+        })
+    });
+    Ok(last.map(|i| keys[i].clone()))
 }
 
 /// Regenerate the whole document. Pure function of the document; deterministic.
@@ -152,70 +336,53 @@ pub fn regenerate_cached(doc: &Document, cache: Option<&mut RegenCache>) -> Resu
     regenerate_cached_opts(doc, cache, true)
 }
 
-/// Serialized-history key of the whole document (the cache key of its full prefix).
-fn full_key(doc: &Document) -> Result<String> {
-    let mut key = String::new();
-    for id in doc.evaluation_order()? {
-        let f = serde_json::to_string(doc.feature(id)?)
-            .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
-        key.push_str(&f);
-        key.push('\n');
+fn not_a_sketch(id: FeatureId, sketch: FeatureId) -> DocError {
+    DocError::BrokenReference {
+        from: id,
+        detail: format!("{sketch} is not a sketch"),
     }
-    Ok(key)
 }
 
-impl RegenCache {
-    /// Remember measurements computed out of band for `doc`'s current geometry
-    /// (deferred measurement); later regenerations of the same history reuse them.
-    pub fn store_measurements(&mut self, doc: &Document, m: Measurements) {
-        if let Ok(key) = full_key(doc)
-            && self.states.contains_key(&key)
-        {
-            self.measurements.insert(key, m);
-        }
+fn kernel(feature: FeatureId) -> impl Fn(k::KernelError) -> DocError {
+    move |e| DocError::Kernel {
+        feature,
+        detail: e.to_string(),
+    }
+}
+
+/// Exact B-rep of `target`, or a structured error (missing body, mesh body).
+fn brep_target(st: &Snapshot, id: FeatureId, target: BodyId) -> Result<Body> {
+    let b = st.bodies.get(&target).ok_or(DocError::BrokenReference {
+        from: id,
+        detail: format!("target body {target} does not exist at this point of the history"),
+    })?;
+    match &b.geometry {
+        BodyGeometry::Brep(body) => Ok(body.clone()),
+        BodyGeometry::Mesh(_) => Err(DocError::ProductLimit(format!(
+            "{id}: body {target} is a mesh (STL) body; exact operations need a B-rep body"
+        ))),
     }
 }
 
 /// Like [`regenerate_cached`]; with `measure == false` the (expensive) B-rep
 /// measurements are skipped unless already cached, leaving
-/// `Evaluation::measurements == None` for a body (deferred measurement).
+/// `EvalBody::measurements == None` (deferred measurement).
 pub fn regenerate_cached_opts(
     doc: &Document,
     mut cache: Option<&mut RegenCache>,
     measure_body: bool,
 ) -> Result<Evaluation> {
+    doc.validate_bodies()?;
     let order = doc.evaluation_order()?;
-    let mut keys = Vec::with_capacity(order.len());
-    let mut key = String::new();
-    for id in &order {
-        let f = serde_json::to_string(doc.feature(*id)?)
-            .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
-        key.push_str(&f);
-        key.push('\n');
-        keys.push(key.clone());
-    }
-    let mut sketches: HashMap<FeatureId, SketchOut> = HashMap::new();
-    let mut extrudes: HashMap<FeatureId, ExtrudeOut> = HashMap::new();
-    let mut body: Option<Body> = None;
-    // Index (into `results`) of the feature that produced the current body. Only the
-    // final body is measured: intermediate measurements cost ~1 s each.
-    let mut last_solid: Option<usize> = None;
-    let mut results = Vec::new();
-
+    let keys = prefix_keys(doc, &order)?;
+    let mut st = Snapshot::new();
     let mut start = 0;
     if let Some(c) = cache.as_deref_mut() {
         if let Some(i) = (0..order.len())
             .rev()
             .find(|&i| c.states.contains_key(&keys[i]))
         {
-            let snap = c.states[&keys[i]].clone();
-            (sketches, extrudes, body, last_solid, results) = (
-                snap.sketches,
-                snap.extrudes,
-                snap.body,
-                snap.last_solid,
-                snap.results,
-            );
+            st = c.states[&keys[i]].clone();
             start = i + 1;
             c.hits += 1;
         } else {
@@ -234,14 +401,17 @@ pub fn regenerate_cached_opts(
             measurements: None,
             solved_sketch: None,
             profile_error: None,
+            body: None,
+            notes: vec![],
         };
         match &f.kind {
             FeatureKind::Sketch { plane, sketch } => {
                 let (frame, resolved) = match plane {
                     SketchPlane::WorldXY => (Frame::XY, None),
                     SketchPlane::WorldXZ => (Frame::XZ, None),
+                    SketchPlane::WorldYZ => (FRAME_YZ, None),
                     SketchPlane::Face(fr) => {
-                        let rf = resolve_face(id, fr, &extrudes, body.as_ref())?;
+                        let rf = resolve_face(id, fr, &st)?;
                         (rf.frame, Some(rf))
                     }
                 };
@@ -267,194 +437,450 @@ pub fn regenerate_cached_opts(
                         ),
                     });
                 }
-                let profile = s.profile().map_err(|e| e.to_string());
+                let profile = s.profile_with_entities().map_err(|e| e.to_string());
                 r.profile_error = profile.as_ref().err().cloned();
                 r.solve = Some(report);
                 r.frame = Some(frame);
                 r.resolved_face = resolved;
                 r.solved_sketch = Some(s);
-                sketches.insert(id, SketchOut { frame, profile });
+                st.sketches.insert(id, SketchOut { frame, profile });
             }
-            FeatureKind::Revolve { sketch, angle } => {
-                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: format!("{sketch} is not a sketch"),
-                })?;
-                if body.is_some() {
-                    return Err(DocError::ProductLimit(
-                        "only one base body (extrude or revolve) per document is supported".into(),
-                    ));
-                }
-                let b = k::revolve(&to_kernel(s.usable(id, *sketch)?), &s.frame, *angle)
+            FeatureKind::Revolve {
+                sketch,
+                angle,
+                body,
+            } => {
+                let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+                let b = k::revolve(&to_kernel(&s.usable(id, *sketch)?.0), &s.frame, *angle)
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
-                last_solid = Some(results.len());
-                body = Some(b);
+                create_body(&mut st, id, *body, BodyGeometry::Brep(b), BodySource::Modeled)?;
+                r.body = Some(*body);
             }
-            FeatureKind::Extrude { sketch, distance } => {
-                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: format!("{sketch} is not a sketch"),
+            FeatureKind::Extrude {
+                sketch,
+                distance,
+                operation,
+                extent,
+                reverse,
+            } => {
+                let out = extrude_feature(
+                    &mut st, id, *sketch, *distance, *operation, *extent, *reverse,
+                )?;
+                r.body = Some(out.body);
+                st.extrudes.insert(id, out);
+            }
+            FeatureKind::Cut { sketch, target, .. } => {
+                legacy_cut(doc, &mut st, id, *sketch, *target, None)?;
+                r.body = Some(*target);
+            }
+            FeatureKind::Pocket {
+                sketch,
+                depth,
+                target,
+            } => {
+                legacy_cut(doc, &mut st, id, *sketch, *target, Some(*depth))?;
+                r.body = Some(*target);
+            }
+            FeatureKind::ImportStep {
+                blob,
+                unit_override_to_mm,
+                bodies,
+            } => {
+                let b = doc.blob(*blob)?;
+                let bytes = b.bytes()?;
+                let imp = import::step(&bytes, *unit_override_to_mm).map_err(|e| match e {
+                    DocError::Validation(m) => DocError::Validation(format!("{id}: {m}")),
+                    other => other,
                 })?;
-                if body.is_some() {
-                    return Err(DocError::ProductLimit(
-                        "only one base extrusion per document is supported".into(),
-                    ));
-                }
-                if !distance.is_finite() || *distance <= 0.0 {
+                if imp.solids.len() != bodies.len() {
                     return Err(DocError::Validation(format!(
-                        "{id}.distance: extrusion thickness must be > 0 mm, got {distance}"
+                        "{id}: {} contains {} solids but the feature records {} bodies",
+                        b.file_name,
+                        imp.solids.len(),
+                        bodies.len()
                     )));
                 }
-                let profile = s.usable(id, *sketch)?.clone();
-                let b = k::extrude(&to_kernel(&profile), &s.frame, *distance).map_err(|e| {
-                    DocError::Kernel {
-                        feature: id,
-                        detail: e.to_string(),
-                    }
-                })?;
-                extrudes.insert(
+                r.notes = imp.notes.clone();
+                for (solid, body) in imp.solids.into_iter().zip(bodies) {
+                    st.imported_faces
+                        .insert((id, *body), Arc::new(solid.planar_faces));
+                    create_body(
+                        &mut st,
+                        id,
+                        *body,
+                        BodyGeometry::Brep(solid.body),
+                        BodySource::ImportedStep {
+                            file_name: b.file_name.clone(),
+                            solid_name: solid.name,
+                        },
+                    )?;
+                }
+                r.body = bodies.last().copied();
+            }
+            FeatureKind::ImportMesh { blob, to_mm, body } => {
+                let b = doc.blob(*blob)?;
+                let bytes = b.bytes()?;
+                let (mesh, notes) = import::stl(&bytes, *to_mm)?;
+                r.notes = notes;
+                create_body(
+                    &mut st,
                     id,
-                    ExtrudeOut {
-                        start: s.frame,
-                        distance: *distance,
-                        profile,
-                    },
-                );
-                last_solid = Some(results.len());
-                body = Some(b);
-            }
-            FeatureKind::Cut { sketch, .. } => {
-                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: format!("{sketch} is not a sketch"),
-                })?;
-                let target = body.as_ref().ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: "cut has no body to cut".into(),
-                })?;
-                // Product limit: every cut must lie inside the base extrusion's profile,
-                // evaluated in the base profile's own frame (not the cut sketch's frame).
-                let host = extrudes.values().next().ok_or(DocError::ProductLimit(
-                    "cuts are only supported on an extruded base body".into(),
-                ))?;
-                let cut_profile = s.usable(id, *sketch)?;
-                let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
-                check_hole_inside(&hole, &host.profile)?;
-                let b =
-                    k::cut_through_all(target, &to_kernel(cut_profile), &s.frame).map_err(|e| {
-                        DocError::Kernel {
-                            feature: id,
-                            detail: e.to_string(),
-                        }
-                    })?;
-                // A cut that removes material always adds faces; containment (checked
-                // above) guarantees the cutter intersects the body.
-                if k::face_count(&b) <= k::face_count(target) {
-                    return Err(DocError::Kernel {
-                        feature: id,
-                        detail: "cut removed no material".into(),
-                    });
-                }
-                last_solid = Some(results.len());
-                body = Some(b);
-            }
-            FeatureKind::Pocket { sketch, depth } => {
-                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: format!("{sketch} is not a sketch"),
-                })?;
-                let target = body.as_ref().ok_or(DocError::BrokenReference {
-                    from: id,
-                    detail: "pocket has no body to cut".into(),
-                })?;
-                // Product limit: the sketch must sit on a cap of an evaluated extrusion;
-                // the pocket goes from that cap into the material.
-                let host_id = match &doc.feature(*sketch)?.kind {
-                    FeatureKind::Sketch {
-                        plane: SketchPlane::Face(fr),
-                        ..
-                    } => fr.feature,
-                    _ => {
-                        return Err(DocError::ProductLimit(format!(
-                            "{id}: a pocket must be sketched on an extrusion end or start cap \
-                             (sketch {sketch} is on a datum plane); use Cut Through All"
-                        )));
-                    }
-                };
-                let host = extrudes.get(&host_id).ok_or(DocError::ProductLimit(
-                    "pockets are only supported on an extruded base body".into(),
-                ))?;
-                if !depth.is_finite() || *depth <= 0.0 {
-                    return Err(DocError::Validation(format!(
-                        "{id}.depth: pocket depth must be > 0 mm, got {depth}"
-                    )));
-                }
-                if *depth >= host.distance - k::tol::MIN_LENGTH {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}.depth: a blind pocket must be shallower than the {} mm thickness \
-                         (got {depth} mm); use Cut Through All for a through hole",
-                        host.distance
-                    )));
-                }
-                let cut_profile = s.usable(id, *sketch)?;
-                let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
-                check_hole_inside(&hole, &host.profile)?;
-                let b = k::cut_blind(target, &to_kernel(cut_profile), &s.frame, *depth).map_err(
-                    |e| DocError::Kernel {
-                        feature: id,
-                        detail: e.to_string(),
+                    *body,
+                    BodyGeometry::Mesh(Arc::new(mesh)),
+                    BodySource::ImportedMesh {
+                        file_name: b.file_name.clone(),
                     },
                 )?;
-                if k::face_count(&b) <= k::face_count(target) {
-                    return Err(DocError::Kernel {
-                        feature: id,
-                        detail: "pocket removed no material".into(),
-                    });
-                }
-                last_solid = Some(results.len());
-                body = Some(b);
+                r.body = Some(*body);
             }
         }
-        results.push(r);
+        st.results.push(r);
         if let Some(c) = cache.as_deref_mut() {
-            c.insert(
-                keys[i].clone(),
-                Snapshot {
-                    sketches: sketches.clone(),
-                    extrudes: extrudes.clone(),
-                    body: body.clone(),
-                    last_solid,
-                    results: results.clone(),
-                },
-            );
+            c.insert(keys[i].clone(), st.clone());
         }
     }
-    let full = keys.last().cloned().unwrap_or_default();
-    let measurements = match (&body, last_solid) {
-        (Some(b), Some(i)) => {
-            let cached = cache
-                .as_deref()
-                .and_then(|c| c.measurements.get(&full).cloned());
-            let m = match cached {
-                Some(m) => Some(m),
-                None if measure_body => Some(measure(results[i].id, b)?),
-                None => None,
-            };
-            if let (Some(c), Some(m)) = (cache, &m)
-                && c.states.contains_key(&full)
-            {
-                c.measurements.insert(full, m.clone());
+
+    // Per-body measurements (cached by the prefix that last touched the body).
+    let pos: HashMap<FeatureId, usize> = order.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+    let mut bodies = Vec::with_capacity(st.created.len());
+    for bid in &st.created {
+        let Some(bs) = st.bodies.get(bid) else {
+            continue;
+        };
+        let info = doc.body(*bid)?;
+        let key = (keys[pos[&bs.last_feature]].clone(), *bid);
+        let measurements = match &bs.geometry {
+            BodyGeometry::Mesh(_) => None,
+            BodyGeometry::Brep(b) => {
+                let cached = cache
+                    .as_deref()
+                    .and_then(|c| c.measurements.get(&key).cloned());
+                let m = match cached {
+                    Some(m) => Some(m),
+                    None if measure_body => Some(measure(bs.last_feature, b)?),
+                    None => None,
+                };
+                if let (Some(c), Some(m)) = (cache.as_deref_mut(), &m)
+                    && c.states.contains_key(&key.0)
+                {
+                    c.measurements.insert(key, m.clone());
+                }
+                m
             }
-            results[i].measurements = m.clone();
-            m
+        };
+        if let Some(r) = st.results.iter_mut().find(|r| r.id == bs.last_feature) {
+            if r.body == Some(*bid) || r.measurements.is_none() {
+                r.measurements = measurements.clone();
+            }
         }
-        _ => None,
+        bodies.push(EvalBody {
+            id: *bid,
+            name: info.name.clone(),
+            visible: info.visible,
+            geometry: bs.geometry.clone(),
+            created_by: bs.created_by,
+            last_feature: bs.last_feature,
+            source: bs.source.clone(),
+            measurements,
+        });
+    }
+    let mut eval = Evaluation {
+        features: st.results,
+        bodies,
+        body: None,
+        measurements: None,
     };
-    Ok(Evaluation {
-        features: results,
+    eval.refresh_legacy_view();
+    Ok(eval)
+}
+
+/// World YZ plane: local x = world Y, local y = world Z, normal +X (right-handed).
+pub const FRAME_YZ: Frame = Frame {
+    origin: [0.0, 0.0, 0.0],
+    x: [0.0, 1.0, 0.0],
+    y: [0.0, 0.0, 1.0],
+    z: [1.0, 0.0, 0.0],
+};
+
+fn create_body(
+    st: &mut Snapshot,
+    id: FeatureId,
+    body: BodyId,
+    geometry: BodyGeometry,
+    source: BodySource,
+) -> Result<()> {
+    if body.0 == 0 {
+        return Err(DocError::Validation(format!(
+            "{id}: body id is unassigned"
+        )));
+    }
+    if st.bodies.contains_key(&body) {
+        return Err(DocError::Validation(format!(
+            "{id}: body {body} already exists"
+        )));
+    }
+    st.bodies.insert(
         body,
-        measurements,
+        BodyState {
+            geometry,
+            created_by: id,
+            last_feature: id,
+            source,
+        },
+    );
+    st.created.push(body);
+    Ok(())
+}
+
+fn replace_body(st: &mut Snapshot, id: FeatureId, body: BodyId, b: Body) {
+    if let Some(s) = st.bodies.get_mut(&body) {
+        s.geometry = BodyGeometry::Brep(b);
+        s.last_feature = id;
+    }
+}
+
+/// Overlap / margin of a Join tool extended into its support face (ADR 0003).
+const JOIN_OVERLAP: f64 = 0.5;
+
+#[allow(clippy::too_many_arguments)]
+fn extrude_feature(
+    st: &mut Snapshot,
+    id: FeatureId,
+    sketch: FeatureId,
+    distance: f64,
+    operation: Operation,
+    extent: Extent,
+    reverse: bool,
+) -> Result<ExtrudeOut> {
+    let s = st.sketches.get(&sketch).ok_or(not_a_sketch(id, sketch))?.clone();
+    let (profile, entities) = s.usable(id, sketch)?.clone();
+    let kp = to_kernel(&profile);
+    let frame = s.frame;
+    let dir = if reverse { -1.0 } else { 1.0 };
+    if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
+        return Err(DocError::Validation(format!(
+            "{id}.distance: extrusion distance must be > 0 mm, got {distance}"
+        )));
+    }
+    // Tool = prism of the profile over [a, b] along the sketch normal.
+    let (mut a, mut b) = if dir > 0.0 {
+        (0.0, distance)
+    } else {
+        (-distance, 0.0)
+    };
+    let mut out = ExtrudeOut {
+        start: frame,
+        distance,
+        dir,
+        extent,
+        profile,
+        entities,
+        removes: false,
+        joined: false,
+        body: BodyId(0),
+    };
+    match operation {
+        Operation::NewBody { body } => {
+            if extent == Extent::ThroughAll {
+                return Err(DocError::Validation(format!(
+                    "{id}: 'through all' needs a Cut target body"
+                )));
+            }
+            let solid = k::extrude(&kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            create_body(st, id, body, BodyGeometry::Brep(solid), BodySource::Modeled)?;
+            out.body = body;
+        }
+        Operation::Join { target } => {
+            if extent == Extent::ThroughAll {
+                return Err(DocError::Validation(format!(
+                    "{id}: 'through all' is only available for Cut"
+                )));
+            }
+            let t = brep_target(st, id, target)?;
+            // A tool end lying on a face of the target would make coplanar boolean
+            // faces (Truck 0.6 returns no result): move that end into the material
+            // by a small overlap, which is only exact when the profile lies on the
+            // face (material under the whole profile).
+            if let Some(side) = k::coplanar_face_side(&t, &frame).map_err(kernel(id))? {
+                if !k::profile_within_face(&t, &frame, &kp).map_err(kernel(id))? {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: a Join sketched on a face of the target must lie inside that face \
+                         (the profile crosses the face boundary or a hole); use New Body, or \
+                         sketch on another plane"
+                    )));
+                }
+                let delta = JOIN_OVERLAP.min(distance / 2.0);
+                // Material is on the -side of the face's outward normal.
+                if dir > 0.0 {
+                    a -= side * delta;
+                } else {
+                    b -= side * delta;
+                }
+                if a >= b {
+                    return Err(DocError::Validation(format!(
+                        "{id}: extrusion distance too small for a join on a face"
+                    )));
+                }
+            }
+            let joined = k::join_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            replace_body(st, id, target, joined);
+            out.body = target;
+            out.joined = true;
+        }
+        Operation::Cut { target } => {
+            let t = brep_target(st, id, target)?;
+            out.removes = true;
+            let margin = k::through_all_margin(&t).map_err(kernel(id))?;
+            if extent == Extent::ThroughAll {
+                let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
+                (a, b) = (lo - margin, hi + margin);
+            } else if let Some(side) = k::coplanar_face_side(&t, &frame).map_err(kernel(id))? {
+                // Start the cutter a margin outside the face so its cap is never
+                // coplanar with it (run-2 rule).
+                if dir > 0.0 {
+                    a += side * margin;
+                } else {
+                    b += side * margin;
+                }
+                if a >= b {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the cut points away from the material of {target}; reverse it"
+                    )));
+                }
+            }
+            let cut = k::cut_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            replace_body(st, id, target, cut);
+            out.body = target;
+        }
+    }
+    Ok(out)
+}
+
+/// Run-1/2 circular cut (`depth == None`: through all) and pocket features on
+/// their explicit target, with the original product limits.
+fn legacy_cut(
+    doc: &Document,
+    st: &mut Snapshot,
+    id: FeatureId,
+    sketch: FeatureId,
+    target: BodyId,
+    depth: Option<f64>,
+) -> Result<()> {
+    let s = st.sketches.get(&sketch).ok_or(not_a_sketch(id, sketch))?.clone();
+    let t = brep_target(st, id, target)?;
+    let host = match depth {
+        // Through cuts: the extrusion that created the target.
+        None => st
+            .extrudes
+            .values()
+            .find(|e| !e.removes && !e.joined && e.body == target && e.extent == Extent::Distance)
+            .cloned()
+            .ok_or(DocError::ProductLimit(
+                "circular cuts are only supported on an extruded base body".into(),
+            ))?,
+        // Pockets: the extrusion whose cap the sketch is on.
+        Some(_) => {
+            let host_id = match &doc.feature(sketch)?.kind {
+                FeatureKind::Sketch {
+                    plane: SketchPlane::Face(fr),
+                    ..
+                } => fr.feature,
+                _ => {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: a pocket must be sketched on an extrusion end or start cap \
+                         (sketch {sketch} is on a datum plane); use Cut Through All"
+                    )));
+                }
+            };
+            st.extrudes
+                .get(&host_id)
+                .filter(|e| !e.removes)
+                .cloned()
+                .ok_or(DocError::ProductLimit(
+                    "pockets are only supported on an extruded base body".into(),
+                ))?
+        }
+    };
+    if let Some(depth) = depth {
+        if !depth.is_finite() || depth <= 0.0 {
+            return Err(DocError::Validation(format!(
+                "{id}.depth: pocket depth must be > 0 mm, got {depth}"
+            )));
+        }
+        if depth >= host.distance - k::tol::MIN_LENGTH {
+            return Err(DocError::ProductLimit(format!(
+                "{id}.depth: a blind pocket must be shallower than the {} mm thickness \
+                 (got {depth} mm); use Cut Through All for a through hole",
+                host.distance
+            )));
+        }
+    }
+    let cut_profile = &s.usable(id, sketch)?.0;
+    let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
+    check_hole_inside(&hole, &host.profile)?;
+    let kp = to_kernel(cut_profile);
+    let b = match depth {
+        None => k::cut_through_all(&t, &kp, &s.frame),
+        Some(d) => k::cut_blind(&t, &kp, &s.frame, d),
+    }
+    .map_err(kernel(id))?;
+    // A cut that removes material always adds faces; containment (checked
+    // above) guarantees the cutter intersects the body.
+    if k::face_count(&b) <= k::face_count(&t) {
+        return Err(DocError::Kernel {
+            feature: id,
+            detail: format!(
+                "{} removed no material",
+                if depth.is_some() { "pocket" } else { "cut" }
+            ),
+        });
+    }
+    replace_body(st, id, target, b);
+    Ok(())
+}
+
+/// Express a circular cut profile (in `cut_frame`) in the host extrusion's start frame.
+/// The cut axis must be parallel to the extrusion direction (product limit).
+fn hole_in_host_frame(
+    hole: &SketchProfile,
+    cut_frame: &Frame,
+    host: &Frame,
+) -> Result<SketchProfile> {
+    let SketchProfile::Circle { center, radius } = hole else {
+        return Err(DocError::ProductLimit(
+            "only circular cuts are supported by Cut Through All / Pocket; use Extrude > Cut \
+             for other profiles"
+                .into(),
+        ));
+    };
+    if (dot(cut_frame.z, host.z).abs() - 1.0).abs() > 1e-9 {
+        return Err(DocError::ProductLimit(
+            "cut axis must be parallel to the base extrusion direction".into(),
+        ));
+    }
+    let w = cut_frame.to_world(*center);
+    let d = sub(w, host.origin);
+    Ok(SketchProfile::Circle {
+        center: [dot(d, host.x), dot(d, host.y)],
+        radius: *radius,
     })
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
+    [a[0] * s, a[1] * s, a[2] * s]
+}
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 fn measure(id: FeatureId, b: &Body) -> Result<Measurements> {
@@ -464,43 +890,152 @@ fn measure(id: FeatureId, b: &Body) -> Result<Measurements> {
     })
 }
 
-/// Resolve a semantic face reference from the generating feature's definition, then
-/// confirm it against the current B-rep: exactly one planar face must coincide.
-fn resolve_face(
-    from: FeatureId,
-    fr: &FaceRef,
-    extrudes: &HashMap<FeatureId, ExtrudeOut>,
-    body: Option<&Body>,
-) -> Result<ResolvedFace> {
-    let e = extrudes.get(&fr.feature).ok_or(DocError::BrokenReference {
-        from,
-        detail: format!("{} is not an evaluated extrusion", fr.feature),
-    })?;
-    let frame = match fr.role {
-        FaceRole::ExtrudeEndCap => e.start.offset(e.distance),
+/// Frame of a face generated by an extrusion, from its definition only.
+fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<Frame> {
+    let broken = |detail: String| DocError::BrokenReference { from, detail };
+    let f = e.start;
+    let z_dir = scale(f.z, e.dir);
+    let frame_from = |origin: [f64; 3], z: [f64; 3], x: [f64; 3]| Frame {
+        origin,
+        x,
+        y: cross(z, x),
+        z,
+    };
+    match fr.role {
+        FaceRole::ExtrudeEndCap | FaceRole::ExtrudeStartCap if e.extent == Extent::ThroughAll => {
+            Err(broken(format!(
+                "{} is a through-all cut; it has no cap faces",
+                fr.feature
+            )))
+        }
+        FaceRole::ExtrudeEndCap => {
+            let origin = f.to_world([0.0, 0.0]);
+            let origin = [
+                origin[0] + z_dir[0] * e.distance,
+                origin[1] + z_dir[1] * e.distance,
+                origin[2] + z_dir[2] * e.distance,
+            ];
+            // New/Join: outward along the extrusion; cut floor: back toward the opening.
+            let z = if e.removes { scale(z_dir, -1.0) } else { z_dir };
+            Ok(frame_from(origin, z, f.x))
+        }
         FaceRole::ExtrudeStartCap => {
-            // Outward normal of the start cap points against the extrusion direction;
-            // flip y to keep the frame right-handed.
-            let s = e.start;
-            Frame {
-                origin: s.origin,
-                x: s.x,
-                y: s.y.map(|c| -c),
-                z: s.z.map(|c| -c),
+            if e.removes || e.joined {
+                return Err(broken(format!(
+                    "{} has no start cap face (a {} starts on its support)",
+                    fr.feature,
+                    if e.removes { "cut" } else { "join" }
+                )));
             }
+            Ok(frame_from(f.origin, scale(z_dir, -1.0), f.x))
+        }
+        FaceRole::ExtrudeSide { entity } => {
+            let i = e
+                .entities
+                .iter()
+                .position(|x| x.0 == entity)
+                .ok_or_else(|| {
+                    broken(format!(
+                        "side face of sketch entity {entity}: the entity is no longer part of \
+                         the profile of {}",
+                        fr.feature
+                    ))
+                })?;
+            let (p, q) = match &e.profile {
+                SketchProfile::Polygon(v) => (v[i], v[(i + 1) % v.len()]),
+                SketchProfile::Loop(segs) => match segs[i] {
+                    f420_sketch::LoopSegment::Line { start } => {
+                        (start, segs[(i + 1) % segs.len()].start())
+                    }
+                    f420_sketch::LoopSegment::Arc { .. } => {
+                        return Err(broken(format!(
+                            "sketch entity {entity} is an arc; its side face is curved"
+                        )));
+                    }
+                },
+                SketchProfile::Circle { .. } => {
+                    return Err(broken("a circle's side face is curved".into()));
+                }
+            };
+            let (a, b) = (f.to_world(p), f.to_world(q));
+            let d = sub(b, a);
+            let len = dot(d, d).sqrt();
+            if len <= 0.0 {
+                return Err(broken("degenerate profile edge".into()));
+            }
+            let x = scale(d, 1.0 / len);
+            // CCW profile about the sketch normal: outward in-plane normal x × z.
+            let n = cross(x, f.z);
+            let z = if e.removes { scale(n, -1.0) } else { n };
+            Ok(frame_from(a, z, x))
+        }
+        FaceRole::Imported { .. } => Err(broken(format!(
+            "{} is an extrusion, not an import",
+            fr.feature
+        ))),
+    }
+}
+
+/// Resolve a semantic face reference from the generating feature's definition, then
+/// confirm it against the owning body's current B-rep: exactly one planar face
+/// must coincide (same plane, same outward normal). Never guesses.
+fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<ResolvedFace> {
+    let (frame, owner) = match fr.role {
+        FaceRole::Imported { body, face } => {
+            let faces = st
+                .imported_faces
+                .get(&(fr.feature, body))
+                .ok_or(DocError::BrokenReference {
+                    from,
+                    detail: format!("{} did not import body {body}", fr.feature),
+                })?;
+            let f = faces.iter().find(|f| f.index == face).ok_or(DocError::BrokenReference {
+                from,
+                detail: format!("imported face {face} of {body} is not planar or does not exist"),
+            })?;
+            (f.frame, body)
+        }
+        _ => {
+            let e = st.extrudes.get(&fr.feature).ok_or(DocError::BrokenReference {
+                from,
+                detail: format!("{} is not an evaluated extrusion", fr.feature),
+            })?;
+            (extrude_face_frame(e, fr, from)?, e.body)
         }
     };
-    let body = body.ok_or(DocError::BrokenReference {
+    let state = st.bodies.get(&owner).ok_or(DocError::BrokenReference {
         from,
-        detail: "no body to reference".into(),
+        detail: format!("body {owner} no longer exists"),
     })?;
+    let BodyGeometry::Brep(body) = &state.geometry else {
+        return Err(DocError::BrokenReference {
+            from,
+            detail: format!("body {owner} is a mesh; mesh faces cannot host sketches"),
+        });
+    };
     let n = k::planar_faces_on(body, &frame);
-    if n != 1 {
+    let role = match fr.role {
+        FaceRole::ExtrudeSide { entity } => format!("side face of entity {entity}"),
+        FaceRole::Imported { face, .. } => format!("imported face {face}"),
+        r => format!("{r:?}"),
+    };
+    if n == 0 {
         return Err(DocError::BrokenReference {
             from,
             detail: format!(
-                "{:?} of {} matches {n} B-rep faces (expected exactly 1); refusing to guess",
-                fr.role, fr.feature
+                "the {role} of {} no longer exists on body {owner} (removed by a later \
+                 feature or edit); re-attach the sketch to another face",
+                fr.feature
+            ),
+        });
+    }
+    if n > 1 {
+        return Err(DocError::BrokenReference {
+            from,
+            detail: format!(
+                "the {role} of {} is ambiguous: {n} faces of body {owner} lie in its plane \
+                 (split or coplanar faces); refusing to guess — re-attach the sketch",
+                fr.feature
             ),
         });
     }
@@ -508,5 +1043,6 @@ fn resolve_face(
         reference: *fr,
         frame,
         matching_brep_faces: n,
+        body: owner,
     })
 }
