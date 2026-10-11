@@ -659,6 +659,17 @@ impl F420App {
             // Deferred measurement: apply only if it describes what is shown.
             let same = r.summary.doc_id == self.summary.doc_id
                 && r.summary.revision == self.summary.revision;
+            if std::env::var_os("F420_TRACE_ENGINE").is_some() {
+                eprintln!(
+                    "{:.3} ui: follow-up doc {} rev {} (showing doc {} rev {}) -> {}",
+                    crate::engine::trace_clock(),
+                    r.summary.doc_id,
+                    r.summary.revision,
+                    self.summary.doc_id,
+                    self.summary.revision,
+                    if same { "applied" } else { "dropped" }
+                );
+            }
             if same {
                 if r.response.ok {
                     self.measurements = r.measurements;
@@ -1375,6 +1386,13 @@ impl F420App {
             self.diag(true, "Worker", "session worker thread stopped".into());
         }
         let busy = self.engine.busy();
+        if (busy || self.summary.measuring) && std::env::var_os("F420_TRACE_ENGINE").is_some() {
+            eprintln!(
+                "{:.3} ui: frame busy={busy} measuring={}",
+                crate::engine::trace_clock(),
+                self.summary.measuring
+            );
+        }
         self.shortcuts(&ctx);
 
         egui::Panel::top("f420_toolbar").show(ui, |ui| {

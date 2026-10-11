@@ -82,6 +82,7 @@ class Driver:
                           interface="org.gnome.Mutter.ScreenCast.Session")
         self.stream = self.call(new_method_call(
             scs, "RecordMonitor", "sa{sv}", (os.environ.get("F420_MONITOR", "Meta-0"), {})))[0]
+        self.last = (1.0, 1.0)
         self.call(new_method_call(self.session, "Start"))
         time.sleep(0.3)
         # The first key event of a new session is dropped while mutter sets up
@@ -104,6 +105,7 @@ class Driver:
         self.call(new_method_call(self.session, method, sig, args))
 
     def move(self, x, y):
+        self.last = (x, y)
         x, y = x + OFFSET[0], y + OFFSET[1]
         self._s("NotifyPointerMotionAbsolute", "sdd", (self.stream, float(x), float(y)))
         time.sleep(0.02)
@@ -280,15 +282,28 @@ def run(driver, lines, probe=None):
                 driver.chord("space" if ch == " " else ch)
             time.sleep(0.1)
         elif op == "wait_idle":
-            deadline = time.time() + (float(args[0]) / 1000.0 if args else 60.0)
+            t0 = time.time()
+            deadline = t0 + (float(args[0]) / 1000.0 if args else 60.0)
             time.sleep(0.2)
+            last = None
             while True:
                 d = probe.load().get("doc", {})
+                state = (d.get("busy"), d.get("measuring"), d.get("revision"))
+                if state != last:
+                    print(f"  t+{time.time() - t0:.2f}s busy={state[0]} measuring={state[1]} rev={state[2]}", flush=True)
+                    last = state
                 if not d.get("busy") and not d.get("measuring"):
                     break
                 if time.time() > deadline:
-                    raise RuntimeError("timed out waiting for idle")
-                time.sleep(0.05)
+                    raise RuntimeError(f"timed out waiting for idle: {d}")
+                # eframe on Wayland repaints only after a compositor frame
+                # callback (egui issue #8326); the private headless compositor's
+                # frame clock can go quiet while the app waits for a worker
+                # reply, so nudge the pointer by 1 px the way a hand on a mouse does.
+                x, y = driver.last
+                driver.move(x + 1.0, y)
+                driver.move(x, y)
+                time.sleep(0.25)
             time.sleep(0.2)
         elif op == "expect":
             path, want = args[0], args[1]

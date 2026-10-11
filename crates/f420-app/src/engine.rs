@@ -254,6 +254,20 @@ struct MeasureSlot {
 
 type Measured = (u64, u64, Result<Measurements, String>);
 
+/// `F420_TRACE_ENGINE=1`: log the deferred-measurement pipeline to stderr.
+fn trace(msg: impl FnOnce() -> String) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("F420_TRACE_ENGINE").is_some_and(|v| v == "1")) {
+        eprintln!("{:.3} engine: {}", trace_clock(), msg());
+    }
+}
+
+/// Seconds since the first trace call (shared by engine and UI traces).
+pub fn trace_clock() -> f64 {
+    static T0: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(Instant::now).elapsed().as_secs_f64()
+}
+
 fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
     let (lock, cv) = &*slot;
     loop {
@@ -272,7 +286,18 @@ fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
                 };
             }
         };
+        trace(|| format!("measure start doc {} rev {}", job.doc_id, job.revision));
+        let t0 = Instant::now();
         let r = f420_kernel::measure(&job.body).map_err(|e| e.to_string());
+        trace(|| {
+            format!(
+                "measure done doc {} rev {} in {:.0} ms ok={}",
+                job.doc_id,
+                job.revision,
+                t0.elapsed().as_secs_f64() * 1e3,
+                r.is_ok()
+            )
+        });
         if out
             .send(WorkerIn::Measured((job.doc_id, job.revision, r)))
             .is_err()
@@ -287,8 +312,10 @@ fn adopt(session: &mut Session, (doc_id, revision, result): Measured) -> Option<
     let response = match result {
         Ok(m) => {
             if !session.adopt_measurements(doc_id, revision, m) {
+                trace(|| format!("stale measurement doc {doc_id} rev {revision} dropped"));
                 return None; // stale: the document moved on
             }
+            trace(|| format!("adopted doc {doc_id} rev {revision}"));
             Response {
                 ok: true,
                 command: "measure".into(),
@@ -296,14 +323,19 @@ fn adopt(session: &mut Session, (doc_id, revision, result): Measured) -> Option<
                 ..Default::default()
             }
         }
-        Err(e) => Response {
-            ok: false,
-            command: "measure".into(),
-            error: Some(f420_document::DocError::Validation(format!(
-                "measurement of revision {revision} failed: {e}"
-            ))),
-            ..Default::default()
-        },
+        Err(e) => {
+            if !session.fail_measurements(doc_id, revision) {
+                return None; // stale failure: nothing to report
+            }
+            Response {
+                ok: false,
+                command: "measure".into(),
+                error: Some(f420_document::DocError::Validation(format!(
+                    "measurement of revision {revision} failed: {e}"
+                ))),
+                ..Default::default()
+            }
+        }
     };
     Some(Reply {
         command: Command::Measure,
@@ -380,7 +412,30 @@ fn worker(
         }
         notify();
         // Queue the newest unmeasured body (replacing any older pending job).
-        if let Some((doc_id, revision, body)) = session.pending_measurement() {
+        let pending = session.pending_measurement();
+        if pending.is_none()
+            && let Some(m) = session.model()
+            && m.measurements_pending()
+        {
+            // The body could not be copied for the measurement thread: report
+            // the measurement as failed rather than leaving it pending forever.
+            let (doc_id, revision) = (session.summary().doc_id, m.revision);
+            if let Some(r) = adopt(
+                &mut session,
+                (
+                    doc_id,
+                    revision,
+                    Err("could not copy the body for measurement".into()),
+                ),
+            ) {
+                if tx.send(r).is_err() {
+                    break;
+                }
+                notify();
+            }
+        }
+        if let Some((doc_id, revision, body)) = pending {
+            trace(|| format!("queue measure doc {doc_id} rev {revision}"));
             let (lock, cv) = &*slot;
             if let Ok(mut g) = lock.lock() {
                 g.job = Some(MeasureJob {

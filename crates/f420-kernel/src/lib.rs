@@ -302,9 +302,25 @@ impl Profile {
 }
 
 /// A B-rep body. The Truck solid is the source of truth; meshes are derived.
+///
+/// `Clone` is shallow: Truck shares vertex points, edge curves and face
+/// surfaces behind `Arc<Mutex<_>>`. Use [`Body::deep_copy`] before handing a
+/// body to another thread that evaluates it concurrently.
 #[derive(Debug, Clone)]
 pub struct Body {
     pub(crate) solid: Solid,
+}
+
+impl Body {
+    /// Independent copy sharing no geometry with `self` (Truck compress →
+    /// extract allocates fresh topology and geometry), safe to evaluate on
+    /// another thread while `self` is in use.
+    pub fn deep_copy(&self) -> Result<Body> {
+        let compressed = guarded("compress body", || self.solid.compress())?;
+        let solid = Solid::extract(compressed)
+            .map_err(|e| KernelError::Internal(format!("extract body: {e}")))?;
+        Ok(Body { solid })
+    }
 }
 
 /// Run a Truck call, converting panics inside the kernel into errors.

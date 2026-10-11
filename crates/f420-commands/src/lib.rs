@@ -265,13 +265,26 @@ impl Session {
         }
     }
 
-    /// Body awaiting deferred measurement: `(doc_id, revision, body)`.
+    /// Body awaiting deferred measurement: `(doc_id, revision, body)`. The body
+    /// is a deep copy (Truck bodies share geometry behind mutexes, so a shallow
+    /// clone measured on another thread races with this session's own use).
     pub fn pending_measurement(&self) -> Option<(u64, u64, f420_kernel::Body)> {
         let m = self.model.as_ref()?;
         if !m.measurements_pending() {
             return None;
         }
-        Some((self.doc_id, m.revision, m.evaluation().body.clone()?))
+        let body = m.evaluation().body.as_ref()?.deep_copy().ok()?;
+        Some((self.doc_id, m.revision, body))
+    }
+
+    /// The deferred measurement of `revision` failed: stop reporting it as
+    /// pending. Returns true when it applied to the current document revision.
+    pub fn fail_measurements(&mut self, doc_id: u64, revision: u64) -> bool {
+        doc_id == self.doc_id
+            && self
+                .model
+                .as_mut()
+                .is_some_and(|model| model.fail_measurements(revision))
     }
 
     /// Install out-of-band measurements if they still describe the current

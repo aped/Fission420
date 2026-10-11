@@ -17,7 +17,10 @@ for script in "$ROOT"/tools/live/*.txt; do
   name=$(basename "$script" .txt)
   case "$name" in *"$FILTER"*) ;; *) continue ;; esac
   dir=$OUT/$name
-  rm -rf "$dir"; mkdir -p "$dir/shots"
+  # Fresh per-script directory; refuse anything that is not a child of OUT.
+  case "$dir" in "$OUT"/?*) ;; *) echo "refusing to clear $dir"; exit 2 ;; esac
+  if [ -d "${dir:?}" ]; then rm -rf -- "${dir:?}"; fi
+  mkdir -p "$dir/shots"
   F420_TRACE_INPUT=1 F420_PROBE="$dir/probe.json" \
     "$ROOT/tools/headless_session.sh" "$dir" 1280x800 "$APP" --maximized --shot-dir "$dir/shots" &
   session=$!

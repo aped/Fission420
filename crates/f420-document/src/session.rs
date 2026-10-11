@@ -30,6 +30,9 @@ pub struct Model {
     /// Skip B-rep measurement during edits (an interactive client measures out of
     /// band and hands the result back with [`Model::adopt_measurements`]).
     defer_measurements: bool,
+    /// Revision whose deferred measurement failed (no longer pending; the
+    /// measurements stay unavailable for that revision).
+    measure_failed: Option<u64>,
 }
 
 /// Cap on undo depth; documents are small, so this is generous.
@@ -52,6 +55,7 @@ impl Model {
             dirty: false,
             cache: RegenCache::default(),
             defer_measurements: false,
+            measure_failed: None,
         }
     }
 
@@ -68,6 +72,7 @@ impl Model {
             dirty: false,
             cache,
             defer_measurements: false,
+            measure_failed: None,
         })
     }
 
@@ -78,7 +83,19 @@ impl Model {
 
     /// The current body has not been measured yet (deferred measurement).
     pub fn measurements_pending(&self) -> bool {
-        self.eval.body.is_some() && self.eval.measurements.is_none()
+        self.eval.body.is_some()
+            && self.eval.measurements.is_none()
+            && self.measure_failed != Some(self.revision)
+    }
+
+    /// Record that the deferred measurement of `revision` failed, so it is no
+    /// longer pending (clients stop waiting; measurements stay unavailable).
+    pub fn fail_measurements(&mut self, revision: u64) -> bool {
+        if revision != self.revision || !self.measurements_pending() {
+            return false;
+        }
+        self.measure_failed = Some(revision);
+        true
     }
 
     /// Install measurements computed out of band for `revision`. Ignored (false)
