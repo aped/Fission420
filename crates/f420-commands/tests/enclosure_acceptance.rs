@@ -271,7 +271,7 @@ fn illegal_parameter_edits_are_refused_unchanged() {
     let (mut s, _dir) = build();
     let before = s.model().unwrap().document().clone();
     let rev = s.summary().revision;
-    let mut try_set = |s: &mut Session, name: &str, expr: &str| -> DocError {
+    let try_set = |s: &mut Session, name: &str, expr: &str| -> DocError {
         let r = s.execute(&Command::SetUserParameter {
             name: name.into(),
             expression: expr.into(),
