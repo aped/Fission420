@@ -327,5 +327,26 @@ fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
     assert_eq!(pat.kind, "linear_pattern");
     assert_close(body_volume(&h, a), 12000.0);
     assert_close(body_volume(&h, b), 4000.0);
+    // Circular instead: undo, then two instances 180° apart about A's centre
+    // (20, 15): the rotated slot also lies inside A, -500.
+    click(&mut h, "Undo");
+    assert_close(body_volume(&h, a), 12500.0);
+    click(&mut h, &cut.name);
+    click(&mut h, "Pattern…");
+    h.get_by_label("Circular").click();
+    let _ = h.try_run();
+    type_into(&mut h, "Pattern count", "2");
+    type_into(&mut h, "Angle between instances (deg)", "180");
+    type_into(&mut h, "Centre x (mm)", "20");
+    type_into(&mut h, "Centre y (mm)", "15");
+    click(&mut h, "OK");
+    let pat = h.state().summary().features.last().unwrap().clone();
+    assert_eq!(
+        pat.kind,
+        "circular_pattern",
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    assert_close(body_volume(&h, a), 12000.0);
     let _ = SketchPlane::WorldXY;
 }

@@ -100,14 +100,29 @@ pub(crate) enum Dialog {
         unit: f420_exchange::threemf::ThreeMfUnit,
     },
     Import(crate::exchange::ImportForm),
-    /// Linear pattern of an Extrude Cut along its sketch's local X or Y.
+    /// Linear / circular pattern or mirror of an Extrude Join or Cut.
     Pattern {
         feature: FeatureId,
+        kind: PatternKind,
         count: String,
         spacing: String,
         along_y: bool,
         reverse: bool,
+        /// Circular: degrees between instances and the centre (sketch mm).
+        angle: String,
+        center_x: String,
+        center_y: String,
+        /// Mirror: world plane through the origin.
+        mirror: SketchPlane,
     },
+}
+
+/// What the pattern dialog creates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatternKind {
+    Linear,
+    Circular,
+    Mirror,
 }
 
 impl Dialog {
@@ -127,7 +142,7 @@ impl Dialog {
             Dialog::ExportDxf { svg: true, .. } => "Export SVG",
             Dialog::Export3mf { .. } => "Export 3MF",
             Dialog::Import(_) => "Import",
-            Dialog::Pattern { .. } => "Linear pattern",
+            Dialog::Pattern { .. } => "Pattern / mirror",
         }
     }
 }
@@ -1915,24 +1930,51 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::Import(form) => form.command()?,
         Dialog::Pattern {
             feature,
+            kind,
             count,
             spacing,
             along_y,
             reverse,
+            angle,
+            center_x,
+            center_y,
+            mirror,
         } => {
-            let n = parse_num("count", count)?;
-            if !(n.is_finite() && n >= 2.0 && n.fract() == 0.0 && n <= 1000.0) {
-                return Err(format!(
-                    "count must be a whole number from 2 to 1000, got {n}"
-                ));
-            }
-            let s = if *reverse { -1.0 } else { 1.0 };
-            Command::LinearPattern {
-                name: None,
-                feature: *feature,
-                count: n as u32,
-                spacing: parse_num("spacing", spacing)?,
-                direction: if *along_y { [0.0, s] } else { [s, 0.0] },
+            let count = || -> Result<u32, String> {
+                let n = parse_num("count", count)?;
+                if !(n.is_finite() && n >= 2.0 && n.fract() == 0.0 && n <= 100.0) {
+                    return Err(format!(
+                        "count must be a whole number from 2 to 100, got {n}"
+                    ));
+                }
+                Ok(n as u32)
+            };
+            match kind {
+                PatternKind::Linear => {
+                    let s = if *reverse { -1.0 } else { 1.0 };
+                    Command::LinearPattern {
+                        name: None,
+                        feature: *feature,
+                        count: count()?,
+                        spacing: parse_num("spacing", spacing)?,
+                        direction: if *along_y { [0.0, s] } else { [s, 0.0] },
+                    }
+                }
+                PatternKind::Circular => Command::CircularPattern {
+                    name: None,
+                    feature: *feature,
+                    count: count()?,
+                    angle_deg: parse_num("angle", angle)?,
+                    center: [
+                        parse_num("centre x", center_x)?,
+                        parse_num("centre y", center_y)?,
+                    ],
+                },
+                PatternKind::Mirror => Command::Mirror {
+                    name: None,
+                    feature: *feature,
+                    plane: *mirror,
+                },
             }
         }
     })

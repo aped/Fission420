@@ -781,19 +781,28 @@ impl F420App {
                 }
             }
             "extrude" => {
-                if matches!(f.operation, Some(f420_document::Operation::Cut { .. }))
-                    && ui
-                        .button("Pattern…")
-                        .probe("Pattern…")
-                        .on_hover_text("Repeat this cut in a row along its sketch's X or Y axis (editable count and spacing)")
-                        .clicked()
+                if matches!(
+                    f.operation,
+                    Some(
+                        f420_document::Operation::Cut { .. } | f420_document::Operation::Join { .. }
+                    )
+                ) && ui
+                    .button("Pattern…")
+                    .probe("Pattern…")
+                    .on_hover_text("Repeat this join/cut in a row or around a centre, or mirror it across a world plane (editable parameters)")
+                    .clicked()
                 {
                     self.dialog = Some(Dialog::Pattern {
                         feature: f.id,
+                        kind: crate::app::PatternKind::Linear,
                         count: "3".into(),
                         spacing: "10".into(),
                         along_y: false,
                         reverse: false,
+                        angle: "60".into(),
+                        center_x: "0".into(),
+                        center_y: "0".into(),
+                        mirror: SketchPlane::WorldYZ,
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
@@ -1367,21 +1376,52 @@ impl F420App {
                     }
                     Dialog::Pattern {
                         feature,
+                        kind,
                         count,
                         spacing,
                         along_y,
                         reverse,
+                        angle,
+                        center_x,
+                        center_y,
+                        mirror,
                     } => {
+                        use crate::app::PatternKind;
                         ui.label(format!("Seed: {}", self.feature_name(*feature)));
-                        num_field(ui, "Pattern count", count);
-                        num_field(ui, "Pattern spacing (mm)", spacing);
                         ui.horizontal(|ui| {
-                            ui.label("Direction");
-                            ui.radio_value(along_y, false, "Sketch X");
-                            ui.radio_value(along_y, true, "Sketch Y");
-                            ui.checkbox(reverse, "Reverse");
+                            ui.radio_value(kind, PatternKind::Linear, "Linear");
+                            ui.radio_value(kind, PatternKind::Circular, "Circular");
+                            ui.radio_value(kind, PatternKind::Mirror, "Mirror");
                         });
-                        ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances cut the same target. Count and spacing stay editable parameters.");
+                        match kind {
+                            PatternKind::Linear => {
+                                num_field(ui, "Pattern count", count);
+                                num_field(ui, "Pattern spacing (mm)", spacing);
+                                ui.horizontal(|ui| {
+                                    ui.label("Direction");
+                                    ui.radio_value(along_y, false, "Sketch X");
+                                    ui.radio_value(along_y, true, "Sketch Y");
+                                    ui.checkbox(reverse, "Reverse");
+                                });
+                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances act on the same target. Count and spacing stay editable parameters.");
+                            }
+                            PatternKind::Circular => {
+                                num_field(ui, "Pattern count", count);
+                                num_field(ui, "Angle between instances (deg)", angle);
+                                num_field(ui, "Centre x (mm)", center_x);
+                                num_field(ui, "Centre y (mm)", center_y);
+                                ui.small("Counter-clockwise about the seed sketch's normal through the centre (seed sketch coordinates). Count includes the seed; instances may not wrap past a full turn.");
+                            }
+                            PatternKind::Mirror => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Mirror plane");
+                                    ui.radio_value(mirror, SketchPlane::WorldYZ, "World YZ");
+                                    ui.radio_value(mirror, SketchPlane::WorldXZ, "World XZ");
+                                    ui.radio_value(mirror, SketchPlane::WorldXY, "World XY");
+                                });
+                                ui.small("Adds the reflected copy of the seed's tool (the seed stays). A joined copy must land on a face of the target.");
+                            }
+                        }
                     }
                     Dialog::ExportDxf { path, sketch, svg } => {
                         ok_allowed &= self.export_dxf_ui(ui, path, sketch, *svg);
