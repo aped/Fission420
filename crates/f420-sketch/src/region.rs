@@ -9,7 +9,7 @@
 //! (a hole directly inside it). Islands inside holes and several separate outer
 //! loops are refused (one region per extrusion; no region picking yet).
 
-use crate::profile::{Prim, arc_arc_hits, dist, line_arc_hits, segments_touch};
+use crate::profile::{Prim, arc_arc_hits, line_arc_hits, segments_touch};
 use crate::{Constraint, Entity, EntityId, Profile, Sketch, SketchError, solve_tolerance};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
@@ -96,12 +96,15 @@ fn prims(p: &Profile) -> Vec<Prim> {
             .map(|i| Prim::of(&segs[i], segs[(i + 1) % segs.len()].start()))
             .collect(),
         Profile::Circle { center, radius } => {
-            let at = |t: f64| [center[0] + radius * t.cos(), center[1] + radius * t.sin()];
-            [0.0, PI]
+            // Exact, shared end points on y = center.y (no trigonometric noise),
+            // so the half-open crossing rule in `inside` sees one vertex each.
+            let right = [center[0] + radius, center[1]];
+            let left = [center[0] - radius, center[1]];
+            [(0.0, right, left), (PI, left, right)]
                 .into_iter()
-                .map(|a0| Prim::Arc {
-                    p: at(a0),
-                    q: at(a0 + PI),
+                .map(|(a0, p, q)| Prim::Arc {
+                    p,
+                    q,
                     c: *center,
                     r: *radius,
                     ccw: true,
@@ -136,38 +139,74 @@ fn boundary_point(g: &[Prim]) -> [f64; 2] {
 }
 
 /// Is `x` inside the closed boundary `g`? `x` is not on the boundary (loops do
-/// not touch). Parity of the chord polygon (horizontal ray, half-open rule at
-/// vertices), toggled once for every arc whose circular segment (the region
-/// between the arc and its chord) contains `x`: a simple loop's region is its
-/// chord polygon with each segment added or removed, so the parities combine.
+/// not touch). Parity of the crossings of the rightward horizontal ray from `x`
+/// with the real boundary curves (not arc chords). Each primitive is split into
+/// pieces monotone in y (an arc at its top and bottom points); a piece crosses
+/// the ray once when its ends lie on different sides under the half-open rule
+/// (`y > x.y` versus `y <= x.y`), and counts when that crossing lies right of
+/// `x`. Neighbouring primitives share identical vertex coordinates, so a ray
+/// through a vertex, along a horizontal edge or tangent to an arc is counted
+/// consistently.
 fn inside(x: [f64; 2], g: &[Prim]) -> bool {
     let mut odd = false;
-    for p in g {
-        let (a, b) = match *p {
-            Prim::Seg { a, b } => (a, b),
-            Prim::Arc { p, q, .. } => (p, q),
-        };
-        if (a[1] > x[1]) != (b[1] > x[1]) {
-            let t = (x[1] - a[1]) / (b[1] - a[1]);
-            if a[0] + t * (b[0] - a[0]) > x[0] {
-                odd = !odd;
+    for prim in g {
+        match *prim {
+            Prim::Seg { a, b } => {
+                if (a[1] > x[1]) != (b[1] > x[1]) {
+                    let t = (x[1] - a[1]) / (b[1] - a[1]);
+                    if a[0] + t * (b[0] - a[0]) > x[0] {
+                        odd = !odd;
+                    }
+                }
             }
-        }
-        if let Prim::Arc {
-            p,
-            q,
-            c,
-            r,
-            a0,
-            sweep,
-            ..
-        } = *p
-        {
-            let t = a0 + sweep / 2.0;
-            let mid = [c[0] + r * t.cos(), c[1] + r * t.sin()];
-            let side = |z: [f64; 2]| (q[0] - p[0]) * (z[1] - p[1]) - (q[1] - p[1]) * (z[0] - p[0]);
-            if dist(x, c) < r && side(x) * side(mid) > 0.0 {
-                odd = !odd;
+            Prim::Arc {
+                p,
+                q,
+                c,
+                r,
+                ccw,
+                a0,
+                sweep,
+            } => {
+                // Ends in CCW order: the point set runs from `a0` over `sweep`.
+                let (from, to) = if ccw { (p, q) } else { (q, p) };
+                // Cut at the y extrema (angles pi/2 + k pi) strictly inside.
+                let mut cuts = vec![(a0, from)];
+                let mut k = ((a0 - PI / 2.0) / PI).floor() as i64;
+                loop {
+                    let t = PI / 2.0 + k as f64 * PI;
+                    if t >= a0 + sweep {
+                        break;
+                    }
+                    if t > a0 {
+                        let y = if k.rem_euclid(2) == 0 {
+                            c[1] + r
+                        } else {
+                            c[1] - r
+                        };
+                        cuts.push((t, [c[0], y]));
+                    }
+                    k += 1;
+                }
+                cuts.push((a0 + sweep, to));
+                for w in cuts.windows(2) {
+                    let ((t0, u), (t1, v)) = (w[0], w[1]);
+                    if (u[1] > x[1]) == (v[1] > x[1]) {
+                        continue;
+                    }
+                    // The piece lies on the right half of the circle when its
+                    // middle angle has a non-negative cosine.
+                    let dy = x[1] - c[1];
+                    let half = (r * r - dy * dy).max(0.0).sqrt();
+                    let hit = if ((t0 + t1) / 2.0).cos() >= 0.0 {
+                        c[0] + half
+                    } else {
+                        c[0] - half
+                    };
+                    if hit > x[0] {
+                        odd = !odd;
+                    }
+                }
             }
         }
     }
@@ -175,6 +214,8 @@ fn inside(x: [f64; 2], g: &[Prim]) -> bool {
 }
 
 pub(crate) fn extract_region(s: &Sketch) -> Result<Region, SketchError> {
+    // `groups` indexes points by id: dangling references must be refused first.
+    s.validate()?;
     let groups = groups(s);
     if groups.len() <= 1 {
         let (outer, outer_entities) = crate::profile::extract_with_entities(s)?;

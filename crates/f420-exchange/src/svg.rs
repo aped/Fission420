@@ -4,21 +4,27 @@
 //! # Import rules
 //! * Elements: `line`, `rect` (no rounded corners), `circle`, `ellipse` with equal radii,
 //!   `polyline`, `polygon`, `path` with `M L H V Z A` (absolute and relative; arcs only
-//!   circular, `rx == ry`). `g` and the root `svg` carry transforms. Cubic/quadratic
-//!   Béziers (`C S Q T`), elliptical arcs, `use`, `text`, `image`, nested `svg` and
-//!   non-similarity transforms on circles/arcs are unsupported: reported per element type
-//!   and refused unless `allow_partial` (then skipped and listed). `defs`, `symbol`,
-//!   `clipPath`, `mask`, `pattern`, `marker`, `style`, `script`, `metadata`, `title`,
-//!   `desc` contents are ignored (they draw nothing by themselves).
+//!   circular, `rx == ry` to 1e-6 relative). `g` carries transforms. Cubic/quadratic
+//!   Béziers (`C S Q T`), elliptical arcs, `use`, `text`, `image`, nested `svg`,
+//!   non-similarity transforms on circles/arcs and lengths in relative units (`%`, `em`,
+//!   `ex`, `rem`, `ch`, `vw`, `vh`, `vmin`, `vmax`, `auto`) are unsupported: reported per
+//!   element type and refused unless `allow_partial` (then that element is skipped and
+//!   listed). `defs`, `symbol`, `clipPath`, `mask`, `pattern`, `marker`, `style`,
+//!   `script`, `metadata`, `title`, `desc` contents and every element in a non-SVG
+//!   namespace (Inkscape's `sodipodi:`/`inkscape:` data, RDF) are ignored silently.
 //! * Transforms: `matrix`, `translate`, `scale`, `rotate` (with optional centre), `skewX`,
 //!   `skewY`, composed per the SVG rules. Lines take any affine map; circles and arcs only
-//!   similarity maps (uniform scale, rotation, reflection, translation).
-//! * Units: the root `width`/`height` with an absolute unit (`mm`, `cm`, `in`, `pt`, `pc`)
-//!   and `viewBox` give millimetres per user unit (`preserveAspectRatio` default
-//!   `xMidYMid meet`: the smaller of the two ratios; other values are unsupported). Only the
-//!   scale is applied: user coordinates keep their origin (the viewBox offset and the
-//!   centering only frame the page), so a drawing's coordinates survive export/import. Without a physical size (no
-//!   width/height, `px`, unitless or `%`) the file declares no unit: the caller must give
+//!   similarity maps (uniform scale, rotation, reflection, translation) to 1e-6 relative.
+//!   A non-identity `transform` on the root `svg` is refused: it applies in the
+//!   embedding page's CSS space, outside the user coordinates this import keeps.
+//! * Units: the root `width`/`height` (> 0) with an absolute unit (`mm`, `cm`, `in`,
+//!   `pt`, `pc`) and `viewBox` give millimetres per user unit (`preserveAspectRatio`:
+//!   any alignment with `meet` takes the smaller ratio, `slice` the larger, `none` only
+//!   with equal ratios). A missing or `auto` width or height follows the other through
+//!   the viewBox aspect ratio. Only the scale is applied: user coordinates keep their
+//!   origin (the viewBox offset and the centering only frame the page), so a drawing's
+//!   coordinates survive export/import. Without a physical size (no width/height, `px`,
+//!   unitless or `%`) the file declares no unit: the caller must give
 //!   `unit_override_to_mm` (mm per user unit), else [`ExchangeError::UnitsRequired`].
 //!   Coordinates with units inside the drawing are converted to user units with CSS
 //!   ratios (96 px per inch).
@@ -36,8 +42,9 @@
 use crate::dxf::{EntityCount, FastIds, PointMerger, open_endpoints, push_point};
 use crate::{ExchangeError, Result, UnsupportedEntities, check_scale};
 use f420_sketch::{Entity, Sketch, SolveReport, SolveStatus};
-use quick_xml::Reader;
+use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::name::ResolveResult;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
@@ -45,6 +52,10 @@ use std::f64::consts::{PI, TAU};
 const FMT: &str = "SVG";
 /// CSS absolute units in user units (px).
 const PX_PER_MM: f64 = 96.0 / 25.4;
+/// Relative tolerance for "equal radii" (`rx`/`ry`) and "similarity transform":
+/// files round to 6-8 significant digits. Near-equal radii use their mean; arc
+/// centres are re-derived so both endpoints stay exactly on the arc.
+const SIMILAR_REL: f64 = 1e-6;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SvgImportOptions {
@@ -119,12 +130,15 @@ impl Affine {
         [a * x[0] + c * x[1] + e, b * x[0] + d * x[1] + f]
     }
 
-    /// Uniform scale factor when this is a similarity (up to 1e-9 relative).
+    /// Uniform scale factor when this is a similarity up to [`SIMILAR_REL`]
+    /// (rounded real-world factors such as Inkscape's 0.26458333 px -> mm):
+    /// the square root of |det|, the geometric mean of the two axis scales.
     fn similarity_scale(&self) -> Option<f64> {
         let [a, b, c, d, ..] = self.0;
         let (n1, n2) = (a * a + b * b, c * c + d * d);
-        let tol = 1e-9 * n1.max(n2);
-        ((n1 - n2).abs() <= tol && (a * c + b * d).abs() <= tol && n1 > 0.0).then(|| n1.sqrt())
+        let tol = SIMILAR_REL * n1.max(n2);
+        ((n1 - n2).abs() <= tol && (a * c + b * d).abs() <= tol && n1 > 0.0)
+            .then(|| (a * d - b * c).abs().sqrt())
     }
 }
 
@@ -171,42 +185,55 @@ fn malformed(msg: impl Into<String>) -> ExchangeError {
     }
 }
 
-/// A length in user units (CSS px); `%` and unknown units are `Err`.
-fn length(v: &str) -> std::result::Result<f64, String> {
+/// CSS units that need a layout context (font size, viewport, parent size).
+const RELATIVE_UNITS: &[&str] = &["%", "em", "ex", "rem", "ch", "vw", "vh", "vmin", "vmax"];
+
+/// Why a length could not be converted.
+#[derive(Debug, PartialEq)]
+enum LenError {
+    /// A relative unit or `auto`: the element is skipped as unsupported.
+    Relative(String),
+    /// Not a length at all: the file is malformed.
+    Malformed(String),
+}
+
+/// A length's number (SVG number grammar, exponent included) and unit text.
+fn split_length(v: &str) -> std::result::Result<(f64, &str), String> {
     let v = v.trim();
-    let split = v
-        .find(|c: char| c.is_ascii_alphabetic() || c == '%')
-        .unwrap_or(v.len());
-    let (num, unit) = v.split_at(split);
-    let x: f64 = num
-        .trim()
-        .parse()
-        .map_err(|_| format!("bad length '{v}'"))?;
-    let k = match unit.trim() {
+    let mut n = Nums::new(v);
+    let x = n.number().map_err(|_| format!("bad length '{v}'"))?;
+    Ok((x, v[n.i..].trim()))
+}
+
+/// A length in user units (CSS px).
+fn length(v: &str) -> std::result::Result<f64, LenError> {
+    if v.trim() == "auto" {
+        return Err(LenError::Relative("auto".into()));
+    }
+    let (x, unit) = split_length(v).map_err(LenError::Malformed)?;
+    let k = match unit {
         "" | "px" => 1.0,
         "mm" => PX_PER_MM,
         "cm" => 10.0 * PX_PER_MM,
         "in" => 96.0,
         "pt" => 96.0 / 72.0,
         "pc" => 16.0,
-        u => return Err(format!("unsupported length unit '{u}' in '{v}'")),
+        u if RELATIVE_UNITS.contains(&u) => return Err(LenError::Relative(u.into())),
+        u => {
+            return Err(LenError::Malformed(format!(
+                "unsupported length unit '{u}' in '{}'",
+                v.trim()
+            )));
+        }
     };
-    if !x.is_finite() {
-        return Err(format!("non-finite length '{v}'"));
-    }
     Ok(x * k)
 }
 
 /// Physical size of a root `width`/`height` in mm, when it has an absolute unit.
 fn physical_mm(v: &str) -> Option<f64> {
-    let v = v.trim();
-    let unit = v.trim_start_matches(|c: char| {
-        c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')
-    });
-    if matches!(unit.trim(), "mm" | "cm" | "in" | "pt" | "pc") {
-        length(v).ok().map(|px| px / PX_PER_MM)
-    } else {
-        None
+    match split_length(v) {
+        Ok((_, "mm" | "cm" | "in" | "pt" | "pc")) => length(v).ok().map(|px| px / PX_PER_MM),
+        _ => None,
     }
 }
 
@@ -364,10 +391,30 @@ fn attr(e: &BytesStart, name: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn len_attr(e: &BytesStart, name: &str) -> Result<f64> {
+/// Failure while drawing one element.
+enum ElemError {
+    /// The whole import fails.
+    Fatal(ExchangeError),
+    /// The element is skipped and reported as unsupported (reason).
+    Unsupported(String),
+}
+
+impl From<ExchangeError> for ElemError {
+    fn from(e: ExchangeError) -> Self {
+        ElemError::Fatal(e)
+    }
+}
+
+/// A length attribute in user units (absent = 0).
+fn len_attr(e: &BytesStart, name: &str) -> std::result::Result<f64, ElemError> {
     match attr(e, name)? {
         None => Ok(0.0),
-        Some(v) => length(&v).map_err(malformed),
+        Some(v) => length(&v).map_err(|err| match err {
+            LenError::Relative(u) => {
+                ElemError::Unsupported(format!("length in relative unit '{u}'"))
+            }
+            LenError::Malformed(m) => ElemError::Fatal(malformed(m)),
+        }),
     }
 }
 
@@ -428,6 +475,16 @@ impl Emit<'_> {
             self.map.apply(c),
             self.map.apply(m),
         );
+        // Under a near-similarity the mapped centre is not exactly equidistant
+        // from the mapped ends: move it onto their perpendicular bisector (the
+        // ends are shared with neighbouring curves and must not move).
+        let cc = {
+            let mid = [(s[0] + e[0]) / 2.0, (s[1] + e[1]) / 2.0];
+            let u = [e[0] - s[0], e[1] - s[1]];
+            let k =
+                ((cc[0] - mid[0]) * u[0] + (cc[1] - mid[1]) * u[1]) / (u[0] * u[0] + u[1] * u[1]);
+            [cc[0] - k * u[0], cc[1] - k * u[1]]
+        };
         let cross = (s[0] - cc[0]) * (mm[1] - cc[1]) - (s[1] - cc[1]) * (mm[0] - cc[0]);
         let (start, end) = if cross > 0.0 { (s, e) } else { (e, s) };
         self.out.push((
@@ -441,15 +498,20 @@ impl Emit<'_> {
     }
 }
 
-fn points_attr(v: &str) -> Result<Vec<[f64; 2]>> {
+/// Point list; `true` when an odd trailing coordinate was dropped (SVG renders
+/// up to the error).
+fn points_attr(v: &str) -> Result<(Vec<[f64; 2]>, bool)> {
     let mut n = Nums::new(v);
     let mut out = Vec::new();
     while n.at_number() {
         let x = n.number()?;
+        if !n.at_number() {
+            return Ok((out, true));
+        }
         let y = n.number()?;
         out.push([x, y]);
     }
-    Ok(out)
+    Ok((out, false))
 }
 
 fn path(em: &mut Emit, d: &str) -> Result<()> {
@@ -458,11 +520,22 @@ fn path(em: &mut Emit, d: &str) -> Result<()> {
     let mut start = [0.0, 0.0];
     let mut cmd = 0u8;
     loop {
+        // Every pass must consume input (a command letter or numbers): guard
+        // against any implicit-repeat path that reads nothing.
+        n.skip_sep();
+        let at = n.i;
         let c = match n.peek() {
             None => break,
             Some(c) if c.is_ascii_alphabetic() => {
                 n.i += 1;
                 c
+            }
+            // Closepath takes no parameters: it cannot repeat implicitly.
+            Some(c) if matches!(cmd, b'Z' | b'z') => {
+                return Err(malformed(format!(
+                    "unexpected '{}' after closepath (Z) at byte {}",
+                    c as char, n.i
+                )));
             }
             Some(_) if cmd != 0 => match cmd {
                 b'M' => b'L',
@@ -523,10 +596,10 @@ fn path(em: &mut Emit, d: &str) -> Result<()> {
                 let p = off([n.number()?, n.number()?], cur);
                 if rx == 0.0 || ry == 0.0 {
                     em.line("path", cur, p);
-                } else if (rx - ry).abs() > 1e-9 * rx.max(ry) {
+                } else if (rx - ry).abs() > SIMILAR_REL * rx.max(ry) {
                     em.rep.unsupported("path", "elliptical arc (rx != ry)");
                 } else {
-                    em.arc("path", cur, p, rx, large, sweep);
+                    em.arc("path", cur, p, (rx + ry) / 2.0, large, sweep);
                 }
                 cur = p;
             }
@@ -549,6 +622,11 @@ fn path(em: &mut Emit, d: &str) -> Result<()> {
                     other as char
                 )));
             }
+        }
+        if n.i == at {
+            return Err(malformed(format!(
+                "path data makes no progress at byte {at}"
+            )));
         }
     }
     Ok(())
@@ -582,6 +660,91 @@ const UNSUPPORTED: &[(&str, &str)] = &[
     ("a", "links (contents not imported)"),
 ];
 
+/// Elements handled by [`draw`] (`g` only carries a transform).
+const DRAWN: &[&str] = &[
+    "g", "line", "rect", "circle", "ellipse", "polyline", "polygon", "path",
+];
+const SVG_NS: &[u8] = b"http://www.w3.org/2000/svg";
+
+/// Emit the curves of one supported element; `Ok(true)` when it is a shape.
+fn draw(e: &BytesStart, name: &str, em: &mut Emit) -> std::result::Result<bool, ElemError> {
+    Ok(match name {
+        "line" => {
+            let p = [len_attr(e, "x1")?, len_attr(e, "y1")?];
+            let q = [len_attr(e, "x2")?, len_attr(e, "y2")?];
+            em.line("line", p, q);
+            true
+        }
+        "rect" => {
+            let (x, y) = (len_attr(e, "x")?, len_attr(e, "y")?);
+            let (w, h) = (len_attr(e, "width")?, len_attr(e, "height")?);
+            // `auto` corner radii (SVG 2) mean "same as the other one": both
+            // auto is square.
+            let corner = |k: &str| match attr(e, k) {
+                Ok(Some(v)) if v.trim() == "auto" => Ok(0.0),
+                _ => len_attr(e, k),
+            };
+            if corner("rx")? > 0.0 || corner("ry")? > 0.0 {
+                em.rep.unsupported("rect", "rounded corners (rx/ry)");
+                false
+            } else if w <= 0.0 || h <= 0.0 {
+                em.rep
+                    .degenerate("rect", "zero or negative size (not rendered)");
+                false
+            } else {
+                let c = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+                for i in 0..4 {
+                    em.line("rect", c[i], c[(i + 1) % 4]);
+                }
+                true
+            }
+        }
+        "circle" | "ellipse" => {
+            let c = [len_attr(e, "cx")?, len_attr(e, "cy")?];
+            let (rx, ry) = if name == "circle" {
+                let r = len_attr(e, "r")?;
+                (r, r)
+            } else {
+                (len_attr(e, "rx")?, len_attr(e, "ry")?)
+            };
+            if rx <= 0.0 || ry <= 0.0 {
+                em.rep
+                    .degenerate(name, "zero or negative radius (not rendered)");
+                false
+            } else if (rx - ry).abs() > SIMILAR_REL * rx.max(ry) {
+                em.rep.unsupported(name, "ellipse with rx != ry");
+                false
+            } else {
+                em.circle(name, c, (rx + ry) / 2.0)
+            }
+        }
+        "polyline" | "polygon" => {
+            let (pts, odd) = points_attr(&attr(e, "points")?.unwrap_or_default())?;
+            if odd {
+                em.rep
+                    .degenerate(name, "odd number of coordinates (last one ignored)");
+            }
+            if pts.len() < 2 {
+                em.rep.degenerate(name, "fewer than two points");
+                false
+            } else {
+                for w in pts.windows(2) {
+                    em.line(name, w[0], w[1]);
+                }
+                if name == "polygon" && pts.first() != pts.last() {
+                    em.line(name, pts[pts.len() - 1], pts[0]);
+                }
+                true
+            }
+        }
+        "path" => {
+            path(em, &attr(e, "d")?.unwrap_or_default())?;
+            true
+        }
+        _ => false,
+    })
+}
+
 /// Import an SVG file's planar paths as an unconstrained sketch. See the module docs.
 pub fn import(bytes: &[u8], opts: &SvgImportOptions) -> Result<SvgImport> {
     if !(opts.join_tolerance_mm.is_finite() && opts.join_tolerance_mm >= 0.0) {
@@ -602,7 +765,7 @@ pub fn import(bytes: &[u8], opts: &SvgImportOptions) -> Result<SvgImport> {
         });
     }
     let text = std::str::from_utf8(bytes).map_err(|e| malformed(format!("not UTF-8: {e}")))?;
-    let mut reader = Reader::from_str(text);
+    let mut reader = NsReader::from_str(text);
     let mut rep = Report::default();
     let mut curves: Vec<(String, Curve)> = Vec::new();
     // Stack of (element name, map at that element) for open elements.
@@ -611,9 +774,26 @@ pub fn import(bytes: &[u8], opts: &SvgImportOptions) -> Result<SvgImport> {
     let mut root: Option<(Affine, SvgUnits)> = None;
     let mut elements = 0u64;
     loop {
-        let ev = reader
-            .read_event()
-            .map_err(|e| malformed(format!("XML at byte {}: {e}", reader.buffer_position())))?;
+        // Elements bound to another namespace (Inkscape's `sodipodi:namedview`,
+        // `inkscape:*`, RDF metadata, ...) or to an undeclared prefix are
+        // editor data, not drawing: skipped silently with their subtree. No
+        // namespace at all (files without `xmlns`) is read as SVG.
+        let (foreign, ev) = match reader.read_resolved_event() {
+            Ok((ns, ev)) => {
+                let foreign = match ns {
+                    ResolveResult::Unbound => false,
+                    ResolveResult::Bound(ns) => ns.as_ref() != SVG_NS,
+                    ResolveResult::Unknown(_) => true,
+                };
+                (foreign, ev)
+            }
+            Err(e) => {
+                return Err(malformed(format!(
+                    "XML at byte {}: {e}",
+                    reader.buffer_position()
+                )));
+            }
+        };
         let (e, empty) = match ev {
             Event::Start(e) => (e, false),
             Event::Empty(e) => (e, true),
@@ -686,7 +866,7 @@ pub fn import(bytes: &[u8], opts: &SvgImportOptions) -> Result<SvgImport> {
             // Content after the root closed.
             continue;
         };
-        if IGNORED.contains(&name_ref) {
+        if foreign || IGNORED.contains(&name_ref) {
             if !empty {
                 skip_depth = 1;
             }
@@ -704,84 +884,27 @@ pub fn import(bytes: &[u8], opts: &SvgImportOptions) -> Result<SvgImport> {
             None => Affine::ID,
         };
         let map = local.then(parent);
+        if !DRAWN.contains(&name_ref) {
+            rep.unsupported(name_ref, "element type not supported");
+            if !empty {
+                skip_depth = 1;
+            }
+            continue;
+        }
         let mut em = Emit {
             map,
             out: Vec::new(),
             rep: &mut rep,
         };
-        let drew = match name_ref {
-            "g" => false,
-            "line" => {
-                let p = [len_attr(&e, "x1")?, len_attr(&e, "y1")?];
-                let q = [len_attr(&e, "x2")?, len_attr(&e, "y2")?];
-                em.line("line", p, q);
-                true
-            }
-            "rect" => {
-                let (x, y) = (len_attr(&e, "x")?, len_attr(&e, "y")?);
-                let (w, h) = (len_attr(&e, "width")?, len_attr(&e, "height")?);
-                if len_attr(&e, "rx")? > 0.0 || len_attr(&e, "ry")? > 0.0 {
-                    em.rep.unsupported("rect", "rounded corners (rx/ry)");
-                    false
-                } else if w <= 0.0 || h <= 0.0 {
-                    em.rep
-                        .degenerate("rect", "zero or negative size (not rendered)");
-                    false
-                } else {
-                    let c = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
-                    for i in 0..4 {
-                        em.line("rect", c[i], c[(i + 1) % 4]);
-                    }
-                    true
-                }
-            }
-            "circle" | "ellipse" => {
-                let c = [len_attr(&e, "cx")?, len_attr(&e, "cy")?];
-                let (rx, ry) = if name_ref == "circle" {
-                    let r = len_attr(&e, "r")?;
-                    (r, r)
-                } else {
-                    (len_attr(&e, "rx")?, len_attr(&e, "ry")?)
-                };
-                if rx <= 0.0 || ry <= 0.0 {
-                    em.rep
-                        .degenerate(name_ref, "zero or negative radius (not rendered)");
-                    false
-                } else if (rx - ry).abs() > 1e-9 * rx.max(ry) {
-                    em.rep.unsupported(name_ref, "ellipse with rx != ry");
-                    false
-                } else {
-                    em.circle(name_ref, c, rx)
-                }
-            }
-            "polyline" | "polygon" => {
-                let pts = points_attr(&attr(&e, "points")?.unwrap_or_default())?;
-                if pts.len() < 2 {
-                    em.rep.degenerate(name_ref, "fewer than two points");
-                    false
-                } else {
-                    for w in pts.windows(2) {
-                        em.line(name_ref, w[0], w[1]);
-                    }
-                    if name_ref == "polygon" && pts.first() != pts.last() {
-                        em.line(name_ref, pts[pts.len() - 1], pts[0]);
-                    }
-                    true
-                }
-            }
-            "path" => {
-                path(&mut em, &attr(&e, "d")?.unwrap_or_default())?;
-                true
-            }
-            other => {
-                em.rep.unsupported(other, "element type not supported");
-                if !empty {
-                    skip_depth = 1;
-                }
-                false
+        let (drew, out) = match draw(&e, name_ref, &mut em) {
+            Ok(drew) => (drew, std::mem::take(&mut em.out)),
+            Err(ElemError::Fatal(err)) => return Err(err),
+            Err(ElemError::Unsupported(why)) => {
+                // Nothing of the element is kept (no partial shapes).
+                rep.unsupported(name_ref, &why);
+                (false, Vec::new())
             }
         };
-        let out = std::mem::take(&mut em.out);
         if drew && !out.is_empty() {
             *rep.imported.entry(name.clone()).or_default() += 1;
         }
@@ -832,34 +955,89 @@ fn root_map(e: &BytesStart, opts: &SvgImportOptions) -> Result<(Affine, SvgUnits
             }
         })
         .transpose()?;
-    if let Some(par) = attr(e, "preserveAspectRatio")?
-        && !matches!(par.trim(), "" | "xMidYMid" | "xMidYMid meet")
+    let refuse = |reason: String| ExchangeError::Unsupported {
+        format: FMT.into(),
+        entities: vec![UnsupportedEntities {
+            entity_type: "svg".into(),
+            count: 1,
+            reason,
+            first_line: 0,
+        }],
+    };
+    // A root transform applies in the embedding CSS context (CSS px, about the
+    // box centre by default), outside the user coordinates this import keeps:
+    // refused rather than guessed. An identity transform is harmless.
+    if let Some(t) = attr(e, "transform")?
+        && parse_transform(&t)? != Affine::ID
     {
-        return Err(ExchangeError::Unsupported {
-            format: FMT.into(),
-            entities: vec![UnsupportedEntities {
-                entity_type: "svg".into(),
-                count: 1,
-                reason: format!("preserveAspectRatio=\"{par}\" (only the default is supported)"),
-                first_line: 0,
-            }],
-        });
+        return Err(refuse(format!(
+            "transform=\"{t}\" on the root <svg> (applies in the embedding page)"
+        )));
     }
+    // Only the scale is used, and every alignment gives the same scale; `slice`
+    // takes the larger ratio, `none` needs equal ratios. Without a viewBox the
+    // attribute has no effect.
+    let par = attr(e, "preserveAspectRatio")?.unwrap_or_default();
+    let par: Vec<&str> = par.split_whitespace().filter(|t| *t != "defer").collect();
+    const ALIGN: &[&str] = &[
+        "xMinYMin", "xMidYMin", "xMaxYMin", "xMinYMid", "xMidYMid", "xMaxYMid", "xMinYMax",
+        "xMidYMax", "xMaxYMax",
+    ];
+    let fit = match par.as_slice() {
+        [] => "meet",
+        [a] if ALIGN.contains(a) => "meet",
+        [a, m @ ("meet" | "slice")] if ALIGN.contains(a) => m,
+        ["none"] | ["none", "meet" | "slice"] => "none",
+        _ if vb.is_none() => "meet",
+        _ => {
+            return Err(refuse(format!(
+                "preserveAspectRatio=\"{}\" is not valid",
+                par.join(" ")
+            )));
+        }
+    };
     let flip = Affine([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
     let wmm = w.as_deref().and_then(physical_mm);
     let hmm = h.as_deref().and_then(physical_mm);
+    // SVG: a negative size is an error, zero disables rendering.
+    for (name, v) in [("width", wmm), ("height", hmm)] {
+        if let Some(v) = v
+            && !(v.is_finite() && v > 0.0)
+        {
+            return Err(malformed(format!("root {name} must be > 0 (got {v} mm)")));
+        }
+    }
+    // A missing or `auto` size follows the other one through the viewBox
+    // aspect ratio (SVG 2).
+    let auto = |v: &Option<String>| v.as_deref().is_none_or(|v| v.trim() == "auto");
+    let (wmm, hmm) = match (wmm, hmm, vb) {
+        (Some(wm), None, Some([_, _, vw, vh])) if auto(&h) => (Some(wm), Some(wm * vh / vw)),
+        (None, Some(hm), Some([_, _, vw, vh])) if auto(&w) => (Some(hm * vw / vh), Some(hm)),
+        other => (other.0, other.1),
+    };
     let (to_view, units) = match (wmm, hmm, vb) {
         (Some(wm), Some(hm), Some([x, y, vw, vh])) => {
             // Scale only: drawing (user) coordinates keep their origin; the
             // viewBox offset and centering just frame the page.
-            let s = (wm / vw).min(hm / vh);
+            let (sx, sy) = (wm / vw, hm / vh);
+            let s = match fit {
+                "slice" => sx.max(sy),
+                "none" if (sx - sy).abs() > SIMILAR_REL * sx.max(sy) => {
+                    return Err(refuse(format!(
+                        "preserveAspectRatio=\"none\" with unequal scales ({sx} and {sy} \
+                         mm per unit) would distort the drawing"
+                    )));
+                }
+                _ => sx.min(sy),
+            };
+            check_scale("SVG root scale (mm per user unit)", s)?;
             (
                 Affine([s, 0.0, 0.0, s, 0.0, 0.0]),
                 SvgUnits {
                     name: format!(
                         "root {}x{} with viewBox {x} {y} {vw} {vh}",
-                        w.unwrap_or_default(),
-                        h.unwrap_or_default()
+                        w.as_deref().unwrap_or("auto"),
+                        h.as_deref().unwrap_or("auto")
                     ),
                     to_mm: s,
                     declared: true,
