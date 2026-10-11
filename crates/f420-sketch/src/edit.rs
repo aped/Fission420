@@ -103,16 +103,18 @@ impl Sketch {
         id
     }
 
+    /// True when some entity uses `id` as an endpoint or centre.
+    pub fn point_used_by_entity(&self, id: PointId) -> bool {
+        self.entities.iter().any(|e| e.points().contains(&id))
+    }
+
     fn used_by_entity(&self, id: PointId) -> bool {
-        self.entities.iter().any(|e| match e {
-            Entity::Line { a, b, .. } => *a == id || *b == id,
-            Entity::Circle { center, .. } => *center == id,
-        })
+        self.point_used_by_entity(id)
     }
 
     /// Remove an entity and everything that only existed for it:
-    /// * constraints on the entity itself (Horizontal/Vertical/Diameter);
-    /// * its endpoints/centre that no other entity uses, with every constraint
+    /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent/EqualRadius);
+    /// * its endpoints/centre (an arc's centre included) that no other entity uses, with every constraint
     ///   that references them;
     /// * construction points (points used by no entity, such as a rectangle
     ///   centre) that were linked to the removed geometry through constraints
@@ -126,12 +128,9 @@ impl Sketch {
             return false;
         };
         let e = self.entities.remove(pos);
-        let ends: Vec<PointId> = match e {
-            Entity::Line { a, b, .. } => vec![a, b],
-            Entity::Circle { center, .. } => vec![center],
-        };
+        let ends: Vec<PointId> = e.points();
         self.constraints
-            .retain(|c| constraint_entity(c) != Some(id));
+            .retain(|c| !constraint_entities(c).contains(&id));
         let is_construction = |s: &Sketch, q: PointId| s.origin != Some(q) && !s.used_by_entity(q);
 
         // Construction points reachable from the removed geometry via constraints.
@@ -241,6 +240,21 @@ impl Sketch {
                 format!("{} (diameter of C{})", dim(d), circle.0)
             }
             Constraint::Coincident { a, b } => format!("Coincident {} · {}", p(a), p(b)),
+            Constraint::Radius { entity, dim: d } => {
+                let prefix = match self.entity(*entity) {
+                    Some(Entity::Circle { .. }) => "C",
+                    _ => "A",
+                };
+                format!("{} (radius of {prefix}{})", dim(d), entity.0)
+            }
+            Constraint::Tangent { line, arc } => format!("Tangent L{} · A{}", line.0, arc.0),
+            Constraint::EqualRadius { a, b } => {
+                let name = |id: &EntityId| match self.entity(*id) {
+                    Some(Entity::Circle { .. }) => format!("C{}", id.0),
+                    _ => format!("A{}", id.0),
+                };
+                format!("Equal radius {} · {}", name(a), name(b))
+            }
         }
     }
 
@@ -400,15 +414,22 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
         Constraint::Horizontal { .. }
         | Constraint::Vertical { .. }
-        | Constraint::Diameter { .. } => vec![],
+        | Constraint::Diameter { .. }
+        | Constraint::Radius { .. }
+        | Constraint::Tangent { .. }
+        | Constraint::EqualRadius { .. } => vec![],
     }
 }
 
-fn constraint_entity(c: &Constraint) -> Option<EntityId> {
+/// Entities a constraint references directly.
+pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
     match c {
-        Constraint::Horizontal { line } | Constraint::Vertical { line } => Some(*line),
-        Constraint::Diameter { circle, .. } => Some(*circle),
-        _ => None,
+        Constraint::Horizontal { line } | Constraint::Vertical { line } => vec![*line],
+        Constraint::Diameter { circle, .. } => vec![*circle],
+        Constraint::Radius { entity, .. } => vec![*entity],
+        Constraint::Tangent { line, arc } => vec![*line, *arc],
+        Constraint::EqualRadius { a, b } => vec![*a, *b],
+        _ => vec![],
     }
 }
 

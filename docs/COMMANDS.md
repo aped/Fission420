@@ -11,6 +11,7 @@ target/release/f420-cli run examples/plate_workflow.json       # JSON lines, one
 target/release/f420-cli run examples/bracket_workflow.json     # 120x60 bracket, 5 holes, STL+STEP
 target/release/f420-cli run examples/scenario_a_workflow.json  # SESSION_2 A: editor sketches, plate + hole
 target/release/f420-cli run examples/scenario_b_workflow.json  # SESSION_2 B: chamfered line loop
+target/release/f420-cli run examples/scenario_r_workflow.json  # stretch: rounded rectangle + slot (3-point arcs)
 target/release/f420-cli acceptance --out artifacts/acceptance  # GOAL.md workflow + scenarios A/B, analytic checks
 tools/external_validation.sh artifacts/acceptance               # python STL + FreeCAD STL/STEP checks
 ```
@@ -19,13 +20,13 @@ tools/external_validation.sh artifacts/acceptance               # python STL + F
 `expect_ok` (default `true`); 2 unreadable/invalid script; 64 usage. Scripts run from the
 repository root (paths are relative to the working directory).
 `acceptance` exits 1 if any check fails and writes `acceptance_report.json`; the blind-pocket
-stretch steps are prefixed `P.`; steps of the
+stretch steps are prefixed `P.`, the three-point-arc stretch steps `R.`; steps of the
 SESSION_2 scenarios are prefixed `A.` / `B.`.
 
 The scenario workflows are generated from `f420_commands::scenarios` (the sketches are built
 with the sketch editing API, like the interactive editor). After changing that module:
 `F420_WRITE_EXAMPLES=1 cargo test -p f420-commands --test scenario_examples`; without the
-variable the same test fails when the committed JSON is stale, and it replays both workflows.
+variable the same test fails when the committed JSON is stale, and it replays the workflows.
 
 ## Commands
 
@@ -35,7 +36,7 @@ variable the same test fails when the committed JSON is stale, and it replays bo
 | `create_sketch` | `name?`, `plane`, `template` + template fields | see below |
 | `extrude` | `name?`, `sketch`, `distance` | new body; distance > 0 mm; one base extrusion per document (product limit); the sketch must be a usable profile (else `Validation`) |
 | `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
-| `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside it (product limit); not on revolved bodies |
+| `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside its profile (product limit; for a line/arc host: centre inside the loop and clearance > `MIN_LENGTH` to every line segment and arc); not on revolved bodies |
 | `pocket` | `name?`, `sketch`, `depth` | blind cut from the extrusion cap the sketch is on, `depth` mm into the material (against the cap's outward normal). Product limits: circular profile sketched on an end/start cap of the base extrusion, strictly inside it, 0 < depth < thickness (`ProductLimit` otherwise; a through hole is `cut_through_all`). Parameter `depth`; follows the cap when the thickness changes |
 | `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
@@ -60,16 +61,31 @@ variable the same test fails when the committed JSON is stale, and it replays bo
 `center` = `[x, y]` in the plane's frame, default origin. `plane`: `"WorldXY"`, `"WorldXZ"`
 (x = world X, y = world Z) or `{"Face":{"feature":N,"role":"ExtrudeEndCap"|"ExtrudeStartCap"}}`.
 
-A sketch whose geometry is not a single closed profile (open polyline, extra dangling line,
-self-intersection, zero-length edge, more than one loop, lines mixed with circles) is still
-created; its `FeatureSummary.profile_error` says why, and any extrude/revolve/cut of it fails
-with `Validation`. Isolated points (such as the origin) are ignored by profile extraction.
+A usable profile is one circle, or one closed loop of lines and arcs (shared endpoints or
+`Coincident` points, every vertex joining exactly two curves). A sketch whose geometry is not
+a single closed profile (open polyline or arc chain, extra dangling curve, self-intersection
+including arc-line and arc-arc crossings or touching, zero-length line, zero-sweep arc, more
+than one loop, lines/arcs mixed with circles) is still created; its
+`FeatureSummary.profile_error` says why, and any extrude/revolve/cut of it fails with
+`Validation`. Isolated points (such as the origin) are ignored by profile extraction.
 
 `Sketch` JSON (`custom`, `edit_sketch`): `points` (`{id, x, y}` mm), `entities`
-(`{"Line":{id,a,b}}`, `{"Circle":{id,center,radius}}`), `constraints` (`FixedPoint`,
-`Horizontal`, `Vertical`, `HorizontalDistance`, `VerticalDistance`, `Distance` (aligned length,
-nonlinear), `SymmetricAboutPoint`, `Diameter`, `Coincident`; dimensions carry
-`{"name", "value"}`, names unique per sketch), optional `origin` (the point fixed at (0, 0)).
+(`{"Line":{id,a,b}}`, `{"Circle":{id,center,radius}}`, `{"Arc":{id,center,start,end}}`),
+`constraints` (`FixedPoint`, `Horizontal`, `Vertical`, `HorizontalDistance`,
+`VerticalDistance`, `Distance` (aligned length, nonlinear), `SymmetricAboutPoint`, `Diameter`,
+`Coincident`, `Radius` (`{entity, dim}`, arc or circle), `Tangent` (`{line, arc}`, sharing one
+endpoint id), `EqualRadius` (`{a, b}`, arcs/circles); dimensions carry `{"name", "value"}`,
+names unique per sketch), optional `origin` (the point fixed at (0, 0)).
+
+Arcs: an `Arc` runs counter-clockwise from `start` to `end` about `center` (sweep in
+(0, 2π)); all three are ordinary points. The entity always implies
+`|start − center| = |end − center|` (part of every solve, never listed as a conflicting
+constraint). The editor API builds one with `Sketch::add_arc_3pt(start, end, via)` (centre at
+the circumcentre; endpoints stored swapped when `via` is on the clockwise side; refused for
+coincident or collinear points or a radius above 1e4 × the span, `SketchError::DegenerateArc`).
+Helpers in `f420_commands::sketches`: `rounded_rectangle(w, h, r)` (dimensions `width`,
+`height`, `radius`; 8 tangents, the other corners `EqualRadius`), `slot(length, radius)`
+(dimensions `length`, `radius`), `offset_circle(d, x, y)`. All fully constrained.
 
 ## Response
 
@@ -98,7 +114,10 @@ extrusions the referenceable `faces` with their current frames.
 ## Native format
 
 `{"format": "fission420", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
-optional sketch `origin`, the `Distance` constraint and the `Pocket` feature. **Migration:** version-1 files are a
+optional sketch `origin`, the `Distance` constraint and the `Pocket` feature; later run-2
+additions (the `Arc` entity, `Radius` / `Tangent` / `EqualRadius` constraints) are serde-additive
+and keep version 2, so a v2 file that uses them cannot be read by a run-1 or early run-2 binary
+(it fails with a `File` parse error; nothing is overwritten). **Migration:** version-1 files are a
 strict subset and load unchanged (identity migration); saving writes version 2. Files claiming
 a newer version than the build supports are refused with a `File` error. Stored coordinates
 are written with shortest round-trip float formatting and reload bit-exactly.

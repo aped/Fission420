@@ -157,6 +157,7 @@ fn extents(s: &f420_sketch::Sketch) -> ([f64; 2], [f64; 2]) {
         .flat_map(|e| match e {
             f420_sketch::Entity::Line { a, b, .. } => vec![*a, *b],
             f420_sketch::Entity::Circle { center, .. } => vec![*center],
+            f420_sketch::Entity::Arc { .. } => e.points(), // TODO(arc-ui)
         })
         .filter_map(|p| s.point_xy(p))
         .collect();

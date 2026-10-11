@@ -1,4 +1,5 @@
 //! Deterministic regeneration of the feature history into B-rep geometry.
+use crate::hole::{check_hole_inside, to_kernel};
 use crate::{DocError, Document, FaceRef, FaceRole, FeatureId, FeatureKind, Result, SketchPlane};
 use f420_kernel::{self as k, Body, Frame, Measurements};
 use f420_sketch::{Profile as SketchProfile, SolveReport};
@@ -70,45 +71,6 @@ struct ExtrudeOut {
     start: Frame,
     distance: f64,
     profile: SketchProfile,
-}
-
-fn to_kernel(p: &SketchProfile) -> k::Profile {
-    match p {
-        SketchProfile::Polygon(v) => k::Profile::Polygon(v.clone()),
-        SketchProfile::Circle { center, radius } => k::Profile::Circle {
-            center: *center,
-            radius: *radius,
-        },
-    }
-}
-
-/// Product limit (not a general CAD rule): a circular cut must lie strictly inside the
-/// polygonal profile of the extrusion whose face it is sketched on, in that face's frame.
-/// For a centred rectangle this means diameter < min(width, height).
-fn check_hole_inside(hole: &SketchProfile, host: &SketchProfile) -> Result<()> {
-    let (SketchProfile::Circle { center, radius }, SketchProfile::Polygon(poly)) = (hole, host)
-    else {
-        return Err(DocError::ProductLimit(
-            "only a circular cut sketched on a polygonal extrusion face is supported".into(),
-        ));
-    };
-    let n = poly.len();
-    for i in 0..n {
-        let (a, b) = (poly[i], poly[(i + 1) % n]);
-        let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
-        let len = ex.hypot(ey);
-        // Signed distance of the centre to the edge's supporting line (inside > 0 for CCW).
-        let d = (ex * (center[1] - a[1]) - ey * (center[0] - a[0])) / len;
-        if d <= *radius + k::tol::MIN_LENGTH {
-            return Err(DocError::ProductLimit(format!(
-                "hole (diameter {:.6} mm) must lie strictly inside the face profile; \
-                 clearance to an edge is {:.6} mm (initial product limit)",
-                2.0 * radius,
-                d - radius
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Express a circular cut profile (in `cut_frame`) in the host extrusion's start frame.

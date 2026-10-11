@@ -10,21 +10,27 @@ use f420_sketch::{Sketch, SolveStatus};
 use std::f64::consts::PI;
 
 impl Run<'_> {
-    fn feature_summary(&self, id: FeatureId) -> Option<crate::FeatureSummary> {
+    pub(super) fn feature_summary(&self, id: FeatureId) -> Option<crate::FeatureSummary> {
         self.s.summary().features.into_iter().find(|f| f.id == id)
     }
 
-    fn solved_sketch(&self, id: FeatureId) -> Option<Sketch> {
+    pub(super) fn solved_sketch(&self, id: FeatureId) -> Option<Sketch> {
         self.feature_summary(id)?.sketch
     }
 
-    fn doc_and_rev(&self) -> Option<(f420_document::Document, u64)> {
+    pub(super) fn doc_and_rev(&self) -> Option<(f420_document::Document, u64)> {
         self.s.model().map(|m| (m.document().clone(), m.revision))
     }
 
     /// One closed shell, B-rep volume, bounds and (optionally) B-rep topology
     /// counts against independent expectations.
-    fn check_solid(&mut self, volume: f64, min: [f64; 3], max: [f64; 3], fev: Option<[usize; 3]>) {
+    pub(super) fn check_solid(
+        &mut self,
+        volume: f64,
+        min: [f64; 3],
+        max: [f64; 3],
+        fev: Option<[usize; 3]>,
+    ) {
         let Some(m) = self
             .s
             .model()
@@ -77,7 +83,7 @@ impl Run<'_> {
     }
 
     /// STL (watertight, mesh volume within chord error) and STEP (structure).
-    fn check_exports(&mut self, stem: &str, volume: f64) {
+    pub(super) fn check_exports(&mut self, stem: &str, volume: f64) {
         let stl = self.out_dir.join(format!("{stem}.stl"));
         let x = self.exec(Command::ExportStl {
             path: stl.clone(),
@@ -123,7 +129,11 @@ impl Run<'_> {
         );
     }
 
-    fn check_unchanged(&mut self, name: &str, before: &Option<(f420_document::Document, u64)>) {
+    pub(super) fn check_unchanged(
+        &mut self,
+        name: &str,
+        before: &Option<(f420_document::Document, u64)>,
+    ) {
         let after = self.doc_and_rev();
         self.check(
             name,

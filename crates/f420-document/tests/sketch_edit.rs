@@ -262,3 +262,81 @@ fn stored_solved_coordinates_round_trip_bit_exactly() {
     let corner = loaded.point_xy(c[1]).unwrap();
     assert!((corner[0] - 100.0 / 7.0).abs() < 1e-8);
 }
+
+/// Quarter disc: lines origin -> (r,0) and (0,r) -> origin, three-point arc
+/// (r,0) -> (0,r) whose centre is coincident with the origin, Radius dimension
+/// "radius". 8 unknowns, 8 equations (fixed origin 2, coincident 2, H, V,
+/// radius, arc-implied equal radius).
+fn quarter_disc(r: f64) -> Sketch {
+    let mut s = Sketch::default();
+    let o = s.ensure_origin();
+    let a = s.add_point(r, 0.0);
+    let b = s.add_point(0.0, r);
+    let h = s.add_line(o, a);
+    let v = s.add_line(b, o);
+    let k = r * std::f64::consts::FRAC_1_SQRT_2;
+    let arc = s.add_arc_3pt(a, b, [k, k]).unwrap();
+    let Some(f420_sketch::Entity::Arc { center, .. }) = s.entity(arc).cloned() else {
+        panic!("arc")
+    };
+    s.constraints.extend([
+        Constraint::Coincident { a: o, b: center },
+        Constraint::Horizontal { line: h },
+        Constraint::Vertical { line: v },
+        Constraint::Radius {
+            entity: arc,
+            dim: Dimension::new("radius", r),
+        },
+    ]);
+    s
+}
+
+#[test]
+fn arc_profile_extrudes_regenerates_and_round_trips() {
+    let mut m = Model::new();
+    let sid = add_sketch(&mut m, quarter_disc(10.0));
+    let solve = |m: &Model| {
+        m.evaluation()
+            .features
+            .iter()
+            .find(|f| f.id == sid)
+            .and_then(|f| f.solve.clone())
+            .unwrap()
+    };
+    assert_eq!(solve(&m).status, f420_sketch::SolveStatus::FullyConstrained);
+    m.transact("extrude", |d| {
+        Ok(d.push(
+            "E",
+            FeatureKind::Extrude {
+                sketch: sid,
+                distance: 4.0,
+            },
+        ))
+    })
+    .unwrap();
+    // Quarter cylinder: pi r^2 h / 4.
+    let want = |r: f64| std::f64::consts::PI * r * r * 4.0 / 4.0;
+    let tol = |v: f64| (1e-7 * v).max(1e-3);
+    assert!(
+        (volume(&m) - want(10.0)).abs() <= tol(want(10.0)),
+        "{}",
+        volume(&m)
+    );
+    m.set_parameter(sid, "radius", 6.0).unwrap();
+    assert!(
+        (volume(&m) - want(6.0)).abs() <= tol(want(6.0)),
+        "{}",
+        volume(&m)
+    );
+    let b = m.evaluation().measurements.as_ref().unwrap().bounds;
+    assert!(b.min[0].abs() < 1e-6 && (b.max[0] - 6.0).abs() < 1e-6);
+    assert!(b.min[1].abs() < 1e-6 && (b.max[1] - 6.0).abs() < 1e-6);
+
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("arc.f420.json");
+    save_file(&p, m.document(), Some(m.evaluation())).unwrap();
+    let back = load_file(&p).unwrap().document;
+    assert_eq!(&back, m.document());
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("\"Arc\"") && text.contains("\"Radius\""));
+}

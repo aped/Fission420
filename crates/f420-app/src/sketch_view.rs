@@ -112,6 +112,12 @@ fn bbox(s: &Sketch) -> Option<([f64; 2], [f64; 2])> {
                 .point_xy(*center)
                 .map(|q| vec![(q, *radius)])
                 .unwrap_or_default(),
+            // TODO(arc-ui): arc extents (points only for now).
+            Entity::Arc { .. } => e
+                .points()
+                .iter()
+                .filter_map(|p| s.point_xy(*p).map(|q| (q, 0.0)))
+                .collect(),
         };
         for (p, r) in pts {
             any = true;
@@ -225,6 +231,7 @@ pub fn paint_sketch(
                     .collect();
                 painter.add(egui::Shape::line(pts, Stroke::new(w, c)));
             }
+            Entity::Arc { .. } => {} // TODO(arc-ui): draw arcs
         }
     }
     // Points: entity endpoints and centres; construction points as small x.
@@ -234,6 +241,7 @@ pub fn paint_sketch(
         .flat_map(|e| match e {
             Entity::Line { a, b, .. } => vec![*a, *b],
             Entity::Circle { center, .. } => vec![*center],
+            Entity::Arc { .. } => e.points(), // TODO(arc-ui)
         })
         .collect();
     for p in &s.points {
