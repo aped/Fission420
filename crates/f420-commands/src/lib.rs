@@ -715,7 +715,7 @@ impl Session {
                 m.transact(&format!("Edit sketch {name}"), |d| {
                     match &mut d.feature_mut(feature)?.kind {
                         FeatureKind::Sketch { sketch, .. } => {
-                            *sketch = new;
+                            *sketch = keep_entity_ids(sketch, new)?;
                             Ok(())
                         }
                         _ => Err(DocError::Validation(format!("{feature} is not a sketch"))),
@@ -1340,6 +1340,47 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, f420_sketch::Sket
     }
     s.validate()?;
     Ok(s)
+}
+
+/// Entity ids are persistent names (face references use them, ADR 0003): an
+/// edit may keep, remove or add entities, but must not give an existing or
+/// removed id to different geometry. Ids removed by the edit are retired.
+fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
+    use f420_sketch::Entity;
+    // An entity keeps its identity when its endpoints change (the editor can
+    // reconnect a line), but not when its kind changes.
+    let shape = |e: &Entity| match e {
+        Entity::Line { .. } => 0,
+        Entity::Circle { .. } => 1,
+        _ => 2,
+    };
+    for e in &new.entities {
+        let id = e.id();
+        let reused = match old.entity(id) {
+            Some(o) => shape(o) != shape(e),
+            None => id.0 < old.retired_entity_ids,
+        };
+        if reused {
+            return Err(DocError::Validation(format!(
+                "sketch entity id {} is reused for different geometry; new entities need fresh \
+                 ids (sketch-entity ids are persistent face names)",
+                id.0
+            )));
+        }
+    }
+    let removed = old
+        .entities
+        .iter()
+        .map(|e| e.id())
+        .filter(|id| new.entity(*id).is_none())
+        .map(|id| id.0.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    new.retired_entity_ids = new
+        .retired_entity_ids
+        .max(old.retired_entity_ids)
+        .max(removed);
+    Ok(new)
 }
 
 /// Validate and solve a sketch, returning the solved definition. Refuses

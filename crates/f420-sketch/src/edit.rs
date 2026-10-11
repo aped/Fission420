@@ -52,7 +52,8 @@ impl Sketch {
                 .map(|e| e.id().0.saturating_add(1))
                 .max()
                 .unwrap_or(1)
-                .max(1),
+                .max(1)
+                .max(self.retired_entity_ids),
         )
     }
 
@@ -150,6 +151,7 @@ impl Sketch {
         };
         let e = self.entities.remove(pos);
         self.construction.remove(&id);
+        self.retired_entity_ids = self.retired_entity_ids.max(id.0.saturating_add(1));
         let ends: Vec<PointId> = e.points();
         self.constraints
             .retain(|c| !constraint_entities(c).contains(&id));
