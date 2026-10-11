@@ -1352,8 +1352,7 @@ impl SketchEditor {
             for pt in freed {
                 if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
                     let before = sk.constraints.len();
-                    sk.constraints
-                        .retain(|c| !crate::sketch_edit::constraint_mentions_point(c, pt));
+                    sk.constraints.retain(|c| !constraint_mentions(c, pt));
                     dropped += before - sk.constraints.len();
                     sk.points.retain(|x| x.id != pt);
                 }
@@ -2569,19 +2568,5 @@ mod tests {
         assert!(ed.sketch.entities.is_empty());
         assert_eq!(ed.sketch.points.len(), 1);
         assert_eq!(ed.sketch.origin, Some(origin));
-    }
-}
-
-/// Does constraint `c` reference point `p` directly?
-pub(crate) fn constraint_mentions_point(c: &Constraint, p: PointId) -> bool {
-    match c {
-        Constraint::FixedPoint { p: x, .. } => *x == p,
-        Constraint::HorizontalDistance { a, b, .. }
-        | Constraint::VerticalDistance { a, b, .. }
-        | Constraint::Distance { a, b, .. }
-        | Constraint::Coincident { a, b } => *a == p || *b == p,
-        Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
-        Constraint::PointOnLine { point, .. } => *point == p,
-        _ => false,
     }
 }
