@@ -3344,4 +3344,73 @@ mod tests {
             ed.feedback
         );
     }
+
+    /// Extend joins the new end to the curve it reaches: an existing point
+    /// there is shared, otherwise the end is held on the line.
+    #[test]
+    fn extend_attaches_the_new_end() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        for (a, b) in [
+            ([0.0, 0.0], [10.0, 0.0]),
+            ([20.0, -5.0], [20.0, 5.0]),
+            ([0.0, 10.0], [10.0, 10.0]),
+            ([30.0, 10.0], [30.0, 20.0]),
+        ] {
+            click(&mut ed, a);
+            click(&mut ed, b);
+            ed.escape();
+        }
+        let ids: Vec<EntityId> = ed.sketch.entities.iter().map(|e| e.id()).collect();
+        ed.set_tool(SketchTool::Extend);
+        // y = 0 line reaches the interior of x = 20: Point-on-line.
+        click(&mut ed, [8.0, 0.0]);
+        let (_, q) = line_ends(&ed, ids[0]);
+        assert!((q[0] - 20.0).abs() < 1e-9, "{q:?} {:?}", ed.feedback);
+        let Some(Entity::Line { b: end0, .. }) = ed.sketch.entity(ids[0]).cloned() else {
+            panic!()
+        };
+        assert!(ed.sketch.constraints.contains(&Constraint::PointOnLine {
+            point: end0,
+            line: ids[1]
+        }));
+        // y = 10 line reaches the end point (30, 10) of x = 30: shared point.
+        click(&mut ed, [8.0, 10.0]);
+        let Some(Entity::Line { b: end2, .. }) = ed.sketch.entity(ids[2]).cloned() else {
+            panic!()
+        };
+        let Some(Entity::Line { a: start3, .. }) = ed.sketch.entity(ids[3]).cloned() else {
+            panic!()
+        };
+        assert_eq!(end2, start3, "{:?}", ed.feedback);
+        assert!(ed.sketch.solve().is_success());
+    }
+
+    /// A construction circle trimmed to an arc stays construction.
+    #[test]
+    fn trim_circle_keeps_construction() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Circle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [10.0, 0.0]);
+        let circle = ed.sketch.entities[0].id();
+        ed.sketch.set_construction(circle, true);
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [-20.0, 0.5]);
+        click(&mut ed, [20.0, 0.5]);
+        ed.escape();
+        click(&mut ed, [0.5, -20.0]);
+        click(&mut ed, [0.5, 20.0]);
+        ed.escape();
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [7.0, 7.0]);
+        let arc = ed
+            .sketch
+            .entities
+            .iter()
+            .find(|e| matches!(e, Entity::Arc { .. }))
+            .map(|e| e.id())
+            .unwrap_or_else(|| panic!("{:?}", ed.feedback));
+        assert!(ed.sketch.is_construction(arc));
+    }
 }

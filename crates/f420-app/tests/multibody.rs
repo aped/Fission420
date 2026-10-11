@@ -463,3 +463,42 @@ fn undo_closes_a_rename_of_a_vanished_body() {
     rect_xy(&mut h, "10", "10", "20", "15");
     assert_eq!(h.state().selected_body(), None);
 }
+
+/// Review run 3 #10: Re-attach does not preselect a face it does not offer
+/// (the cap of the sketch's own extrusion would be a cycle), and its button
+/// stays disabled until a valid support is chosen.
+#[test]
+fn reattach_does_not_preselect_an_unoffered_face() {
+    let mut h = harness();
+    click(&mut h, "New");
+    rect_xy(&mut h, "40", "30", "20", "15");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    let sketch = h.state().summary().features[0].id;
+    let top = h.state().world_to_screen([20.0, 15.0, 10.0]).unwrap();
+    pointer_click(&mut h, top);
+    assert!(
+        h.state()
+            .selected_face()
+            .and_then(|f| f.reference)
+            .is_some(),
+        "picked the extrusion's end cap"
+    );
+    h.state_mut().start_reattach(sketch);
+    let _ = h.try_run();
+    assert!(h.get_by_label("Re-attach").accesskit_node().is_disabled());
+}
+
+/// Review run 3 #9: a dialog holding ids of the old document does not survive
+/// a document change.
+#[test]
+fn dialogs_close_when_the_document_changes() {
+    let mut h = harness();
+    click(&mut h, "New");
+    rect_xy(&mut h, "40", "30", "20", "15");
+    click(&mut h, "Extrude…");
+    assert!(h.query_by_label("Extrude distance (mm)").is_some());
+    h.state_mut().request(Command::NewDocument);
+    settle(&mut h);
+    assert!(h.query_by_label("Extrude distance (mm)").is_none());
+}
