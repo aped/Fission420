@@ -478,6 +478,7 @@ impl F420App {
                     SketchTool::Circle,
                     SketchTool::Arc,
                     SketchTool::Dimension,
+                    SketchTool::Trim,
                 ] {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))

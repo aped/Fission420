@@ -43,6 +43,8 @@ pub enum SketchTool {
     /// Three-point arc: start, end, then a point the arc passes through.
     Arc,
     Dimension,
+    /// Remove the clicked part of a line between its nearest intersections.
+    Trim,
 }
 
 impl SketchTool {
@@ -55,6 +57,7 @@ impl SketchTool {
             SketchTool::Circle => "Circle",
             SketchTool::Arc => "3-Point Arc",
             SketchTool::Dimension => "Dimension",
+            SketchTool::Trim => "Trim",
         }
     }
 
@@ -67,6 +70,7 @@ impl SketchTool {
             SketchTool::Circle => "C",
             SketchTool::Arc => "A",
             SketchTool::Dimension => "D",
+            SketchTool::Trim => "T",
         }
     }
 
@@ -90,6 +94,10 @@ impl SketchTool {
             }
             SketchTool::Dimension => {
                 "Click a line (length), circle (diameter), arc (radius), or two points (horizontal/vertical distance)"
+            }
+            SketchTool::Trim => {
+                "Click the part of a line to remove: it is cut at the nearest intersections with other \
+                 curves (a line with none is deleted) · lines only"
             }
         }
     }
@@ -790,7 +798,10 @@ impl SketchEditor {
             _ => self.snap(pos, None, None, view),
         };
         self.cursor = Some(s);
-        self.hover = if self.tool == SketchTool::Select || self.tool == SketchTool::Dimension {
+        self.hover = if matches!(
+            self.tool,
+            SketchTool::Select | SketchTool::Dimension | SketchTool::Trim
+        ) {
             self.pick(pos, screen, view)
         } else {
             None
@@ -916,6 +927,7 @@ impl SketchEditor {
             }
             SketchTool::Arc => self.arc_click(pos, view),
             SketchTool::Dimension => self.dimension_click(pos, screen, view),
+            SketchTool::Trim => self.trim_click(pos, screen, view),
         }
     }
 
@@ -1194,6 +1206,169 @@ impl SketchEditor {
                 "Circle Ø{} mm added.",
                 f420_sketch::fmt_mm(2.0 * r)
             ));
+        }
+    }
+
+    // ----- trim -----
+
+    /// Parameters t in (0, 1) along line `p -> q` where other curves cross it.
+    fn line_cuts(&self, line: EntityId, p: [f64; 2], q: [f64; 2]) -> Vec<f64> {
+        let d = [q[0] - p[0], q[1] - p[1]];
+        let len2 = d[0] * d[0] + d[1] * d[1];
+        let eps = f420_sketch::solve_tolerance(self.sketch.scale()) / len2.sqrt().max(1e-12);
+        let inside = |t: f64| t > eps && t < 1.0 - eps;
+        let mut ts = Vec::new();
+        let circle_hits = |c: [f64; 2], r: f64| -> Vec<f64> {
+            // |p + t d - c|^2 = r^2
+            let f = [p[0] - c[0], p[1] - c[1]];
+            let (a, b, cc) = (
+                len2,
+                2.0 * (f[0] * d[0] + f[1] * d[1]),
+                f[0] * f[0] + f[1] * f[1] - r * r,
+            );
+            let disc = b * b - 4.0 * a * cc;
+            if disc < 0.0 {
+                return vec![];
+            }
+            let s = disc.sqrt();
+            vec![(-b - s) / (2.0 * a), (-b + s) / (2.0 * a)]
+        };
+        for e in &self.sketch.entities {
+            if e.id() == line {
+                continue;
+            }
+            match e {
+                Entity::Line { a, b, .. } => {
+                    let (Some(c), Some(g)) = (self.sketch.point_xy(*a), self.sketch.point_xy(*b))
+                    else {
+                        continue;
+                    };
+                    let k = [g[0] - c[0], g[1] - c[1]];
+                    let den = d[0] * k[1] - d[1] * k[0];
+                    if den.abs() < 1e-12 * len2.sqrt() * k[0].hypot(k[1]) {
+                        continue; // parallel
+                    }
+                    let w = [c[0] - p[0], c[1] - p[1]];
+                    let t = (w[0] * k[1] - w[1] * k[0]) / den;
+                    let u = (w[0] * d[1] - w[1] * d[0]) / den;
+                    if inside(t) && (-1e-9..=1.0 + 1e-9).contains(&u) {
+                        ts.push(t);
+                    }
+                }
+                Entity::Circle { center, radius, .. } => {
+                    if let Some(c) = self.sketch.point_xy(*center) {
+                        ts.extend(circle_hits(c, *radius).into_iter().filter(|t| inside(*t)));
+                    }
+                }
+                Entity::Arc { id, .. } => {
+                    let Some(g) = self.sketch.arc_geometry(*id) else {
+                        continue;
+                    };
+                    for t in circle_hits(g.center, g.radius) {
+                        let x = [p[0] + t * d[0], p[1] + t * d[1]];
+                        let ang = (x[1] - g.center[1]).atan2(x[0] - g.center[0]);
+                        let rel = (ang - g.start_angle).rem_euclid(std::f64::consts::TAU);
+                        if inside(t) && rel <= g.sweep + 1e-9 {
+                            ts.push(t);
+                        }
+                    }
+                }
+            }
+        }
+        ts.sort_by(f64::total_cmp);
+        ts
+    }
+
+    fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
+            self.fail("Click the part of a line to remove (away from its endpoints).".into());
+            return;
+        };
+        let Some(Entity::Line { a, b, .. }) = self.sketch.entity(e).cloned() else {
+            self.fail("Trim works on lines only in this build (arcs and circles: not yet).".into());
+            return;
+        };
+        let (Some(p), Some(q)) = (self.sketch.point_xy(a), self.sketch.point_xy(b)) else {
+            return;
+        };
+        let d = [q[0] - p[0], q[1] - p[1]];
+        let len2 = d[0] * d[0] + d[1] * d[1];
+        let tc = (((pos[0] - p[0]) * d[0] + (pos[1] - p[1]) * d[1]) / len2).clamp(0.0, 1.0);
+        let cuts = self.line_cuts(e, p, q);
+        let lo = cuts.iter().copied().filter(|t| *t < tc).fold(0.0, f64::max);
+        let hi = cuts.iter().copied().filter(|t| *t > tc).fold(1.0, f64::min);
+        let at = |t: f64| [p[0] + t * d[0], p[1] + t * d[1]];
+        let mut dropped = 0usize;
+        let origin = self.sketch.origin;
+        let ok = self.try_change(false, |sk| {
+            if lo <= 0.0 && hi >= 1.0 {
+                sk.remove_entity(e);
+                return Ok(());
+            }
+            // Constraints whose meaning depends on this line's extent.
+            let before = sk.constraints.len();
+            sk.constraints.retain(|c| {
+                !matches!(c, Constraint::EqualLength { a: x, b: y } if *x == e || *y == e)
+                    && !matches!(c, Constraint::Tangent { line, .. } if *line == e)
+            });
+            dropped += before - sk.constraints.len();
+            let set_ends = |sk: &mut Sketch, na: PointId, nb: PointId| {
+                if let Some(Entity::Line { a, b, .. }) =
+                    sk.entities.iter_mut().find(|x| x.id() == e)
+                {
+                    (*a, *b) = (na, nb);
+                }
+            };
+            let mut freed = Vec::new();
+            if lo <= 0.0 {
+                let n = sk.add_point(at(hi)[0], at(hi)[1]);
+                set_ends(sk, n, b);
+                freed.push(a);
+            } else if hi >= 1.0 {
+                let n = sk.add_point(at(lo)[0], at(lo)[1]);
+                set_ends(sk, a, n);
+                freed.push(b);
+            } else {
+                let n0 = sk.add_point(at(lo)[0], at(lo)[1]);
+                let n1 = sk.add_point(at(hi)[0], at(hi)[1]);
+                set_ends(sk, a, n0);
+                let l2 = sk.add_line(n1, b);
+                let hv: Vec<Constraint> = sk
+                    .constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::Horizontal { line } if *line == e => {
+                            Some(Constraint::Horizontal { line: l2 })
+                        }
+                        Constraint::Vertical { line } if *line == e => {
+                            Some(Constraint::Vertical { line: l2 })
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                sk.constraints.extend(hv);
+            }
+            // A detached endpoint used by nothing else goes, with its constraints.
+            for pt in freed {
+                if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
+                    let before = sk.constraints.len();
+                    sk.constraints
+                        .retain(|c| !crate::sketch_edit::constraint_mentions_point(c, pt));
+                    dropped += before - sk.constraints.len();
+                    sk.points.retain(|x| x.id != pt);
+                }
+            }
+            Ok(())
+        });
+        if ok {
+            self.selection.clear();
+            self.info(if dropped > 0 {
+                format!(
+                    "Trimmed; {dropped} constraint(s) that no longer applied were removed. New endpoints are unconstrained."
+                )
+            } else {
+                "Trimmed. New endpoints are unconstrained.".into()
+            });
         }
     }
 
@@ -2232,6 +2407,108 @@ mod tests {
         assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
     }
 
+    fn line_ends(ed: &SketchEditor, l: EntityId) -> ([f64; 2], [f64; 2]) {
+        let Some(Entity::Line { a, b, .. }) = ed.sketch.entity(l) else {
+            panic!("{l:?} is not a line")
+        };
+        (
+            ed.sketch.point_xy(*a).unwrap(),
+            ed.sketch.point_xy(*b).unwrap(),
+        )
+    }
+
+    #[test]
+    fn trim_overhangs_split_and_delete() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [40.0, 20.0]);
+        let rect: Vec<EntityId> = ed.sketch.entities.iter().map(|e| e.id()).collect();
+        // A vertical line crossing the rectangle (overhanging 5 mm both ends).
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [20.0, -5.0]);
+        click(&mut ed, [20.0, 25.0]);
+        ed.escape();
+        let v = ed.sketch.entities.last().unwrap().id();
+        let n_points = ed.sketch.points.len();
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [20.0, 22.0]);
+        let (p, q) = line_ends(&ed, v);
+        assert!(
+            (p[1] + 5.0).abs() < 1e-9 && (q[1] - 20.0).abs() < 1e-9,
+            "{p:?} {q:?}"
+        );
+        click(&mut ed, [20.0, -2.5]);
+        let (p, q) = line_ends(&ed, v);
+        assert!(
+            p[1].abs() < 1e-9 && (q[1] - 20.0).abs() < 1e-9,
+            "{p:?} {q:?}"
+        );
+        // Two new end points, both old ones (now unused) removed.
+        assert_eq!(ed.sketch.points.len(), n_points);
+        // Split the bottom edge between x = 0 and the cross line... the bottom
+        // edge is cut only at x = 20 (the trimmed line's end lies on it).
+        let bottom = *rect
+            .iter()
+            .find(|l| {
+                let (p, q) = line_ends(&ed, **l);
+                p[1].abs() < 1e-9 && q[1].abs() < 1e-9
+            })
+            .unwrap();
+        let entities = ed.sketch.entities.len();
+        click(&mut ed, [30.0, 0.0]);
+        assert_eq!(
+            ed.sketch.entities.len(),
+            entities,
+            "overhang trim keeps the count"
+        );
+        let (p, q) = line_ends(&ed, bottom);
+        let xs = [p[0].min(q[0]), p[0].max(q[0])];
+        assert!(xs[0].abs() < 1e-9 && (xs[1] - 20.0).abs() < 1e-9, "{xs:?}");
+        // Splitting: a horizontal line crossed by two verticals, trim the middle.
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        for (a, b) in [
+            ([0.0, 0.0], [30.0, 0.0]),
+            ([10.0, -5.0], [10.0, 5.0]),
+            ([20.0, -5.0], [20.0, 5.0]),
+        ] {
+            click(&mut ed, a);
+            click(&mut ed, b);
+            ed.escape();
+        }
+        let h = ed.sketch.entities[0].id();
+        let count_h = |ed: &SketchEditor| {
+            ed.sketch
+                .constraints
+                .iter()
+                .filter(|c| matches!(c, Constraint::Horizontal { .. }))
+                .count()
+        };
+        // The line tool made it Horizontal (alignment snap).
+        let h_before = count_h(&ed);
+        assert!(h_before >= 1);
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [15.0, 0.0]);
+        assert_eq!(ed.sketch.entities.len(), 4, "split adds a line");
+        assert_eq!(
+            count_h(&ed),
+            2 * h_before,
+            "Horizontal copied to the new piece"
+        );
+        let (p, q) = line_ends(&ed, h);
+        assert!((p[0].max(q[0]) - 10.0).abs() < 1e-9);
+        // A line with no intersections is deleted.
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [0.0, 30.0]);
+        click(&mut ed, [10.0, 30.0]);
+        ed.escape();
+        let n = ed.sketch.entities.len();
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [5.0, 30.0]);
+        assert_eq!(ed.sketch.entities.len(), n - 1);
+    }
+
     #[test]
     fn lone_start_point_never_costs_or_breaks_undo() {
         let mut ed = SketchEditor::new(Sketch::default());
@@ -2292,5 +2569,19 @@ mod tests {
         assert!(ed.sketch.entities.is_empty());
         assert_eq!(ed.sketch.points.len(), 1);
         assert_eq!(ed.sketch.origin, Some(origin));
+    }
+}
+
+/// Does constraint `c` reference point `p` directly?
+pub(crate) fn constraint_mentions_point(c: &Constraint, p: PointId) -> bool {
+    match c {
+        Constraint::FixedPoint { p: x, .. } => *x == p,
+        Constraint::HorizontalDistance { a, b, .. }
+        | Constraint::VerticalDistance { a, b, .. }
+        | Constraint::Distance { a, b, .. }
+        | Constraint::Coincident { a, b } => *a == p || *b == p,
+        Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
+        Constraint::PointOnLine { point, .. } => *point == p,
+        _ => false,
     }
 }
