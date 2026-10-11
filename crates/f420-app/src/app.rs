@@ -1169,11 +1169,6 @@ impl F420App {
             .any(|f| f.kind == "extrude" || f.kind == "revolve")
     }
 
-    /// Cut/pocket features (both consume a circular cap sketch).
-    pub(crate) fn is_cut_kind(kind: &str) -> bool {
-        kind == "cut_through_all" || kind == "pocket"
-    }
-
     pub(crate) fn feature_name(&self, id: FeatureId) -> String {
         self.summary
             .features
