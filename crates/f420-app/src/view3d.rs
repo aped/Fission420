@@ -375,6 +375,7 @@ impl F420App {
             self.doc_dim_input(ui);
             self.paint_placement(&painter, rect);
             self.paint_extrude_preview(&painter, rect);
+            self.paint_reattach_preview(&painter, rect);
             if (!self.summary.open || self.summary.features.is_empty())
                 && self.placement.is_none()
                 && self.dialog.is_none()
@@ -1018,6 +1019,20 @@ impl F420App {
             );
             if ui.put(btn, egui::Button::new("Dismiss")).clicked() {
                 self.banner = None;
+            }
+            if b.kind == "BrokenReference"
+                && let Some(s) = self.broken_sketch
+            {
+                let btn2 = btn
+                    .translate(egui::vec2(0.0, 26.0))
+                    .with_max_x(btn.min.x + 130.0);
+                if ui
+                    .put(btn2, egui::Button::new("Re-attach sketch…"))
+                    .probe("Re-attach sketch…")
+                    .clicked()
+                {
+                    self.start_reattach(s);
+                }
             }
         }
         if self.engine.busy() {

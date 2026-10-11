@@ -266,6 +266,10 @@ pub struct F420App {
     pub(crate) show_help: bool,
     /// Summary of the last successful import (window until closed).
     pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
+    /// Open "Re-attach sketch" window.
+    pub(crate) reattach: Option<crate::reattach::Reattach>,
+    /// Sketch named by the last BrokenReference refusal (offered for repair).
+    pub(crate) broken_sketch: Option<FeatureId>,
     /// Commands in flight with their submit time (FIFO; latency measurement).
     in_flight: VecDeque<(String, Instant)>,
     /// Last command round trips (name, latency) for the status bar / report.
@@ -329,6 +333,8 @@ impl F420App {
             sketch_dim_opened: None,
             show_help: false,
             import_summary: None,
+            reattach: None,
+            broken_sketch: None,
             in_flight: VecDeque::new(),
             latencies: VecDeque::new(),
             frame_ema: None,
@@ -747,11 +753,22 @@ impl F420App {
                 None => ("Error", "command failed".to_string()),
             };
             let hint = response.error.as_ref().map(next_step).unwrap_or_default();
+            if let Some(DocError::BrokenReference { from, .. }) = &response.error
+                && summary
+                    .features
+                    .iter()
+                    .any(|f| f.id == *from && f.kind == "sketch")
+            {
+                self.broken_sketch = Some(*from);
+            }
             self.diag(
                 true,
                 kind,
                 format!("{} rejected: {msg}{hint}", response.command),
             );
+        }
+        if response.ok && matches!(command, Command::SetSketchPlane { .. }) {
+            self.broken_sketch = None;
         }
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
@@ -764,6 +781,8 @@ impl F420App {
             self.doc_dim_edit = None;
             self.rename = None;
             self.body_rename = None;
+            self.reattach = None;
+            self.broken_sketch = None;
         }
         // A sketch session belongs to one document; a different document
         // (Open/New/Close completed) ends it without committing.
@@ -1568,6 +1587,7 @@ impl F420App {
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
         self.import_summary_ui(&ctx);
+        self.reattach_ui(&ctx);
         if busy || self.summary.measuring {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -1865,7 +1885,7 @@ pub fn next_step(e: &DocError) -> String {
         DocError::Validation(_) => "Check the value and try again; the model is unchanged.",
         DocError::ProductLimit(_) => "This is a current product limit; the model is unchanged.",
         DocError::BrokenReference { .. } => {
-            "The referenced feature/face is gone; edit the sketch plane or undo."
+            "The referenced face is gone or no longer unique; the model is unchanged. Re-attach the sketch to another face or plane (Re-attach sketch…), then repeat the edit."
         }
         DocError::SketchSolve { .. } => {
             "Edit the sketch and delete or change one of the conflicting constraints."

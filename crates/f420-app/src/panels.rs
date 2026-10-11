@@ -704,6 +704,14 @@ impl F420App {
                             Some(f.id),
                         )));
                     }
+                    if ui
+                        .button("Re-attach…")
+                        .probe("Re-attach…")
+                        .on_hover_text("Move this sketch to another face or plane (repair a broken support); one undo step")
+                        .clicked()
+                    {
+                        self.start_reattach(f.id);
+                    }
                     let cb = self.cut_blocker(&f);
                     if action(ui, "Cut with this sketch…", cb.as_deref()) {
                         self.dialog = Some(Dialog::Cut {
@@ -845,6 +853,23 @@ impl F420App {
     }
 
     pub(crate) fn sketch_inspector(&mut self, ui: &mut egui::Ui) {
+        if let Some(b) = self.broken_sketch {
+            ui.colored_label(
+                BAD_COLOR,
+                format!(
+                    "{} lost its support face (edit refused). Re-attach it, then Finish again.",
+                    self.feature_name(b)
+                ),
+            );
+            if ui
+                .button("Re-attach sketch…")
+                .probe("Re-attach sketch…")
+                .clicked()
+            {
+                self.start_reattach(b);
+            }
+            ui.separator();
+        }
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
