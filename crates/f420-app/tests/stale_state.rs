@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{Key, Modifiers};
 use egui_kittest::{
     Harness,
-    kittest::{NodeT as _, Queryable as _},
+    kittest::Queryable as _,
 };
 use f420_app::{ExecMode, F420App};
 use f420_commands::{Command, ExtrudeOp, SketchTemplate};
