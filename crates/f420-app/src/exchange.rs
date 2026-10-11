@@ -29,6 +29,8 @@ pub enum Format {
     Step,
     Stl,
     Dxf,
+    ThreeMf,
+    Svg,
 }
 
 impl Format {
@@ -41,6 +43,8 @@ impl Format {
             "step" | "stp" => Some(Format::Step),
             "stl" => Some(Format::Stl),
             "dxf" => Some(Format::Dxf),
+            "3mf" => Some(Format::ThreeMf),
+            "svg" => Some(Format::Svg),
             _ => None,
         }
     }
@@ -50,6 +54,8 @@ impl Format {
             Format::Step => "STEP: exact solids as B-rep bodies",
             Format::Stl => "STL: triangle mesh as a mesh body",
             Format::Dxf => "DXF: 2D lines/arcs/circles/polylines as an unconstrained sketch",
+            Format::ThreeMf => "3MF: mesh objects as mesh bodies (units declared in the file)",
+            Format::Svg => "SVG: planar paths as an unconstrained sketch",
         }
     }
 }
@@ -88,12 +94,26 @@ impl ImportForm {
         let path = nonempty_path(&self.path)?;
         let fmt = Format::of(&self.path).ok_or_else(|| {
             format!(
-                "'{}': unsupported file type; import supports .step/.stp, .stl and .dxf",
+                "'{}': unsupported file type; import supports .step/.stp, .stl, .3mf, .dxf and .svg",
                 self.path.trim()
             )
         })?;
         let unit = UNITS.get(self.unit).map_or(1.0, |u| u.1);
+        let plane = match self.plane {
+            DxfPlane::WorldXY => SketchPlane::WorldXY,
+            DxfPlane::WorldXZ => SketchPlane::WorldXZ,
+            DxfPlane::WorldYZ => SketchPlane::WorldYZ,
+            DxfPlane::Face(r) => SketchPlane::Face(r),
+        };
         Ok(match fmt {
+            Format::ThreeMf => Command::Import3mf { path },
+            Format::Svg => Command::ImportSvg {
+                path,
+                plane,
+                name: None,
+                units_to_mm: self.needs_units.then_some(unit),
+                allow_partial: self.allow_partial,
+            },
             Format::Step => Command::ImportStep {
                 path,
                 units_to_mm: self.needs_units.then_some(unit),
@@ -104,12 +124,7 @@ impl ImportForm {
             },
             Format::Dxf => Command::ImportDxf {
                 path,
-                plane: match self.plane {
-                    DxfPlane::WorldXY => SketchPlane::WorldXY,
-                    DxfPlane::WorldXZ => SketchPlane::WorldXZ,
-                    DxfPlane::WorldYZ => SketchPlane::WorldYZ,
-                    DxfPlane::Face(r) => SketchPlane::Face(r),
-                },
+                plane,
                 name: None,
                 units_to_mm: self.needs_units.then_some(unit),
                 allow_partial: self.allow_partial,
@@ -148,7 +163,11 @@ impl ExportScope {
 fn is_import(cmd: &Command) -> bool {
     matches!(
         cmd,
-        Command::ImportStep { .. } | Command::ImportStl { .. } | Command::ImportDxf { .. }
+        Command::ImportStep { .. }
+            | Command::ImportStl { .. }
+            | Command::ImportDxf { .. }
+            | Command::Import3mf { .. }
+            | Command::ImportSvg { .. }
     )
 }
 
@@ -285,12 +304,12 @@ impl F420App {
                 ui.label(format!("Format: {}", f.label()));
             }
             None if form.path.trim().is_empty() => {
-                ui.weak("Supported: .step / .stp, .stl, .dxf");
+                ui.weak("Supported: .step / .stp, .stl, .3mf, .dxf, .svg");
             }
             None => {
                 ui.colored_label(
                     Color32::from_rgb(255, 200, 120),
-                    "Unsupported extension: import supports .step / .stp, .stl and .dxf",
+                    "Unsupported extension: import supports .step / .stp, .stl, .3mf, .dxf and .svg",
                 );
             }
         }
@@ -310,7 +329,7 @@ impl F420App {
                 "This file declares no length unit: choose what one file unit means."
             });
         }
-        if fmt == Some(Format::Dxf) {
+        if matches!(fmt, Some(Format::Dxf | Format::Svg)) {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Sketch plane");
                 ui.radio_value(&mut form.plane, DxfPlane::WorldXY, "World XY");
@@ -493,7 +512,8 @@ impl F420App {
                 ui.small(match s.format {
                     Format::Step => "Exact B-rep without feature history: select/hide/rename, sketch on planar faces, Extrude Join/Cut with it as target, export STEP/STL. Its original features are not recovered.",
                     Format::Stl => "Triangle mesh: display, hide/show, rename, save, STL export. Exact operations (sketch on faces, join/cut, STEP export) are unavailable.",
-                    Format::Dxf => "Unconstrained sketch: edit and dimension it in the sketch editor, extrude it, export DXF. Constraints were not inferred.",
+                    Format::Dxf | Format::Svg => "Unconstrained sketch: edit and dimension it in the sketch editor, extrude it, export DXF/SVG. Constraints were not inferred.",
+                    Format::ThreeMf => "Mesh objects: display, hide/show, rename, save, STL/3MF export. Exact operations (sketch on faces, join/cut, STEP export) are unavailable. Units came from the file.",
                 });
                 ui.small("Undo removes the whole import in one step.");
                 if ui.button("Close summary").probe("Close summary").clicked() {
@@ -505,12 +525,13 @@ impl F420App {
         }
     }
 
-    /// Body of the Export DXF dialog. Returns true when OK may be pressed.
+    /// Body of the Export DXF / SVG (sketch) dialog. Returns true when OK may be pressed.
     pub(crate) fn export_dxf_ui(
         &self,
         ui: &mut egui::Ui,
         path: &mut String,
         sketch: &mut Option<FeatureId>,
+        svg: bool,
     ) -> bool {
         let sketches: Vec<_> = self
             .summary
@@ -519,8 +540,13 @@ impl F420App {
             .filter(|f| f.kind == "sketch")
             .collect();
         crate::panels::feature_combo(ui, "Sketch to export", sketch, &sketches);
-        crate::panels::text_field(ui, "DXF path", path);
-        ui.small("Writes the sketch's lines, arcs and circles in its local 2D sketch coordinates, mm, as R12 ASCII DXF. Construction geometry and constraints are not written.");
+        if svg {
+            crate::panels::text_field(ui, "SVG path", path);
+            ui.small("Writes the sketch's lines, arcs and circles in its local 2D sketch coordinates, mm (SVG y axis points down, so y is negated). Construction geometry and constraints are not written.");
+        } else {
+            crate::panels::text_field(ui, "DXF path", path);
+            ui.small("Writes the sketch's lines, arcs and circles in its local 2D sketch coordinates, mm, as R12 ASCII DXF. Construction geometry and constraints are not written.");
+        }
         sketch.is_some()
     }
 }

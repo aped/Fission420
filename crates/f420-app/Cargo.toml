@@ -12,6 +12,7 @@ f420-commands = { path = "../f420-commands" }
 f420-document = { path = "../f420-document" }
 f420-kernel = { path = "../f420-kernel" }
 f420-sketch = { path = "../f420-sketch" }
+f420-exchange = { path = "../f420-exchange" }
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", default-features = false }

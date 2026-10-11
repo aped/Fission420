@@ -303,3 +303,48 @@ fn export_selection_policy_and_dxf() {
     let t = std::fs::read_to_string(&dxf).expect("DXF written");
     assert_eq!(t.matches("\nLINE\n").count(), 4, "{t}");
 }
+
+#[test]
+fn threemf_import_export_and_svg_sketch() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    // 3MF declares its units: no unit prompt.
+    click(&mut h, "Import…");
+    type_into(
+        &mut h,
+        "Import file path",
+        &fixture("f420-exchange/tests/fixtures/threemf/freecad_two_boxes.3mf"),
+    );
+    assert!(h.query_by_label("File units").is_none());
+    click(&mut h, "OK");
+    let bodies = h.state().summary().bodies.clone();
+    assert!(!bodies.is_empty(), "{:?}", h.state().diagnostics().last());
+    assert!(bodies.iter().all(|b| b.kind == "mesh"));
+    click(&mut h, "Close summary");
+    h.get_by_label("Export").click();
+    let _ = h.try_run();
+    click(&mut h, "Export 3MF…");
+    click(&mut h, &format!("All visible bodies ({})", bodies.len()));
+    let out = tmp("all.3mf");
+    type_into(&mut h, "3MF path", out.to_str().unwrap());
+    click(&mut h, "OK");
+    let last = h.state().diagnostics().last().unwrap().clone();
+    assert!(!last.error, "{last:?}");
+    assert!(
+        std::fs::metadata(&out)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false)
+    );
+    // SVG paths become an unconstrained sketch on the chosen plane.
+    let n = h.state().summary().features.len();
+    import(
+        &mut h,
+        &fixture("f420-exchange/tests/fixtures/svg/plate_mm.svg"),
+    );
+    if h.query_by_label("File units").is_some() {
+        click(&mut h, "OK");
+    }
+    let f = h.state().summary().features.clone();
+    assert_eq!(f.len(), n + 1, "{:?}", h.state().diagnostics().last());
+    assert_eq!(f.last().unwrap().kind, "sketch");
+}

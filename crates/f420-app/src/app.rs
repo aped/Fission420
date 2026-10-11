@@ -90,6 +90,14 @@ pub(crate) enum Dialog {
     ExportDxf {
         path: String,
         sketch: Option<FeatureId>,
+        /// SVG instead of DXF.
+        svg: bool,
+    },
+    Export3mf {
+        path: String,
+        chord: String,
+        scope: crate::exchange::ExportScope,
+        unit: f420_exchange::threemf::ThreeMfUnit,
     },
     Import(crate::exchange::ImportForm),
     /// Linear pattern of an Extrude Cut along its sketch's local X or Y.
@@ -115,7 +123,9 @@ impl Dialog {
             Dialog::Open { .. } => "Open document",
             Dialog::ExportStl { .. } => "Export STL",
             Dialog::ExportStep { .. } => "Export STEP",
-            Dialog::ExportDxf { .. } => "Export DXF",
+            Dialog::ExportDxf { svg: false, .. } => "Export DXF",
+            Dialog::ExportDxf { svg: true, .. } => "Export SVG",
+            Dialog::Export3mf { .. } => "Export 3MF",
             Dialog::Import(_) => "Import",
             Dialog::Pattern { .. } => "Linear pattern",
         }
@@ -1871,9 +1881,32 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             path: nonempty_path(path)?,
             bodies: scope.bodies(),
         },
-        Dialog::ExportDxf { path, sketch } => Command::ExportDxf {
+        Dialog::ExportDxf {
+            path,
+            sketch,
+            svg: false,
+        } => Command::ExportDxf {
             path: nonempty_path(path)?,
             sketch: need(sketch, "sketch")?,
+        },
+        Dialog::ExportDxf {
+            path,
+            sketch,
+            svg: true,
+        } => Command::ExportSvg {
+            path: nonempty_path(path)?,
+            sketch: need(sketch, "sketch")?,
+        },
+        Dialog::Export3mf {
+            path,
+            chord,
+            scope,
+            unit,
+        } => Command::Export3mf {
+            path: nonempty_path(path)?,
+            chord: Some(parse_num("chord", chord)?),
+            bodies: scope.bodies(),
+            unit: Some(*unit),
         },
         Dialog::Import(form) => form.command()?,
         Dialog::Pattern {

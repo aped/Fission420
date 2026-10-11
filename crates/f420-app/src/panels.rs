@@ -151,6 +151,45 @@ impl F420App {
                     self.dialog = Some(Dialog::ExportDxf {
                         path: self.default_path("dxf"),
                         sketch,
+                        svg: false,
+                    });
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        open && has_sketch,
+                        egui::Button::new("Export SVG (sketch)…"),
+                    )
+                    .probe("Export SVG (sketch)…")
+                    .on_disabled_hover_text("Needs a sketch")
+                    .clicked()
+                {
+                    let sketch = self
+                        .selected
+                        .filter(|id| {
+                            self.summary
+                                .features
+                                .iter()
+                                .any(|f| f.id == *id && f.kind == "sketch")
+                        })
+                        .or_else(|| self.unused_sketch());
+                    self.dialog = Some(Dialog::ExportDxf {
+                        path: self.default_path("svg"),
+                        sketch,
+                        svg: true,
+                    });
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(open, egui::Button::new("Export 3MF…"))
+                    .probe("Export 3MF…")
+                    .clicked()
+                {
+                    self.dialog = Some(Dialog::Export3mf {
+                        path: self.default_path("3mf"),
+                        chord: "0.01".into(),
+                        scope: self.default_export_scope(),
+                        unit: f420_exchange::threemf::ThreeMfUnit::Millimeter,
                     });
                     ui.close();
                 }
@@ -1338,8 +1377,27 @@ impl F420App {
                         });
                         ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances cut the same target. Count and spacing stay editable parameters.");
                     }
-                    Dialog::ExportDxf { path, sketch } => {
-                        ok_allowed &= self.export_dxf_ui(ui, path, sketch);
+                    Dialog::ExportDxf { path, sketch, svg } => {
+                        ok_allowed &= self.export_dxf_ui(ui, path, sketch, *svg);
+                    }
+                    Dialog::Export3mf {
+                        path,
+                        chord,
+                        scope,
+                        unit,
+                    } => {
+                        use f420_exchange::threemf::ThreeMfUnit as U;
+                        text_field(ui, "3MF path", path);
+                        num_field(ui, "3MF chord tolerance (mm)", chord);
+                        egui::ComboBox::from_label("3MF file unit")
+                            .selected_text(format!("{unit:?}"))
+                            .show_ui(ui, |ui| {
+                                for u in [U::Millimeter, U::Centimeter, U::Meter, U::Inch, U::Foot, U::Micron] {
+                                    ui.selectable_value(unit, u, format!("{u:?}"));
+                                }
+                            });
+                        ui.small("Each body is one mesh object (B-rep bodies tessellated at the chord tolerance, watertightness checked; mesh bodies as imported). Coordinates are written in the chosen unit; no materials or colours.");
+                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
                     }
                     Dialog::Import(form) => {
                         ok_allowed &= self.import_form_ui(ui, form);
