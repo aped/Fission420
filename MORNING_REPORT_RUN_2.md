@@ -18,7 +18,9 @@ bracket) still works and still passes its tests.
   points (shared endpoints), H/V alignment (adds visible H/V constraints) and an adaptive grid;
   screen-space tolerances; constraint-respecting drags with explanations; inline dimension
   editing with units (Enter applies, Esc cancels); Horizontal / Vertical / Coincident / Tangent /
-  Equal radius; local undo; Finish = one document undo step, Cancel discards.
+  Equal radius / Equal length / Parallel / Perpendicular / Midpoint / On line (selection-based,
+  in the inspector), construction geometry (X); local undo; Finish = one document undo step,
+  Cancel discards.
   Behaviour spec: `docs/behavior/sketching.md`.
 * **Profiles**: any single closed loop of lines and arcs (or one circle) extrudes as an exact
   B-rep; open / self-intersecting / zero-length geometry is kept but refused with a reason.
@@ -42,8 +44,9 @@ bracket) still works and still passes its tests.
   (3) measured kernel hardening: exact post-boolean edges (above), plus a preserved
   fragile-boolean regression case (the corner Ø6.5 + centred Ø20 sequence still needs the retry
   path; a test fails on purpose if a Truck upgrade changes that).
-* **Also added**: Delete feature (dependency-checked, one undo step, Del), Midpoint constraint,
-  README.
+* **Also added**: Delete feature (dependency-checked, one undo step, Del); Parallel,
+  Perpendicular, Equal length, Midpoint and On-line constraints; construction (reference)
+  geometry; README.
 * **Evidence of real-window behaviour**: the desktop session was locked all night
   (`loginctl … LockedHint=yes`), so all window evidence comes from a *private headless GNOME
   compositor* (`mutter --headless`) running the real release binary, with **real Wayland
@@ -91,6 +94,8 @@ compositor with real Wayland input (`tools/live/*.txt`, assertions on the app's 
 | C.5 | unsaved changes on close; failed save path; focus blocks shortcuts | PASS (UI; Live window-close via Alt+F4 → confirm) | |
 | S1 | blind circular pocket, depth vs through-all, volume/closed/STEP | PASS (UI, Headless, Ext) | `blind_pocket_through_cut_dialog`; pocket STEP err 3.5e-7 |
 | S2 | three-point arcs, minimum constraints, profile validation | PASS (unit, UI, Live, Headless, Ext) | `three_point_arc_*`; acceptance R.1–R.7; R STEP err ≤ 1.4e-6 |
+| extra | Parallel / Perpendicular / Equal length / On line / Midpoint, construction geometry | PASS (unit, UI, Live) | `crates/f420-sketch` tests (83), `sketch_edit.rs` tests, `tools/live/f_constraints.txt` |
+| extra | delete feature | PASS (command, UI, Live) | `crates/f420-commands/tests/commands.rs`, `delete_feature_from_browser_and_keyboard`, `tools/live/e_pocket_rename_delete.txt` |
 | S3 | measured kernel hardening | PASS | `docs/adr/0002-exact-boolean-edges.md`, `docs/behavior/timings.md`; kernel tests incl. fragile-boolean regression; acceptance 440/0; FreeCAD 8/8 |
 | run 1 | GOAL.md acceptance, plate/bracket examples, revolve, placement | PASS | `cargo xtask check`, `ui_workflow.rs`, `placement.rs` |
 
@@ -157,20 +162,27 @@ binaries refuse).
 
 ## 6. Screenshots (capture method)
 
-All "after" images are F12 captures from the real release binary in a private headless mutter
-(virtual monitor 1280×800 unless noted), driven by real compositor input.
+`docs/screenshots/` (committed, JPEG). "Before" is the run-1 app on the real desktop at the start
+of the run. Every "after" image is an in-app F12 capture of the real release binary in a private
+headless mutter (virtual monitor 1280×800 unless noted), driven by real compositor input.
 
 | image | shows |
 |---|---|
-| `artifacts/run2/before_empty.png`, `before_demo.png` | run-1 UI at the start (real desktop, before the lock) |
-| `artifacts/run2/live_a/shots/shot_008.png` | active sketch with dimensions, inline editor |
-| `artifacts/run2/live_a/shots/shot_011.png` | selected top face with semantic description |
-| `artifacts/run2/live_a/shots/shot_014.png` | plate with hole, selected sketch's dimensions in 3D |
-| `artifacts/run2/live_a/shots/shot_016.png` | pending regeneration indicator (last valid model shown) |
-| `artifacts/run2/live_a/shots/shot_022.png` | unsaved-changes guard on window close |
-| `artifacts/run2/live_a/shots/shot_032.png` | recoverable error: redundant dimension rejected with culprits |
-| `artifacts/run2/live_auto/d_three_point_arc/shots/shot_001.png` | three-point arc with radius dimension |
-| `artifacts/run2/live_big/shots/shot_003.png` | 1920×1080 at 1.2× UI zoom |
+| `00-before-run1.jpg` | run-1 UI at the start of the night |
+| `01-sketch-dimensions.jpg` | active sketch: centred rectangle, 80/50 mm dimensions, inline editor |
+| `02-face-selected.jpg` | top face selected: highlight + semantic description, Create Sketch enabled |
+| `03-plate-hole-dims-3d.jpg` | plate with hole; selected sketch's dimensions editable in 3D |
+| `04-pending-regeneration.jpg` | pending regeneration: last valid model shown, measurements marked pending (before the kernel speed-up) |
+| `05-rejected-redundant-dimension.jpg` | recoverable error: redundant dimension rejected, culprits named |
+| `06-unsaved-changes.jpg` | window close with unsaved changes |
+| `07-three-point-arc.jpg` | three-point arc with radius dimension |
+| `08-1920x1080-zoom.jpg` | 1920×1080 at 1.2× UI zoom (v1 example file opened) |
+| `09-constraints-inspector.jpg` | Parallel + Equal length glyphs, construction line, constrain-selection grid |
+| `10-blind-pocket.jpg` | blind pocket selected (floor + wall highlighted), depth parameter |
+| `11-arc-d-shape-extruded.jpg` | line + arc profile extruded |
+
+All raw captures (≈80 PNGs) with the scripts and logs that produced them are under
+`artifacts/run2/` (untracked, per repository rules).
 
 ## 7. Timings (method: release build, this machine)
 
@@ -212,8 +224,21 @@ All "after" images are F12 captures from the real release binary in a private he
 
 ## 10. Next three improvements (by practical value) and open decisions
 
-1. **TBD**
-2. **TBD**
-3. **TBD**
+1. **Semantic references beyond extrusion caps** (side faces keyed by the generating sketch
+   edge, cut walls/floors), with cuts in any direction. The kernel already cuts from a side face
+   exactly (kernel test); the document's product limit and face resolution are what stop it.
+   This needs a small topological-naming design (ADR) to stay honest about broken references.
+2. **Verify on a physical display** and, if needed, harden frame pacing: run
+   `tools/live_walkthrough.sh` on the unlocked desktop (or click through §5) and watch for UI
+   that only updates on mouse movement (egui #8326). If it appears, consider a timed repaint
+   fallback while work is pending.
+3. **More modelling**: multiple bodies / joins, linear patterns of holes, fillets on sketch
+   corners (sketch-level arcs already exist), and non-circular cuts and pockets.
 
-Decisions for you: **TBD**
+Decisions for you:
+* Commit screenshots in-repo (now ~1.2 MB of JPEG under `docs/screenshots/`) or keep only
+  `artifacts/`?
+* Keep run-1 template dialogs (Templates menu) now that the editor covers them?
+* Persist undo history in files (still not done by design)?
+* Patch/vendor Truck (boolean fragility, STEP surfaces as B-splines)? Not needed for tonight's
+  fixes; exact edge rebuilds live in the adapter (ADR 0002).
