@@ -18,8 +18,8 @@ pub use io::{
 };
 pub use model::*;
 pub use regen::{
-    BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FeatureResult, MeshBody, RegenCache,
-    ResolvedFace, regenerate, regenerate_cached, regenerate_cached_opts,
+    BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FaceCandidate, FeatureResult,
+    MeshBody, RegenCache, ResolvedFace, regenerate, regenerate_cached, regenerate_cached_opts,
 };
 pub use session::{Model, ParamChange};
 

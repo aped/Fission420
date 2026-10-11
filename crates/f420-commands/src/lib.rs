@@ -9,8 +9,8 @@ pub mod scenarios;
 pub mod sketches;
 
 use f420_document::{
-    DocError, Document, FaceRef, FaceRole, FeatureId, FeatureKind, Model, SketchPlane, load_file,
-    save_file, write_atomic,
+    BodyGeometry, BodyId, BodySource, DocError, Document, Extent, FaceCandidate, FaceRef, FaceRole,
+    FeatureId, FeatureKind, Model, Operation, SketchPlane, load_file, save_file, write_atomic,
 };
 use f420_kernel::{self as k, Frame, Measurements, MeshCheck};
 use f420_sketch::{Sketch, SolveStatus};
@@ -53,11 +53,26 @@ pub enum Command {
         #[serde(flatten)]
         template: SketchTemplate,
     },
+    /// Extrude a sketch profile (ADR 0003): a new body (default), or joined to /
+    /// cut from `target` (default: the only body, else required). `through_all`
+    /// (Cut only) ignores `distance`. `reverse` extrudes against the sketch normal.
     Extrude {
         #[serde(default)]
         name: Option<String>,
         sketch: FeatureId,
+        #[serde(default)]
         distance: f64,
+        #[serde(default, skip_serializing_if = "ExtrudeOp::is_new_body")]
+        op: ExtrudeOp,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<BodyId>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_all: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        /// New body: its name (default "BodyN").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
     },
     /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
     Revolve {
@@ -94,6 +109,55 @@ pub enum Command {
         feature: FeatureId,
         name: String,
     },
+    RenameBody {
+        body: BodyId,
+        name: String,
+    },
+    SetBodyVisible {
+        body: BodyId,
+        visible: bool,
+    },
+    /// Re-attach a sketch to another plane or face (repair of a broken face
+    /// reference; one undo step). The sketch's local geometry is kept.
+    SetSketchPlane {
+        feature: FeatureId,
+        plane: SketchPlane,
+    },
+    /// Import exact solids from a STEP file as new bodies (one per solid). The
+    /// file is embedded in the document. `units_to_mm` is used only when the
+    /// file declares no length unit.
+    ImportStep {
+        path: PathBuf,
+        #[serde(default)]
+        units_to_mm: Option<f64>,
+    },
+    /// Import an STL file as a mesh body (display/export only). STL is unitless:
+    /// `units_to_mm` (mm per file unit) is required.
+    ImportStl {
+        path: PathBuf,
+        #[serde(default)]
+        units_to_mm: Option<f64>,
+    },
+    /// Import the 2D geometry of a DXF file as a new (unconstrained) sketch on
+    /// `plane`. `units_to_mm` is used only when the file declares no unit.
+    ImportDxf {
+        path: PathBuf,
+        plane: SketchPlane,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        units_to_mm: Option<f64>,
+        /// Skip unsupported entities (reported) instead of refusing the file.
+        #[serde(default)]
+        allow_partial: bool,
+        #[serde(default)]
+        layers: Option<Vec<String>>,
+    },
+    /// Write a sketch's lines/arcs/circles as an R12 ASCII DXF (mm).
+    ExportDxf {
+        path: PathBuf,
+        sketch: FeatureId,
+    },
     /// Remove a feature that nothing depends on (one undoable step). Refused
     /// with the dependent features named otherwise.
     DeleteFeature {
@@ -108,21 +172,41 @@ pub enum Command {
         path: PathBuf,
     },
     Close,
+    /// Binary STL of `bodies` (default: all visible bodies). B-rep bodies are
+    /// tessellated (watertightness checked); mesh bodies are written as imported.
     ExportStl {
         path: PathBuf,
         #[serde(default)]
         chord: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bodies: Option<Vec<BodyId>>,
     },
-    /// STEP (AP214 via truck-stepio) of the exact B-rep. Refused for geometry the
-    /// exporter cannot write exactly (see f420_kernel::export_step).
+    /// STEP (AP214 via truck-stepio) of the exact B-rep `bodies` (default: all
+    /// visible B-rep bodies), one solid per body. Mesh bodies are refused.
     ExportStep {
         path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bodies: Option<Vec<BodyId>>,
     },
     Measure,
     Inspect,
 }
 
 impl Command {
+    /// A new-body distance extrusion (the common case).
+    pub fn extrude(name: Option<String>, sketch: FeatureId, distance: f64) -> Self {
+        Command::Extrude {
+            name,
+            sketch,
+            distance,
+            op: ExtrudeOp::NewBody,
+            target: None,
+            through_all: false,
+            reverse: false,
+            body_name: None,
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Command::NewDocument => "new_document",
@@ -134,6 +218,13 @@ impl Command {
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
+            Command::RenameBody { .. } => "rename_body",
+            Command::SetBodyVisible { .. } => "set_body_visible",
+            Command::SetSketchPlane { .. } => "set_sketch_plane",
+            Command::ImportStep { .. } => "import_step",
+            Command::ImportStl { .. } => "import_stl",
+            Command::ImportDxf { .. } => "import_dxf",
+            Command::ExportDxf { .. } => "export_dxf",
             Command::DeleteFeature { .. } => "delete_feature",
             Command::Undo => "undo",
             Command::Redo => "redo",
@@ -146,6 +237,41 @@ impl Command {
             Command::Inspect => "inspect",
         }
     }
+}
+
+/// What an extrusion does with its tool body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtrudeOp {
+    #[default]
+    NewBody,
+    Join,
+    Cut,
+}
+
+impl ExtrudeOp {
+    fn is_new_body(&self) -> bool {
+        *self == ExtrudeOp::NewBody
+    }
+}
+
+/// Inspectable per-body state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BodySummary {
+    pub id: BodyId,
+    pub name: String,
+    pub visible: bool,
+    /// "brep" (exact solid) or "mesh" (triangle mesh, STL import).
+    pub kind: String,
+    pub source: BodySource,
+    pub created_by: FeatureId,
+    pub last_feature: FeatureId,
+    /// Exact B-rep measurements (None: deferred or a mesh body).
+    #[serde(default)]
+    pub measurements: Option<Measurements>,
+    /// Mesh bodies: diagnostics (closed, boundary edges, volume if closed...).
+    #[serde(default)]
+    pub mesh: Option<f420_document::import::MeshDiagnostics>,
 }
 
 /// Inspectable per-feature state.
@@ -170,9 +296,25 @@ pub struct FeatureSummary {
     /// Sketches: why this is not a usable closed profile, if it is not.
     #[serde(default)]
     pub profile_error: Option<String>,
-    /// Extrusions: semantic faces that can host a sketch, with their frames.
+    /// Extrusions/imports: semantic faces that can host a sketch, with their frames.
     #[serde(default)]
     pub faces: Vec<FaceSummary>,
+    /// Extrusions: operation, extent, direction.
+    #[serde(default)]
+    pub operation: Option<Operation>,
+    #[serde(default)]
+    pub extent: Option<Extent>,
+    #[serde(default)]
+    pub reverse: bool,
+    /// Body created or modified by this feature.
+    #[serde(default)]
+    pub body: Option<BodyId>,
+    /// Bodies created by this feature.
+    #[serde(default)]
+    pub creates: Vec<BodyId>,
+    /// Imports: units, counts, warnings.
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 /// A semantically referenceable face and its current placement frame.
@@ -180,6 +322,8 @@ pub struct FeatureSummary {
 pub struct FaceSummary {
     pub reference: FaceRef,
     pub frame: Frame,
+    #[serde(default)]
+    pub body: BodyId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,6 +343,9 @@ pub struct DocSummary {
     pub can_undo: Option<String>,
     pub can_redo: Option<String>,
     pub features: Vec<FeatureSummary>,
+    /// Bodies in creation order.
+    #[serde(default)]
+    pub bodies: Vec<BodySummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -228,6 +375,9 @@ pub struct Response {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<f64>,
 }
+
+/// `(doc_id, revision, [(body, deep copy)])` awaiting measurement.
+pub type PendingMeasurement = (u64, u64, Vec<(BodyId, f420_kernel::Body)>);
 
 /// An application session: at most one open document.
 pub struct Session {
@@ -271,16 +421,22 @@ impl Session {
         }
     }
 
-    /// Body awaiting deferred measurement: `(doc_id, revision, body)`. The body
-    /// is a deep copy (Truck bodies share geometry behind mutexes, so a shallow
-    /// clone measured on another thread races with this session's own use).
-    pub fn pending_measurement(&self) -> Option<(u64, u64, f420_kernel::Body)> {
+    /// Bodies awaiting deferred measurement: `(doc_id, revision, bodies)`. The
+    /// bodies are deep copies (Truck bodies share geometry behind mutexes, so a
+    /// shallow clone measured on another thread races with this session's own use).
+    pub fn pending_measurement(&self) -> Option<PendingMeasurement> {
         let m = self.model.as_ref()?;
         if !m.measurements_pending() {
             return None;
         }
-        let body = m.evaluation().body.as_ref()?.deep_copy().ok()?;
-        Some((self.doc_id, m.revision, body))
+        let bodies = m
+            .evaluation()
+            .unmeasured()
+            .into_iter()
+            .map(|(id, b)| b.deep_copy().map(|b| (id, b)))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        Some((self.doc_id, m.revision, bodies))
     }
 
     /// The deferred measurement of `revision` failed: stop reporting it as
@@ -295,7 +451,12 @@ impl Session {
 
     /// Install out-of-band measurements if they still describe the current
     /// document revision. Returns true when adopted.
-    pub fn adopt_measurements(&mut self, doc_id: u64, revision: u64, m: Measurements) -> bool {
+    pub fn adopt_measurements(
+        &mut self,
+        doc_id: u64,
+        revision: u64,
+        m: Vec<(BodyId, Measurements)>,
+    ) -> bool {
         doc_id == self.doc_id
             && self
                 .model
@@ -401,16 +562,72 @@ impl Session {
                 name,
                 sketch,
                 distance,
+                op,
+                target,
+                through_all,
+                reverse,
+                body_name,
             } => {
-                let (name, sketch, distance) = (name.clone(), *sketch, *distance);
-                if !distance.is_finite() || distance <= 0.0 {
-                    return Err(DocError::Validation(format!(
-                        "extrusion thickness must be > 0 mm, got {distance}"
-                    )));
-                }
-                let id = self.model_mut()?.transact("Extrude", |d| {
+                let (name, sketch, distance, reverse) =
+                    (name.clone(), *sketch, *distance, *reverse);
+                let extent = if *through_all {
+                    if *op != ExtrudeOp::Cut {
+                        return Err(DocError::Validation(
+                            "'through all' is only available for Cut".into(),
+                        ));
+                    }
+                    Extent::ThroughAll
+                } else {
+                    if !distance.is_finite() || distance <= 0.0 {
+                        return Err(DocError::Validation(format!(
+                            "extrusion distance must be > 0 mm, got {distance}"
+                        )));
+                    }
+                    Extent::Distance
+                };
+                let m = self.model_mut()?;
+                let target = match op {
+                    ExtrudeOp::NewBody => None,
+                    _ => Some(match target {
+                        Some(t) => *t,
+                        None => default_target(m, sketch)?,
+                    }),
+                };
+                let body_name = body_name.clone();
+                let id = m.transact("Extrude", |d| {
+                    let operation = match (op, target) {
+                        (ExtrudeOp::Join, Some(target)) => Operation::Join { target },
+                        (ExtrudeOp::Cut, Some(target)) => Operation::Cut { target },
+                        _ => {
+                            let n = match &body_name {
+                                Some(n) => valid_name(n, "body")?,
+                                None => d.default_body_name(),
+                            };
+                            if d.bodies.iter().any(|b| b.name == n) {
+                                return Err(DocError::Validation(format!(
+                                    "another body is already named '{n}'"
+                                )));
+                            }
+                            Operation::NewBody {
+                                body: d.add_body(n),
+                            }
+                        }
+                    };
                     let n = name.unwrap_or_else(|| d.default_name("Extrude"));
-                    Ok(d.push(n, FeatureKind::Extrude { sketch, distance }))
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Extrude {
+                            sketch,
+                            distance: if extent == Extent::ThroughAll {
+                                0.0
+                            } else {
+                                distance
+                            },
+                            operation,
+                            extent,
+                            reverse,
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }
@@ -426,12 +643,14 @@ impl Session {
                     )));
                 }
                 let id = self.model_mut()?.transact("Revolve", |d| {
+                    let body = d.add_body(d.default_body_name());
                     let n = name.unwrap_or_else(|| d.default_name("Revolve"));
                     Ok(d.push(
                         n,
                         FeatureKind::Revolve {
                             sketch,
                             angle: a.to_radians(),
+                            body,
                         },
                     ))
                 })?;
@@ -439,13 +658,16 @@ impl Session {
             }
             Command::CutThroughAll { name, sketch } => {
                 let (name, sketch) = (name.clone(), *sketch);
-                let id = self.model_mut()?.transact("Cut", |d| {
+                let m = self.model_mut()?;
+                let target = default_target(m, sketch)?;
+                let id = m.transact("Cut", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Cut"));
                     Ok(d.push(
                         n,
                         FeatureKind::Cut {
                             sketch,
                             extent: f420_document::CutExtent::ThroughAll,
+                            target,
                         },
                     ))
                 })?;
@@ -462,9 +684,18 @@ impl Session {
                         "pocket depth must be > 0 mm, got {depth}"
                     )));
                 }
-                let id = self.model_mut()?.transact("Pocket", |d| {
+                let m = self.model_mut()?;
+                let target = default_target(m, sketch)?;
+                let id = m.transact("Pocket", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Pocket"));
-                    Ok(d.push(n, FeatureKind::Pocket { sketch, depth }))
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Pocket {
+                            sketch,
+                            depth,
+                            target,
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }
@@ -497,23 +728,11 @@ impl Session {
                 let m = self.model_mut()?;
                 let doc = m.document();
                 let name = doc.feature(feature)?.name.clone();
-                // A base body is used by every cut/pocket (implicitly: they cut
-                // the current body) as well as by explicit references.
-                let base = matches!(
-                    doc.feature(feature)?.kind,
-                    FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }
-                );
+                // Explicit references plus Join/Cut targets of bodies it creates.
                 let dependents: Vec<String> = doc
-                    .features
-                    .iter()
-                    .filter(|f| {
-                        f.dependencies().contains(&feature)
-                            || (base
-                                && matches!(
-                                    f.kind,
-                                    FeatureKind::Cut { .. } | FeatureKind::Pocket { .. }
-                                ))
-                    })
+                    .dependents_of(feature)
+                    .into_iter()
+                    .filter_map(|id| doc.feature(id).ok())
                     .map(|f| format!("{} {}", f.id, f.name))
                     .collect();
                 if !dependents.is_empty() {
@@ -524,9 +743,201 @@ impl Session {
                 }
                 m.transact(&format!("Delete {name}"), |d| {
                     d.features.retain(|f| f.id != feature);
+                    d.prune_bodies();
+                    d.prune_blobs();
                     Ok(())
                 })?;
                 r.message = Some(format!("deleted {feature} {name}"));
+            }
+            Command::RenameBody { body, name } => {
+                let (body, name) = (*body, valid_name(name, "body")?);
+                let m = self.model_mut()?;
+                if m.document()
+                    .bodies
+                    .iter()
+                    .any(|b| b.id != body && b.name == name)
+                {
+                    return Err(DocError::Validation(format!(
+                        "another body is already named '{name}'"
+                    )));
+                }
+                let old = m.document().body(body)?.name.clone();
+                m.transact(&format!("Rename {old} to {name}"), |d| {
+                    d.body_mut(body)?.name = name.clone();
+                    Ok(())
+                })?;
+            }
+            Command::SetBodyVisible { body, visible } => {
+                let (body, visible) = (*body, *visible);
+                let m = self.model_mut()?;
+                let name = m.document().body(body)?.name.clone();
+                m.transact(
+                    &format!("{} {name}", if visible { "Show" } else { "Hide" }),
+                    |d| {
+                        d.body_mut(body)?.visible = visible;
+                        Ok(())
+                    },
+                )?;
+            }
+            Command::SetSketchPlane { feature, plane } => {
+                let (feature, plane) = (*feature, *plane);
+                let m = self.model_mut()?;
+                let name = m.document().feature(feature)?.name.clone();
+                m.transact(&format!("Re-attach {name}"), |d| {
+                    match &mut d.feature_mut(feature)?.kind {
+                        FeatureKind::Sketch { plane: p, .. } => {
+                            *p = plane;
+                            Ok(())
+                        }
+                        _ => Err(DocError::Validation(format!("{feature} is not a sketch"))),
+                    }
+                })?;
+                r.feature = Some(feature);
+            }
+            Command::ImportStep { path, units_to_mm } => {
+                let bytes = read_import(path)?;
+                let unit = *units_to_mm;
+                // Parse once up front for body names and an early, precise error.
+                let imp = f420_document::import::step(&bytes, unit)?;
+                if imp.solids.is_empty() {
+                    return Err(DocError::Validation(format!(
+                        "{}: no solids found",
+                        path.display()
+                    )));
+                }
+                let names: Vec<Option<String>> =
+                    imp.solids.iter().map(|s| s.name.clone()).collect();
+                let file = file_name(path);
+                let stem = file_stem(path);
+                let notes = imp.notes;
+                let id = self.model_mut()?.transact(&format!("Import {file}"), |d| {
+                    let blob = d.add_blob(&file, &bytes);
+                    let mut bodies = Vec::new();
+                    for (i, n) in names.iter().enumerate() {
+                        let base = n
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|n| !n.is_empty())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| {
+                                if names.len() == 1 {
+                                    stem.clone()
+                                } else {
+                                    format!("{stem}-{}", i + 1)
+                                }
+                            });
+                        let name = unique_body_name(d, &base);
+                        bodies.push(d.add_body(name));
+                    }
+                    let n = d.default_name("Import");
+                    Ok(d.push(
+                        n,
+                        FeatureKind::ImportStep {
+                            blob,
+                            unit_override_to_mm: unit,
+                            bodies,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+                r.message = Some(notes.join("; "));
+            }
+            Command::ImportStl { path, units_to_mm } => {
+                let to_mm = units_to_mm.ok_or_else(|| {
+                    DocError::Validation(
+                        "STL files have no units: choose the file unit (units_to_mm, e.g. 1 for \
+                         mm, 25.4 for inches)"
+                            .into(),
+                    )
+                })?;
+                if !to_mm.is_finite() || to_mm <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "units_to_mm must be > 0, got {to_mm}"
+                    )));
+                }
+                let bytes = read_import(path)?;
+                let (_, notes) = f420_document::import::stl(&bytes, to_mm)?;
+                let file = file_name(path);
+                let stem = file_stem(path);
+                let id = self.model_mut()?.transact(&format!("Import {file}"), |d| {
+                    let blob = d.add_blob(&file, &bytes);
+                    let body = d.add_body(unique_body_name(d, &stem));
+                    let n = d.default_name("Import");
+                    Ok(d.push(n, FeatureKind::ImportMesh { blob, to_mm, body }))
+                })?;
+                r.feature = Some(id);
+                r.message = Some(notes.join("; "));
+            }
+            Command::ImportDxf {
+                path,
+                plane,
+                name,
+                units_to_mm,
+                allow_partial,
+                layers,
+            } => {
+                let bytes = read_import(path)?;
+                let opts = f420_exchange::dxf::DxfImportOptions {
+                    layers: layers.clone(),
+                    allow_partial: *allow_partial,
+                    unit_override_to_mm: *units_to_mm,
+                    ..Default::default()
+                };
+                let imp = f420_exchange::dxf::import(&bytes, &opts)
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                let mut notes = vec![format!(
+                    "units: {} ({} mm per unit, {})",
+                    imp.units.name,
+                    imp.units.to_mm,
+                    if imp.units.declared {
+                        "declared in file"
+                    } else {
+                        "chosen at import"
+                    }
+                )];
+                notes.push(format!(
+                    "imported {}",
+                    imp.imported
+                        .iter()
+                        .map(|c| format!("{} x{}", c.entity_type, c.count))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                for sk in &imp.skipped {
+                    notes.push(format!(
+                        "skipped {} x{} ({})",
+                        sk.entity_type, sk.count, sk.reason
+                    ));
+                }
+                notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
+                let (plane, name, sketch) = (*plane, name.clone(), imp.sketch);
+                let stem = file_stem(path);
+                let id = self
+                    .model_mut()?
+                    .transact(&format!("Import {stem}.dxf"), |d| {
+                        let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
+                        Ok(d.push(n, FeatureKind::Sketch { plane, sketch }))
+                    })?;
+                r.feature = Some(id);
+                r.message = Some(notes.join("; "));
+            }
+            Command::ExportDxf { path, sketch } => {
+                let m = self.model_mut()?;
+                let solved = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == *sketch)
+                    .and_then(|f| f.solved_sketch.clone())
+                    .ok_or_else(|| DocError::Validation(format!("{sketch} is not a sketch")))?;
+                let text = f420_exchange::dxf::export(&solved, &Default::default())
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                write_atomic(path, text.as_bytes())?;
+                r.message = Some(format!(
+                    "wrote {} ({} bytes, R12 ASCII, mm)",
+                    path.display(),
+                    text.len()
+                ));
             }
             Command::RenameFeature { feature, name } => {
                 let (feature, name) = (*feature, name.trim().to_string());
@@ -583,44 +994,91 @@ impl Session {
                 self.path = None;
                 self.doc_id += 1;
             }
-            Command::ExportStl { path, chord } => {
+            Command::ExportStl {
+                path,
+                chord,
+                bodies,
+            } => {
                 let chord = chord.unwrap_or(k::tol::MESH_CHORD);
                 let m = self.model_mut()?;
-                let body = m.evaluation().body.as_ref().ok_or(DocError::Validation(
-                    "document has no solid body to export".into(),
-                ))?;
-                let mesh =
-                    k::tessellate(body, chord).map_err(|e| DocError::Validation(e.to_string()))?;
-                let check = k::check_mesh(&mesh);
-                if !check.watertight {
-                    r.mesh_check = Some(check);
-                    return Err(DocError::Validation(
-                        "tessellation is not watertight; STL not written".into(),
-                    ));
+                let ev = m.evaluation();
+                let ids = export_selection(m, bodies.as_deref())?;
+                let mut all = k::TriMesh {
+                    positions: vec![],
+                    normals: vec![],
+                    triangles: vec![],
+                    tri_face: vec![],
+                    chord_tolerance: chord,
+                };
+                let mut checks = Vec::new();
+                for id in &ids {
+                    let b = ev.body_by_id(*id).expect("selection checked");
+                    let mesh = match &b.geometry {
+                        BodyGeometry::Brep(body) => {
+                            let mesh = k::tessellate(body, chord)
+                                .map_err(|e| DocError::Validation(e.to_string()))?;
+                            let check = k::check_mesh(&mesh);
+                            if !check.watertight {
+                                r.mesh_check = Some(check);
+                                return Err(DocError::Validation(format!(
+                                    "tessellation of {} is not watertight; STL not written",
+                                    b.name
+                                )));
+                            }
+                            checks.push(check);
+                            mesh
+                        }
+                        BodyGeometry::Mesh(mb) => mb.mesh.clone(),
+                    };
+                    let base = all.positions.len() as u32;
+                    all.positions.extend(&mesh.positions);
+                    all.normals.extend(&mesh.normals);
+                    all.triangles.extend(
+                        mesh.triangles
+                            .iter()
+                            .map(|t| [t[0] + base, t[1] + base, t[2] + base]),
+                    );
+                    all.tri_face.extend(&mesh.tri_face);
                 }
-                let bytes = k::write_stl_binary(&mesh, "body");
+                let bytes = k::write_stl_binary(&all, "Fission420");
                 write_atomic(path, &bytes)?;
-                r.mesh_check = Some(check);
-                r.measurements = m.evaluation().measurements.clone();
+                if ids.len() == 1 {
+                    r.mesh_check = checks.pop();
+                }
+                r.measurements = ev.measurements.clone();
                 r.message = Some(format!(
-                    "wrote {} ({} triangles, chord {chord} mm) from committed revision {}",
+                    "wrote {} ({} triangles, {} bod{}, chord {chord} mm) from committed revision {}",
                     path.display(),
-                    mesh.triangles.len(),
+                    all.triangles.len(),
+                    ids.len(),
+                    if ids.len() == 1 { "y" } else { "ies" },
                     m.revision
                 ));
             }
-            Command::ExportStep { path } => {
+            Command::ExportStep { path, bodies } => {
                 let m = self.model_mut()?;
-                let body = m.evaluation().body.as_ref().ok_or(DocError::Validation(
-                    "document has no solid body to export".into(),
-                ))?;
-                let text = k::export_step(body, "Fission420")
+                let ev = m.evaluation();
+                let ids = export_selection(m, bodies.as_deref())?;
+                let mut named = Vec::new();
+                for id in &ids {
+                    let b = ev.body_by_id(*id).expect("selection checked");
+                    let body = b.geometry.brep().ok_or_else(|| {
+                        DocError::Validation(format!(
+                            "{} is a mesh (STL) body; STEP export needs exact B-rep bodies",
+                            b.name
+                        ))
+                    })?;
+                    named.push((b.name.as_str(), body));
+                }
+                let text = k::export_step_bodies(&named, "Fission420")
                     .map_err(|e| DocError::Validation(e.to_string()))?;
                 write_atomic(path, text.as_bytes())?;
                 r.message = Some(format!(
-                    "wrote {} ({} bytes) from committed revision {}",
+                    "wrote {} ({} bytes, {} solid{}) from committed revision {}",
                     path.display(),
                     text.len(),
+                    ids.len(),
+                    if ids.len() == 1 { "" } else { "s" },
                     m.revision
                 ));
             }
@@ -647,6 +1105,7 @@ impl Session {
                 can_undo: None,
                 can_redo: None,
                 features: vec![],
+                bodies: vec![],
             };
         };
         DocSummary {
@@ -659,28 +1118,60 @@ impl Session {
             can_undo: m.undo_label().map(Into::into),
             can_redo: m.redo_label().map(Into::into),
             features: summarize(m.document(), m),
+            bodies: m
+                .evaluation()
+                .bodies
+                .iter()
+                .map(|b| BodySummary {
+                    id: b.id,
+                    name: b.name.clone(),
+                    visible: b.visible,
+                    kind: match b.geometry {
+                        BodyGeometry::Brep(_) => "brep",
+                        BodyGeometry::Mesh(_) => "mesh",
+                    }
+                    .into(),
+                    source: b.source.clone(),
+                    created_by: b.created_by,
+                    last_feature: b.last_feature,
+                    measurements: b.measurements.clone(),
+                    mesh: b.geometry.mesh().map(|mb| mb.diagnostics.clone()),
+                })
+                .collect(),
         }
     }
 }
 
 fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
+    let ev = m.evaluation();
     doc.features
         .iter()
         .map(|f| {
-            let res = m.evaluation().features.iter().find(|r| r.id == f.id);
+            let res = ev.features.iter().find(|r| r.id == f.id);
             let (kind, plane) = match &f.kind {
                 FeatureKind::Sketch { plane, .. } => ("sketch", Some(*plane)),
                 FeatureKind::Extrude { .. } => ("extrude", None),
                 FeatureKind::Revolve { .. } => ("revolve", None),
                 FeatureKind::Cut { .. } => ("cut_through_all", None),
                 FeatureKind::Pocket { .. } => ("pocket", None),
+                FeatureKind::ImportStep { .. } => ("import_step", None),
+                FeatureKind::ImportMesh { .. } => ("import_mesh", None),
+            };
+            let (operation, extent, reverse) = match &f.kind {
+                FeatureKind::Extrude {
+                    operation,
+                    extent,
+                    reverse,
+                    ..
+                } => (Some(*operation), Some(*extent), *reverse),
+                _ => (None, None, false),
             };
             FeatureSummary {
                 id: f.id,
                 name: f.name.clone(),
                 kind: kind.into(),
                 parameters: f.parameters(),
-                depends_on: f.dependencies(),
+                depends_on: doc.dependencies_of(f),
                 plane,
                 solve_status: res.and_then(|r| r.solve.as_ref()).map(|s| s.status),
                 solve_dof: res.and_then(|r| r.solve.as_ref()).map(|s| s.dof),
@@ -696,52 +1187,141 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 },
                 sketch: res.and_then(|r| r.solved_sketch.clone()),
                 profile_error: res.and_then(|r| r.profile_error.clone()),
-                faces: extrude_faces(doc, m, f),
+                faces: ev
+                    .faces
+                    .iter()
+                    .filter(|c| c.reference.feature == f.id)
+                    .map(face_summary)
+                    .collect(),
+                operation,
+                extent,
+                reverse,
+                body: res.and_then(|r| r.body),
+                creates: f.created_bodies(),
+                notes: res.map(|r| r.notes.clone()).unwrap_or_default(),
             }
         })
         .collect()
 }
 
-/// End/start cap frames of an evaluated extrusion (same derivation as the
-/// regenerator's semantic face resolution: profile frame offset by distance).
-fn extrude_faces(doc: &Document, m: &Model, f: &f420_document::Feature) -> Vec<FaceSummary> {
-    let FeatureKind::Extrude { sketch, distance } = &f.kind else {
-        return vec![];
-    };
-    let Some(start) = m
-        .evaluation()
+fn face_summary(c: &FaceCandidate) -> FaceSummary {
+    FaceSummary {
+        reference: c.reference,
+        frame: c.frame,
+        body: c.body,
+    }
+}
+
+/// Target body for a Join/Cut when none was given: the body owning the face
+/// the sketch is on, else the only B-rep body. Never guesses among several.
+fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
+    let ev = m.evaluation();
+    if let Some(rf) = ev
         .features
         .iter()
-        .find(|r| r.id == *sketch)
-        .and_then(|r| r.frame)
-    else {
-        return vec![];
-    };
-    if doc.feature(*sketch).is_err() {
-        return vec![];
+        .find(|r| r.id == sketch)
+        .and_then(|r| r.resolved_face.as_ref())
+    {
+        return Ok(rf.body);
     }
-    let flip = Frame {
-        origin: start.origin,
-        x: start.x,
-        y: start.y.map(|c| -c),
-        z: start.z.map(|c| -c),
+    let breps: Vec<_> = ev
+        .bodies
+        .iter()
+        .filter(|b| b.geometry.brep().is_some())
+        .collect();
+    match breps.as_slice() {
+        [one] => Ok(one.id),
+        [] => Err(DocError::Validation(
+            "there is no solid body to join to or cut".into(),
+        )),
+        many => Err(DocError::Validation(format!(
+            "choose a target body ({})",
+            many.iter()
+                .map(|b| format!("{} {}", b.id, b.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+/// Bodies to export: the given ids (must exist), else every visible body.
+fn export_selection(m: &Model, ids: Option<&[BodyId]>) -> Result<Vec<BodyId>, DocError> {
+    let ev = m.evaluation();
+    let ids: Vec<BodyId> = match ids {
+        Some(ids) => {
+            for id in ids {
+                if ev.body_by_id(*id).is_none() {
+                    return Err(DocError::Validation(format!("unknown body {id}")));
+                }
+            }
+            ids.to_vec()
+        }
+        None => ev
+            .bodies
+            .iter()
+            .filter(|b| b.visible)
+            .map(|b| b.id)
+            .collect(),
     };
-    vec![
-        FaceSummary {
-            reference: FaceRef {
-                feature: f.id,
-                role: FaceRole::ExtrudeEndCap,
-            },
-            frame: start.offset(*distance),
-        },
-        FaceSummary {
-            reference: FaceRef {
-                feature: f.id,
-                role: FaceRole::ExtrudeStartCap,
-            },
-            frame: flip,
-        },
-    ]
+    if ids.is_empty() {
+        return Err(DocError::Validation(
+            "document has no (visible) body to export".into(),
+        ));
+    }
+    Ok(ids)
+}
+
+/// 1-128 printable characters, trimmed.
+fn valid_name(name: &str, what: &str) -> Result<String, DocError> {
+    let name = name.trim().to_string();
+    if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
+        return Err(DocError::Validation(format!(
+            "{what} name must be 1-128 printable characters"
+        )));
+    }
+    Ok(name)
+}
+
+fn unique_body_name(d: &Document, base: &str) -> String {
+    let base: String = base.chars().filter(|c| !c.is_control()).take(100).collect();
+    let base = if base.trim().is_empty() {
+        "Body".to_string()
+    } else {
+        base
+    };
+    if !d.bodies.iter().any(|b| b.name == base) {
+        return base;
+    }
+    (2..)
+        .map(|i| format!("{base} ({i})"))
+        .find(|n| !d.bodies.iter().any(|b| &b.name == n))
+        .unwrap_or(base)
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "import".into())
+}
+
+fn file_stem(p: &Path) -> String {
+    p.file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "import".into())
+}
+
+/// Read an import source, bounded by the native file limit (it is embedded).
+fn read_import(path: &Path) -> Result<Vec<u8>, DocError> {
+    let ferr = |e: std::io::Error| DocError::File(format!("open {}: {e}", path.display()));
+    let len = std::fs::metadata(path).map_err(ferr)?.len();
+    let max = f420_document::MAX_FILE_BYTES / 2;
+    if len > max {
+        return Err(DocError::File(format!(
+            "{}: {len} bytes exceeds the import limit of {max} bytes",
+            path.display()
+        )));
+    }
+    std::fs::read(path).map_err(ferr)
 }
 
 /// Closed loop of lines through `vertices` with shared endpoints.

@@ -209,11 +209,7 @@ pub fn scenario_a_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             plane: SketchPlane::WorldXY,
             template: SketchTemplate::Custom { sketch: base },
         }),
-        ok(Command::Extrude {
-            name: Some("Plate".into()),
-            sketch: s1,
-            distance: 10.0,
-        }),
+        ok(Command::extrude(Some("Plate".into()), s1, 10.0)),
         ok(Command::CreateSketch {
             name: Some("Hole sketch".into()),
             plane: end_cap_of(e1),
@@ -248,9 +244,11 @@ pub fn scenario_a_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::ExportStl {
             path: out.join("scenario_a.stl"),
             chord: Some(0.01),
+            bodies: None,
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_a.step"),
+            bodies: None,
         }),
         ok(Command::Inspect),
     ])
@@ -269,11 +267,7 @@ pub fn scenario_b_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             plane: SketchPlane::WorldXY,
             template: SketchTemplate::Custom { sketch: plate },
         }),
-        ok(Command::Extrude {
-            name: Some("Chamfered plate".into()),
-            sketch: s1,
-            distance: 5.0,
-        }),
+        ok(Command::extrude(Some("Chamfered plate".into()), s1, 5.0)),
         ok(Command::EditSketch {
             feature: s1,
             sketch: moved,
@@ -301,9 +295,11 @@ pub fn scenario_b_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::ExportStl {
             path: out.join("scenario_b.stl"),
             chord: Some(0.01),
+            bodies: None,
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_b.step"),
+            bodies: None,
         }),
         ok(Command::Inspect),
     ])
@@ -389,11 +385,7 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             plane: SketchPlane::WorldXY,
             template: SketchTemplate::Custom { sketch: base },
         }),
-        ok(Command::Extrude {
-            name: Some("Rounded plate".into()),
-            sketch: s1,
-            distance: t,
-        }),
+        ok(Command::extrude(Some("Rounded plate".into()), s1, t)),
         ok(Command::SetParameter {
             feature: s1,
             name: "radius".into(),
@@ -424,9 +416,11 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::ExportStl {
             path: out.join("scenario_r.stl"),
             chord: Some(0.01),
+            bodies: None,
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_r.step"),
+            bodies: None,
         }),
         ok(Command::Inspect),
         ok(Command::NewDocument),
@@ -435,17 +429,19 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             plane: SketchPlane::WorldXY,
             template: SketchTemplate::Custom { sketch: slot },
         }),
-        ok(Command::Extrude {
-            name: Some("Slot plate".into()),
-            sketch: FeatureId(1),
-            distance: st,
-        }),
+        ok(Command::extrude(
+            Some("Slot plate".into()),
+            FeatureId(1),
+            st,
+        )),
         ok(Command::ExportStl {
             path: out.join("scenario_r_slot.stl"),
             chord: Some(0.01),
+            bodies: None,
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_r_slot.step"),
+            bodies: None,
         }),
         ok(Command::NewDocument),
         ok(Command::CreateSketch {
@@ -455,11 +451,7 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
                 sketch: self_intersecting_arc_loop()?,
             },
         }),
-        fails(Command::Extrude {
-            name: None,
-            sketch: FeatureId(1),
-            distance: 5.0,
-        }),
+        fails(Command::extrude(None, FeatureId(1), 5.0)),
         ok(Command::CreateSketch {
             name: Some("Open arcs".into()),
             plane: SketchPlane::WorldXY,
@@ -467,11 +459,7 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
                 sketch: open_arc_chain()?,
             },
         }),
-        fails(Command::Extrude {
-            name: None,
-            sketch: FeatureId(2),
-            distance: 5.0,
-        }),
+        fails(Command::extrude(None, FeatureId(2), 5.0)),
         ok(Command::Inspect),
     ])
 }

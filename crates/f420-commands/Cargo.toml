@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 f420-document = { version = "0.1.0", path = "../f420-document" }
+f420-exchange = { version = "0.1.0", path = "../f420-exchange" }
 f420-kernel = { version = "0.1.0", path = "../f420-kernel" }
 f420-sketch = { version = "0.1.0", path = "../f420-sketch" }
 serde = { version = "1.0.229", features = ["derive"] }

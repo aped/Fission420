@@ -112,11 +112,7 @@ pub(super) fn scenario_r(r: &mut Run<'_>) {
         format!("{arcs_in_profile:?}"),
         arcs_in_profile == Some(8),
     );
-    let x = r.exec(Command::Extrude {
-        name: Some("Rounded plate".into()),
-        sketch: s1,
-        distance: t,
-    });
+    let x = r.exec(Command::extrude(Some("Rounded plate".into()), s1, t));
     let Some(e1) = r.ok("extrude", &x) else {
         return;
     };
@@ -245,11 +241,7 @@ pub(super) fn scenario_r(r: &mut Run<'_>) {
         return;
     };
     r.check_fully_constrained(ss, "slot");
-    let x = r.exec(Command::Extrude {
-        name: Some("Slot plate".into()),
-        sketch: ss,
-        distance: st,
-    });
+    let x = r.exec(Command::extrude(Some("Slot plate".into()), ss, st));
     let Some(es) = r.ok("extrude slot", &x) else {
         return;
     };
@@ -310,11 +302,7 @@ pub(super) fn scenario_r(r: &mut Run<'_>) {
             pe.as_deref().is_some_and(|e| e.contains(want)),
         );
         let before = r.doc_and_rev();
-        let x = r.exec(Command::Extrude {
-            name: None,
-            sketch: sid,
-            distance: 5.0,
-        });
+        let x = r.exec(Command::extrude(None, sid, 5.0));
         let detail = x.error.as_ref().map(|e| e.to_string()).unwrap_or_default();
         r.check(
             &format!("{label}: extrude rejected with a structured error"),

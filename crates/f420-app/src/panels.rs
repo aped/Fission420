@@ -7,7 +7,7 @@
 
 use eframe::egui::{self, Color32, RichText};
 use f420_commands::{Command, FeatureSummary};
-use f420_document::{FaceRole, FeatureId, SketchPlane};
+use f420_document::{FeatureId, SketchPlane};
 use f420_kernel::VolumeResult;
 use f420_sketch::SolveStatus;
 
@@ -691,10 +691,8 @@ impl F420App {
             "extrude" => {
                 ui.horizontal_wrapped(|ui| {
                     for fs in &f.faces {
-                        let label = match fs.reference.role {
-                            FaceRole::ExtrudeEndCap => "Sketch on end cap",
-                            FaceRole::ExtrudeStartCap => "Sketch on start cap",
-                        };
+                        let label =
+                            format!("Sketch on {}", crate::face_role_label(&fs.reference.role));
                         if ui.button(label).clicked() {
                             self.begin_sketch(SketchTarget::New {
                                 plane: SketchPlane::Face(fs.reference),

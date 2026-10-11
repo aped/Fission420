@@ -451,6 +451,12 @@ mod tests {
             solve_dof: None,
             solve_residual: None,
             frame: Some(Frame::XY),
+            operation: None,
+            extent: None,
+            reverse: false,
+            body: None,
+            creates: vec![],
+            notes: vec![],
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

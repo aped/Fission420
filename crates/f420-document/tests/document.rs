@@ -260,7 +260,8 @@ fn save_load_round_trip_and_corrupt_inputs() {
 fn second_extrusion_creates_a_second_body() {
     // Run 2 refused a second base extrusion; with bodies (ADR 0003) it is a new body.
     let (mut m, [s1, ..]) = plate(80.0, 50.0, 10.0, 10.0, FaceRole::ExtrudeEndCap);
-    m.transact("e2", |d| Ok(d.push_extrude("E2", s1, 5.0))).unwrap();
+    m.transact("e2", |d| Ok(d.push_extrude("E2", s1, 5.0)))
+        .unwrap();
     let ev = m.evaluation();
     assert_eq!(ev.bodies.len(), 2);
     assert_eq!(m.document().bodies[1].name, "Body2");

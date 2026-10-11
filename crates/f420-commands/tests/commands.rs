@@ -16,11 +16,7 @@ fn plate_with_hole() -> Session {
                 center: None,
             },
         },
-        Command::Extrude {
-            name: None,
-            sketch: FeatureId(1),
-            distance: 10.0,
-        },
+        Command::extrude(None, FeatureId(1), 10.0),
         Command::CreateSketch {
             name: None,
             plane: end_cap_of(FeatureId(2)),

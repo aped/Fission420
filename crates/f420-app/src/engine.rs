@@ -242,7 +242,7 @@ enum WorkerIn {
 struct MeasureJob {
     doc_id: u64,
     revision: u64,
-    body: f420_kernel::Body,
+    bodies: Vec<(f420_document::BodyId, f420_kernel::Body)>,
 }
 
 /// Latest-job-wins slot shared with the measurement thread.
@@ -252,7 +252,11 @@ struct MeasureSlot {
     shutdown: bool,
 }
 
-type Measured = (u64, u64, Result<Measurements, String>);
+type Measured = (
+    u64,
+    u64,
+    Result<Vec<(f420_document::BodyId, Measurements)>, String>,
+);
 
 /// `F420_TRACE_ENGINE=1`: log the deferred-measurement pipeline to stderr.
 fn trace(msg: impl FnOnce() -> String) {
@@ -288,7 +292,12 @@ fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
         };
         trace(|| format!("measure start doc {} rev {}", job.doc_id, job.revision));
         let t0 = Instant::now();
-        let r = f420_kernel::measure(&job.body).map_err(|e| e.to_string());
+        let r = job
+            .bodies
+            .iter()
+            .map(|(id, b)| f420_kernel::measure(b).map(|m| (*id, m)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string());
         trace(|| {
             format!(
                 "measure done doc {} rev {} in {:.0} ms ok={}",
@@ -445,7 +454,7 @@ fn worker(
                 notify();
             }
         }
-        if let Some((doc_id, revision, body)) = pending {
+        if let Some((doc_id, revision, bodies)) = pending {
             last_job = Some((doc_id, revision));
             trace(|| format!("queue measure doc {doc_id} rev {revision}"));
             let (lock, cv) = &*slot;
@@ -453,7 +462,7 @@ fn worker(
                 g.job = Some(MeasureJob {
                     doc_id,
                     revision,
-                    body,
+                    bodies,
                 });
                 cv.notify_one();
             }
@@ -665,11 +674,7 @@ mod tests {
                     center: None,
                 },
             },
-            Command::Extrude {
-                name: None,
-                sketch: S1,
-                distance: 10.0,
-            },
+            Command::extrude(None, S1, 10.0),
         ]
     }
 

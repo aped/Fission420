@@ -484,11 +484,8 @@ fn scenario_b_arbitrary_closed_profile() {
         h.get_by_label_contains("Profile not usable:");
         // ...and the shared command path rejects it without changing the document.
         let id = f.id;
-        h.state_mut().request(f420_commands::Command::Extrude {
-            name: None,
-            sketch: id,
-            distance: 5.0,
-        });
+        h.state_mut()
+            .request(f420_commands::Command::extrude(None, id, 5.0));
         settle(&mut h);
         assert_eq!(
             h.state().summary().revision,

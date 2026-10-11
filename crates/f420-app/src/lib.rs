@@ -15,3 +15,14 @@ pub mod view3d;
 
 pub use app::{ConfirmAnswer, Diagnostic, F420App, Guarded, SketchSession, SketchTarget};
 pub use engine::{ExecMode, Reply};
+
+/// Human-readable name of a semantic face role.
+pub(crate) fn face_role_label(role: &f420_document::FaceRole) -> String {
+    use f420_document::FaceRole;
+    match role {
+        FaceRole::ExtrudeEndCap => "end cap".into(),
+        FaceRole::ExtrudeStartCap => "start cap".into(),
+        FaceRole::ExtrudeSide { entity } => format!("side face (sketch entity {entity})"),
+        FaceRole::Imported { body, face } => format!("imported face {face} of {body}"),
+    }
+}

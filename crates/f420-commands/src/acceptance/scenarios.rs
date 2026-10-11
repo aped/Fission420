@@ -88,6 +88,7 @@ impl Run<'_> {
         let x = self.exec(Command::ExportStl {
             path: stl.clone(),
             chord: Some(0.01),
+            bodies: None,
         });
         self.ok("export_stl", &x);
         match &x.mesh_check {
@@ -115,7 +116,10 @@ impl Run<'_> {
             None => self.check("STL mesh check", "present", "missing", false),
         }
         let step = self.out_dir.join(format!("{stem}.step"));
-        let x = self.exec(Command::ExportStep { path: step.clone() });
+        let x = self.exec(Command::ExportStep {
+            path: step.clone(),
+            bodies: None,
+        });
         self.ok("export_step", &x);
         let text = std::fs::read_to_string(&step).unwrap_or_default();
         let good = text.starts_with("ISO-10303-21;")
@@ -193,11 +197,7 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
         format!("origin {origin:?}, params {params:?}"),
         origin.is_some() && params == vec![("width".into(), 80.0), ("height".into(), 50.0)],
     );
-    let x = r.exec(Command::Extrude {
-        name: Some("Plate".into()),
-        sketch: s1,
-        distance: 10.0,
-    });
+    let x = r.exec(Command::extrude(Some("Plate".into()), s1, 10.0));
     let Some(e1) = r.ok("extrude 10", &x) else {
         return;
     };
@@ -387,11 +387,7 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         shoelace(&CHAMFER_PLATE),
         area == 2350.0 && (shoelace(&CHAMFER_PLATE) - area).abs() < 1e-9,
     );
-    let x = r.exec(Command::Extrude {
-        name: Some("Chamfered plate".into()),
-        sketch: s1,
-        distance: t,
-    });
+    let x = r.exec(Command::extrude(Some("Chamfered plate".into()), s1, t));
     let Some(e1) = r.ok("extrude 5", &x) else {
         return;
     };
@@ -550,11 +546,7 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
             pe.is_some(),
         );
         let before = r.doc_and_rev();
-        let x = r.exec(Command::Extrude {
-            name: None,
-            sketch: sid,
-            distance: t,
-        });
+        let x = r.exec(Command::extrude(None, sid, t));
         r.check(
             &format!("{label}: extrude rejected"),
             "Validation error",
@@ -639,11 +631,7 @@ pub(super) fn scenario_pocket(r: &mut Run<'_>) {
     let Some(s1) = r.ok("create base sketch", &x) else {
         return;
     };
-    let x = r.exec(Command::Extrude {
-        name: Some("Plate".into()),
-        sketch: s1,
-        distance: 10.0,
-    });
+    let x = r.exec(Command::extrude(Some("Plate".into()), s1, 10.0));
     let Some(e1) = r.ok("extrude 10", &x) else {
         return;
     };

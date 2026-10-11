@@ -115,12 +115,24 @@ pub struct EvalBody {
     pub measurements: Option<Measurements>,
 }
 
+/// A planar face that can host a sketch in the final model: its semantic
+/// reference, its frame (z = outward normal) and owning body. Exactly one B-rep
+/// face of the body lies in the frame's plane with that normal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FaceCandidate {
+    pub reference: FaceRef,
+    pub frame: Frame,
+    pub body: BodyId,
+}
+
 /// Disposable geometry cache for a document.
 #[derive(Debug, Clone)]
 pub struct Evaluation {
     pub features: Vec<FeatureResult>,
     /// Bodies in creation order.
     pub bodies: Vec<EvalBody>,
+    /// Referenceable planar faces of the final model (history order).
+    pub faces: Vec<FaceCandidate>,
     /// Legacy single-body view: the B-rep of the body modified by the last
     /// solid feature in history (the only body of v1/v2 documents).
     pub body: Option<Body>,
@@ -185,6 +197,7 @@ impl Evaluation {
         Self {
             features: vec![],
             bodies: vec![],
+            faces: vec![],
             body: None,
             measurements: None,
         }
@@ -596,14 +609,78 @@ pub fn regenerate_cached_opts(
             measurements,
         });
     }
+    let faces = face_candidates(&st, &order);
     let mut eval = Evaluation {
         features: st.results,
         bodies,
+        faces,
         body: None,
         measurements: None,
     };
     eval.refresh_legacy_view();
     Ok(eval)
+}
+
+/// Every semantic planar face (extrusion caps and line sides, imported planar
+/// faces) that resolves uniquely on the final geometry.
+fn face_candidates(st: &Snapshot, order: &[FeatureId]) -> Vec<FaceCandidate> {
+    let mut out = Vec::new();
+    let mut push = |reference: FaceRef, frame: Frame, body: BodyId| {
+        if let Some(BodyState {
+            geometry: BodyGeometry::Brep(b),
+            ..
+        }) = st.bodies.get(&body)
+            && k::planar_faces_on(b, &frame) == 1
+        {
+            out.push(FaceCandidate {
+                reference,
+                frame,
+                body,
+            });
+        }
+    };
+    for fid in order {
+        if let Some(e) = st.extrudes.get(fid) {
+            let roles = [FaceRole::ExtrudeEndCap, FaceRole::ExtrudeStartCap]
+                .into_iter()
+                .chain(
+                    e.entities
+                        .iter()
+                        .map(|id| FaceRole::ExtrudeSide { entity: id.0 }),
+                );
+            for role in roles {
+                let fr = FaceRef {
+                    feature: *fid,
+                    role,
+                };
+                if let Ok(frame) = extrude_face_frame(e, &fr, *fid) {
+                    push(fr, frame, e.body);
+                }
+            }
+        }
+        let mut imported: Vec<_> = st
+            .imported_faces
+            .iter()
+            .filter(|((f, _), _)| f == fid)
+            .collect();
+        imported.sort_by_key(|((_, b), _)| *b);
+        for ((_, body), faces) in imported {
+            for f in faces.iter() {
+                push(
+                    FaceRef {
+                        feature: *fid,
+                        role: FaceRole::Imported {
+                            body: *body,
+                            face: f.index,
+                        },
+                    },
+                    f.frame,
+                    *body,
+                );
+            }
+        }
+    }
+    out
 }
 
 /// World YZ plane: local x = world Y, local y = world Z, normal +X (right-handed).

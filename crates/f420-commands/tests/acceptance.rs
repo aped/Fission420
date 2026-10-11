@@ -34,11 +34,7 @@ fn commands_without_document_fail_cleanly() {
         Command::Undo,
         Command::Measure,
         Command::Close,
-        Command::Extrude {
-            name: None,
-            sketch: f420_document::FeatureId(1),
-            distance: 1.0,
-        },
+        Command::extrude(None, f420_document::FeatureId(1), 1.0),
     ] {
         let r = s.execute(&c);
         assert!(!r.ok && r.error.is_some(), "{c:?}");
@@ -73,14 +69,7 @@ fn off_center_hole_is_placed_editable_and_contained() {
             template: rect,
         },
     );
-    ok(
-        &mut s,
-        Command::Extrude {
-            name: None,
-            sketch: FeatureId(1),
-            distance: 10.0,
-        },
-    );
+    ok(&mut s, Command::extrude(None, FeatureId(1), 10.0));
     let circle = SketchTemplate::CenteredCircle {
         diameter: 10.0,
         center: Some([30.0, -10.0]),
@@ -251,6 +240,7 @@ fn revolve_washer_edit_undo_and_limits() {
     let r = s.execute(&Command::ExportStl {
         path: dir.path().join("w.stl"),
         chord: Some(0.01),
+        bodies: None,
     });
     assert!(r.ok && r.mesh_check.unwrap().watertight);
 }

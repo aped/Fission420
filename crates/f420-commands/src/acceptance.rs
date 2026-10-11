@@ -272,11 +272,7 @@ fn workflow(r: &mut Run<'_>) {
     );
 
     r.step = "3 extrude +10".into();
-    let x = r.exec(Command::Extrude {
-        name: Some("Plate".into()),
-        sketch: s1,
-        distance: 10.0,
-    });
+    let x = r.exec(Command::extrude(Some("Plate".into()), s1, 10.0));
     let Some(e1) = r.ok("extrude", &x) else {
         return;
     };
@@ -405,6 +401,7 @@ fn workflow(r: &mut Run<'_>) {
     let x = r.exec(Command::ExportStl {
         path: stl.clone(),
         chord: Some(0.01),
+        bodies: None,
     });
     r.ok("export_stl", &x);
     if let Some(mc) = &x.mesh_check {
@@ -436,7 +433,10 @@ fn workflow(r: &mut Run<'_>) {
     );
 
     let step = r.out_dir.join("plate.step");
-    let x = r.exec(Command::ExportStep { path: step.clone() });
+    let x = r.exec(Command::ExportStep {
+        path: step.clone(),
+        bodies: None,
+    });
     r.ok("export_step", &x);
     let text = std::fs::read_to_string(&step).unwrap_or_default();
     let header = text.starts_with("ISO-10303-21;")

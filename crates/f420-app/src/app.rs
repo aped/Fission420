@@ -279,6 +279,7 @@ impl F420App {
                 can_undo: None,
                 can_redo: None,
                 features: vec![],
+                bodies: vec![],
             },
             measurements: None,
             selected: None,
@@ -480,6 +481,7 @@ impl F420App {
             Cmd(Command::ExportStl {
                 path: stl,
                 chord: Some(0.01),
+                bodies: None,
             }),
             Set {
                 feature: "Plate",
@@ -1014,6 +1016,7 @@ impl F420App {
         match plane {
             SketchPlane::WorldXY => Ok(PlaneFrame::WORLD_XY),
             SketchPlane::WorldXZ => Ok(PlaneFrame::from_kernel(&f420_kernel::Frame::XZ)),
+            SketchPlane::WorldYZ => Ok(PlaneFrame::from_kernel(&f420_document::FRAME_YZ)),
             SketchPlane::Face(r) => self
                 .summary
                 .features
@@ -1229,10 +1232,12 @@ impl F420App {
         match plane {
             SketchPlane::WorldXY => "on World XY".into(),
             SketchPlane::WorldXZ => "on World XZ".into(),
+            SketchPlane::WorldYZ => "on World YZ".into(),
             SketchPlane::Face(r) => {
                 let role = match r.role {
-                    FaceRole::ExtrudeEndCap => "EndCap",
-                    FaceRole::ExtrudeStartCap => "StartCap",
+                    FaceRole::ExtrudeEndCap => "EndCap".to_string(),
+                    FaceRole::ExtrudeStartCap => "StartCap".to_string(),
+                    ref other => crate::face_role_label(other),
                 };
                 format!(
                     "on {}.{role} (semantic: {} {:?})",
@@ -1331,11 +1336,7 @@ impl F420App {
                 name,
                 sketch,
                 distance,
-            } => id(sketch).map(|s| Command::Extrude {
-                name: Some(name.into()),
-                sketch: s,
-                distance,
-            }),
+            } => id(sketch).map(|s| Command::extrude(Some(name.into()), s, distance)),
             DemoStep::CircleOnCapOf {
                 name,
                 extrude,
@@ -1712,11 +1713,11 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
         },
-        Dialog::Extrude { sketch, distance } => Command::Extrude {
-            name: None,
-            sketch: need(sketch, "profile sketch")?,
-            distance: parse_num("distance", distance)?,
-        },
+        Dialog::Extrude { sketch, distance } => Command::extrude(
+            None,
+            need(sketch, "profile sketch")?,
+            parse_num("distance", distance)?,
+        ),
         Dialog::CircleOnFace {
             extrude,
             diameter,
@@ -1757,9 +1758,11 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::ExportStl { path, chord } => Command::ExportStl {
             path: nonempty_path(path)?,
             chord: Some(parse_num("chord", chord)?),
+            bodies: None,
         },
         Dialog::ExportStep { path } => Command::ExportStep {
             path: nonempty_path(path)?,
+            bodies: None,
         },
     })
 }

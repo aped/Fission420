@@ -17,7 +17,7 @@
 
 use eframe::egui::{self, Color32, Pos2, Response, Stroke};
 use f420_commands::{Command, FeatureSummary};
-use f420_document::{FaceRef, FaceRole, FeatureId};
+use f420_document::{FaceRef, FeatureId};
 use f420_viewport::{Camera, GridPlane, Ray, RenderMesh, ViewPreset};
 
 use crate::app::{DocDimEdit, F420App, SketchTarget};
@@ -185,10 +185,7 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
                     .map_or_else(|| id.to_string(), |f| f.name.clone())
             };
             let (owner, description) = if let Some(r) = reference {
-                let role = match r.role {
-                    FaceRole::ExtrudeEndCap => "end cap",
-                    FaceRole::ExtrudeStartCap => "start cap",
-                };
+                let role = crate::face_role_label(&r.role);
                 (
                     Some(r.feature),
                     format!(
