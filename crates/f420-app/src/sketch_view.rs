@@ -8,7 +8,7 @@
 //! readable at any zoom and never need to be stored in the document.
 
 use eframe::egui::{self, Color32, Pos2, Stroke};
-use f420_sketch::{Constraint, Entity, PointId, Sketch};
+use f420_sketch::{Constraint, Entity, EntityId, PointId, Sketch};
 use f420_viewport::Camera;
 
 use crate::place::PlaneFrame;
@@ -492,6 +492,7 @@ fn paint_dimension(
     let text = match c {
         Constraint::Diameter { .. } => format!("Ø{} mm", f420_sketch::fmt_mm(d.value)),
         Constraint::Radius { .. } => format!("R{} mm", f420_sketch::fmt_mm(d.value)),
+        Constraint::Angle { .. } => format!("{}°", f420_sketch::fmt_mm(d.value)),
         _ => format!("{} mm", f420_sketch::fmt_mm(d.value)),
     };
     let stroke = Stroke::new(1.2, col);
@@ -600,6 +601,24 @@ fn paint_dimension(
                 col,
                 editing,
             ))
+        }
+        Constraint::Angle { a, b, .. } => {
+            // Label between the two lines' midpoints, with leaders to each.
+            let mid_of = |l: &EntityId| -> Option<[f64; 2]> {
+                let Some(Entity::Line { a, b, .. }) = s.entity(*l) else {
+                    return None;
+                };
+                let (p, q) = (s.point_xy(*a)?, s.point_xy(*b)?);
+                Some([0.5 * (p[0] + q[0]), 0.5 * (p[1] + q[1])])
+            };
+            let (ma, mb) = (mid_of(a)?, mid_of(b)?);
+            let (sa, sb) = (pr.screen(ma)?, pr.screen(mb)?);
+            let at = sa + (sb - sa) * 0.5;
+            let dashed = Stroke::new(0.8, col);
+            for g in [sa, sb] {
+                painter.extend(egui::Shape::dashed_line(&[g, at], dashed, 4.0, 3.0));
+            }
+            Some(label(painter, at, text, col, editing))
         }
         _ => None,
     }

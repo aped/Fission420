@@ -1054,6 +1054,10 @@ impl F420App {
                         ed.constrain_equal_radius();
                     }
                     ui.end_row();
+                    if action(ui, "Angle", ed.two_lines_disabled_reason()) {
+                        ed.constrain_angle();
+                    }
+                    ui.end_row();
                     if action(ui, "Midpoint", ed.midpoint_disabled_reason()) {
                         ed.constrain_midpoint();
                     }
@@ -1574,7 +1578,7 @@ impl F420App {
                 ui.separator();
                 ui.label(RichText::new("Sketch").strong());
                 ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · A 3-point arc · D dimension");
-                ui.label("Constraints: lines for Horizontal/Vertical; two lines for Parallel/Perpendicular/Equal length; two points for Coincident; a line + a point for Midpoint/On line; a line + arc sharing an end for Tangent; two arcs/circles for Equal radius. X toggles construction (reference) geometry, which profiles ignore.");
+                ui.label("Constraints: lines for Horizontal/Vertical; two lines for Parallel/Perpendicular/Equal length/Angle (degrees, counter-clockwise); two points for Coincident; a line + a point for Midpoint/On line; a line + arc sharing an end for Tangent; two arcs/circles for Equal radius. X toggles construction (reference) geometry, which profiles ignore.");
                 ui.label("Del delete · Enter end line chain · Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
                 ui.label("Snaps: existing points (shared endpoint), horizontal/vertical alignment (adds an H/V constraint), grid (position only).");
                 ui.label("Ctrl+Z inside a sketch undoes sketch steps; Finish Sketch records one document undo step; Cancel Sketch discards the session.");

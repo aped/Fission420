@@ -1370,13 +1370,16 @@ impl SketchEditor {
             .buffer
             .trim()
             .trim_end_matches("mm")
+            .trim_end_matches('°')
+            .trim_end_matches("deg")
             .trim()
             .parse::<f64>()
         {
             Ok(v) if v.is_finite() && v > 0.0 => v,
             _ => {
                 self.fail(format!(
-                    "'{}' is not a valid dimension: enter a positive number of millimetres.",
+                    "'{}' is not a valid dimension: enter a positive number (millimetres; \
+                     degrees for angles).",
                     ed.buffer.trim()
                 ));
                 return false;
@@ -1397,7 +1400,15 @@ impl SketchEditor {
         });
         if ok {
             self.dim_edit = None;
-            self.info(format!("{name} = {} mm", f420_sketch::fmt_mm(value)));
+            let angle = matches!(
+                self.sketch.constraints.get(ed.constraint),
+                Some(Constraint::Angle { .. })
+            );
+            self.info(format!(
+                "{name} = {}{}",
+                f420_sketch::fmt_mm(value),
+                if angle { "°" } else { " mm" }
+            ));
         }
         ok
     }
@@ -1539,6 +1550,44 @@ impl SketchEditor {
                 Constraint::Parallel { a, b }
             });
             Ok(())
+        });
+    }
+
+    /// Angle dimension between the two selected lines: the counter-clockwise
+    /// angle from one line's direction to the other's, oriented so the value is
+    /// in (0, 180); opens the inline value editor (degrees).
+    pub fn constrain_angle(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b)) = self.two_lines() else {
+            return;
+        };
+        let dir = |l: EntityId| -> Option<[f64; 2]> {
+            let Some(Entity::Line { a, b, .. }) = self.sketch.entity(l) else {
+                return None;
+            };
+            let (p, q) = (self.sketch.point_xy(*a)?, self.sketch.point_xy(*b)?);
+            Some([q[0] - p[0], q[1] - p[1]])
+        };
+        let (Some(u), Some(v)) = (dir(a), dir(b)) else {
+            return;
+        };
+        let deg = (u[0] * v[1] - u[1] * v[0])
+            .atan2(u[0] * v[0] + u[1] * v[1])
+            .to_degrees();
+        // Measure from the line that makes the CCW angle positive.
+        let (a, b, deg) = if deg >= 0.0 {
+            (a, b, deg)
+        } else {
+            (b, a, -deg)
+        };
+        if !(deg > 1e-6 && deg < 180.0 - 1e-6) {
+            self.fail("The lines are parallel: use Parallel, or move one line first.".into());
+            return;
+        }
+        self.add_dimension(Constraint::Angle {
+            a,
+            b,
+            dim: Dimension::new(self.sketch.unique_dimension_name("angle"), deg),
         });
     }
 
@@ -2132,6 +2181,55 @@ mod tests {
         assert!(ed.sketch.is_construction(l2));
         ed.toggle_construction();
         assert!(!ed.sketch.is_construction(l2));
+    }
+
+    #[test]
+    fn angle_dimension_between_two_lines_edits_in_degrees() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [30.0, 0.0]);
+        ed.escape();
+        click(&mut ed, [0.0, 10.0]);
+        click(&mut ed, [20.0, 25.0]);
+        ed.escape();
+        let (l1, l2) = (ed.sketch.entities[0].id(), ed.sketch.entities[1].id());
+        let ang = |ed: &SketchEditor, l: EntityId| {
+            let Some(Entity::Line { a, b, .. }) = ed.sketch.entity(l) else {
+                panic!()
+            };
+            let (p, q) = (
+                ed.sketch.point_xy(*a).unwrap(),
+                ed.sketch.point_xy(*b).unwrap(),
+            );
+            (q[1] - p[1]).atan2(q[0] - p[0]).to_degrees()
+        };
+        // Selected in reverse order: the editor orients the angle to be positive.
+        ed.selection = vec![Item::Entity(l2), Item::Entity(l1)];
+        ed.constrain_angle();
+        let idx = ed.sketch.constraints.len() - 1;
+        assert!(matches!(ed.sketch.constraints[idx], Constraint::Angle { a, .. } if a == l1));
+        let edit = ed.dim_edit.as_mut().expect("inline editor opened");
+        edit.buffer = "60°".into();
+        assert!(ed.apply_dim_edit());
+        assert!(
+            (ang(&ed, l2) - ang(&ed, l1) - 60.0).abs() < 1e-7,
+            "{} {}",
+            ang(&ed, l1),
+            ang(&ed, l2)
+        );
+        // Parallel lines are refused with a reason.
+        click(&mut ed, [0.0, 40.0]);
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [0.0, 40.0]);
+        click(&mut ed, [30.0, 40.0]);
+        ed.escape();
+        let l3 = ed.sketch.entities.last().unwrap().id();
+        let before = ed.sketch.clone();
+        ed.selection = vec![Item::Entity(l1), Item::Entity(l3)];
+        ed.constrain_angle();
+        assert_eq!(ed.sketch, before);
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
     }
 
     #[test]
