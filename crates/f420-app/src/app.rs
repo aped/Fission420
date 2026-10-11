@@ -2049,6 +2049,8 @@ pub fn error_kind(e: &DocError) -> &'static str {
         DocError::SketchSolve { .. } => "SketchSolve",
         DocError::ProductLimit(_) => "ProductLimit",
         DocError::Kernel { .. } => "Kernel",
+        DocError::GeometryCheck { .. } => "GeometryCheck",
+        DocError::Expression { .. } => "Expression",
         DocError::NothingTo(_) => "NothingTo",
         DocError::File(_) => "File",
     }
@@ -2069,6 +2071,12 @@ pub fn next_step(e: &DocError) -> String {
             "The geometry kernel could not build this; try a slightly different value, or undo."
         }
         DocError::File(_) => "Check the path and permissions; the open document is unchanged.",
+        DocError::GeometryCheck { .. } => {
+            "The kernel's result was wrong and was refused; the model is unchanged."
+        }
+        DocError::Expression { .. } => {
+            "Fix the expression or the parameter it names; the model is unchanged."
+        }
         _ => return String::new(),
     };
     format!(" — {s}")

@@ -505,10 +505,9 @@ fn join_on_thin_plate_does_not_poke_through() {
 /// pocket cut from the other side. The bounds do not change, so neither the
 /// depth cap nor the bounds check sees it. 20x20x10 (4000) - 10x10x9.7 pocket
 /// (970) + 4x4x5 boss (80) = 3110.
+/// Run 4: the overlap is sized from the clear material depth under the
+/// profile (0.3 mm here), so the result is exact.
 #[test]
-#[ignore = "review finding 5 (skin over a cavity): the 0.5 mm Join overlap still \
-            pokes into a cavity closer than 0.5 mm below the face; needs a material \
-            depth probe under the profile (not implemented)"]
 fn join_over_thin_skin_does_not_poke_into_cavity() {
     let mut d = Document::new();
     let s1 = sketch(&mut d, SketchPlane::WorldXY, rect(20.0, 20.0, 0.0, 0.0));

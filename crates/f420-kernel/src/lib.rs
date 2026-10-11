@@ -13,6 +13,7 @@ mod mesh;
 mod ops;
 mod step;
 mod step_in;
+mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
@@ -30,6 +31,7 @@ pub use step_in::{
     ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
     import_step,
 };
+pub use validate::{BooleanCheck, Prism, PrismOp, clear_depth, verify_prism_boolean};
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;

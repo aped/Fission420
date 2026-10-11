@@ -45,6 +45,14 @@ pub enum DocError {
     ProductLimit(String),
     #[error("kernel error in feature {feature}: {detail}")]
     Kernel { feature: FeatureId, detail: String },
+    /// The kernel returned a result that failed the independent check against
+    /// the nominal operation (wrong geometry refused before commit).
+    #[error("feature {feature}: geometry check failed: {detail}")]
+    GeometryCheck { feature: FeatureId, detail: String },
+    /// A named parameter or bound expression is invalid (unknown name, cycle,
+    /// division by zero, unit mismatch, non-finite value, ...).
+    #[error("parameter {name}: {detail}")]
+    Expression { name: String, detail: String },
     #[error("nothing to {0}")]
     NothingTo(String),
     #[error("file error: {0}")]

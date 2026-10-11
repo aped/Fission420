@@ -273,41 +273,7 @@ fn join_and_cut_refuse_tools_with_inner_loops_up_front() {
     assert!((volume(&a) - volume(&c) - 400.0 * 5.0).abs() < 1e-6);
 }
 
-/// Review finding 3 (Truck 0.6 boolean behaviour, not ops code): cutting a
-/// through-circle that fully swallows an existing through-hole keeps the old
-/// hole's walls inside the void. The wrong solid still passes
-/// `check_single_closed`. Observed: removed pi*64*10 = 2010.6 instead of
-/// pi*(64 - 25)*10 = 1225.2, and the face count grows because the old hole's
-/// walls survive inside the void (enlarging a hole should only replace them).
-#[test]
-#[ignore = "Truck 0.6 boolean keeps an engulfed hole's walls (wrong volume); no result \
-            check in cut_region yet - see runs/run-3/REVIEW_FINDINGS.md, sketch/kernel #3"]
-fn cut_swallowing_an_existing_hole_removes_only_the_new_material() {
-    use std::f64::consts::PI;
-    let plate = extrude(&rect(0.0, 0.0, 80.0, 50.0), &Frame::XY, 10.0).unwrap();
-    let down = Frame {
-        origin: [0.0, 50.0, 12.0],
-        x: [1.0, 0.0, 0.0],
-        y: [0.0, -1.0, 0.0],
-        z: [0.0, 0.0, -1.0],
-    };
-    let small = Profile::Circle {
-        center: [20.0, 25.0],
-        radius: 5.0,
-    };
-    let big = Profile::Circle {
-        center: [20.0, 25.0],
-        radius: 8.0,
-    };
-    let holed = cut_prism(&plate, &small, &down, 14.0).unwrap();
-    let before = measure(&holed).unwrap().face_count;
-    let out = cut_prism(&holed, &big, &down, 14.0).unwrap();
-    let removed = volume(&holed) - volume(&out);
-    let want = PI * (64.0 - 25.0) * 10.0;
-    assert!(
-        (removed - want).abs() < 1e-3,
-        "removed {removed}, want {want}"
-    );
-    // Enlarging a hole replaces its walls: the face count does not grow.
-    assert_eq!(measure(&out).unwrap().face_count, before);
-}
+// The engulfed-hole cut (run-3 review sketch/kernel #3) is a Truck 0.6 result
+// that `cut_prism` still returns; it is detected by `validate::tests::
+// swallowed_hole_cut_is_detected` and refused by the document
+// (f420-commands/tests/geometry_gate.rs).

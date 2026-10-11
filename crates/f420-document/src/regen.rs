@@ -259,14 +259,13 @@ struct ExtrudeOut {
     /// Tool span `[a, b]` along the sketch normal actually used (after
     /// overlap/margin adjustments).
     span: (f64, f64),
-    /// Cut: the span before the blind-cut margin adjustments (re-derived for
-    /// each pattern/mirror copy, whose surroundings differ from the seed's).
+    /// Join/Cut: the user's nominal span along the sketch normal, before the
+    /// overlap/margin workarounds (re-derived for each pattern/mirror copy, whose
+    /// surroundings differ from the seed's). Through-all cuts recompute it.
     nominal: (f64, f64),
     /// Outward side (+1/-1 along the sketch normal) of the target face in the
     /// sketch plane, if any.
     side: Option<f64>,
-    /// The sketch plane holds a face of the target (Join/Cut from a face).
-    on_face: bool,
     /// New/Join (material added) vs Cut (material removed).
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
@@ -929,7 +928,6 @@ fn extrude_feature(
         span: (0.0, 0.0),
         nominal: (0.0, 0.0),
         side,
-        on_face: side.is_some(),
         removes: false,
         joined: false,
         body: BodyId(0),
@@ -952,12 +950,9 @@ fn extrude_feature(
                     "{id}: 'through all' is only available for Cut"
                 )));
             }
-            let mut nominal_bounds = None;
-            // A tool end lying on a face of the target would make coplanar boolean
-            // faces (Truck 0.6 returns no result): move that end into the material
-            // by a small overlap, which is only exact when the profile lies on the
-            // face (material under the whole profile).
-            if let Some(side) = side {
+            out.joined = true;
+            out.nominal = (a, b);
+            if side.is_some() {
                 // Report a tool that misses the target as such, before the
                 // face-containment rule (the sketch plane may merely be coplanar
                 // with some face of the target).
@@ -973,55 +968,16 @@ fn extrude_feature(
                         detail: "join: the extrusion does not touch the target body".into(),
                     });
                 }
-                if !k::profile_within_face(&t, &frame, &kp).map_err(kernel(id))? {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: a Join sketched on a face of the target must lie inside that face \
-                         (the profile crosses the face boundary or a hole); use New Body, or \
-                         sketch on another plane"
-                    )));
-                }
-                // Material is on the -side of the face's outward normal. Keep the
-                // overlap within half the body's depth below the plane, so it
-                // cannot poke out of a plate thinner than the overlap.
-                let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
-                let depth = if side > 0.0 { -lo } else { hi };
-                let delta = JOIN_OVERLAP.min(distance / 2.0).min(depth / 2.0);
-                if dir > 0.0 {
-                    a = -side * delta;
-                } else {
-                    b = -side * delta;
-                }
-                nominal_bounds = Some((tb, ob));
             }
-            let joined = k::join_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
-            // The overlap must stay inside the material: the result may not
-            // reach past the target and the nominal (overlap-free) tool.
-            if let Some((tb, ob)) = nominal_bounds {
-                let rb = k::bounds(&joined).map_err(kernel(id))?;
-                let eps = 10.0 * k::tol::KERNEL_LINEAR;
-                if (0..3).any(|i| {
-                    rb.min[i] < tb.min[i].min(ob.min[i]) - eps
-                        || rb.max[i] > tb.max[i].max(ob.max[i]) + eps
-                }) {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: the join's overlap into the support ({delta_mm:.3} mm) would \
-                         poke through the material under the sketch face; the support is \
-                         too thin there",
-                        delta_mm = (if dir > 0.0 { a } else { b }).abs()
-                    )));
-                }
-            }
+            let (joined, used) = apply_tool(&t, &out, &frame, None, id)?;
+            (a, b) = used;
             replace_body(st, id, target, joined);
             out.body = target;
-            out.joined = true;
         }
         (Operation::Cut { .. }, Some((target, t))) => {
             out.removes = true;
-            let margin = k::through_all_margin(&t).map_err(kernel(id))?;
-            if extent == Extent::ThroughAll {
-                let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
-                (a, b) = (lo - margin, hi + margin);
-            } else if let Some(side) = side
+            if extent == Extent::Distance
+                && let Some(side) = side
                 && dir * side > 0.0
             {
                 return Err(DocError::Validation(format!(
@@ -1029,14 +985,8 @@ fn extrude_feature(
                 )));
             }
             out.nominal = (a, b);
-            out.side = side;
-            let mut refused = None;
-            if extent == Extent::Distance {
-                ((a, b), refused) = blind_cut_span(&t, &frame, &kp, (a, b), dir, side, margin)
-                    .map_err(kernel(id))?;
-            }
-            let cut = k::cut_prism(&t, &kp, &frame.offset(a), b - a)
-                .map_err(|e| coplanar_cut_error(id, refused, e))?;
+            let (cut, used) = apply_tool(&t, &out, &frame, None, id)?;
+            (a, b) = used;
             replace_body(st, id, target, cut);
             out.body = target;
         }
@@ -1170,44 +1120,127 @@ fn coplanar_cut_error(id: FeatureId, end: Option<CoplanarEnd>, e: k::KernelError
     ))
 }
 
-/// Apply one transformed copy of extrusion `e`'s tool (`frame` replaces the
-/// seed's sketch frame; the span along its normal is the seed's) to `body`.
-/// Join copies sketched on a face must again lie inside a face of the body (the
-/// seed's overlap into the material is only exact there).
-fn apply_tool_copy(
+/// Apply extrusion `e`'s tool, placed on `frame` (its sketch frame for the
+/// seed, a transformed frame for a pattern/mirror copy), to `body`. This is the
+/// one path for seeds and copies (SESSION_4 §1): the workarounds for Truck's
+/// coplanar-face failures are re-derived for each placement from the material
+/// around it, and the result is checked against the nominal operation
+/// ([`k::verify_prism_boolean`]) before it is accepted.
+///
+/// * Join from a face (`e.side`): the profile must lie inside a face of `body`
+///   in the plane; the tool's start moves into the support by an overlap no
+///   deeper than half the material that is free of other surfaces under the
+///   profile ([`k::clear_depth`]), at most [`JOIN_OVERLAP`].
+/// * Blind cut: the start/floor margins of [`blind_cut_span`].
+/// * Through-all cut: the span covers `body` along the normal plus a margin.
+///
+/// Returns the new body and the span `(a, b)` along `frame.z` actually used.
+fn apply_tool(
     body: &Body,
     e: &ExtrudeOut,
     frame: &Frame,
-    what: &str,
+    what: Option<&str>,
     id: FeatureId,
-) -> Result<Body> {
+) -> Result<(Body, (f64, f64))> {
     let kp = to_kernel(&e.profile);
-    let start = frame.offset(e.span.0);
-    let len = e.span.1 - e.span.0;
-    let err = |err: k::KernelError| DocError::Kernel {
+    let prefix = what.map(|w| format!("{w}: ")).unwrap_or_default();
+    let err = |x: k::KernelError| DocError::Kernel {
         feature: id,
-        detail: format!("{what}: {err}"),
+        detail: format!("{prefix}{x}"),
     };
-    if e.removes && e.extent == Extent::Distance {
-        // The blind-cut margins depend on the material around this copy.
-        let margin = k::through_all_margin(body).map_err(err)?;
-        let ((a, b), refused) =
-            blind_cut_span(body, frame, &kp, e.nominal, e.dir, e.side, margin).map_err(err)?;
-        return k::cut_prism(body, &kp, &frame.offset(a), b - a).map_err(|x| match x {
-            x if refused.is_some() => coplanar_cut_error(id, refused, x),
-            x => err(x),
-        });
-    }
+    let check = |result: &Body, op: k::PrismOp, nominal: (f64, f64), used: (f64, f64)| {
+        let start = frame.offset(nominal.0);
+        let prism = k::Prism {
+            profile: &kp,
+            start: &start,
+            length: nominal.1 - nominal.0,
+        };
+        k::verify_prism_boolean(
+            body,
+            result,
+            op,
+            &prism,
+            (used.0 - nominal.0, used.1 - nominal.0),
+        )
+        .map_err(|x| DocError::GeometryCheck {
+            feature: id,
+            detail: format!(
+                "{prefix}{}; refused (the model is unchanged). {}",
+                x.to_string()
+                    .trim_start_matches("result is not a valid solid: "),
+                match op {
+                    k::PrismOp::Cut => {
+                        "Known Truck 0.6 case: a cut that fully contains an existing hole or \
+                         pocket. Enlarge the existing feature by editing its dimension instead, \
+                         or change the profile so it crosses the existing feature"
+                    }
+                    k::PrismOp::Join => "Change the profile or the support face",
+                }
+            ),
+        })
+    };
     if e.removes {
-        return k::cut_prism(body, &kp, &start, len).map_err(err);
+        let margin = k::through_all_margin(body).map_err(err)?;
+        let (nominal, (span, refused)) = if e.extent == Extent::ThroughAll {
+            let (lo, hi) = k::extent_along(body, frame).map_err(err)?;
+            let span = (lo - margin, hi + margin);
+            (span, (span, None))
+        } else {
+            (
+                e.nominal,
+                blind_cut_span(body, frame, &kp, e.nominal, e.dir, e.side, margin).map_err(err)?,
+            )
+        };
+        let out =
+            k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(
+                |x| match x {
+                    x if refused.is_some() => coplanar_cut_error(id, refused, x),
+                    x => err(x),
+                },
+            )?;
+        check(&out, k::PrismOp::Cut, nominal, span)?;
+        return Ok((out, span));
     }
-    if e.on_face && !k::profile_within_face(body, frame, &kp).map_err(err)? {
-        return Err(DocError::ProductLimit(format!(
-            "{id}: {what}: the joined copy is not inside a face of the target (its \
-             sketch plane holds no face under the whole profile)"
-        )));
-    }
-    k::join_prism(body, &kp, &start, len).map_err(err)
+    let (a, b) = e.nominal;
+    let span = match e.side {
+        None => (a, b),
+        Some(side) => {
+            // A tool end lying on a face of the target would make coplanar
+            // boolean faces (Truck 0.6 returns no result): move that end into
+            // the material, which is only exact when the profile lies on the
+            // face (material under the whole profile) and the overlap stays
+            // inside material that no other surface crosses.
+            if !k::profile_within_face(body, frame, &kp).map_err(err)? {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: {prefix}a Join sketched on a face of the target must lie inside \
+                     that face; the profile is not inside a face here (it crosses the face \
+                     boundary or a hole). Use New Body, or sketch on another plane"
+                )));
+            }
+            let face = Frame {
+                z: [side * frame.z[0], side * frame.z[1], side * frame.z[2]],
+                ..*frame
+            };
+            let clear = k::clear_depth(body, &face, &kp, 2.0 * JOIN_OVERLAP).map_err(err)?;
+            if clear < 2.0 * k::tol::MIN_LENGTH {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: {prefix}the material under the joined profile is only {clear:.4} \
+                     mm deep before another surface (a cavity or hole just under the face); \
+                     a Join from this face cannot be built exactly. Sketch the join \
+                     elsewhere or thicken the support"
+                )));
+            }
+            let delta = JOIN_OVERLAP.min((b - a) / 2.0).min(clear / 2.0);
+            if e.dir > 0.0 {
+                (-side * delta, b)
+            } else {
+                (a, -side * delta)
+            }
+        }
+    };
+    let out = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(err)?;
+    check(&out, k::PrismOp::Join, (a, b), span)?;
+    Ok((out, span))
 }
 
 /// Pattern/mirror seeds: an evaluated Extrude Join or Cut.
@@ -1275,13 +1308,14 @@ fn linear_pattern(
             ],
             ..f
         };
-        body = apply_tool_copy(
+        body = apply_tool(
             &body,
             &e,
             &frame,
-            &format!("instance {} of {count}", i + 1),
+            Some(&format!("instance {} of {count}", i + 1)),
             id,
-        )?;
+        )?
+        .0;
     }
     replace_body(st, id, e.body, body);
     Ok(e.body)
@@ -1344,13 +1378,14 @@ fn circular_pattern(
             y: rot(f.y, t),
             z: f.z,
         };
-        body = apply_tool_copy(
+        body = apply_tool(
             &body,
             &e,
             &frame,
-            &format!("instance {} of {count}", i + 1),
+            Some(&format!("instance {} of {count}", i + 1)),
             id,
-        )?;
+        )?
+        .0;
     }
     replace_body(st, id, e.body, body);
     Ok(e.body)
@@ -1385,13 +1420,12 @@ fn mirror_feature(
         y,
         z: cross(x, y),
     };
-    e.span = (-e.span.1, -e.span.0);
     // Along the reflected frame's normal (−R z) the tool and the face sides flip.
     e.nominal = (-e.nominal.1, -e.nominal.0);
     e.dir = -e.dir;
     e.side = e.side.map(|s| -s);
     let body = brep_target(st, id, e.body)?;
-    let out = apply_tool_copy(&body, &e, &frame, "mirrored copy", id)?;
+    let (out, _) = apply_tool(&body, &e, &frame, Some("mirrored copy"), id)?;
     replace_body(st, id, e.body, out);
     Ok(e.body)
 }
@@ -1468,6 +1502,41 @@ fn legacy_cut(
         Some(d) => k::cut_blind(&t, &kp, &s.frame, d),
     }
     .map_err(kernel(id))?;
+    // Independent check against the nominal cut (through all: the body's whole
+    // extent along the normal; pocket: from the face down to `depth`).
+    let (nominal, used) = match depth {
+        None => {
+            let (lo, hi) = k::extent_along(&t, &s.frame).map_err(kernel(id))?;
+            let m = k::through_all_margin(&t).map_err(kernel(id))?;
+            ((lo - m, hi + m), (lo - m, hi + m))
+        }
+        Some(d) => {
+            let m = k::through_all_margin(&t).map_err(kernel(id))?;
+            ((-d, 0.0), (-d, m))
+        }
+    };
+    let start = s.frame.offset(nominal.0);
+    k::verify_prism_boolean(
+        &t,
+        &b,
+        k::PrismOp::Cut,
+        &k::Prism {
+            profile: &kp,
+            start: &start,
+            length: nominal.1 - nominal.0,
+        },
+        (used.0 - nominal.0, used.1 - nominal.0),
+    )
+    .map_err(|x| DocError::GeometryCheck {
+        feature: id,
+        detail: format!(
+            "{}; refused (the model is unchanged). Known Truck 0.6 case: a cut that fully \
+             contains an existing hole or pocket; enlarge that feature by editing its \
+             dimension instead",
+            x.to_string()
+                .trim_start_matches("result is not a valid solid: ")
+        ),
+    })?;
     // A cut that removes material always adds faces; containment (checked
     // above) guarantees the cutter intersects the body.
     if k::face_count(&b) <= k::face_count(&t) {

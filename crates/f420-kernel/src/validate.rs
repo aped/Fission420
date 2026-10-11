@@ -1,0 +1,550 @@
+//! Independent checks of boolean results (SESSION_4 §1).
+//!
+//! Truck 0.6 booleans can return a single closed shell that is still the wrong
+//! solid (an engulfed hole's walls left inside a cut; a Join overlap poking into
+//! a cavity). These checks never call the boolean algorithm again. They compare
+//! the result against the *nominal* operation the user asked for:
+//!
+//! * Join: `expected = target ∪ prism`; Cut: `expected = target \ prism`, where
+//!   the prism is the user's nominal tool (no overlap or margin workarounds),
+//!   classified analytically.
+//! * Target membership is the generalized winding number of the target's
+//!   tessellation (exact for a closed polyhedron; probes are placed farther from
+//!   the surface than the chord error).
+//!
+//! [`verify_prism_boolean`] probes both sides of every result face near the
+//! tool: just inside a face must be expected material, just outside must not.
+//! A face with expected material on neither side (a stray wall left in a void,
+//! the floor of an overlap that leaked into a cavity) or on both sides fails.
+//! It also checks the volume bounds of the operation. [`clear_depth`] finds how
+//! deep the material under a face is free of other surfaces, from the exact
+//! planar triangles (and the chord-bounded curved ones), so a Join overlap can
+//! be sized to stay inside the material instead of using a fixed depth.
+use crate::mesh::tessellate;
+use crate::{Body, Frame, KernelError, LoopSegment, Profile, Result, guarded, tol};
+use serde::{Deserialize, Serialize};
+use truck_modeling::*;
+
+/// Set operation of a prism tool on a target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrismOp {
+    Join,
+    Cut,
+}
+
+/// Outcome statistics of a passed check (for logs and tests).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BooleanCheck {
+    /// Result faces near the tool that were probed.
+    pub faces_probed: usize,
+    /// Probe pairs evaluated (inside/outside of a face).
+    pub probes: usize,
+    /// Probe pairs skipped because a point was too close to a surface to classify.
+    pub skipped: usize,
+}
+
+/// The nominal prism: `profile` (in `start`'s 2D coordinates) swept from
+/// `start` by `length` along `start.z`.
+pub struct Prism<'a> {
+    pub profile: &'a Profile,
+    pub start: &'a Frame,
+    pub length: f64,
+}
+
+impl Prism<'_> {
+    /// The nominal span `(0, length)` along `start.z`.
+    pub fn span(&self) -> (f64, f64) {
+        (0.0, self.length)
+    }
+}
+
+/// Chord used for the validation tessellations, relative to the part size.
+fn check_chord(diag: f64) -> f64 {
+    (diag * 1.0e-4).clamp(1.0e-3, 0.02)
+}
+
+fn diag_of(b: &crate::Bounds) -> f64 {
+    (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+// ------------------------------------------------------------------ 2D profile
+
+/// Profile boundary as a closed polygon dense enough that its distance to the
+/// true boundary is below `1e-6 * scale` (arcs and circles are subdivided).
+fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
+    fn arc_pts(out: &mut Vec<[f64; 2]>, c: [f64; 2], r: f64, a0: f64, sweep: f64) {
+        let sag = (1.0e-6 * r).max(1.0e-9);
+        let step = 2.0 * (1.0 - sag / r).clamp(-1.0, 1.0).acos();
+        let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(8, 20_000);
+        for k in 0..n {
+            let t = a0 + sweep * k as f64 / n as f64;
+            out.push([c[0] + r * t.cos(), c[1] + r * t.sin()]);
+        }
+    }
+    match p {
+        Profile::Polygon(v) => v.clone(),
+        Profile::Circle { center, radius } => {
+            let mut out = Vec::new();
+            arc_pts(&mut out, *center, *radius, 0.0, std::f64::consts::TAU);
+            out
+        }
+        Profile::Loop(segs) => {
+            let n = segs.len();
+            let mut out = Vec::new();
+            for (i, s) in segs.iter().enumerate() {
+                let (a, b) = (s.start(), segs[(i + 1) % n].start());
+                match s {
+                    LoopSegment::Line { .. } => out.push(a),
+                    LoopSegment::Arc { center, ccw, .. } => {
+                        let r = (a[0] - center[0]).hypot(a[1] - center[1]);
+                        let sweep = crate::arc_signed_sweep(a, b, *center, *ccw);
+                        let a0 = (a[1] - center[1]).atan2(a[0] - center[0]);
+                        arc_pts(&mut out, *center, r, a0, sweep);
+                    }
+                }
+            }
+            out
+        }
+    }
+}
+
+fn point_in_polygon(p: [f64; 2], poly: &[[f64; 2]]) -> bool {
+    let n = poly.len();
+    let mut inside = false;
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        if (a[1] > p[1]) != (b[1] > p[1]) {
+            let x = a[0] + (p[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+            if p[0] < x {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let e = [b[0] - a[0], b[1] - a[1]];
+    let l2 = e[0] * e[0] + e[1] * e[1];
+    let t = if l2 > 0.0 {
+        (((p[0] - a[0]) * e[0] + (p[1] - a[1]) * e[1]) / l2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p[0] - a[0] - t * e[0]).hypot(p[1] - a[1] - t * e[1])
+}
+
+fn dist_to_polygon(p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
+    let n = poly.len();
+    (0..n)
+        .map(|i| seg_dist(p, poly[i], poly[(i + 1) % n]))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Local coordinates of a world point in `f` (u, v in-plane, w along `f.z`).
+fn local(f: &Frame, p: [f64; 3]) -> [f64; 3] {
+    let d = [p[0] - f.origin[0], p[1] - f.origin[1], p[2] - f.origin[2]];
+    let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+    [dot(f.x), dot(f.y), dot(f.z)]
+}
+
+/// Analytic prism membership: `Some(inside)`, or `None` within `eps` of its boundary.
+struct PrismTest {
+    start: Frame,
+    length: f64,
+    poly: Vec<[f64; 2]>,
+}
+
+impl PrismTest {
+    fn new(p: &Prism) -> Self {
+        Self {
+            start: *p.start,
+            length: p.length,
+            poly: profile_polygon(p.profile),
+        }
+    }
+    fn classify(&self, x: [f64; 3], eps: f64) -> Option<bool> {
+        let [u, v, w] = local(&self.start, x);
+        let d_cap = w.abs().min((w - self.length).abs());
+        let d_side = dist_to_polygon([u, v], &self.poly);
+        if d_cap < eps && (point_in_polygon([u, v], &self.poly) || d_side < eps) {
+            return None;
+        }
+        if d_side < eps && w > -eps && w < self.length + eps {
+            return None;
+        }
+        Some(w > 0.0 && w < self.length && point_in_polygon([u, v], &self.poly))
+    }
+}
+
+// -------------------------------------------------------------- mesh winding
+
+/// Generalized winding number of a closed triangle mesh (1 inside, 0 outside).
+struct Winding {
+    tris: Vec<[[f64; 3]; 3]>,
+}
+
+impl Winding {
+    fn new(m: &crate::TriMesh) -> Self {
+        Self {
+            tris: m
+                .triangles
+                .iter()
+                .map(|t| t.map(|i| m.positions[i as usize]))
+                .collect(),
+        }
+    }
+    fn number(&self, p: [f64; 3]) -> f64 {
+        let mut sum = 0.0;
+        for t in &self.tris {
+            let a = sub(t[0], p);
+            let b = sub(t[1], p);
+            let c = sub(t[2], p);
+            let (la, lb, lc) = (norm(a), norm(b), norm(c));
+            let num = dot(a, cross(b, c));
+            let den = la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb;
+            sum += 2.0 * num.atan2(den);
+        }
+        sum / (4.0 * std::f64::consts::PI)
+    }
+    /// `Some(inside)`, or `None` when the winding number is not near 0 or 1.
+    fn classify(&self, p: [f64; 3]) -> Option<bool> {
+        let w = self.number(p);
+        if (w - 1.0).abs() < 0.1 {
+            Some(true)
+        } else if w.abs() < 0.1 {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+fn norm(a: [f64; 3]) -> f64 {
+    dot(a, a).sqrt()
+}
+
+/// Whether B-rep face `i` of `body` (in `face_iter` order, the tessellation's
+/// `tri_face`) is planar: its triangles lie exactly on the surface.
+fn planar_faces(body: &Body) -> Vec<bool> {
+    body.solid
+        .face_iter()
+        .map(|f| matches!(f.surface(), Surface::Plane(_)))
+        .collect()
+}
+
+// ------------------------------------------------------------ result check
+
+/// Check that `result` is `target` joined with / cut by the nominal `prism`
+/// (see the module docs). `used` is the span `(a, b)` along `prism.start.z`
+/// of the tool actually handed to the kernel (with any overlap or margin): faces
+/// of the result near it are probed, the rest are untouched target faces.
+/// `Err(InvalidResult)` names the failing evidence.
+pub fn verify_prism_boolean(
+    target: &Body,
+    result: &Body,
+    op: PrismOp,
+    prism: &Prism,
+    used: (f64, f64),
+) -> Result<BooleanCheck> {
+    let tb = crate::measure::raw_bounds(&target.solid)?;
+    let rb = crate::measure::raw_bounds(&result.solid)?;
+    let diag = diag_of(&tb).max(diag_of(&rb));
+    let chord = check_chord(diag);
+    let tmesh = tessellate(target, chord)?;
+    let rmesh = tessellate(result, chord)?;
+    let tcheck = crate::check_mesh(&tmesh);
+    let rcheck = crate::check_mesh(&rmesh);
+    if !rcheck.watertight {
+        return Err(KernelError::InvalidResult(format!(
+            "result check: the result's tessellation is not closed ({} boundary, {} \
+             non-manifold, {} misoriented edges)",
+            rcheck.boundary_edges, rcheck.nonmanifold_edges, rcheck.misoriented_edges
+        )));
+    }
+    if !tcheck.watertight {
+        // The target's own tessellation must be closed for the winding number.
+        return Err(KernelError::InvalidResult(
+            "result check: the target's tessellation is not closed; cannot verify".into(),
+        ));
+    }
+    guarded("result check", || {
+        check_faces(target, result, op, prism, used, &tmesh, &rmesh, chord, diag)
+    })?
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_faces(
+    _target: &Body,
+    result: &Body,
+    op: PrismOp,
+    prism: &Prism,
+    used: (f64, f64),
+    tmesh: &crate::TriMesh,
+    rmesh: &crate::TriMesh,
+    chord: f64,
+    diag: f64,
+) -> Result<BooleanCheck> {
+    let tool = PrismTest::new(prism);
+    let wind = Winding::new(tmesh);
+    let planar = planar_faces(result);
+    // Probe offsets: exact faces need only clear float noise; curved faces must
+    // clear the chord error of both tessellations.
+    let h_plane = (1.0e-6 * diag).max(20.0 * tol::KERNEL_LINEAR);
+    let h_curved = 3.0 * chord;
+    let eps_tool = 0.5 * h_plane;
+    // Neighbourhood of the tool actually used: faces outside it are untouched
+    // target faces.
+    let tool_box = {
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        for q in &tool.poly {
+            for w in [used.0.min(0.0), used.1.max(prism.length)] {
+                let p = prism.start.offset(w).to_world(*q);
+                for i in 0..3 {
+                    lo[i] = lo[i].min(p[i]);
+                    hi[i] = hi[i].max(p[i]);
+                }
+            }
+        }
+        let m = (0.02 * diag).max(1.0);
+        (lo.map(|v| v - m), hi.map(|v| v + m))
+    };
+    let expected = |p: [f64; 3]| -> Option<bool> {
+        let in_tool = tool.classify(p, eps_tool)?;
+        match (op, in_tool) {
+            (PrismOp::Join, true) => Some(true),
+            (PrismOp::Cut, true) => Some(false),
+            _ => wind.classify(p),
+        }
+    };
+    // Per face: the triangles (largest first) to probe.
+    let nfaces = planar.len();
+    let mut by_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); nfaces];
+    for (ti, t) in rmesh.triangles.iter().enumerate() {
+        let [a, b, c] = t.map(|i| rmesh.positions[i as usize]);
+        let n = cross(sub(b, a), sub(c, a));
+        let area2 = norm(n);
+        let fi = rmesh.tri_face.get(ti).copied().unwrap_or(0) as usize;
+        if fi < nfaces && area2 > 0.0 {
+            by_face[fi].push((area2, ti));
+        }
+    }
+    let mut stats = BooleanCheck::default();
+    for (fi, tris) in by_face.iter_mut().enumerate() {
+        tris.sort_by(|x, y| y.0.total_cmp(&x.0));
+        let mut face_probed = false;
+        let mut decided = 0;
+        for &(area2, ti) in tris.iter().take(24) {
+            if decided >= 3 {
+                break;
+            }
+            let t = rmesh.triangles[ti];
+            let [a, b, c] = t.map(|i| rmesh.positions[i as usize]);
+            let centroid = [
+                (a[0] + b[0] + c[0]) / 3.0,
+                (a[1] + b[1] + c[1]) / 3.0,
+                (a[2] + b[2] + c[2]) / 3.0,
+            ];
+            if (0..3).any(|i| centroid[i] < tool_box.0[i] || centroid[i] > tool_box.1[i]) {
+                continue;
+            }
+            let n = cross(sub(b, a), sub(c, a));
+            let n = [n[0] / area2, n[1] / area2, n[2] / area2];
+            let h = if planar[fi] { h_plane } else { h_curved };
+            // The triangle must be wide enough that the probes stay over it.
+            let inr = area2 / (norm(sub(b, a)) + norm(sub(c, b)) + norm(sub(a, c)));
+            if inr < 2.0 * h {
+                continue;
+            }
+            face_probed = true;
+            stats.probes += 1;
+            let inside = [
+                centroid[0] - h * n[0],
+                centroid[1] - h * n[1],
+                centroid[2] - h * n[2],
+            ];
+            let outside = [
+                centroid[0] + h * n[0],
+                centroid[1] + h * n[1],
+                centroid[2] + h * n[2],
+            ];
+            match (expected(inside), expected(outside)) {
+                (Some(true), Some(false)) => decided += 1,
+                (Some(i), Some(o)) => {
+                    return Err(KernelError::InvalidResult(format!(
+                        "result check: a face of the result near {} does not bound the \
+                         expected solid ({} on its material side, {} on its open side); the \
+                         kernel returned a wrong {} result",
+                        fmt_pt(centroid),
+                        if i { "material" } else { "no material" },
+                        if o { "material" } else { "no material" },
+                        match op {
+                            PrismOp::Join => "join",
+                            PrismOp::Cut => "cut",
+                        }
+                    )));
+                }
+                _ => stats.skipped += 1,
+            }
+        }
+        if face_probed {
+            stats.faces_probed += 1;
+        }
+    }
+    Ok(stats)
+}
+
+fn fmt_pt(p: [f64; 3]) -> String {
+    format!("({:.3}, {:.3}, {:.3}) mm", p[0], p[1], p[2])
+}
+
+// ------------------------------------------------------------- clear depth
+
+/// Depth (mm, ≥ 0) below the plane of `face` (z = outward normal; material on
+/// the -z side) to which the prism of `profile` is free of any other surface of
+/// `body`, capped at `max`. A Join overlap of up to this depth into the support
+/// stays inside the material. Planar faces are exact; curved faces are
+/// tessellated and their chord error is subtracted, and their triangles are
+/// ignored within twice the chord of the profile boundary (a wall that shares
+/// the boundary, e.g. a cylinder stacked on a cylinder).
+pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Result<f64> {
+    let b = crate::measure::raw_bounds(&body.solid)?;
+    let diag = diag_of(&b);
+    let chord = check_chord(diag);
+    let mesh = tessellate(body, chord)?;
+    let planar = planar_faces(body);
+    let poly = profile_polygon(profile);
+    guarded("clear depth", || {
+        let w_min = (1.0e-7 * diag).max(10.0 * tol::KERNEL_LINEAR);
+        let mut best = max;
+        for (ti, t) in mesh.triangles.iter().enumerate() {
+            let fi = mesh.tri_face.get(ti).copied().unwrap_or(0) as usize;
+            let curved = !planar.get(fi).copied().unwrap_or(false);
+            let slack = if curved {
+                2.0 * chord
+            } else {
+                (1.0e-7 * diag).max(10.0 * tol::KERNEL_LINEAR)
+            };
+            // Depth below the face: w = -z.
+            let pts: Vec<[f64; 3]> = t
+                .iter()
+                .map(|&i| {
+                    let l = local(face, mesh.positions[i as usize]);
+                    [l[0], l[1], -l[2]]
+                })
+                .collect();
+            if pts.iter().all(|p| p[2] < w_min) || pts.iter().all(|p| p[2] >= best) {
+                continue;
+            }
+            let clipped = clip_below(&pts, w_min);
+            if clipped.is_empty() {
+                continue;
+            }
+            if let Some(d) = invasion_depth(&clipped, &poly, slack) {
+                let d = if curved { (d - chord).max(0.0) } else { d };
+                best = best.min(d);
+            }
+        }
+        Ok(best.max(0.0))
+    })?
+}
+
+/// Clip a convex polygon (u, v, w) to `w >= w_min`.
+fn clip_below(p: &[[f64; 3]], w_min: f64) -> Vec<[f64; 3]> {
+    let n = p.len();
+    let mut out = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let (a, b) = (p[i], p[(i + 1) % n]);
+        let (ia, ib) = (a[2] >= w_min, b[2] >= w_min);
+        if ia {
+            out.push(a);
+        }
+        if ia != ib {
+            let t = (w_min - a[2]) / (b[2] - a[2]);
+            out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), w_min]);
+        }
+    }
+    out
+}
+
+/// Smallest depth `w` of the part of the convex 3D polygon `p` whose (u, v)
+/// projection lies strictly inside `poly` (by more than `slack`), if any.
+fn invasion_depth(p: &[[f64; 3]], poly: &[[f64; 2]], slack: f64) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    let mut take = |w: f64| best = Some(best.map_or(w, |b: f64| b.min(w)));
+    let strictly_inside =
+        |q: [f64; 2]| point_in_polygon(q, poly) && dist_to_polygon(q, poly) > slack;
+    // (a) polygon vertices inside the footprint.
+    for v in p {
+        if strictly_inside([v[0], v[1]]) {
+            take(v[2]);
+        }
+    }
+    // (b) proper crossings of polygon edges with the footprint boundary.
+    let n = p.len();
+    let m = poly.len();
+    for i in 0..n {
+        let (a, b) = (p[i], p[(i + 1) % n]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        if d[0].hypot(d[1]) <= slack {
+            continue;
+        }
+        for j in 0..m {
+            let (c, e) = (poly[j], poly[(j + 1) % m]);
+            let f = [e[0] - c[0], e[1] - c[1]];
+            let den = d[0] * f[1] - d[1] * f[0];
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let g = [c[0] - a[0], c[1] - a[1]];
+            let t = (g[0] * f[1] - g[1] * f[0]) / den;
+            let s = (g[0] * d[1] - g[1] * d[0]) / den;
+            let tl = slack / d[0].hypot(d[1]);
+            if t > tl && t < 1.0 - tl && (0.0..=1.0).contains(&s) {
+                // The edge passes into the interior: probe just past the crossing.
+                let q = |t: f64| [a[0] + t * d[0], a[1] + t * d[1]];
+                let inward =
+                    strictly_inside(q((t + tl).min(1.0))) || strictly_inside(q((t - tl).max(0.0)));
+                if inward {
+                    take(a[2] + t * (b[2] - a[2]));
+                }
+            }
+        }
+    }
+    // (c) footprint vertices inside the polygon's projection (non-degenerate).
+    if n >= 3 {
+        let (a, b, c) = (p[0], p[1], p[2]);
+        let nrm = cross(sub(b, a), sub(c, a));
+        if nrm[2].abs() > 1e-12 * norm(nrm).max(1e-300) {
+            let proj: Vec<[f64; 2]> = p.iter().map(|v| [v[0], v[1]]).collect();
+            for q in poly {
+                if point_in_polygon(*q, &proj) {
+                    // Plane through a with normal nrm: w at (u, v).
+                    let w = a[2] - (nrm[0] * (q[0] - a[0]) + nrm[1] * (q[1] - a[1])) / nrm[2];
+                    take(w);
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(test)]
+mod tests;
