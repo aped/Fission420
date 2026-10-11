@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod print;
 pub mod scenarios;
 pub mod sketches;
 
@@ -210,6 +211,9 @@ pub enum Command {
         bodies: Option<Vec<BodyId>>,
         #[serde(default)]
         unit: Option<f420_exchange::threemf::ThreeMfUnit>,
+        /// Print options (angle, placement, bed, strict mesh policy): docs/PRINT_EXPORT.md.
+        #[serde(flatten, default)]
+        print: print::PrintOptions,
     },
     /// Import the planar paths of an SVG file (subset: docs/formats/svg.md) as a
     /// new unconstrained sketch on `plane`. `units_to_mm` (mm per user unit) is
@@ -257,6 +261,10 @@ pub enum Command {
         chord: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bodies: Option<Vec<BodyId>>,
+        /// Print options (angle, placement, bed, separate files, strict mesh
+        /// policy): docs/PRINT_EXPORT.md.
+        #[serde(flatten, default)]
+        print: print::PrintOptions,
     },
     /// STEP (AP214 via truck-stepio) of the exact B-rep `bodies` (default: all
     /// visible B-rep bodies; visible mesh bodies are named in the message as not
@@ -446,6 +454,9 @@ pub struct Response {
     pub measurements: Option<Measurements>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mesh_check: Option<MeshCheck>,
+    /// Print exports: per-body/file report (docs/PRINT_EXPORT.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export: Option<print::ExportReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1252,73 +1263,33 @@ impl Session {
                 path,
                 chord,
                 bodies,
+                print: opts,
             } => {
                 let chord = chord.unwrap_or(k::tol::MESH_CHORD);
                 let m = self.model_mut()?;
-                let ids = export_selection(m, bodies.as_deref())?;
-                let meshes = export_meshes(m, &ids, chord, r)?;
-                let mut all = k::TriMesh {
-                    positions: vec![],
-                    normals: vec![],
-                    triangles: vec![],
-                    tri_face: vec![],
-                    chord_tolerance: chord,
-                };
-                for (_, mesh) in &meshes {
-                    let base = all.positions.len() as u32;
-                    all.positions.extend(&mesh.positions);
-                    all.normals.extend(&mesh.normals);
-                    all.triangles.extend(
-                        mesh.triangles
-                            .iter()
-                            .map(|t| [t[0] + base, t[1] + base, t[2] + base]),
-                    );
-                    all.tri_face.extend(&mesh.tri_face);
-                }
-                let bytes = k::write_stl_binary(&all, "Fission420");
-                write_atomic(path, &bytes)?;
+                print::export(
+                    m,
+                    path,
+                    chord,
+                    bodies.as_deref(),
+                    opts,
+                    print::Format::Stl,
+                    r,
+                )?;
                 r.measurements = m.evaluation().measurements.clone();
-                r.message = Some(format!(
-                    "wrote {} ({} triangles, {} bod{}, chord {chord} mm) from committed revision {}",
-                    path.display(),
-                    all.triangles.len(),
-                    ids.len(),
-                    if ids.len() == 1 { "y" } else { "ies" },
-                    m.revision
-                ));
             }
             Command::Export3mf {
                 path,
                 chord,
                 bodies,
                 unit,
+                print: opts,
             } => {
-                use f420_exchange::threemf;
                 let chord = chord.unwrap_or(k::tol::MESH_CHORD);
-                let unit = unit.unwrap_or(threemf::ThreeMfUnit::Millimeter);
+                let unit = unit.unwrap_or(f420_exchange::threemf::ThreeMfUnit::Millimeter);
                 let m = self.model_mut()?;
-                let ids = export_selection(m, bodies.as_deref())?;
-                let meshes = export_meshes(m, &ids, chord, r)?;
-                let objects: Vec<threemf::MeshObject> = meshes
-                    .into_iter()
-                    .map(|(name, mesh)| threemf::MeshObject {
-                        name: Some(name),
-                        positions: mesh.positions,
-                        triangles: mesh.triangles,
-                        color: None,
-                    })
-                    .collect();
-                let bytes = threemf::write(&objects, unit)
-                    .map_err(|e| DocError::Validation(e.to_string()))?;
-                write_atomic(path, &bytes)?;
-                r.message = Some(format!(
-                    "wrote {} ({} object{}, unit {}, chord {chord} mm) from committed revision {}",
-                    path.display(),
-                    objects.len(),
-                    if objects.len() == 1 { "" } else { "s" },
-                    unit.name(),
-                    m.revision
-                ));
+                let format = print::Format::ThreeMf(unit);
+                print::export(m, path, chord, bodies.as_deref(), opts, format, r)?;
             }
             Command::Import3mf { path } => {
                 let bytes = read_import(path)?;
@@ -1574,49 +1545,8 @@ fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
     }
 }
 
-/// Triangle meshes of bodies `ids` for mesh exports: B-rep bodies tessellated at
-/// `chord` and required watertight (the failing check is put on `r`), mesh
-/// bodies as imported. Returns (body name, mesh) in `ids` order.
-fn export_meshes(
-    m: &Model,
-    ids: &[BodyId],
-    chord: f64,
-    r: &mut Response,
-) -> Result<Vec<(String, k::TriMesh)>, DocError> {
-    let ev = m.evaluation();
-    let mut out = Vec::with_capacity(ids.len());
-    let mut checks = Vec::new();
-    for id in ids {
-        let b = ev
-            .body_by_id(*id)
-            .ok_or_else(|| DocError::Validation(format!("unknown body {id}")))?;
-        let mesh = match &b.geometry {
-            BodyGeometry::Brep(body) => {
-                let mesh =
-                    k::tessellate(body, chord).map_err(|e| DocError::Validation(e.to_string()))?;
-                let check = k::check_mesh(&mesh);
-                if !check.watertight {
-                    r.mesh_check = Some(check);
-                    return Err(DocError::Validation(format!(
-                        "tessellation of {} is not watertight; nothing written",
-                        b.name
-                    )));
-                }
-                checks.push(check);
-                mesh
-            }
-            BodyGeometry::Mesh(mb) => mb.mesh.clone(),
-        };
-        out.push((b.name.clone(), mesh));
-    }
-    if ids.len() == 1 {
-        r.mesh_check = checks.pop();
-    }
-    Ok(out)
-}
-
 /// Bodies to export: the given ids (must exist), else every visible body.
-fn export_selection(m: &Model, ids: Option<&[BodyId]>) -> Result<Vec<BodyId>, DocError> {
+pub(crate) fn export_selection(m: &Model, ids: Option<&[BodyId]>) -> Result<Vec<BodyId>, DocError> {
     let ev = m.evaluation();
     let ids: Vec<BodyId> = match ids {
         Some(ids) => {

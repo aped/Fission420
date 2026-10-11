@@ -414,6 +414,7 @@ fn workflow(r: &mut Run<'_>) {
         path: stl.clone(),
         chord: Some(0.01),
         bodies: None,
+        print: Default::default(),
     });
     r.ok("export_stl", &x);
     if let Some(mc) = &x.mesh_check {

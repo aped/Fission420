@@ -245,6 +245,7 @@ pub fn scenario_a_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             path: out.join("scenario_a.stl"),
             chord: Some(0.01),
             bodies: None,
+            print: Default::default(),
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_a.step"),
@@ -296,6 +297,7 @@ pub fn scenario_b_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             path: out.join("scenario_b.stl"),
             chord: Some(0.01),
             bodies: None,
+            print: Default::default(),
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_b.step"),
@@ -417,6 +419,7 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             path: out.join("scenario_r.stl"),
             chord: Some(0.01),
             bodies: None,
+            print: Default::default(),
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_r.step"),
@@ -438,6 +441,7 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             path: out.join("scenario_r_slot.stl"),
             chord: Some(0.01),
             bodies: None,
+            print: Default::default(),
         }),
         ok(Command::ExportStep {
             path: out.join("scenario_r_slot.step"),

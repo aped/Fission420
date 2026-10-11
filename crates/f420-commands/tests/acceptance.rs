@@ -241,6 +241,7 @@ fn revolve_washer_edit_undo_and_limits() {
         path: dir.path().join("w.stl"),
         chord: Some(0.01),
         bodies: None,
+        print: Default::default(),
     });
     assert!(r.ok && r.mesh_check.unwrap().watertight);
 }

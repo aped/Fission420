@@ -449,6 +449,7 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
         path: stl,
         chord: Some(0.01),
         bodies: Some(vec![a, b]),
+        print: Default::default(),
     });
     r.ok("export STL (A, B; separate shells, not fused)", &x);
     // Re-read with the STEP importer in a fresh session (own reader; the
