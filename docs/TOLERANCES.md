@@ -12,7 +12,13 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `WELD_TOLERANCE` (mesh.rs) | 1e-5 mm | mesh | welding tessellation vertices across faces |
 | `tol::MIN_MESH_CHORD_*` | max(1e-3 mm, 1e-5 × bbox diagonal) | mesh | lower bound on chord (prevents runaway allocation) |
 | `tol::MESH_CHORD` | 0.01 mm | mesh | default chordal tolerance for display/STL |
+| `tol::ARC_RADIUS_MATCH` | 1e-6 mm (= `KERNEL_LINEAR`) | geometric | max start/end radius mismatch of an arc in a kernel `Profile::Loop`; the arc's last control point is placed exactly on the end vertex, so a mismatch distorts only the last span by at most this; sketches are solved far tighter |
+| arc span slack (f420-kernel `build.rs` `ARC_SPAN_SLACK`) | 1e-9 quarter turns | construction | an arc becomes `ceil(sweep / (π/2) − slack)` single-span edges, so a solved quarter arc (sweep π/2 + rounding) stays one edge; spans stay < π (positive middle weight) |
+| bounds extremum refinement (f420-kernel `measure.rs`) | 60 golden-section iterations between neighbouring samples | numerical | exact axis extrema of explicit curved edges; skipped for boolean intersection curves (they keep sampling error) |
+| hole containment clearance (f420-document `hole.rs`) | `tol::MIN_LENGTH` | validation | a circular cut is accepted only if every host line segment / arc is farther than `r + MIN_LENGTH` from its centre (and, for a line/arc loop, the centre is inside) |
 | sketch solver tolerance | see crates/f420-sketch | numerical | Newton residual convergence |
+| sketch profile tolerance `tol = solve_tolerance(scale)` | max(1e-9 mm, 1e-12 × sketch scale) | geometric | zero-length lines / zero-sweep arcs (chord ≤ tol), touching or crossing segments (line–line orientation at tol × length; line–arc and arc–arc exact circle intersections, within tol; angular span test widened by tol / r), zero area (\|area\| ≤ tol × perimeter / 2) |
+| three-point arc degeneracy (f420-sketch `arc.rs`) | any two points ≤ tol apart, or triangle height over its longest side ≤ tol; `MAX_ARC_RADIUS_RATIO` = 1e4 (radius ≤ 1e4 × longest side) | validation | `add_arc_3pt` / `arc_through_3_points`; flatter arcs are near-lines and badly conditioned |
 | `DIST_GRAD_FLOOR` (solver.rs) | 1e-12 mm | numerical | below this length the `Distance` gradient uses a fixed unit direction (coincident start points) |
 | viewport pick tolerance | pixels | viewport | picking only; never touches model; convert with `Viewport::pixels_per_mm()` |
 | feature-edge quantum (f420-viewport `edges.rs`) | max(1e-5 × mesh diagonal, 4e-7 × max abs coord, 1e-9) | display | matching duplicated tessellation positions when deriving display edges; display cache only |
