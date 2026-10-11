@@ -210,7 +210,8 @@ pub enum Command {
         bodies: Option<Vec<BodyId>>,
     },
     /// STEP (AP214 via truck-stepio) of the exact B-rep `bodies` (default: all
-    /// visible B-rep bodies), one solid per body. Mesh bodies are refused.
+    /// visible B-rep bodies; visible mesh bodies are named in the message as not
+    /// written), one solid per body. An explicit selection with a mesh is refused.
     ExportStep {
         path: PathBuf,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1142,7 +1143,26 @@ impl Session {
             Command::ExportStep { path, bodies } => {
                 let m = self.model_mut()?;
                 let ev = m.evaluation();
-                let ids = export_selection(m, bodies.as_deref())?;
+                let mut ids = export_selection(m, bodies.as_deref())?;
+                // Default selection: visible B-rep bodies; meshes are named, not
+                // silently dropped. An explicit selection with a mesh is refused.
+                let mut skipped = Vec::new();
+                if bodies.is_none() {
+                    ids.retain(|id| match ev.body_by_id(*id) {
+                        Some(b) if b.geometry.mesh().is_some() => {
+                            skipped.push(b.name.clone());
+                            false
+                        }
+                        _ => true,
+                    });
+                    if ids.is_empty() {
+                        return Err(DocError::Validation(format!(
+                            "no visible B-rep body to export (mesh bodies cannot be written \
+                             to STEP: {})",
+                            skipped.join(", ")
+                        )));
+                    }
+                }
                 let mut named = Vec::new();
                 for id in &ids {
                     let b = ev.body_by_id(*id).expect("selection checked");
@@ -1158,12 +1178,17 @@ impl Session {
                     .map_err(|e| DocError::Validation(e.to_string()))?;
                 write_atomic(path, text.as_bytes())?;
                 r.message = Some(format!(
-                    "wrote {} ({} bytes, {} solid{}) from committed revision {}",
+                    "wrote {} ({} bytes, {} solid{}) from committed revision {}{}",
                     path.display(),
                     text.len(),
                     ids.len(),
                     if ids.len() == 1 { "" } else { "s" },
-                    m.revision
+                    m.revision,
+                    if skipped.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; mesh bodies not written: {}", skipped.join(", "))
+                    }
                 ));
             }
             Command::Measure => {

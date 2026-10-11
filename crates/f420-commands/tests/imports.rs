@@ -190,7 +190,7 @@ fn imported_box_join_boss_and_side_face_blind_cut() {
     // V -= 4 pi * 6. The side face reference is the imported one (normal +X).
     let side = face(&s, b, [1.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
     let sk = circle_on(&mut s, &side, [40.0, 15.0, 5.0], 4.0);
-    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b), 6.0, false, true);
+    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b), 6.0, false, false);
     assert!(r.ok, "{:?}", r.error);
     assert_volume(&s, b, 12000.0 + 125.0 * PI - 24.0 * PI);
     assert_eq!(s.summary().bodies.len(), 1);
@@ -331,7 +331,7 @@ fn dxf_contour_onto_imported_face_cuts_the_imported_body() {
             sketch,
         },
     );
-    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b[0]), 4.0, false, true);
+    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b[0]), 4.0, false, false);
     assert!(r.ok, "{:?}", r.error);
     assert_volume(&s, b[0], 12000.0 - 4.0 * 500.0);
     let (lo, hi) = bounds(&s, b[0]);
@@ -389,24 +389,27 @@ fn mesh_body_rename_hide_and_explicit_export_selection() {
     assert_eq!(body(&s, m).name, "Tet");
 }
 
-/// A blind cut sketched on a face but not reversed points away from the
-/// material. regen.rs intends the explicit diagnostic "the cut points away from
-/// the material of B..; reverse it", but that branch only fires when the
-/// through-all margin is >= the distance; otherwise the cutter is shifted
-/// outside the body and the user gets the generic "does not intersect the
-/// target body", which does not say what to change.
+/// Direction semantics (ADR 0003): a blind cut sketched on a face of its target
+/// goes into the material by default; `reverse` makes it point away, which is
+/// refused with an explicit "clear 'reverse'" diagnostic (not a generic miss).
 #[test]
-#[ignore = "backend bug: unreversed blind face cut reports 'does not intersect' instead of 'reverse it'"]
-fn unreversed_blind_cut_from_face_says_reverse_it() {
+fn blind_cut_from_face_goes_into_material_and_reverse_is_explained() {
     let mut s = Session::new();
     ok(&mut s, Command::NewDocument);
     let (_, b) = import_step(&mut s, "box_40x30x10_mm.step");
     let top = face(&s, b[0], [0.0, 0.0, 1.0], [0.0, 0.0, 10.0]);
     let sk = circle_on(&mut s, &top, [20.0, 15.0, 10.0], 6.0);
-    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b[0]), 4.0, false, false);
+    let rev = s.model().unwrap().revision;
+    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b[0]), 4.0, false, true);
     assert!(!r.ok);
     let msg = r.error.map(|e| e.to_string()).unwrap_or_default();
-    assert!(msg.contains("reverse"), "{msg}");
+    assert!(
+        msg.contains("points away") && msg.contains("reverse"),
+        "{msg}"
+    );
+    assert_eq!(s.model().unwrap().revision, rev);
+    let r = extrude(&mut s, sk, ExtrudeOp::Cut, Some(b[0]), 4.0, false, false);
+    assert!(r.ok, "{:?}", r.error);
 }
 
 /// ExportStep's documented default is "all visible B-rep bodies" (lib.rs doc
@@ -414,7 +417,6 @@ fn unreversed_blind_cut_from_face_says_reverse_it() {
 /// the default export should write the solid; it currently refuses the whole
 /// export because the default selection includes the mesh body.
 #[test]
-#[ignore = "backend bug: ExportStep default selection includes visible mesh bodies (doc says B-rep only)"]
 fn export_step_default_skips_mesh_bodies_as_documented() {
     let mut s = Session::new();
     ok(&mut s, Command::NewDocument);

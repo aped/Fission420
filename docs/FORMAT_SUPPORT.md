@@ -34,7 +34,7 @@ B-rep reconstruction, recovered feature history from STEP.
 | | B-rep (exact) | Mesh | 2D sketch |
 |---|---|---|---|
 | STEP import | `ImportStep` base feature, one body per `MANIFOLD_SOLID_BREP` (per placed instance) | | |
-| STEP export | each selected B-rep body as one `MANIFOLD_SOLID_BREP`; mesh bodies refused | refused | |
+| STEP export | each selected B-rep body as one `MANIFOLD_SOLID_BREP`; explicitly selected mesh bodies refused, default selection skips (and names) them | refused | |
 | STL import | never (no reconstruction) | `ImportMesh` base feature, one mesh body per file | |
 | STL export | tessellated (chord tolerance, watertightness checked; not written if not watertight) | written as imported | |
 | DXF import | | | new sketch on a chosen plane or planar face, no constraints except the origin |
@@ -192,14 +192,12 @@ tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures
 
 ## Known issues found by these checks
 
-* `ExportStep` without `bodies` includes visible **mesh** bodies and therefore refuses the
-  whole export, although its doc comment says "all visible B-rep bodies". Workaround: pass
-  `bodies` explicitly. (`imports.rs::export_step_default_skips_mesh_bodies_as_documented`,
-  ignored.)
-* A blind (distance) cut sketched on a face and not reversed reports "the extrusion does
-  not intersect the target body" instead of the intended "the cut points away from the
-  material; reverse it". (`imports.rs::unreversed_blind_cut_from_face_says_reverse_it`,
-  ignored.)
+* Fixed after these checks (coordinator, run 3): `ExportStep` without `bodies` now writes the
+  visible B-rep bodies and names skipped mesh bodies in its message
+  (`imports.rs::export_step_default_skips_mesh_bodies_as_documented`); a blind cut sketched on
+  a face now goes into the material by default and a reversed one is refused with "points away
+  from the material; clear 'reverse'"
+  (`imports.rs::blind_cut_from_face_goes_into_material_and_reverse_is_explained`).
 * A face-sketched contour whose edge is coplanar with a side face of the target (e.g. the
   40 mm slot on the 40 mm wide box top) makes the Truck boolean fail; the command returns a
   clean error and keeps the model.

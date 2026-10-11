@@ -1,4 +1,6 @@
-//! v1/v2 -> v3 migration against the committed run-1/run-2 example documents:
+//! v1/v2 -> v3 migration against frozen copies of the run-1/run-2 example
+//! documents (crates/f420-commands/tests/fixtures/native_v2; the live examples/
+//! are re-saved as v3 by `cargo xtask check`):
 //! every file loads, gets exactly one body (the base extrusion/revolve, "Body1"),
 //! keeps its feature ids, and regenerates to the volume recorded in its own
 //! save-time cache (written by the run-2 implementation).
@@ -7,7 +9,8 @@ use f420_kernel::VolumeResult;
 use std::path::PathBuf;
 
 fn examples() -> Vec<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../f420-commands/tests/fixtures/native_v2");
     let mut v: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())
@@ -24,9 +27,12 @@ fn committed_v2_examples_migrate_and_regenerate_identically() {
     for p in files {
         let raw: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
-        if raw["version"] != 2 {
-            continue;
-        }
+        assert_eq!(
+            raw["version"],
+            2,
+            "{}: frozen fixture must stay v2",
+            p.display()
+        );
         let ids_before: Vec<u64> = raw["document"]["features"]
             .as_array()
             .unwrap()

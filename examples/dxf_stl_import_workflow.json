@@ -34,8 +34,7 @@
   },
   {
     "cmd": "export_step",
-    "path": "artifacts/dxf_stl_import_all.step",
-    "expect_ok": false
+    "path": "artifacts/dxf_stl_import_all.step"
   },
   {
     "cmd": "export_step",
