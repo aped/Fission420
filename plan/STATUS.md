@@ -37,12 +37,16 @@
 | 16:50 | sketch editor core 7d96ae8 | 7 unit tests |
 | 16:58 | UI restructure ca4b332 | run-1 UI tests updated + pass |
 | 17:02 | scenario A/B/C kittest suite 965894b | 6/6 pass |
-| 17:20 | live-window input (headless mutter + RemoteDesktop) d788d6e; fixes found live | scenario A executed live, screenshots artifacts/run2/live_a/shots |
+| 17:13 | live-window input (headless mutter + RemoteDesktop) d788d6e; fixes found live | scenario A executed live, screenshots artifacts/run2/live_a/shots |
+| 17:35 | live B + C (drag, conflicts, MMB orbit, close guard), 1920x1080 + 1.2x zoom | artifacts/run2/live_a, live_big |
+| 17:45 | backend worker merged 5b1e701 (A/B headless acceptance, coalescing, pocket stretch) | xtask PASS 151 tests, acceptance 339/339 |
+| 17:50 | pocket UI (Through all / Blind depth) cc30adc | UI test |
+| 18:02 | deferred measurement 9da2e20: plate edit geometry 2395 -> 575 ms | engine tests, docs/behavior/timings.md |
+| 18:10 | template sketches edit in the editor keeping center_x/center_y | UI test |
 
 ## Next
-- Merge backend worker (headless A/B acceptance, engine coalescing, timings).
-- Live scenario B/C walkthrough; regeneration latency (2.4 s plate+hole set_parameter) profiling.
-- Integration reserve from 22:53: xtask check, external validation, report.
+- Arcs worker (stretch 2: three-point arcs, sketch/kernel/document/commands) running; then the editor arc tool (app).
+- Integration reserve from 22:53: xtask check, external validation, live re-run, MORNING_REPORT_RUN_2.md.
 
 ## Evidence locations (run 2)
 - UI tests: crates/f420-app/tests/sketch_workflow.rs (A/B/C), ui_workflow.rs + placement.rs (run 1, updated)

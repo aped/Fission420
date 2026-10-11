@@ -921,9 +921,15 @@ mod tests {
             assert!(f.response.ok && f.measurements.is_some());
             measured.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        stats("plate SetParameter width round trip (geometry; measurement deferred)", rt);
+        stats(
+            "plate SetParameter width round trip (geometry; measurement deferred)",
+            rt,
+        );
         stats("plate SetParameter width worker time", worker);
-        stats("plate SetParameter width until measurements arrive", measured);
+        stats(
+            "plate SetParameter width until measurements arrive",
+            measured,
+        );
         // Undo of the same: served from the regeneration cache.
         let (mut rt, mut worker) = (vec![], vec![]);
         for _ in 0..RUNS.min(5) {

@@ -218,9 +218,17 @@ pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 
 impl SketchEditor {
-    /// Start a session on `sketch`. Editor sketches always get an origin point.
+    /// Start a session on `sketch`. New and editor sketches get an origin point;
+    /// template sketches (no origin, one fixed anchor) are edited as they are so
+    /// their anchor stays the `center_x`/`center_y` parameters after Finish.
     pub fn new(mut sketch: Sketch) -> Self {
-        sketch.ensure_origin();
+        let has_anchor = sketch
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::FixedPoint { .. }));
+        if sketch.origin.is_none() && !has_anchor {
+            sketch.ensure_origin();
+        }
         let original = sketch.clone();
         let mut solved = sketch.clone();
         let report = solved.solve();

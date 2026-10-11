@@ -795,3 +795,45 @@ fn blind_pocket_through_cut_dialog() {
     assert!(owned.iter().any(|f| !f.planar), "{owned:?}");
     assert!(owned.iter().all(|f| f.reference.is_none()));
 }
+
+/// Template sketches (run 1 dialogs / old files) open in the same editor; a
+/// dimension edited there keeps the template's parameters and references.
+#[test]
+fn template_sketch_is_editable_in_the_sketch_editor() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Rectangle on XY…");
+    type_into(&mut h, "Rectangle center X (mm)", "10");
+    click(&mut h, "OK");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    let sk = h.state().summary().features[0].clone();
+    click(&mut h, &sk.name);
+    click(&mut h, "Edit Sketch");
+    assert_eq!(status(&h), SolveStatus::FullyConstrained);
+    assert!(session_sketch(&h).origin.is_none(), "template anchor kept");
+    // Edit the width through its annotation inside the editor.
+    let _ = h.try_run();
+    let label = h.state().dimension_label("width").expect("width label");
+    click(&mut h, "Select");
+    pointer_click(&mut h, label.center());
+    pointer_click(&mut h, label.center());
+    enter_dimension(&mut h, "width", "60");
+    click(&mut h, "Finish Sketch");
+    let after = h.state().summary().features[0].clone();
+    assert_eq!(after.id, sk.id, "same feature, references intact");
+    assert_eq!(
+        after.parameters,
+        vec![
+            ("width".to_string(), 60.0),
+            ("height".to_string(), 50.0),
+            ("center_x".to_string(), 10.0),
+            ("center_y".to_string(), 0.0)
+        ]
+    );
+    assert_volume(&h, 60.0 * 50.0 * 10.0);
+    let b = h.state().measurements().unwrap().bounds;
+    assert!((b.min[0] + 20.0).abs() < 1e-6 && (b.max[0] - 40.0).abs() < 1e-6);
+}
