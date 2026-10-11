@@ -13,7 +13,8 @@ mod regen;
 mod session;
 
 pub use io::{
-    FORMAT_NAME, FORMAT_VERSION, MIN_FORMAT_VERSION, NativeFile, load_file, save_file, write_atomic,
+    FORMAT_NAME, FORMAT_VERSION, MAX_FILE_BYTES, MIN_FORMAT_VERSION, NativeFile, load_file,
+    migrate_to_v3, save_file, write_atomic,
 };
 pub use model::*;
 pub use regen::{

@@ -18,15 +18,7 @@ fn plate(w: f64, h: f64, d: f64, hole: f64, role: FaceRole) -> (Model, [FeatureI
         })
         .unwrap();
     let e1 = m
-        .transact("e1", |doc| {
-            Ok(doc.push(
-                "E1",
-                FeatureKind::Extrude {
-                    sketch: s1,
-                    distance: d,
-                },
-            ))
-        })
+        .transact("e1", |doc| Ok(doc.push_extrude("E1", s1, d)))
         .unwrap();
     let s2 = m
         .transact("s2", |doc| {
@@ -46,6 +38,7 @@ fn plate(w: f64, h: f64, d: f64, hole: f64, role: FaceRole) -> (Model, [FeatureI
                 FeatureKind::Cut {
                     sketch: s2,
                     extent: CutExtent::ThroughAll,
+                    target: BodyId(1),
                 },
             ))
         })
@@ -187,10 +180,7 @@ fn broken_and_cyclic_references_are_reported() {
     d.features.push(Feature {
         id: FeatureId(2),
         name: "E".into(),
-        kind: FeatureKind::Extrude {
-            sketch: FeatureId(1),
-            distance: 1.0,
-        },
+        kind: FeatureKind::extrude(FeatureId(1), 1.0, Operation::NewBody { body: BodyId(1) }),
     });
     match regenerate(&d) {
         Err(DocError::Cycle(ids)) => assert_eq!(ids, vec![FeatureId(1), FeatureId(2)]),
@@ -267,20 +257,19 @@ fn save_load_round_trip_and_corrupt_inputs() {
 }
 
 #[test]
-fn second_base_extrusion_is_rejected() {
+fn second_extrusion_creates_a_second_body() {
+    // Run 2 refused a second base extrusion; with bodies (ADR 0003) it is a new body.
     let (mut m, [s1, ..]) = plate(80.0, 50.0, 10.0, 10.0, FaceRole::ExtrudeEndCap);
-    let doc = m.document().clone();
-    let r = m.transact("e2", |d| {
-        Ok(d.push(
-            "E2",
-            FeatureKind::Extrude {
-                sketch: s1,
-                distance: 5.0,
-            },
-        ))
-    });
-    assert!(matches!(r, Err(DocError::ProductLimit(_))));
-    assert_eq!(m.document(), &doc);
+    m.transact("e2", |d| Ok(d.push_extrude("E2", s1, 5.0))).unwrap();
+    let ev = m.evaluation();
+    assert_eq!(ev.bodies.len(), 2);
+    assert_eq!(m.document().bodies[1].name, "Body2");
+    let b2 = ev.body_by_id(BodyId(2)).unwrap();
+    let v = match b2.measurements.as_ref().unwrap().volume {
+        VolumeResult::Value { volume, .. } => volume,
+        ref v => panic!("{v:?}"),
+    };
+    assert!((v - 80.0 * 50.0 * 5.0).abs() < 1e-6, "{v}");
 }
 
 /// Move a template sketch's fixed origin point (the template's anchor) to (x, y).
@@ -307,13 +296,7 @@ fn doc_with_cut(
             sketch: rect,
         },
     );
-    let e1 = d.push(
-        "E1",
-        FeatureKind::Extrude {
-            sketch: s1,
-            distance: 5.0,
-        },
-    );
+    let e1 = d.push_extrude("E1", s1, 5.0);
     let s2 = d.push(
         "S2",
         FeatureKind::Sketch {
@@ -326,6 +309,7 @@ fn doc_with_cut(
         FeatureKind::Cut {
             sketch: s2,
             extent: CutExtent::ThroughAll,
+            target: BodyId(1),
         },
     );
     d

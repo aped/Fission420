@@ -95,9 +95,8 @@ impl Blob {
     pub fn bytes(&self) -> Result<Vec<u8>> {
         let b = match self.encoding {
             BlobEncoding::Text => self.data.as_bytes().to_vec(),
-            BlobEncoding::Base64 => crate::blob::base64_decode(&self.data).ok_or_else(|| {
-                DocError::File(format!("{}: invalid base64 data", self.id))
-            })?,
+            BlobEncoding::Base64 => crate::blob::base64_decode(&self.data)
+                .ok_or_else(|| DocError::File(format!("{}: invalid base64 data", self.id)))?,
         };
         if b.len() as u64 != self.len || crate::blob::fnv64_hex(&b) != self.fnv64 {
             return Err(DocError::File(format!(
@@ -241,6 +240,19 @@ pub enum FeatureKind {
         to_mm: f64,
         body: BodyId,
     },
+}
+
+impl FeatureKind {
+    /// Distance extrusion along the sketch normal.
+    pub fn extrude(sketch: FeatureId, distance: f64, operation: Operation) -> Self {
+        FeatureKind::Extrude {
+            sketch,
+            distance,
+            operation,
+            extent: Extent::Distance,
+            reverse: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -649,6 +661,21 @@ impl Document {
             kind,
         });
         id
+    }
+
+    /// Append a new-body distance extrusion of `sketch`, allocating its body
+    /// (default name). Convenience for the common case.
+    pub fn push_extrude(
+        &mut self,
+        name: impl Into<String>,
+        sketch: FeatureId,
+        distance: f64,
+    ) -> FeatureId {
+        let body = self.add_body(self.default_body_name());
+        self.push(
+            name,
+            FeatureKind::extrude(sketch, distance, Operation::NewBody { body }),
+        )
     }
 
     /// Unique default name like "Sketch1".

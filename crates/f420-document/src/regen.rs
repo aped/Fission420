@@ -145,11 +145,14 @@ impl Evaluation {
 
     /// Recompute [`Evaluation::body`] / [`Evaluation::measurements`] from `bodies`.
     pub fn refresh_legacy_view(&mut self) {
-        let view = self.active_body().and_then(|id| self.body_by_id(id)).and_then(|b| {
-            b.geometry
-                .brep()
-                .map(|body| (body.clone(), b.measurements.clone()))
-        });
+        let view = self
+            .active_body()
+            .and_then(|id| self.body_by_id(id))
+            .and_then(|b| {
+                b.geometry
+                    .brep()
+                    .map(|body| (body.clone(), b.measurements.clone()))
+            });
         (self.body, self.measurements) = match view {
             Some((b, m)) => (Some(b), m),
             None => (None, None),
@@ -197,7 +200,11 @@ struct SketchOut {
 
 impl SketchOut {
     /// The profile, or a structured error naming the consuming feature.
-    fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&(SketchProfile, Vec<EntityId>)> {
+    fn usable(
+        &self,
+        user: FeatureId,
+        sketch: FeatureId,
+    ) -> Result<&(SketchProfile, Vec<EntityId>)> {
         self.profile.as_ref().map_err(|why| {
             DocError::Validation(format!(
                 "{user}: sketch {sketch} has no usable profile ({why}); \
@@ -319,9 +326,8 @@ fn body_key(doc: &Document, body: BodyId) -> Result<Option<String>> {
     let order = doc.evaluation_order()?;
     let keys = prefix_keys(doc, &order)?;
     let last = order.iter().rposition(|id| {
-        doc.feature(*id).is_ok_and(|f| {
-            f.created_bodies().contains(&body) || f.target_body() == Some(body)
-        })
+        doc.feature(*id)
+            .is_ok_and(|f| f.created_bodies().contains(&body) || f.target_body() == Some(body))
     });
     Ok(last.map(|i| keys[i].clone()))
 }
@@ -372,8 +378,8 @@ pub fn regenerate_cached_opts(
     mut cache: Option<&mut RegenCache>,
     measure_body: bool,
 ) -> Result<Evaluation> {
-    doc.validate_bodies()?;
     let order = doc.evaluation_order()?;
+    doc.validate_bodies()?;
     let keys = prefix_keys(doc, &order)?;
     let mut st = Snapshot::new();
     let mut start = 0;
@@ -453,7 +459,13 @@ pub fn regenerate_cached_opts(
                 let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
                 let b = k::revolve(&to_kernel(&s.usable(id, *sketch)?.0), &s.frame, *angle)
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
-                create_body(&mut st, id, *body, BodyGeometry::Brep(b), BodySource::Modeled)?;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(b),
+                    BodySource::Modeled,
+                )?;
                 r.body = Some(*body);
             }
             FeatureKind::Extrude {
@@ -610,9 +622,7 @@ fn create_body(
     source: BodySource,
 ) -> Result<()> {
     if body.0 == 0 {
-        return Err(DocError::Validation(format!(
-            "{id}: body id is unassigned"
-        )));
+        return Err(DocError::Validation(format!("{id}: body id is unassigned")));
     }
     if st.bodies.contains_key(&body) {
         return Err(DocError::Validation(format!(
@@ -652,7 +662,11 @@ fn extrude_feature(
     extent: Extent,
     reverse: bool,
 ) -> Result<ExtrudeOut> {
-    let s = st.sketches.get(&sketch).ok_or(not_a_sketch(id, sketch))?.clone();
+    let s = st
+        .sketches
+        .get(&sketch)
+        .ok_or(not_a_sketch(id, sketch))?
+        .clone();
     let (profile, entities) = s.usable(id, sketch)?.clone();
     let kp = to_kernel(&profile);
     let frame = s.frame;
@@ -766,7 +780,11 @@ fn legacy_cut(
     target: BodyId,
     depth: Option<f64>,
 ) -> Result<()> {
-    let s = st.sketches.get(&sketch).ok_or(not_a_sketch(id, sketch))?.clone();
+    let s = st
+        .sketches
+        .get(&sketch)
+        .ok_or(not_a_sketch(id, sketch))?
+        .clone();
     let t = brep_target(st, id, target)?;
     let host = match depth {
         // Through cuts: the extrusion that created the target.
@@ -982,24 +1000,32 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
 fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<ResolvedFace> {
     let (frame, owner) = match fr.role {
         FaceRole::Imported { body, face } => {
-            let faces = st
-                .imported_faces
-                .get(&(fr.feature, body))
+            let faces =
+                st.imported_faces
+                    .get(&(fr.feature, body))
+                    .ok_or(DocError::BrokenReference {
+                        from,
+                        detail: format!("{} did not import body {body}", fr.feature),
+                    })?;
+            let f = faces
+                .iter()
+                .find(|f| f.index == face)
                 .ok_or(DocError::BrokenReference {
                     from,
-                    detail: format!("{} did not import body {body}", fr.feature),
+                    detail: format!(
+                        "imported face {face} of {body} is not planar or does not exist"
+                    ),
                 })?;
-            let f = faces.iter().find(|f| f.index == face).ok_or(DocError::BrokenReference {
-                from,
-                detail: format!("imported face {face} of {body} is not planar or does not exist"),
-            })?;
             (f.frame, body)
         }
         _ => {
-            let e = st.extrudes.get(&fr.feature).ok_or(DocError::BrokenReference {
-                from,
-                detail: format!("{} is not an evaluated extrusion", fr.feature),
-            })?;
+            let e = st
+                .extrudes
+                .get(&fr.feature)
+                .ok_or(DocError::BrokenReference {
+                    from,
+                    detail: format!("{} is not an evaluated extrusion", fr.feature),
+                })?;
             (extrude_face_frame(e, fr, from)?, e.body)
         }
     };

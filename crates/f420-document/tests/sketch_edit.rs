@@ -106,15 +106,7 @@ fn open_profile_sketch_regenerates_but_cannot_be_extruded() {
 
     let (doc, rev) = (m.document().clone(), m.revision);
     let err = m
-        .transact("extrude", |d| {
-            Ok(d.push(
-                "E",
-                FeatureKind::Extrude {
-                    sketch: sid,
-                    distance: 5.0,
-                },
-            ))
-        })
+        .transact("extrude", |d| Ok(d.push_extrude("E", sid, 5.0)))
         .unwrap_err();
     assert!(
         matches!(err, DocError::Validation(ref t) if t.contains("no usable profile")),
@@ -192,13 +184,21 @@ fn conflicting_dimension_edit_rolls_back_and_names_culprits() {
 }
 
 #[test]
-fn v1_file_loads_saves_as_v2_and_reloads_equal() {
+fn v1_file_migrates_to_bodies_saves_as_v3_and_reloads_equal() {
     let src = v1_fixture();
     let raw: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap();
     assert_eq!(raw["version"], 1, "fixture must stay a v1 file");
     let nf = load_file(&src).unwrap();
     assert_eq!(nf.version, 1);
+    // Migration (ADR 0003): the base extrusion creates Body1, cuts target it.
+    assert_eq!(nf.document.bodies.len(), 1);
+    assert_eq!(nf.document.bodies[0].name, "Body1");
+    for f in &nf.document.features {
+        if let FeatureKind::Cut { target, .. } | FeatureKind::Pocket { target, .. } = &f.kind {
+            assert_eq!(*target, nf.document.bodies[0].id);
+        }
+    }
     let m = Model::from_document(nf.document.clone()).unwrap();
     // v1 template sketches have no origin and keep their center parameters.
     for f in &m.document().features {
@@ -208,12 +208,12 @@ fn v1_file_loads_saves_as_v2_and_reloads_equal() {
         }
     }
     let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("plate_v2.f420.json");
+    let out = dir.path().join("plate_v3.f420.json");
     save_file(&out, m.document(), Some(m.evaluation())).unwrap();
     let raw2: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     assert_eq!(raw2["version"], FORMAT_VERSION);
-    assert_eq!(FORMAT_VERSION, 2);
+    assert_eq!(FORMAT_VERSION, 3);
     let nf2 = load_file(&out).unwrap();
     assert_eq!(nf2.document, nf.document);
     let m2 = Model::from_document(nf2.document).unwrap();
@@ -223,10 +223,10 @@ fn v1_file_loads_saves_as_v2_and_reloads_equal() {
 #[test]
 fn newer_format_version_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let p = dir.path().join("v3.f420.json");
+    let p = dir.path().join("v4.f420.json");
     let doc = Document::new();
     let mut nf = NativeFile::new(&doc, None);
-    nf.version = 3;
+    nf.version = FORMAT_VERSION + 1;
     std::fs::write(&p, serde_json::to_vec(&nf).unwrap()).unwrap();
     match load_file(&p) {
         Err(DocError::File(t)) => assert!(t.contains("newer"), "{t}"),
@@ -304,16 +304,8 @@ fn arc_profile_extrudes_regenerates_and_round_trips() {
             .unwrap()
     };
     assert_eq!(solve(&m).status, f420_sketch::SolveStatus::FullyConstrained);
-    m.transact("extrude", |d| {
-        Ok(d.push(
-            "E",
-            FeatureKind::Extrude {
-                sketch: sid,
-                distance: 4.0,
-            },
-        ))
-    })
-    .unwrap();
+    m.transact("extrude", |d| Ok(d.push_extrude("E", sid, 4.0)))
+        .unwrap();
     // Quarter cylinder: pi r^2 h / 4.
     let want = |r: f64| std::f64::consts::PI * r * r * 4.0 / 4.0;
     let tol = |v: f64| (1e-7 * v).max(1e-3);

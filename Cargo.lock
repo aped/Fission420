@@ -845,6 +845,7 @@ dependencies = [
 name = "f420-document"
 version = "0.1.0"
 dependencies = [
+ "f420-exchange",
  "f420-kernel",
  "f420-sketch",
  "serde",

@@ -26,10 +26,7 @@ pub(crate) fn base64_encode(bytes: &[u8]) -> String {
 /// Decode padded standard base64; `None` on any invalid character or length.
 /// ASCII whitespace is ignored.
 pub(crate) fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    let clean: Vec<u8> = text
-        .bytes()
-        .filter(|c| !c.is_ascii_whitespace())
-        .collect();
+    let clean: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
     if clean.len() % 4 != 0 {
         return None;
     }

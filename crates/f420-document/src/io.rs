@@ -1,6 +1,6 @@
 //! Versioned native file format (`.f420.json`) with atomic save.
 //!
-//! Layout: `{ "format": "fission420", "version": 2, "document": {...}, "cache": {...} }`.
+//! Layout: `{ "format": "fission420", "version": 3, "document": {...}, "cache": {...} }`.
 //! `document` is authoritative. `cache` is an informational summary of the geometry at
 //! save time; loaders regenerate and may compare against it, never trust it.
 use crate::{DocError, Document, Evaluation, Result};
@@ -11,13 +11,14 @@ use std::path::Path;
 
 pub const FORMAT_NAME: &str = "fission420";
 /// v2 (run 2): sketches may carry `origin` and `Distance` constraints, and the
-/// history may contain `Pocket` features. v1 files
-/// are a strict subset and load unchanged (identity migration); saves write v2.
-pub const FORMAT_VERSION: u32 = 2;
+/// history may contain `Pocket` features. v1 files are a strict subset of v2.
+/// v3 (run 3, ADR 0003): bodies, blobs, extrude operations/extents, imports. v1/v2
+/// files are migrated on load (see [`migrate_to_v3`]); saves write v3.
+pub const FORMAT_VERSION: u32 = 3;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
-/// Refuse to parse native files larger than this.
-const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+/// Refuse to parse native files larger than this (v3 embeds imported source files).
+pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeometryCache {
@@ -148,9 +149,15 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         }
         v => return Err(DocError::File(format!("unsupported file version {v:?}"))),
     }
-    let nf: NativeFile = serde_json::from_slice(bytes)
+    let mut nf: NativeFile = serde_json::from_slice(bytes)
         .map_err(|e| DocError::File(format!("invalid document structure: {e}")))?;
+    if nf.version < 3 {
+        // `nf.version` keeps the version read (so callers can report the
+        // migration); `NativeFile::new` always writes FORMAT_VERSION.
+        migrate_to_v3(&mut nf.document)?;
+    }
     nf.document.evaluation_order()?;
+    nf.document.validate_bodies()?;
     for f in &nf.document.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &f.kind {
             sketch
@@ -159,4 +166,47 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         }
     }
     Ok(nf)
+}
+
+/// v1/v2 -> v3 (ADR 0003). Older documents have one implicit base body: every
+/// body-creating feature (Extrude/Revolve) gets a fresh body id in history order
+/// ("Body1", ...), and every legacy Cut/Pocket targets the first one. Feature ids
+/// and geometry are unchanged. Must only be called on documents without bodies.
+pub fn migrate_to_v3(doc: &mut Document) -> Result<()> {
+    use crate::{FeatureKind, Operation};
+    if !doc.bodies.is_empty() || !doc.blobs.is_empty() {
+        return Err(DocError::File(
+            "pre-v3 file must not contain bodies or embedded files".into(),
+        ));
+    }
+    doc.next_body_id = 1;
+    doc.next_blob_id = 1;
+    let mut base = None;
+    for i in 0..doc.features.len() {
+        let new_body = matches!(
+            doc.features[i].kind,
+            FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }
+        );
+        if new_body {
+            let name = doc.default_body_name();
+            let id = doc.add_body(name);
+            base.get_or_insert(id);
+            match &mut doc.features[i].kind {
+                FeatureKind::Extrude { operation, .. } => {
+                    *operation = Operation::NewBody { body: id }
+                }
+                FeatureKind::Revolve { body, .. } => *body = id,
+                _ => unreachable!(),
+            }
+        }
+    }
+    for f in &mut doc.features {
+        if let FeatureKind::Cut { target, .. } | FeatureKind::Pocket { target, .. } = &mut f.kind {
+            *target = base.ok_or_else(|| DocError::BrokenReference {
+                from: f.id,
+                detail: "cut has no base body to cut".into(),
+            })?;
+        }
+    }
+    Ok(())
 }
