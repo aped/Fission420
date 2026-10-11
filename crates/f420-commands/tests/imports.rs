@@ -451,3 +451,77 @@ fn import_commands_round_trip_as_json() {
     let back: Vec<Command> = serde_json::from_str(&serde_json::to_string(&cmds).unwrap()).unwrap();
     assert_eq!(cmds, back);
 }
+
+const INCH: f64 = 25.4;
+
+fn repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// Replay a committed workflow (`f420-cli run` format): repository-relative
+/// inputs (`crates/...`) resolve against the repository, outputs go to `out`.
+fn replay_workflow(name: &str, out: &std::path::Path) -> Session {
+    let text = std::fs::read_to_string(repo().join("examples").join(name)).unwrap();
+    let mut steps: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
+    let mut s = Session::new();
+    for (i, st) in steps.iter_mut().enumerate() {
+        let expect_ok = st
+            .as_object_mut()
+            .unwrap()
+            .remove("expect_ok")
+            .is_none_or(|v| v.as_bool().unwrap());
+        if let Some(p) = st.get_mut("path") {
+            let rel = p.as_str().unwrap().to_string();
+            let fixed = if rel.starts_with("crates/") {
+                repo().join(&rel)
+            } else {
+                out.join(std::path::Path::new(&rel).file_name().unwrap())
+            };
+            *p = serde_json::Value::String(fixed.to_string_lossy().into_owned());
+        }
+        let cmd: Command = serde_json::from_value(st.clone()).unwrap();
+        let r = s.execute(&cmd);
+        assert_eq!(r.ok, expect_ok, "{name} step {i} {cmd:?}: {:?}", r.error);
+    }
+    s
+}
+
+fn open_example(file: &str) -> Session {
+    let mut e = Session::new();
+    ok(
+        &mut e,
+        Command::Open {
+            path: repo().join("examples").join(file),
+        },
+    );
+    e
+}
+
+#[test]
+fn imported_step_hole_workflow_replays_and_matches_the_example() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = replay_workflow("imported_step_hole_workflow.json", dir.path());
+    // 40 x 30 x 10 box with a centred Ø6 through hole: 12000 - 90 pi.
+    assert_volume(&s, BodyId(1), 12000.0 - 90.0 * PI);
+    assert!(dir.path().join("imported_step_hole.step").exists());
+    // The committed example (saved by `f420-cli run`) opens without the source
+    // file and is the same document with the same geometry.
+    let e = open_example("imported_step_hole.f420.json");
+    assert_volume(&e, BodyId(1), 12000.0 - 90.0 * PI);
+    assert_eq!(e.model().unwrap().document(), s.model().unwrap().document());
+}
+
+#[test]
+fn dxf_stl_import_workflow_replays_and_matches_the_example() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = replay_workflow("dxf_stl_import_workflow.json", dir.path());
+    // Notch plate (40 x 20 - 12.5 pi) x 3; the STL box 20 x 10 x 5 read in inches.
+    assert_volume(&s, BodyId(1), 3.0 * (800.0 - 12.5 * PI));
+    let v = body(&s, BodyId(2)).mesh.unwrap().signed_volume.unwrap();
+    let exp = 1000.0 * INCH.powi(3);
+    assert!((v - exp).abs() <= 1e-9 * exp, "{v} vs {exp}");
+    let e = open_example("dxf_stl_import.f420.json");
+    assert_eq!(e.model().unwrap().document(), s.model().unwrap().document());
+    assert_eq!(body(&e, BodyId(2)).mesh, body(&s, BodyId(2)).mesh);
+    assert_volume(&e, BodyId(1), 3.0 * (800.0 - 12.5 * PI));
+}

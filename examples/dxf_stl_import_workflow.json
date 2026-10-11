@@ -1,0 +1,60 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "import_dxf",
+    "path": "crates/f420-exchange/tests/fixtures/dxf/notch_freecad_r12.dxf",
+    "plane": "WorldXY",
+    "expect_ok": false
+  },
+  {
+    "cmd": "import_dxf",
+    "path": "crates/f420-exchange/tests/fixtures/dxf/notch_freecad_r12.dxf",
+    "plane": "WorldXY",
+    "name": "Notch",
+    "units_to_mm": 1.0
+  },
+  {
+    "cmd": "extrude",
+    "name": "Notch plate",
+    "sketch": 1,
+    "distance": 3.0,
+    "body_name": "Notch plate"
+  },
+  {
+    "cmd": "import_stl",
+    "path": "crates/f420-exchange/tests/fixtures/stl/box_freecad_binary.stl",
+    "expect_ok": false
+  },
+  {
+    "cmd": "import_stl",
+    "path": "crates/f420-exchange/tests/fixtures/stl/box_freecad_binary.stl",
+    "units_to_mm": 25.4
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/dxf_stl_import_all.step",
+    "expect_ok": false
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/dxf_stl_import.step",
+    "bodies": [
+      1
+    ]
+  },
+  {
+    "cmd": "export_stl",
+    "path": "artifacts/dxf_stl_import.stl"
+  },
+  {
+    "cmd": "export_dxf",
+    "path": "artifacts/dxf_stl_import_notch.dxf",
+    "sketch": 1
+  },
+  {
+    "cmd": "save",
+    "path": "examples/dxf_stl_import.f420.json"
+  }
+]
