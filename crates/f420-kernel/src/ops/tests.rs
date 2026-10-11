@@ -194,3 +194,48 @@ fn chamfer_box_edge_and_refusals() {
         "{e}"
     );
 }
+
+#[test]
+#[ignore = "feasibility spike: fillet via a tangent-arc tool"]
+fn spike_fillet_tangent_arc_tool() {
+    use crate::LoopSegment;
+    // Block 40x30x10, top-front edge along x at y=0, z=10. Frame: origin on the
+    // edge before x=0, z = +X (edge direction), x = +Y, y = +Z (local (y, z)
+    // offsets from the edge point (y=0, z=10)).
+    let b = block();
+    let r = 2.0;
+    let m = 3.0;
+    let frame = Frame {
+        origin: [-m, 0.0, 10.0],
+        x: [0.0, 1.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [1.0, 0.0, 0.0],
+    };
+    // Local: face1 (top) runs along +x (local), face2 (front) along -y (local).
+    // A = (r, 0) on top, B = (0, -r) on front, C = (r, -r). Removed region: corner
+    // (0,0)-A-arc-B; tool also extends outward (+y local up, -x local front).
+    let segs = vec![
+        LoopSegment::Line { start: [0.0, -r] }, // B -> B + out
+        LoopSegment::Line { start: [-m, -r] },  // -> corner out
+        LoopSegment::Line { start: [-m, m] },   // -> top out
+        LoopSegment::Line { start: [r, m] },    // -> above A
+        LoopSegment::Arc {
+            start: [r, 0.0],
+            center: [r, -r],
+            ccw: false,
+        }, // A -> B (bulging to corner)
+    ];
+    let p = Profile::Loop(segs);
+    let res = crate::build::subtract_prism(&b, &p, &frame, 40.0 + 2.0 * m, "fillet");
+    match &res {
+        Ok(f) => eprintln!(
+            "fillet spike: volume {} (expected {})",
+            volume(f),
+            12000.0 - (r * r - std::f64::consts::PI * r * r / 4.0) * 40.0
+        ),
+        Err(e) => eprintln!(
+            "fillet spike failed: {}",
+            e.to_string().chars().take(300).collect::<String>()
+        ),
+    }
+}
