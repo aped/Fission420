@@ -143,6 +143,63 @@ pub fn cut_through_all(target: &Body, profile: &Profile, frame: &Frame) -> Resul
     Err(KernelError::BooleanFailed(failures.join("; ")))
 }
 
+/// Blind cut (pocket): remove the prism of `profile` from the sketch plane of
+/// `frame` to `depth` along `-frame.z` (into the material when `frame` is an
+/// outward-facing planar face). The cutter starts a margin *above* the face so
+/// its top cap is never coplanar with the face (Truck 0.6 rejects coplanar
+/// boolean faces); its floor lies at exactly `depth`. The caller must ensure the
+/// floor is strictly inside the body (`depth` less than the local thickness).
+pub fn cut_blind(target: &Body, profile: &Profile, frame: &Frame, depth: f64) -> Result<Body> {
+    frame.validate()?;
+    profile.validate()?;
+    if !depth.is_finite() || depth < tol::MIN_LENGTH {
+        return Err(KernelError::InvalidInput(format!(
+            "pocket depth must be >= {} mm, got {depth}",
+            tol::MIN_LENGTH
+        )));
+    }
+    let m = measure::raw_bounds(&target.solid)?;
+    let diag = ((m.max[0] - m.min[0]).powi(2)
+        + (m.max[1] - m.min[1]).powi(2)
+        + (m.max[2] - m.min[2]).powi(2))
+    .sqrt();
+    let margin = tol::THROUGH_ALL_MARGIN_ABS.max(diag * tol::THROUGH_ALL_MARGIN_REL);
+    let start = frame.offset(-depth);
+    let length = depth + margin;
+    let seams: &[f64] = match profile {
+        Profile::Circle { .. } => &SEAM_ANGLES,
+        Profile::Polygon(_) => &SEAM_ANGLES[..1],
+    };
+    let mut failures = Vec::new();
+    let attempts = seams
+        .iter()
+        .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
+    for (seam, btol) in attempts {
+        let tool = guarded("pocket tool", || -> Result<Solid> {
+            let face = profile_face_seam(profile, &start, seam)?;
+            Ok(builder::tsweep(&face, v3(start.z) * length))
+        })??;
+        let attempt = guarded("pocket", || {
+            let mut t = tool.clone();
+            t.not();
+            truck_shapeops::and(&target.solid, &t, btol)
+        });
+        let seam = format!("{seam}/tol {btol}");
+        match attempt {
+            Ok(Some(solid)) => {
+                let body = Body { solid };
+                match check_single_closed(&body, "pocket") {
+                    Ok(()) => return Ok(body),
+                    Err(e) => failures.push(format!("seam {seam}: {e}")),
+                }
+            }
+            Ok(None) => failures.push(format!("seam {seam}: truck_shapeops::and returned None")),
+            Err(e) => failures.push(format!("seam {seam}: {e}")),
+        }
+    }
+    Err(KernelError::BooleanFailed(failures.join("; ")))
+}
+
 fn check_single_closed(body: &Body, what: &str) -> Result<()> {
     let shells = body.solid.boundaries();
     if shells.len() != 1 {

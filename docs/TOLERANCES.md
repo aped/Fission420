@@ -13,11 +13,20 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::MIN_MESH_CHORD_*` | max(1e-3 mm, 1e-5 × bbox diagonal) | mesh | lower bound on chord (prevents runaway allocation) |
 | `tol::MESH_CHORD` | 0.01 mm | mesh | default chordal tolerance for display/STL |
 | sketch solver tolerance | see crates/f420-sketch | numerical | Newton residual convergence |
+| `DIST_GRAD_FLOOR` (solver.rs) | 1e-12 mm | numerical | below this length the `Distance` gradient uses a fixed unit direction (coincident start points) |
 | viewport pick tolerance | pixels | viewport | picking only; never touches model; convert with `Viewport::pixels_per_mm()` |
 | feature-edge quantum (f420-viewport `edges.rs`) | max(1e-5 × mesh diagonal, 4e-7 × max abs coord, 1e-9) | display | matching duplicated tessellation positions when deriving display edges; display cache only |
 | grid min cell (`f420_viewport::MIN_CELL_PX`) | 14 points | viewport | adaptive grid spacing from {1,2,5}×10^k mm; snapping step via `Viewport::grid_spacing()` |
+| sketch editor pick / snap / alignment (`f420-app sketch_edit.rs`) | 8 / 10 / 8 points | viewport | screen-space; converted to sketch mm with the local px-per-mm at the cursor; never stored |
+| face analysis plane / cylinder (`f420-app view3d.rs`) | max(1e-3 mm, 1e-5 × mesh radius); + display chord 0.05 mm for cylinders | display | maps a picked display face to a semantic cap reference or cut wall; the regenerator re-validates references on the exact B-rep |
 
 Acceptance tolerances (GOAL.md) live in tests and the headless demo, not in model code.
+
+Solver convergence is judged on equation residuals (`max(1e-9 mm, 1e-12 × sketch scale)`), not
+on coordinates. Through nonlinear rows (the `Distance` constraint) solved coordinates can differ
+from the exact solution by a few residuals (observed 4e-9 mm on a 3-4-5 triangle), so tests and
+the acceptance scenarios compare solved coordinates at 1e-8 mm (10× the residual tolerance);
+volumes and bounds keep the GOAL.md tolerances.
 
 Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware; fine for parts of
 ~1 mm to ~10 m, unverified beyond (review finding 6).

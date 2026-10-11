@@ -1,5 +1,9 @@
 //! The GOAL.md acceptance workflow, executed only through [`Session::execute`], with
 //! every geometric claim checked against independently derived analytic values.
+//! The SESSION_2 scenarios A and B (editor-built sketches) run after the GOAL.md
+//! workflow in fresh sessions; their steps are prefixed "A." / "B.".
+
+mod scenarios;
 use crate::{Command, Response, Session, SketchTemplate, end_cap_of};
 use f420_document::{FeatureId, SketchPlane};
 use f420_kernel::{self as k, VolumeResult};
@@ -198,7 +202,8 @@ impl Run<'_> {
     }
 }
 
-/// Run the full workflow. Writes `plate.f420.json` and `plate.stl` into `out_dir`.
+/// Run the GOAL.md workflow and SESSION_2 scenarios A and B. Writes
+/// `plate.*`, `scenario_a.*` and `scenario_b.*` (.f420.json, .stl, .step) into `out_dir`.
 pub fn run(out_dir: &Path) -> Report {
     let mut r = Run {
         s: Session::new(),
@@ -208,6 +213,9 @@ pub fn run(out_dir: &Path) -> Report {
         out_dir,
     };
     workflow(&mut r);
+    scenarios::scenario_a(&mut r);
+    scenarios::scenario_b(&mut r);
+    scenarios::scenario_pocket(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {

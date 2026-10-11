@@ -69,6 +69,15 @@ pub enum FeatureKind {
         sketch: FeatureId,
         extent: CutExtent,
     },
+    /// Blind cut: removes the sketch profile from the sketched extrusion cap
+    /// inward (against the cap's outward normal) to `depth` mm. Product limits:
+    /// circular profile sketched on an end/start cap of the base extrusion,
+    /// strictly inside it, 0 < depth < extrusion thickness (a through hole is
+    /// `Cut`). Added in format v2; absent from v1 files.
+    Pocket {
+        sketch: FeatureId,
+        depth: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,6 +98,7 @@ impl Feature {
             FeatureKind::Sketch { .. } => vec![],
             FeatureKind::Extrude { sketch, .. }
             | FeatureKind::Cut { sketch, .. }
+            | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
         }
     }
@@ -108,6 +118,7 @@ impl Feature {
             // Unit conversion boundary: degrees for users, radians internally.
             FeatureKind::Revolve { angle, .. } => vec![("angle_deg".into(), angle.to_degrees())],
             FeatureKind::Cut { .. } => vec![],
+            FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
         }
     }
 
@@ -120,7 +131,12 @@ impl Feature {
             )));
         }
         match &mut self.kind {
-            FeatureKind::Sketch { sketch, .. } if name == "center_x" || name == "center_y" => {
+            // Only template sketches (exactly one fixed anchor, no origin) expose
+            // center_x / center_y; on editor sketches the only FixedPoint is the
+            // origin, which must never move.
+            FeatureKind::Sketch { sketch, .. }
+                if (name == "center_x" || name == "center_y") && anchor(sketch).is_some() =>
+            {
                 let Some(f420_sketch::Constraint::FixedPoint { x, y, .. }) = sketch
                     .constraints
                     .iter_mut()
@@ -167,6 +183,15 @@ impl Feature {
                     )));
                 }
                 *distance = value;
+                Ok(())
+            }
+            FeatureKind::Pocket { depth, .. } if name == "depth" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.depth: pocket depth must be > 0 mm, got {value}"
+                    )));
+                }
+                *depth = value;
                 Ok(())
             }
             _ => Err(DocError::UnknownParameter {

@@ -439,3 +439,143 @@ pub(crate) fn solve_with(sketch: &mut Sketch, pins: &[Pin]) -> SolveReport {
     }
     report
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Dimension, EntityId, PointId, SketchPoint};
+
+    /// The analytic Jacobian must match central finite differences for every
+    /// equation kind, including the nonlinear Distance row.
+    #[test]
+    fn analytic_jacobian_matches_finite_differences() {
+        let pt = |id: u32, x: f64, y: f64| SketchPoint {
+            id: PointId(id),
+            x,
+            y,
+        };
+        let s = Sketch {
+            origin: None,
+            points: vec![
+                pt(0, 0.3, -0.2),
+                pt(1, 4.1, 1.7),
+                pt(2, -2.5, 3.3),
+                pt(3, 7.0, -4.0),
+            ],
+            entities: vec![
+                Entity::Line {
+                    id: EntityId(1),
+                    a: PointId(0),
+                    b: PointId(1),
+                },
+                Entity::Line {
+                    id: EntityId(2),
+                    a: PointId(1),
+                    b: PointId(2),
+                },
+                Entity::Circle {
+                    id: EntityId(3),
+                    center: PointId(3),
+                    radius: 2.2,
+                },
+            ],
+            constraints: vec![
+                Constraint::FixedPoint {
+                    p: PointId(0),
+                    x: 0.0,
+                    y: 0.0,
+                },
+                Constraint::Horizontal { line: EntityId(1) },
+                Constraint::Vertical { line: EntityId(2) },
+                Constraint::HorizontalDistance {
+                    a: PointId(0),
+                    b: PointId(1),
+                    dim: Dimension::new("w", 5.0),
+                },
+                Constraint::VerticalDistance {
+                    a: PointId(1),
+                    b: PointId(2),
+                    dim: Dimension::new("h", 3.0),
+                },
+                Constraint::SymmetricAboutPoint {
+                    a: PointId(0),
+                    b: PointId(2),
+                    center: PointId(3),
+                },
+                Constraint::Diameter {
+                    circle: EntityId(3),
+                    dim: Dimension::new("d", 4.0),
+                },
+                Constraint::Coincident {
+                    a: PointId(2),
+                    b: PointId(3),
+                },
+                Constraint::Distance {
+                    a: PointId(0),
+                    b: PointId(2),
+                    dim: Dimension::new("len", 6.0),
+                },
+            ],
+        };
+        s.validate().unwrap();
+        let sys = System::build(&s);
+        let rows = sys.all_rows();
+        let x0 = sys.initial.clone();
+        let j = sys.jacobian(&x0, &rows);
+        let h = 1e-6;
+        let mut max_err: f64 = 0.0;
+        for c in 0..sys.n {
+            let (mut xp, mut xm) = (x0.clone(), x0.clone());
+            xp[c] += h;
+            xm[c] -= h;
+            let (rp, rm) = (sys.residuals(&xp, &rows), sys.residuals(&xm, &rows));
+            for r in 0..rows.len() {
+                let fd = (rp[r] - rm[r]) / (2.0 * h);
+                max_err = max_err.max((fd - j[(r, c)]).abs());
+            }
+        }
+        assert!(
+            max_err < 1e-7,
+            "Jacobian vs finite differences: {max_err:e}"
+        );
+        // Distance row against the hand-derived gradient d|b-a|/db = (b-a)/|b-a|
+        // with a = (0.3, -0.2), b = (-2.5, 3.3).
+        let (dx, dy): (f64, f64) = (-2.5 - 0.3, 3.3 + 0.2);
+        let l = (dx * dx + dy * dy).sqrt();
+        let last = rows.len() - 1;
+        let bcol = sys.point_col[&PointId(2)];
+        assert!((j[(last, bcol)] - dx / l).abs() < 1e-12);
+        assert!((j[(last, bcol + 1)] - dy / l).abs() < 1e-12);
+    }
+
+    /// Coincident endpoints: the Distance gradient falls back to a unit
+    /// direction instead of NaN, so the row still has rank 1.
+    #[test]
+    fn distance_row_is_finite_at_zero_length() {
+        let s = Sketch {
+            origin: None,
+            points: vec![
+                SketchPoint {
+                    id: PointId(0),
+                    x: 1.0,
+                    y: 1.0,
+                },
+                SketchPoint {
+                    id: PointId(1),
+                    x: 1.0,
+                    y: 1.0,
+                },
+            ],
+            entities: vec![],
+            constraints: vec![Constraint::Distance {
+                a: PointId(0),
+                b: PointId(1),
+                dim: Dimension::new("d", 5.0),
+            }],
+        };
+        let sys = System::build(&s);
+        let j = sys.jacobian(&sys.initial, &sys.all_rows());
+        assert!(j.iter().all(|v| v.is_finite()));
+        assert_eq!(rank(&j), 1);
+    }
+}

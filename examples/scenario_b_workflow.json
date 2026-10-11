@@ -1,0 +1,516 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Chamfered profile",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 5,
+            "id": 4
+          }
+        },
+        {
+          "Line": {
+            "a": 5,
+            "b": 1,
+            "id": 5
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 60.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 60.0,
+          "y": 30.0
+        },
+        {
+          "id": 4,
+          "x": 50.0,
+          "y": 40.0
+        },
+        {
+          "id": 5,
+          "x": 0.0,
+          "y": 40.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 5.0,
+    "name": "Chamfered plate",
+    "sketch": 1
+  },
+  {
+    "cmd": "edit_sketch",
+    "feature": 1,
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 5,
+            "id": 4
+          }
+        },
+        {
+          "Line": {
+            "a": 5,
+            "b": 1,
+            "id": 5
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 60.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 60.0,
+          "y": 30.0
+        },
+        {
+          "id": 4,
+          "x": 45.0,
+          "y": 40.0
+        },
+        {
+          "id": 5,
+          "x": 0.0,
+          "y": 40.0
+        }
+      ]
+    }
+  },
+  {
+    "cmd": "edit_sketch",
+    "feature": 1,
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        {
+          "Coincident": {
+            "a": 0,
+            "b": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Vertical": {
+            "line": 2
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 4
+          }
+        },
+        {
+          "Vertical": {
+            "line": 5
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 1,
+            "b": 2,
+            "dim": {
+              "name": "width",
+              "value": 60.0
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 1,
+            "b": 5,
+            "dim": {
+              "name": "height",
+              "value": 40.0
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 2,
+            "b": 3,
+            "dim": {
+              "name": "side",
+              "value": 30.0
+            }
+          }
+        },
+        {
+          "Distance": {
+            "a": 3,
+            "b": 4,
+            "dim": {
+              "name": "chamfer",
+              "value": 18.027756377319946
+            }
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 5,
+            "id": 4
+          }
+        },
+        {
+          "Line": {
+            "a": 5,
+            "b": 1,
+            "id": 5
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 60.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 60.0,
+          "y": 30.0
+        },
+        {
+          "id": 4,
+          "x": 45.0,
+          "y": 40.0
+        },
+        {
+          "id": 5,
+          "x": 0.0,
+          "y": 40.0
+        }
+      ]
+    }
+  },
+  {
+    "cmd": "set_parameter",
+    "feature": 1,
+    "name": "chamfer",
+    "value": 12.0
+  },
+  {
+    "cmd": "edit_sketch",
+    "expect_ok": false,
+    "feature": 1,
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 1,
+            "id": 4
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 60.0,
+          "y": 40.0
+        },
+        {
+          "id": 3,
+          "x": 60.0,
+          "y": 0.0
+        },
+        {
+          "id": 4,
+          "x": 0.0,
+          "y": 40.0
+        }
+      ]
+    }
+  },
+  {
+    "cmd": "edit_sketch",
+    "expect_ok": false,
+    "feature": 1,
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 1,
+            "b": 2,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 2,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 5,
+            "id": 4
+          }
+        }
+      ],
+      "origin": 0,
+      "points": [
+        {
+          "id": 0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 1,
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "id": 2,
+          "x": 60.0,
+          "y": 0.0
+        },
+        {
+          "id": 3,
+          "x": 60.0,
+          "y": 30.0
+        },
+        {
+          "id": 4,
+          "x": 50.0,
+          "y": 40.0
+        },
+        {
+          "id": 5,
+          "x": 0.0,
+          "y": 40.0
+        }
+      ]
+    }
+  },
+  {
+    "cmd": "save",
+    "path": "examples/scenario_b.f420.json"
+  },
+  {
+    "cmd": "close"
+  },
+  {
+    "cmd": "open",
+    "path": "examples/scenario_b.f420.json"
+  },
+  {
+    "chord": 0.01,
+    "cmd": "export_stl",
+    "path": "artifacts/scenario_b.stl"
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/scenario_b.step"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

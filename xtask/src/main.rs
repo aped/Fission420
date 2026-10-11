@@ -75,6 +75,30 @@ fn main() -> ExitCode {
                 "examples/bracket_workflow.json",
             ],
         ),
+        (
+            "scenario A example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/scenario_a_workflow.json",
+            ],
+        ),
+        (
+            "scenario B example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/scenario_b_workflow.json",
+            ],
+        ),
     ];
     for (name, args) in stages {
         if !run(name, args) {

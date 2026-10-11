@@ -539,3 +539,6 @@ impl Sketch {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_edit;
