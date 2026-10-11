@@ -262,6 +262,16 @@ pub enum FeatureKind {
         seed: FeatureId,
         plane: SketchPlane,
     },
+    /// Repeat the tool of `seed` (an Extrude Join/Cut) `count - 1` more times,
+    /// each rotated by a further `angle` (radians; parameter `angle_deg`, counter-
+    /// clockwise about the seed sketch's normal) about `center` (seed sketch-plane
+    /// coordinates), on the seed's target body. The seed is instance 0.
+    CircularPattern {
+        seed: FeatureId,
+        count: u32,
+        angle: f64,
+        center: [f64; 2],
+    },
     /// Equal-distance chamfer of the straight convex edge where planar faces `a`
     /// and `b` (semantic references on one body) meet, `distance` mm along each.
     Chamfer {
@@ -304,7 +314,9 @@ impl Feature {
             | FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
-            FeatureKind::LinearPattern { seed, .. } => vec![*seed],
+            FeatureKind::LinearPattern { seed, .. } | FeatureKind::CircularPattern { seed, .. } => {
+                vec![*seed]
+            }
             FeatureKind::Mirror {
                 seed,
                 plane: SketchPlane::Face(r),
@@ -392,6 +404,10 @@ impl Feature {
                 ("count".into(), f64::from(*count)),
                 ("spacing".into(), *spacing),
             ],
+            FeatureKind::CircularPattern { count, angle, .. } => vec![
+                ("count".into(), f64::from(*count)),
+                ("angle_deg".into(), angle.to_degrees()),
+            ],
         }
     }
 
@@ -460,7 +476,10 @@ impl Feature {
                 *distance = value;
                 Ok(())
             }
-            FeatureKind::LinearPattern { count, .. } if name == "count" => {
+            FeatureKind::LinearPattern { count, .. }
+            | FeatureKind::CircularPattern { count, .. }
+                if name == "count" =>
+            {
                 if value.fract() != 0.0 || !(2.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
                     return Err(DocError::Validation(format!(
                         "{id}.count: pattern count must be an integer in 2..={MAX_PATTERN_COUNT}, \
@@ -468,6 +487,16 @@ impl Feature {
                     )));
                 }
                 *count = value as u32;
+                Ok(())
+            }
+            FeatureKind::CircularPattern { angle, .. } if name == "angle_deg" => {
+                if value <= 0.0 || value >= 360.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.angle_deg: angle between instances must be in (0, 360) degrees, \
+                         got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
                 Ok(())
             }
             FeatureKind::LinearPattern { spacing, .. } if name == "spacing" => {

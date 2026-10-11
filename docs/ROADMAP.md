@@ -9,8 +9,8 @@ implemented; listing them here is not a claim of support. Ordered roughly by val
   per-loop operations where that is provably equivalent.
 - Region picking inside a sketch (choose which closed region(s) to extrude; islands inside holes;
   several outer loops in one feature producing several bodies).
-- Circular patterns; patterns and mirrors of New Body extrusions, whole bodies and sketches
-  (today: linear patterns and mirrors of Extrude Join/Cut features only), and referenceable faces
+- Patterns and mirrors of New Body extrusions, whole bodies and sketches
+  (today: linear/circular patterns and mirrors of Extrude Join/Cut features only), and referenceable faces
   on pattern/mirror instances.
 - General reference repair: re-attach with preview for every reference kind, and topological
   naming that survives face splits/merges (today: deterministic refusal + explicit re-attach).

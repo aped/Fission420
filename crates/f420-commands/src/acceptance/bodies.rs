@@ -1269,3 +1269,99 @@ pub(super) fn scenario_svg(r: &mut Run<'_>) {
         &x,
     );
 }
+
+/// Circular pattern: a bolt circle of six Ø8 holes on a Ø100 disc.
+pub(super) fn scenario_circular(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3O.1 bolt circle".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Disc".into()),
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 100.0,
+            center: None,
+        },
+    });
+    let Some(sd) = r.ok("disc sketch Ø100", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Disc", sd, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(disc) = r.ok("extrude 10", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Bolt hole".into()),
+        plane: SketchPlane::Face(FaceRef {
+            feature: disc,
+            role: FaceRole::ExtrudeEndCap,
+        }),
+        template: SketchTemplate::CenteredCircle {
+            diameter: 8.0,
+            center: Some([35.0, 0.0]),
+        },
+    });
+    let Some(sh) = r.ok("hole sketch at (35, 0) on top", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Bolt hole", sh, 0.0, ExtrudeOp::Cut, None, true, None);
+    let Some(hole) = r.ok("through-all", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CircularPattern {
+        name: None,
+        feature: hole,
+        count: 6,
+        angle_deg: 60.0,
+        center: [0.0, 0.0],
+    });
+    let Some(pat) = r.ok("circular pattern x6 at 60°", &x) else {
+        return;
+    };
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    let v = |n: f64| PI * 2500.0 * 10.0 - n * PI * 16.0 * 10.0;
+    r.check_body_solid(
+        "disc with 6 holes",
+        b,
+        v(6.0),
+        [-50.0, -50.0, 0.0],
+        [50.0, 50.0, 10.0],
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("bolt_circle.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    r.step = "3O.2 edits".into();
+    for (p, val) in [("count", 4.0), ("angle_deg", 90.0)] {
+        let x = r.exec(Command::SetParameter {
+            feature: pat,
+            name: p.into(),
+            value: val,
+        });
+        r.ok(&format!("{p} = {val}"), &x);
+    }
+    r.check_body_solid(
+        "disc with 4 holes at 90°",
+        b,
+        v(4.0),
+        [-50.0, -50.0, 0.0],
+        [50.0, 50.0, 10.0],
+    );
+    r.refused(
+        "7 instances at 60° wrap past a full turn",
+        Command::SetParameter {
+            feature: pat,
+            name: "count".into(),
+            value: 8.0,
+        },
+        "full turn",
+    );
+}

@@ -105,6 +105,17 @@ pub enum Command {
         spacing: f64,
         direction: [f64; 2],
     },
+    /// Repeat an Extrude Join/Cut `count - 1` more times, each rotated a further
+    /// `angle_deg` counter-clockwise about the seed sketch's normal through
+    /// `center` (seed sketch 2D coordinates). Parameters "count", "angle_deg".
+    CircularPattern {
+        #[serde(default)]
+        name: Option<String>,
+        feature: FeatureId,
+        count: u32,
+        angle_deg: f64,
+        center: [f64; 2],
+    },
     /// Add the mirror image of an Extrude Join/Cut's tool across `plane` (world
     /// plane through the origin, or a planar face) to the seed's target body.
     Mirror {
@@ -282,6 +293,7 @@ impl Command {
             Command::Revolve { .. } => "revolve",
             Command::LinearPattern { .. } => "linear_pattern",
             Command::Mirror { .. } => "mirror",
+            Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
@@ -789,6 +801,34 @@ impl Session {
                             count,
                             spacing,
                             direction,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::CircularPattern {
+                name,
+                feature,
+                count,
+                angle_deg,
+                center,
+            } => {
+                let (name, seed, count, a, center) =
+                    (name.clone(), *feature, *count, *angle_deg, *center);
+                if !a.is_finite() || a <= 0.0 || a >= 360.0 {
+                    return Err(DocError::Validation(format!(
+                        "angle between instances must be in (0, 360) degrees, got {a}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Circular pattern", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Circular pattern"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::CircularPattern {
+                            seed,
+                            count,
+                            angle: a.to_radians(),
+                            center,
                         },
                     ))
                 })?;
@@ -1418,6 +1458,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::ImportMesh { .. } => ("import_mesh", None),
                 FeatureKind::Import3mf { .. } => ("import_3mf", None),
                 FeatureKind::LinearPattern { .. } => ("linear_pattern", None),
+                FeatureKind::CircularPattern { .. } => ("circular_pattern", None),
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
             };

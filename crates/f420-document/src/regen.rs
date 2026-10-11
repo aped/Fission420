@@ -578,6 +578,16 @@ pub fn regenerate_cached_opts(
                     &mut st, id, *seed, *count, *spacing, *direction,
                 )?);
             }
+            FeatureKind::CircularPattern {
+                seed,
+                count,
+                angle,
+                center,
+            } => {
+                r.body = Some(circular_pattern(
+                    &mut st, id, *seed, *count, *angle, *center,
+                )?);
+            }
             FeatureKind::Mirror { seed, plane } => {
                 let frame = match plane {
                     SketchPlane::WorldXY => Frame::XY,
@@ -1095,6 +1105,74 @@ fn linear_pattern(
                 f.origin[2] + world[2] * t,
             ],
             ..f
+        };
+        body = apply_tool_copy(
+            &body,
+            &e,
+            &frame,
+            &format!("instance {} of {count}", i + 1),
+            id,
+        )?;
+    }
+    replace_body(st, id, e.body, body);
+    Ok(e.body)
+}
+
+/// Circular pattern of an Extrude Join/Cut: the seed's exact tool rotated about
+/// the axis through `center` (seed sketch coordinates) along the sketch normal.
+fn circular_pattern(
+    st: &mut Snapshot,
+    id: FeatureId,
+    seed: FeatureId,
+    count: u32,
+    angle: f64,
+    center: [f64; 2],
+) -> Result<BodyId> {
+    let e = copy_seed(st, id, seed)?;
+    if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
+        return Err(DocError::Validation(format!(
+            "{id}.count: must be in 2..={}, got {count}",
+            crate::MAX_PATTERN_COUNT
+        )));
+    }
+    if !angle.is_finite() || angle <= 0.0 || angle >= std::f64::consts::TAU {
+        return Err(DocError::Validation(format!(
+            "{id}.angle_deg: must be in (0, 360), got {}",
+            angle.to_degrees()
+        )));
+    }
+    if f64::from(count - 1) * angle > std::f64::consts::TAU + 1e-9 {
+        return Err(DocError::Validation(format!(
+            "{id}: {count} instances {:.6}° apart overlap after a full turn",
+            angle.to_degrees()
+        )));
+    }
+    if !(center[0].is_finite() && center[1].is_finite()) {
+        return Err(DocError::Validation(format!("{id}: centre must be finite")));
+    }
+    let f = e.start;
+    let c = f.to_world(center);
+    let rot = |v: [f64; 3], t: f64| {
+        // Rodrigues about f.z (v ⟂ f.z for in-plane vectors, but keep it general).
+        let (s, co) = t.sin_cos();
+        let k = f.z;
+        let kxv = cross(k, v);
+        let kd = dot(k, v);
+        [
+            v[0] * co + kxv[0] * s + k[0] * kd * (1.0 - co),
+            v[1] * co + kxv[1] * s + k[1] * kd * (1.0 - co),
+            v[2] * co + kxv[2] * s + k[2] * kd * (1.0 - co),
+        ]
+    };
+    let mut body = brep_target(st, id, e.body)?;
+    for i in 1..count {
+        let t = angle * f64::from(i);
+        let o = rot(sub(f.origin, c), t);
+        let frame = Frame {
+            origin: [c[0] + o[0], c[1] + o[1], c[2] + o[2]],
+            x: rot(f.x, t),
+            y: rot(f.y, t),
+            z: f.z,
         };
         body = apply_tool_copy(
             &body,

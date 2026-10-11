@@ -63,6 +63,10 @@ check chamfer.step "[12000 - 0.5*9*40]" "[0,0,0,40,30,10]" \
 #     (43.6,-20.6) out; material at (5.6,-5.6).
 check svg_plate.step "[5*(2400 - 36*math.pi - (80 + 16*math.pi))]" "[0.6,-40.6,0,60.6,-0.6,5]" \
   "[[20.6,-20.6,2.5],[43.6,-20.6,2.5],[5.6,-5.6,2.5]]" "[False, False, True]"
+# 3O: Ø100 x 10 disc with six Ø8 holes on a 35 mm radius at 0, 60, ..., 300 degrees.
+check bolt_circle.step "[math.pi*2500*10 - 6*math.pi*16*10]" "[-50,-50,0,50,50,10]" \
+  "[[35,0,5],[17.5,30.31088913,5],[-17.5,30.31088913,5],[-35,0,5],[-17.5,-30.31088913,5],[17.5,-30.31088913,5],[0,35,5],[35,10,5]]" \
+  "[False, False, False, False, False, False, True, True]"
 # 3S: our SVG export read by FreeCAD's own importer: edge lengths 200 + 12pi + 20 + 8pi, extents 60 x 40.
 out=$(timeout 180 flatpak run --env="F420_SVG=$DIR/svg_plate.svg" --filesystem="$DIR" --filesystem="$REPO" \
   --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/freecad_check_svg.py" 2>&1 | grep FREECAD_RESULT) || status=1
