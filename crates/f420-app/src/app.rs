@@ -133,12 +133,14 @@ pub struct SketchSession {
     pub saved_camera: Option<Camera>,
     /// Finish was pressed; waiting for the commit reply.
     pub committing: bool,
-    /// Primary press inside the view (screen position), until its release.
+    /// Primary press inside the view (screen position, editor epoch at the
+    /// press), until its release. A changed epoch voids the press.
     pub(crate) press: Option<egui::Pos2>,
+    pub(crate) press_epoch: u64,
     /// The current press has moved beyond the click slop (a drag).
     pub(crate) press_dragging: bool,
-    /// Last click (position, time) for double-click detection.
-    pub(crate) last_click: Option<(egui::Pos2, f64)>,
+    /// Last click (position, time, egui pass) for double-click detection.
+    pub(crate) last_click: Option<(egui::Pos2, f64, u64)>,
 }
 
 /// Actions that discard the open document and therefore need confirmation
@@ -1095,6 +1097,7 @@ impl F420App {
             saved_camera,
             committing: false,
             press: None,
+            press_epoch: 0,
             press_dragging: false,
             last_click: None,
         });
@@ -1243,10 +1246,20 @@ impl F420App {
 
     /// Features that use `id` (deleting `id` is refused while any exist).
     pub(crate) fn dependents_of(&self, id: FeatureId) -> Vec<String> {
+        // A base body is used by every cut/pocket even without an explicit
+        // reference (the regenerator cuts the current body).
+        let base = self
+            .summary
+            .features
+            .iter()
+            .any(|f| f.id == id && (f.kind == "extrude" || f.kind == "revolve"));
         self.summary
             .features
             .iter()
-            .filter(|f| f.depends_on.contains(&id))
+            .filter(|f| {
+                f.depends_on.contains(&id)
+                    || (base && (f.kind == "cut_through_all" || f.kind == "pocket"))
+            })
             .map(|f| f.name.clone())
             .collect()
     }

@@ -87,6 +87,12 @@ fn delete_refuses_used_features_and_is_one_undo_step() {
     assert!(s.execute(&Command::Undo).ok);
     let v = 40000.0 - 250.0 * std::f64::consts::PI;
     assert!((volume(&s) - v).abs() < 1e-6);
+    // The base extrusion is used by the cut implicitly (it cuts the body).
+    let r = s.execute(&Command::DeleteFeature {
+        feature: FeatureId(2),
+    });
+    assert!(!r.ok);
+    assert!(r.error.unwrap().to_string().contains("F4"), "cut named");
     // Unknown ids are reported, not panicked on.
     assert!(
         !s.execute(&Command::DeleteFeature {

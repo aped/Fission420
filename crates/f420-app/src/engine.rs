@@ -414,9 +414,15 @@ fn worker(
         }
         notify();
         // Queue the newest unmeasured body (replacing any older pending job).
-        let pending = session
-            .pending_measurement()
-            .filter(|(d, r, _)| last_job != Some((*d, *r)));
+        // Compare the key before deep-copying the body for the measurer.
+        let key = session
+            .model()
+            .filter(|m| m.measurements_pending())
+            .map(|m| (session.summary().doc_id, m.revision));
+        let pending = match key {
+            Some(k) if last_job != Some(k) => session.pending_measurement(),
+            _ => None,
+        };
         if pending.is_none()
             && let Some(m) = session.model()
             && m.measurements_pending()

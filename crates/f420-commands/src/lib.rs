@@ -497,10 +497,23 @@ impl Session {
                 let m = self.model_mut()?;
                 let doc = m.document();
                 let name = doc.feature(feature)?.name.clone();
+                // A base body is used by every cut/pocket (implicitly: they cut
+                // the current body) as well as by explicit references.
+                let base = matches!(
+                    doc.feature(feature)?.kind,
+                    FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }
+                );
                 let dependents: Vec<String> = doc
                     .features
                     .iter()
-                    .filter(|f| f.dependencies().contains(&feature))
+                    .filter(|f| {
+                        f.dependencies().contains(&feature)
+                            || (base
+                                && matches!(
+                                    f.kind,
+                                    FeatureKind::Cut { .. } | FeatureKind::Pocket { .. }
+                                ))
+                    })
                     .map(|f| format!("{} {}", f.id, f.name))
                     .collect();
                 if !dependents.is_empty() {

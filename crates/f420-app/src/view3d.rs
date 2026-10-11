@@ -663,7 +663,15 @@ impl F420App {
         };
         let ed = &mut s.editor;
         if ed.dim_edit.is_some() {
+            // The inline editor owns input; forget any press it interrupted.
+            s.press = None;
+            s.press_dragging = false;
             return;
+        }
+        if s.press.is_some() && s.press_epoch != ed.epoch() {
+            // Tool change / Escape / undo since the press: void it.
+            s.press = None;
+            s.press_dragging = false;
         }
         // Clicks and drags are derived from the raw primary-button events in
         // order, each at its own position. egui's response-level click uses the
@@ -673,13 +681,24 @@ impl F420App {
         let layer = ui.layer_id();
         let ctx = ui.ctx().clone();
         let (events, now) = ui.input(|i| (i.events.clone(), i.time));
+        let pass = ctx.cumulative_pass_nr();
         let in_view = |p: Pos2| rect.contains(p) && ctx.layer_id_at(p) == Some(layer);
         let trace = std::env::var_os("F420_TRACE_ENGINE").is_some();
         let mut saw_pointer = false;
         for ev in events {
+            if ed.dim_edit.is_some() {
+                // A click in this batch opened the inline editor: stop here.
+                s.press = None;
+                s.press_dragging = false;
+                break;
+            }
             match ev {
                 egui::Event::PointerMoved(m) => {
                     saw_pointer = true;
+                    if s.press.is_none() && !in_view(m) {
+                        ed.cursor = None;
+                        ed.hover = None;
+                    }
                     if let Some(o) = s.press
                         && !s.press_dragging
                         && o.distance(m) > CLICK_SLOP_PX
@@ -706,9 +725,16 @@ impl F420App {
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     ..
-                } if in_view(pos) => {
+                } => {
                     saw_pointer = true;
+                    if !in_view(pos) {
+                        // A press elsewhere (panels, dialogs) is not ours.
+                        s.press = None;
+                        s.press_dragging = false;
+                        continue;
+                    }
                     s.press = Some(pos);
+                    s.press_epoch = ed.epoch();
                     s.press_dragging = false;
                     if let Some(p) = pr.unproject(pos) {
                         ed.pointer_move(p, Some(pos), &view_at(p));
@@ -725,6 +751,9 @@ impl F420App {
                     };
                     saw_pointer = true;
                     let dragged = std::mem::take(&mut s.press_dragging);
+                    if !dragged && !in_view(pos) {
+                        continue; // a click released outside the view
+                    }
                     let Some(p) = pr.unproject(pos) else { continue };
                     let v = View {
                         snapping: !modifiers.shift,
@@ -747,14 +776,19 @@ impl F420App {
                         s.last_click = None;
                     } else {
                         ed.click(p, Some(pos), &v, modifiers.shift);
-                        let double = s.last_click.is_some_and(|(lp, lt)| {
-                            now - lt < DOUBLE_CLICK_S && lp.distance(pos) <= CLICK_SLOP_PX
+                        // Frame times are the only clock egui gives; require the two
+                        // clicks to come from different passes so one slow batch
+                        // never fakes a double click.
+                        let double = s.last_click.is_some_and(|(lp, lt, lpass)| {
+                            lpass != pass
+                                && now - lt < DOUBLE_CLICK_S
+                                && lp.distance(pos) <= CLICK_SLOP_PX
                         });
                         if double {
                             ed.double_click(p, Some(pos), &v);
                             s.last_click = None;
                         } else {
-                            s.last_click = Some((pos, now));
+                            s.last_click = Some((pos, now, pass));
                         }
                     }
                 }

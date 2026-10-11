@@ -214,6 +214,9 @@ pub struct SketchEditor {
     screen_targets: Vec<(Item, egui::Rect)>,
     /// The sketch as it was when the session started (to detect changes).
     original: Sketch,
+    /// Bumped whenever a gesture is cancelled or the tool/history changes, so
+    /// the view can drop a pointer press that started before (see `epoch`).
+    epoch: u64,
 }
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -321,6 +324,7 @@ impl SketchEditor {
             redo: vec![],
             screen_targets: vec![],
             original,
+            epoch: 0,
         }
     }
 
@@ -351,6 +355,27 @@ impl SketchEditor {
         self.cancel_gesture();
         self.tool = tool;
         self.feedback = None;
+        self.epoch += 1;
+    }
+
+    /// Changes whenever an in-progress pointer press should be forgotten
+    /// (tool change, Escape, cancelled gesture, undo/redo).
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// A Line chain whose only point is its (new) start point.
+    fn lone_chain(&self) -> bool {
+        matches!(&self.gesture, Gesture::Line { first, last, fresh: true }
+            if first == last && !self.sketch.point_used_by_entity(*first))
+    }
+
+    /// End an empty line chain before any other edit, so its start point never
+    /// leaks into another step's undo snapshot.
+    fn end_lone_chain(&mut self) {
+        if self.lone_chain() {
+            self.cancel_gesture();
+        }
     }
 
     /// True while a multi-click gesture or drag is in progress.
@@ -654,7 +679,13 @@ impl SketchEditor {
     }
 
     pub fn undo(&mut self) -> bool {
+        if self.lone_chain() {
+            // The pending start point is the most recent action: drop just it.
+            self.cancel_gesture();
+            return true;
+        }
         self.cancel_gesture();
+        self.epoch += 1;
         let Some(prev) = self.undo.pop() else {
             return false;
         };
@@ -666,6 +697,7 @@ impl SketchEditor {
 
     pub fn redo(&mut self) -> bool {
         self.cancel_gesture();
+        self.epoch += 1;
         let Some(next) = self.redo.pop() else {
             return false;
         };
@@ -709,6 +741,9 @@ impl SketchEditor {
     /// Abort the current gesture. A drag in progress restores its start state;
     /// a line chain without segments drops the point it created.
     pub fn cancel_gesture(&mut self) {
+        if !matches!(self.gesture, Gesture::Idle) {
+            self.epoch += 1;
+        }
         match std::mem::replace(&mut self.gesture, Gesture::Idle) {
             Gesture::Drag { before, .. } => {
                 self.sketch = *before;
@@ -720,11 +755,12 @@ impl SketchEditor {
                 last,
                 fresh: true,
             } if first == last && !self.sketch.point_used_by_entity(first) => {
-                // Undo the lone start point (its snapshot is on top of the stack).
-                if let Some(prev) = self.undo.pop() {
-                    self.sketch = prev;
-                    self.resolve();
-                }
+                // The lone start point was never an undo step: remove it directly.
+                self.sketch.points.retain(|q| q.id != first);
+                self.sketch
+                    .constraints
+                    .retain(|c| !constraint_mentions(c, first));
+                self.resolve();
             }
             _ => {}
         }
@@ -961,9 +997,14 @@ impl SketchEditor {
                 }
                 let mut new_last = None;
                 let closes = s.kind == SnapKind::Point(first);
+                let was_lone = self.lone_chain();
                 let ok = self.try_add_line(last, &s, &mut new_last);
                 if !ok {
                     return;
+                }
+                if was_lone && let Some(top) = self.undo.last_mut() {
+                    // Undoing the first segment must not leave its start point.
+                    top.points.retain(|q| q.id != first);
                 }
                 self.gesture = match (closes, new_last) {
                     (true, _) => {
@@ -981,14 +1022,12 @@ impl SketchEditor {
             _ => {
                 // First point of a chain: may be new or an existing point; it
                 // only becomes part of the sketch with the first segment.
-                let before = self.sketch.clone();
+                let n = self.sketch.points.len();
                 let p = self.point_for(&s);
-                let fresh = self.sketch.points.len() != before.points.len();
-                if fresh {
-                    // New, unattached point: one undo step; dropped again if the
-                    // chain ends without a segment (see `cancel_gesture`).
-                    self.push_undo(before);
-                }
+                // A new start point is not an undo step of its own: it is removed
+                // if the chain ends without a segment, and stripped from the first
+                // segment's undo snapshot (see `line_click`).
+                let fresh = self.sketch.points.len() != n;
                 self.gesture = Gesture::Line {
                     first: p,
                     last: p,
@@ -1400,6 +1439,7 @@ impl SketchEditor {
     }
 
     pub fn constrain_lines(&mut self, vertical: bool) {
+        self.end_lone_chain();
         let lines = self.selected_lines();
         if lines.is_empty() {
             return;
@@ -1488,6 +1528,7 @@ impl SketchEditor {
     }
 
     pub fn constrain_parallel(&mut self, perpendicular: bool) {
+        self.end_lone_chain();
         let Some((a, b)) = self.two_lines() else {
             return;
         };
@@ -1509,6 +1550,7 @@ impl SketchEditor {
 
     /// Keep the selected point on the (infinite) selected line.
     pub fn constrain_on_line(&mut self) {
+        self.end_lone_chain();
         let Some((line, point)) = self.midpoint_pair() else {
             return;
         };
@@ -1527,6 +1569,7 @@ impl SketchEditor {
     /// Toggle construction (reference) geometry: it still solves and can be
     /// dimensioned, but profiles ignore it.
     pub fn toggle_construction(&mut self) {
+        self.end_lone_chain();
         let es = self.selected_entities();
         if es.is_empty() {
             return;
@@ -1560,6 +1603,7 @@ impl SketchEditor {
 
     /// Keep the selected point at the midpoint of the selected line.
     pub fn constrain_midpoint(&mut self) {
+        self.end_lone_chain();
         let Some((line, p)) = self.midpoint_pair() else {
             return;
         };
@@ -1574,6 +1618,7 @@ impl SketchEditor {
     }
 
     pub fn constrain_tangent(&mut self) {
+        self.end_lone_chain();
         let Some((line, arc)) = self.tangent_pair() else {
             return;
         };
@@ -1585,6 +1630,7 @@ impl SketchEditor {
 
     /// Equal length (two lines) or equal radius (two arcs/circles).
     pub fn constrain_equal_radius(&mut self) {
+        self.end_lone_chain();
         let es = self.selected_entities();
         if self.equal_disabled_reason().is_some() {
             return;
@@ -1601,6 +1647,7 @@ impl SketchEditor {
     }
 
     pub fn constrain_coincident(&mut self) {
+        self.end_lone_chain();
         let p = self.selected_points();
         if p.len() != 2 {
             return;
@@ -1617,9 +1664,11 @@ impl SketchEditor {
         if self.selection.is_empty() {
             return;
         }
+        self.end_lone_chain();
         let sel = std::mem::take(&mut self.selection);
+        let kept = sel.clone();
         let origin = self.sketch.origin;
-        self.try_change(false, |sk| {
+        let ok = self.try_change(false, |sk| {
             let mut cons: Vec<usize> = sel
                 .iter()
                 .filter_map(|i| match i {
@@ -1668,9 +1717,13 @@ impl SketchEditor {
             }
             Ok(())
         });
-        // Constraint indices may have shifted: never leave an editor pointing
-        // at a different dimension.
-        self.dim_edit = None;
+        if ok {
+            // Constraint indices may have shifted: never leave an editor
+            // pointing at a different dimension.
+            self.dim_edit = None;
+        } else {
+            self.selection = kept;
+        }
     }
 }
 
@@ -2079,6 +2132,37 @@ mod tests {
         assert!(ed.sketch.is_construction(l2));
         ed.toggle_construction();
         assert!(!ed.sketch.is_construction(l2));
+    }
+
+    #[test]
+    fn lone_start_point_never_costs_or_breaks_undo() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [5.0, 5.0]);
+        click(&mut ed, [25.0, 15.0]);
+        let rect = ed.sketch.clone();
+        // Ctrl+Z with only a pending start point cancels just that point.
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [40.0, 40.0]);
+        assert!(ed.undo());
+        assert_eq!(ed.sketch, rect, "rectangle kept, start point gone");
+        // An edit made while a start point is pending survives Escape.
+        click(&mut ed, [40.0, 40.0]);
+        let line = ed.sketch.entities[0].id();
+        ed.selection = vec![Item::Entity(line)];
+        ed.toggle_construction();
+        assert!(ed.sketch.is_construction(line));
+        assert!(ed.escape());
+        assert!(ed.sketch.is_construction(line), "construction toggle kept");
+        assert_eq!(ed.sketch.points.len(), rect.points.len(), "no stray point");
+        // Undoing a chain's first segment leaves no stray start point.
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [40.0, 40.0]);
+        click(&mut ed, [50.0, 47.0]);
+        assert!(ed.escape());
+        let n_with = ed.sketch.points.len();
+        assert!(ed.undo());
+        assert_eq!(ed.sketch.points.len(), n_with - 2);
     }
 
     #[test]
