@@ -151,10 +151,12 @@ enum DragItem {
 enum Gesture {
     Idle,
     /// Polyline in progress: `first` is the chain's first point, `last` the
-    /// point the rubber band starts from.
+    /// point the rubber band starts from. `fresh`: `first` was created by this
+    /// chain (removed again if the chain ends without a segment).
     Line {
         first: PointId,
         last: PointId,
+        fresh: bool,
     },
     /// First click of a rectangle (centre or corner), circle (centre) or arc (start).
     FirstClick(Snap),
@@ -227,6 +229,19 @@ pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     }
     let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
     dist(p, [a[0] + t * dx, a[1] + t * dy])
+}
+
+/// Does constraint `c` reference point `p` directly?
+pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
+    match c {
+        Constraint::FixedPoint { p: q, .. } => *q == p,
+        Constraint::HorizontalDistance { a, b, .. }
+        | Constraint::VerticalDistance { a, b, .. }
+        | Constraint::Distance { a, b, .. }
+        | Constraint::Coincident { a, b } => *a == p || *b == p,
+        Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
+        _ => false,
+    }
 }
 
 /// Distance from `p` to an arc (to the nearest end outside its angular span).
@@ -690,19 +705,34 @@ impl SketchEditor {
         false
     }
 
-    /// Abort the current gesture. A drag in progress restores its start state.
+    /// Abort the current gesture. A drag in progress restores its start state;
+    /// a line chain without segments drops the point it created.
     pub fn cancel_gesture(&mut self) {
-        if let Gesture::Drag { before, .. } = std::mem::replace(&mut self.gesture, Gesture::Idle) {
-            self.sketch = *before;
-            self.resolve();
-            self.info("Drag cancelled; geometry restored.".into());
+        match std::mem::replace(&mut self.gesture, Gesture::Idle) {
+            Gesture::Drag { before, .. } => {
+                self.sketch = *before;
+                self.resolve();
+                self.info("Drag cancelled; geometry restored.".into());
+            }
+            Gesture::Line {
+                first,
+                last,
+                fresh: true,
+            } if first == last && !self.sketch.point_used_by_entity(first) => {
+                // Undo the lone start point (its snapshot is on top of the stack).
+                if let Some(prev) = self.undo.pop() {
+                    self.sketch = prev;
+                    self.resolve();
+                }
+            }
+            _ => {}
         }
     }
 
     /// End a polyline chain (Enter / right click), keeping what was drawn.
     pub fn finish_chain(&mut self) {
         if matches!(self.gesture, Gesture::Line { .. } | Gesture::DimFirst(_)) {
-            self.gesture = Gesture::Idle;
+            self.cancel_gesture();
         }
     }
 
@@ -713,11 +743,15 @@ impl SketchEditor {
             self.drag_to(&item, pos, view);
             return;
         }
-        let anchor = match self.tool {
-            SketchTool::Line => self.rubber_band_from(),
-            _ => None,
+        // Same snapping as the click that will follow (preview = result).
+        let s = match (&self.tool, &self.gesture) {
+            (SketchTool::Line, _) => self.snap(pos, self.rubber_band_from(), None, view),
+            (SketchTool::Arc, Gesture::FirstClick(start)) => {
+                self.snap(pos, Some(start.pos), None, view)
+            }
+            (SketchTool::Arc, Gesture::ArcEnd { .. }) => self.via_snap(pos, view),
+            _ => self.snap(pos, None, None, view),
         };
-        let s = self.snap(pos, anchor, None, view);
         self.cursor = Some(s);
         self.hover = if self.tool == SketchTool::Select || self.tool == SketchTool::Dimension {
             self.pick(pos, screen, view)
@@ -869,14 +903,7 @@ impl SketchEditor {
             Gesture::ArcEnd { start, end } => {
                 // The pass-through point only shapes the arc: grid snapping like
                 // every other click, but never merged with an existing point.
-                let mut via = self.snap(pos, None, None, view);
-                if matches!(via.kind, SnapKind::Point(_)) {
-                    via = Snap {
-                        pos,
-                        kind: SnapKind::Free,
-                        align: None,
-                    };
-                }
+                let via = self.via_snap(pos, view);
                 self.gesture = Gesture::Idle;
                 let ok = self.try_change(true, |sk| {
                     let mut pid = |s: &Snap| match s.kind {
@@ -922,7 +949,7 @@ impl SketchEditor {
         let anchor = self.rubber_band_from();
         let s = self.snap(pos, anchor, None, view);
         match self.gesture.clone() {
-            Gesture::Line { first, last } => {
+            Gesture::Line { first, last, .. } => {
                 let Some(from) = self.sketch.point_xy(last) else {
                     self.gesture = Gesture::Idle;
                     return;
@@ -942,7 +969,11 @@ impl SketchEditor {
                         self.info("Loop closed.".into());
                         Gesture::Idle
                     }
-                    (false, Some(p)) => Gesture::Line { first, last: p },
+                    (false, Some(p)) => Gesture::Line {
+                        first,
+                        last: p,
+                        fresh: false,
+                    },
                     _ => Gesture::Idle,
                 };
             }
@@ -951,11 +982,17 @@ impl SketchEditor {
                 // only becomes part of the sketch with the first segment.
                 let before = self.sketch.clone();
                 let p = self.point_for(&s);
-                if self.sketch.points.len() != before.points.len() {
-                    // New, unattached point: keep it as part of the in-progress chain.
+                let fresh = self.sketch.points.len() != before.points.len();
+                if fresh {
+                    // New, unattached point: one undo step; dropped again if the
+                    // chain ends without a segment (see `cancel_gesture`).
                     self.push_undo(before);
                 }
-                self.gesture = Gesture::Line { first: p, last: p };
+                self.gesture = Gesture::Line {
+                    first: p,
+                    last: p,
+                    fresh,
+                };
             }
         }
     }
@@ -978,6 +1015,12 @@ impl SketchEditor {
                 if to == from {
                     return Err("zero-length line".into());
                 }
+                let duplicate = sk.entities.iter().any(|e| {
+                    matches!(e, Entity::Line { a, b, .. } if (*a == from && *b == to) || (*a == to && *b == from))
+                });
+                if duplicate {
+                    return Err("a line already connects these two points".into());
+                }
                 let line = sk.add_line(from, to);
                 if with_align {
                     match s.align {
@@ -993,10 +1036,28 @@ impl SketchEditor {
             });
             if ok {
                 *new_last = end;
+                if !with_align {
+                    // The alignment constraint was redundant; the line itself is fine.
+                    self.feedback = None;
+                }
                 return true;
             }
         }
         false
+    }
+
+    /// Snap for an arc's pass-through point: grid like every click, never a point.
+    fn via_snap(&self, pos: [f64; 2], view: &View) -> Snap {
+        let via = self.snap(pos, None, None, view);
+        if matches!(via.kind, SnapKind::Point(_)) {
+            Snap {
+                pos,
+                kind: SnapKind::Free,
+                align: None,
+            }
+        } else {
+            via
+        }
     }
 
     fn make_rectangle(&mut self, first: Snap, second: Snap, centered: bool) {
@@ -1017,11 +1078,31 @@ impl SketchEditor {
             );
             return;
         }
+        // Clicked corners that snapped to an existing point reuse it (shared
+        // vertex), exactly as the snap cue promised.
+        let clicked: Vec<Snap> = if centered {
+            vec![second]
+        } else {
+            vec![first, second]
+        };
         let ok = self.try_change(true, |sk| {
-            let p1 = sk.add_point(lo[0], lo[1]);
-            let p2 = sk.add_point(hi[0], lo[1]);
-            let p3 = sk.add_point(hi[0], hi[1]);
-            let p4 = sk.add_point(lo[0], hi[1]);
+            let mut corner = |x: f64, y: f64| {
+                let reuse = clicked.iter().find_map(|s| match s.kind {
+                    SnapKind::Point(id)
+                        if (s.pos[0] - x).abs() <= 1e-9
+                            && (s.pos[1] - y).abs() <= 1e-9
+                            && sk.point(id).is_some() =>
+                    {
+                        Some(id)
+                    }
+                    _ => None,
+                });
+                reuse.unwrap_or_else(|| sk.add_point(x, y))
+            };
+            let p1 = corner(lo[0], lo[1]);
+            let p2 = corner(hi[0], lo[1]);
+            let p3 = corner(hi[0], hi[1]);
+            let p4 = corner(lo[0], hi[1]);
             let bottom = sk.add_line(p1, p2);
             let right = sk.add_line(p2, p3);
             let top = sk.add_line(p3, p4);
@@ -1460,17 +1541,31 @@ impl SketchEditor {
                 Item::Point(p) if Some(*p) != origin => Some(*p),
                 _ => None,
             }) {
-                ents.extend(sk.entities.iter().filter_map(|e| match e {
-                    Entity::Line { id, a, b } if *a == p || *b == p => Some(*id),
-                    Entity::Circle { id, center, .. } if *center == p => Some(*id),
-                    _ => None,
-                }));
+                ents.extend(
+                    sk.entities
+                        .iter()
+                        .filter(|e| e.points().contains(&p))
+                        .map(|e| e.id()),
+                );
             }
             for e in ents {
                 sk.remove_entity(e);
             }
+            // Selected points no curve uses any more (e.g. a lone point) go too.
+            for p in sel.iter().filter_map(|i| match i {
+                Item::Point(p) if Some(*p) != origin => Some(*p),
+                _ => None,
+            }) {
+                if sk.point(p).is_some() && !sk.point_used_by_entity(p) {
+                    sk.constraints.retain(|c| !constraint_mentions(c, p));
+                    sk.points.retain(|q| q.id != p);
+                }
+            }
             Ok(())
         });
+        // Constraint indices may have shifted: never leave an editor pointing
+        // at a different dimension.
+        self.dim_edit = None;
     }
 }
 
@@ -1729,6 +1824,51 @@ mod tests {
         click(&mut ed, [30.0, 20.0]);
         assert_eq!(ed.sketch, before);
         assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+    }
+
+    #[test]
+    fn review_fixes_stray_point_delete_duplicates_and_corner_snaps() {
+        // A Line chain ended without a segment leaves no stray point.
+        let mut ed = SketchEditor::new(Sketch::default());
+        let n0 = ed.sketch.points.len();
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [30.0, 30.0]);
+        assert_eq!(ed.sketch.points.len(), n0 + 1);
+        assert!(ed.escape());
+        assert_eq!(ed.sketch.points.len(), n0, "lone start point removed");
+        assert!(!ed.can_undo());
+        // Duplicate line between the same two points is refused.
+        click(&mut ed, [0.0, 10.0]);
+        click(&mut ed, [20.0, 10.0]);
+        click(&mut ed, [0.0, 10.0]);
+        assert_eq!(ed.sketch.entities.len(), 1);
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+        ed.escape();
+        // 2-point rectangle reuses a snapped point (the origin) as its corner.
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.2, -0.2]);
+        click(&mut ed, [-20.0, -10.0]);
+        let origin = ed.sketch.origin.unwrap();
+        assert!(ed.sketch.point_used_by_entity(origin), "origin is a corner");
+        // Deleting a dimension closes the inline editor for it.
+        ed.set_tool(SketchTool::Dimension);
+        click(&mut ed, [-10.0, -10.0]);
+        assert!(ed.dim_edit.is_some());
+        ed.delete_selection();
+        assert!(ed.dim_edit.is_none());
+        // Deleting an arc's end point deletes the arc.
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Arc);
+        click(&mut ed, [10.0, 0.0]);
+        click(&mut ed, [-10.0, 0.0]);
+        click(&mut ed, [0.0, 10.0]);
+        assert_eq!(ed.sketch.entities.len(), 1);
+        let Entity::Arc { start, .. } = ed.sketch.entities[0] else {
+            panic!("arc")
+        };
+        ed.selection = vec![Item::Point(start)];
+        ed.delete_selection();
+        assert!(ed.sketch.entities.is_empty());
     }
 
     #[test]

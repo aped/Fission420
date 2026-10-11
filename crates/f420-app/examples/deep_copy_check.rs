@@ -3,9 +3,17 @@
 use f420_kernel::{self as k, Frame, Profile};
 
 fn main() {
-    let rect = Profile::Polygon(vec![[-40.0, -25.0], [40.0, -25.0], [40.0, 25.0], [-40.0, 25.0]]);
+    let rect = Profile::Polygon(vec![
+        [-40.0, -25.0],
+        [40.0, -25.0],
+        [40.0, 25.0],
+        [-40.0, 25.0],
+    ]);
     let plate = k::extrude(&rect, &Frame::XY, 10.0).expect("extrude");
-    let hole = Profile::Circle { center: [0.0, 0.0], radius: 5.0 };
+    let hole = Profile::Circle {
+        center: [0.0, 0.0],
+        radius: 5.0,
+    };
     let cut = k::cut_through_all(&plate, &hole, &Frame::XY.offset(10.0)).expect("cut");
     for (name, body, n) in [("box", &plate, 200), ("plate+hole", &cut, 3)] {
         let want = k::measure(body).expect("measure").volume;

@@ -91,6 +91,7 @@ struct Shell {
     f12_pending: bool,
     title: String,
     trace_input: bool,
+    closing: bool,
     probe: Option<PathBuf>,
     probe_last: String,
     result: Arc<Mutex<Result<(), String>>>,
@@ -308,6 +309,11 @@ impl eframe::App for Shell {
             f420_app::probe::begin_frame();
         }
         self.app.ui(ui);
+        // A confirmed exit (Discard, or Save followed by a successful save).
+        if self.app.exit_confirmed() && !self.closing {
+            self.closing = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if let Some(p) = self.probe.clone() {
             write_probe(&p, &self.app, &mut self.probe_last);
         }
@@ -370,6 +376,7 @@ fn main() -> ExitCode {
                 f12_pending: false,
                 title: String::new(),
                 trace_input: std::env::var_os("F420_TRACE_INPUT").is_some_and(|v| v == "1"),
+                closing: false,
                 probe: std::env::var_os("F420_PROBE").map(PathBuf::from),
                 probe_last: String::new(),
                 result: result_app,

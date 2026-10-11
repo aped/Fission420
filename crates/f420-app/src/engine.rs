@@ -375,6 +375,8 @@ fn worker(
     };
     let mut queue: VecDeque<Command> = VecDeque::new();
     let mut stopping = false;
+    // Last (doc_id, revision) handed to the measurement thread.
+    let mut last_job: Option<(u64, u64)> = None;
     'run: loop {
         if stopping && queue.is_empty() {
             break; // Shutdown received and every queued command answered
@@ -412,10 +414,13 @@ fn worker(
         }
         notify();
         // Queue the newest unmeasured body (replacing any older pending job).
-        let pending = session.pending_measurement();
+        let pending = session
+            .pending_measurement()
+            .filter(|(d, r, _)| last_job != Some((*d, *r)));
         if pending.is_none()
             && let Some(m) = session.model()
             && m.measurements_pending()
+            && last_job != Some((session.summary().doc_id, m.revision))
         {
             // The body could not be copied for the measurement thread: report
             // the measurement as failed rather than leaving it pending forever.
@@ -435,6 +440,7 @@ fn worker(
             }
         }
         if let Some((doc_id, revision, body)) = pending {
+            last_job = Some((doc_id, revision));
             trace(|| format!("queue measure doc {doc_id} rev {revision}"));
             let (lock, cv) = &*slot;
             if let Ok(mut g) = lock.lock() {

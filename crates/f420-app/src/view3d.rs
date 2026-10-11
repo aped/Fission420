@@ -691,6 +691,8 @@ impl F420App {
                 ed.release();
             } else if let Some(l) = latest
                 && let Some(p) = pr.unproject(l)
+                // A long press without movement is not a second click.
+                && origin.is_some_and(|o| o.distance(l) > 6.0)
             {
                 ed.click(p, Some(l), &view_at(p), shift);
             }
@@ -993,11 +995,13 @@ fn inline_number_editor(
                             i.key_pressed(egui::Key::Escape),
                         )
                     });
-                    if !r.has_focus() && !enter && !esc {
+                    // Take focus when opened only: the user may click into other
+                    // fields; Escape elsewhere still cancels via the shortcuts.
+                    if select_all {
                         r.request_focus();
                     }
                     apply |= enter && (r.lost_focus() || r.has_focus());
-                    cancel |= esc;
+                    cancel |= esc && (r.lost_focus() || r.has_focus());
                     if ui.button("Set dimension").clicked() {
                         apply = true;
                     }

@@ -1024,6 +1024,16 @@ impl F420App {
 
     /// Open the sketch editor for a new sketch or an existing sketch feature.
     pub fn begin_sketch(&mut self, target: SketchTarget) {
+        if self.engine.busy() {
+            // The session copies the sketch/face from the current summary; a
+            // queued edit would otherwise be silently undone by Finish.
+            self.diag(
+                true,
+                "Sketch",
+                "wait for the current regeneration to finish, then open the sketch".into(),
+            );
+            return;
+        }
         if self.sketch.is_some() {
             self.diag(
                 true,
@@ -1526,6 +1536,13 @@ impl F420App {
             return;
         }
         let ed = &mut s.editor;
+        if ed.dragging() {
+            // Mid-drag only Escape (restore) is meaningful.
+            if sc(Modifiers::NONE, Key::Escape) {
+                ed.escape();
+            }
+            return;
+        }
         if sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || sc(Modifiers::COMMAND, Key::Y) {
             ed.redo();
         } else if sc(Modifiers::COMMAND, Key::Z) {
