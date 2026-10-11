@@ -256,6 +256,13 @@ pub enum FeatureKind {
         seed: FeatureId,
         plane: SketchPlane,
     },
+    /// Equal-distance chamfer of the straight convex edge where planar faces `a`
+    /// and `b` (semantic references on one body) meet, `distance` mm along each.
+    Chamfer {
+        a: FaceRef,
+        b: FaceRef,
+        distance: f64,
+    },
 }
 
 impl FeatureKind {
@@ -297,6 +304,13 @@ impl Feature {
                 plane: SketchPlane::Face(r),
             } => vec![*seed, r.feature],
             FeatureKind::Mirror { seed, .. } => vec![*seed],
+            FeatureKind::Chamfer { a, b, .. } => {
+                let mut v = vec![a.feature];
+                if b.feature != a.feature {
+                    v.push(b.feature);
+                }
+                v
+            }
             FeatureKind::ImportStep { .. } | FeatureKind::ImportMesh { .. } => vec![],
         }
     }
@@ -363,6 +377,7 @@ impl Feature {
             }
             FeatureKind::ImportMesh { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
+            FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::LinearPattern { count, spacing, .. } => vec![
                 ("count".into(), f64::from(*count)),
                 ("spacing".into(), *spacing),
@@ -452,6 +467,15 @@ impl Feature {
                     )));
                 }
                 *spacing = value;
+                Ok(())
+            }
+            FeatureKind::Chamfer { distance, .. } if name == "distance" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.distance: chamfer distance must be > 0 mm, got {value}"
+                    )));
+                }
+                *distance = value;
                 Ok(())
             }
             FeatureKind::Pocket { depth, .. } if name == "depth" => {

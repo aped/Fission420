@@ -1085,3 +1085,108 @@ pub(super) fn scenario_mirror(r: &mut Run<'_>) {
         "not inside a face",
     );
 }
+
+/// Backlog 6: equal-distance chamfer of a box edge named by its two faces.
+pub(super) fn scenario_chamfer(r: &mut Run<'_>) {
+    r.s = crate::Session::new();
+    r.step = "3E.1 chamfer the top-front edge".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let Some(sb) = r.polygon(
+        "Block",
+        SketchPlane::WorldXY,
+        &[[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Block", sb, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(blk) = r.ok("extrude 40x30x10", &x) else {
+        return;
+    };
+    let faces = r.feature_summary(blk).map(|f| f.faces).unwrap_or_default();
+    let top = faces
+        .iter()
+        .find(|f| f.reference.role == FaceRole::ExtrudeEndCap)
+        .map(|f| f.reference);
+    let front = faces
+        .iter()
+        .find(|f| {
+            matches!(f.reference.role, FaceRole::ExtrudeSide { .. })
+                && (f.frame.z[1] + 1.0).abs() < 1e-12
+        })
+        .map(|f| f.reference);
+    let bottom = faces
+        .iter()
+        .find(|f| f.reference.role == FaceRole::ExtrudeStartCap)
+        .map(|f| f.reference);
+    let (Some(top), Some(front), Some(bottom)) = (top, front, bottom) else {
+        r.check(
+            "top/front/bottom faces offered",
+            "present",
+            "missing",
+            false,
+        );
+        return;
+    };
+    let x = r.exec(Command::Chamfer {
+        name: None,
+        a: top,
+        b: front,
+        distance: 2.0,
+    });
+    let Some(ch) = r.ok("chamfer 2 mm", &x) else {
+        return;
+    };
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 12000 - 0.5 * 2 * 2 * 40.
+    r.check_body_solid(
+        "chamfered block",
+        b,
+        11920.0,
+        [0.0, 0.0, 0.0],
+        [40.0, 30.0, 10.0],
+    );
+    let x = r.exec(Command::SetParameter {
+        feature: ch,
+        name: "distance".into(),
+        value: 3.0,
+    });
+    r.ok("distance = 3", &x);
+    // 12000 - 0.5 * 9 * 40.
+    r.check_body_solid(
+        "chamfer 3 mm",
+        b,
+        11820.0,
+        [0.0, 0.0, 0.0],
+        [40.0, 30.0, 10.0],
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("chamfer.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    r.refused(
+        "chamfer between parallel faces",
+        Command::Chamfer {
+            name: None,
+            a: top,
+            b: bottom,
+            distance: 1.0,
+        },
+        "parallel",
+    );
+    r.refused(
+        "chamfer larger than the face",
+        Command::SetParameter {
+            feature: ch,
+            name: "distance".into(),
+            value: 12.0,
+        },
+        "reaches past",
+    );
+}

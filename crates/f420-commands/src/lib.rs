@@ -113,6 +113,15 @@ pub enum Command {
         feature: FeatureId,
         plane: SketchPlane,
     },
+    /// Chamfer the straight convex edge between two planar faces (semantic
+    /// references, e.g. from `FeatureSummary.faces`), `distance` mm along each.
+    Chamfer {
+        #[serde(default)]
+        name: Option<String>,
+        a: FaceRef,
+        b: FaceRef,
+        distance: f64,
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -236,6 +245,7 @@ impl Command {
             Command::Revolve { .. } => "revolve",
             Command::LinearPattern { .. } => "linear_pattern",
             Command::Mirror { .. } => "mirror",
+            Command::Chamfer { .. } => "chamfer",
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
@@ -755,6 +765,24 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Chamfer {
+                name,
+                a,
+                b,
+                distance,
+            } => {
+                let (name, a, b, distance) = (name.clone(), *a, *b, *distance);
+                if !distance.is_finite() || distance <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "chamfer distance must be > 0 mm, got {distance}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Chamfer", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Chamfer"));
+                    Ok(d.push(n, FeatureKind::Chamfer { a, b, distance }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetParameter {
                 feature,
                 name,
@@ -1214,6 +1242,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::ImportMesh { .. } => ("import_mesh", None),
                 FeatureKind::LinearPattern { .. } => ("linear_pattern", None),
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
+                FeatureKind::Chamfer { .. } => ("chamfer", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {

@@ -226,6 +226,7 @@ pub fn run(out_dir: &Path) -> Report {
     bodies::scenario_nested(&mut r);
     bodies::scenario_pattern(&mut r);
     bodies::scenario_mirror(&mut r);
+    bodies::scenario_chamfer(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {

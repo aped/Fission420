@@ -588,6 +588,20 @@ pub fn regenerate_cached_opts(
                 r.frame = Some(frame);
                 r.body = Some(mirror_feature(&mut st, id, *seed, &frame)?);
             }
+            FeatureKind::Chamfer { a, b, distance } => {
+                let (fa, fb) = (resolve_face(id, a, &st)?, resolve_face(id, b, &st)?);
+                if fa.body != fb.body {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the two faces belong to different bodies ({} and {})",
+                        fa.body, fb.body
+                    )));
+                }
+                let body = brep_target(&st, id, fa.body)?;
+                let out =
+                    k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
+                replace_body(&mut st, id, fa.body, out);
+                r.body = Some(fa.body);
+            }
             FeatureKind::ImportMesh { blob, to_mm, body } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;

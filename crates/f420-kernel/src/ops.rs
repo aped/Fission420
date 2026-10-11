@@ -118,7 +118,7 @@ fn same_shape(a: &Body, b: &Body) -> bool {
 }
 
 /// Planar faces of `body` lying in `frame`'s plane, with either normal direction.
-fn coplanar_faces(body: &Body, frame: &Frame) -> Vec<Face> {
+pub(crate) fn coplanar_faces(body: &Body, frame: &Frame) -> Vec<Face> {
     let z = Vector3::new(frame.z[0], frame.z[1], frame.z[2]);
     let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
     body.solid
@@ -178,7 +178,7 @@ pub fn coplanar_face_side(body: &Body, frame: &Frame) -> Result<Option<f64>> {
 const REGION_SAMPLES: usize = 64;
 
 /// Polygonized boundary loops of a planar face in `frame`'s 2D coordinates.
-fn face_loops_2d(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
+pub(crate) fn face_loops_2d(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
     let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
     let x = Vector3::new(frame.x[0], frame.x[1], frame.x[2]);
     let y = Vector3::new(frame.y[0], frame.y[1], frame.y[2]);
@@ -208,7 +208,7 @@ fn face_loops_2d(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
 }
 
 /// Even-odd point-in-polygon over several loops (outer + holes).
-fn inside_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> bool {
+pub(crate) fn inside_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> bool {
     let mut inside = false;
     for l in loops {
         let n = l.len();
@@ -225,7 +225,7 @@ fn inside_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> bool {
     inside
 }
 
-fn dist_to_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> f64 {
+pub(crate) fn dist_to_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> f64 {
     let mut d = f64::INFINITY;
     for l in loops {
         let n = l.len();

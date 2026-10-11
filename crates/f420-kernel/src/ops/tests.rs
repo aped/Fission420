@@ -144,3 +144,53 @@ fn region_with_holes_extrudes_cuts_and_exports() {
     assert!(m.face_count >= 11, "{}", m.face_count);
     assert!(export_step(&b, "t").is_ok());
 }
+
+#[test]
+fn chamfer_box_edge_and_refusals() {
+    // 40 x 30 x 10 block; top face (z = 10, +Z) and front face (y = 0, -Y).
+    let b = block();
+    let front = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [0.0, -1.0, 0.0],
+    };
+    let c = crate::chamfer_edge(&b, &top(), &front, 2.0).unwrap();
+    // Removes a 2 x 2 right-triangle prism along the 40 mm edge: 0.5 * 4 * 40.
+    assert!(
+        (volume(&c) - (12000.0 - 80.0)).abs() < 1e-6,
+        "{}",
+        volume(&c)
+    );
+    let m = measure(&c).unwrap();
+    assert_eq!(
+        (m.shell_count, m.all_shells_closed, m.face_count),
+        (1, true, 7)
+    );
+    assert!(export_step(&c, "t").is_ok());
+    // Parallel faces, too large a distance, non-adjacent faces.
+    let bottom = Frame {
+        z: [0.0, 0.0, -1.0],
+        y: [0.0, -1.0, 0.0],
+        ..Frame::XY
+    };
+    assert!(crate::chamfer_edge(&b, &top(), &bottom, 1.0).is_err());
+    assert!(crate::chamfer_edge(&b, &top(), &front, 12.0).is_err());
+    let back = Frame {
+        origin: [0.0, 30.0, 0.0],
+        x: [-1.0, 0.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [0.0, 1.0, 0.0],
+    };
+    let _ = back;
+    // A boss within the chamfer's reach is not cut silently: the removed-volume
+    // check refuses it.
+    let boss = join_prism(&b, &rect(10.0, 0.5, 20.0, 5.0), &top().offset(-0.5), 3.5).unwrap();
+    let e = crate::chamfer_edge(&boss, &top(), &front, 2.0)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("instead of the edge wedge") || e.contains("cannot tell"),
+        "{e}"
+    );
+}

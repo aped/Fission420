@@ -6,6 +6,7 @@
 //! `docs/TOLERANCES.md` for the tolerance policy.
 
 mod build;
+mod chamfer;
 mod exact;
 mod measure;
 mod mesh;
@@ -14,6 +15,7 @@ mod step;
 mod step_in;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
+pub use chamfer::chamfer_edge;
 pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
     planar_faces_on, z_face_inner_loops,

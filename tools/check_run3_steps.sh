@@ -55,4 +55,7 @@ check pattern.step "[80*20*5 - 3*math.pi*2.5**2*5]" "[0,0,0,80,20,5]" \
 check mirror_pattern.step "[16000 + 3*500 - 2*math.pi*9*10]" "[-40,0,0,40,20,15]" \
   "[[-30,10,12],[30,10,12],[-16,10,12],[16,10,12],[-5,10,5],[5,10,5],[0,10,5]]" \
   "[True, True, True, False, False, False, True]"
+# 3E: 40x30x10 block, top-front edge (y=0, z=10) chamfered 3 mm: removes 0.5*3*3*40.
+check chamfer.step "[12000 - 0.5*9*40]" "[0,0,0,40,30,10]" \
+  "[[20,0.5,9.5],[20,2.9,9.5],[20,1.0,7.5],[20,15,5]]" "[False, True, True, True]"
 exit $status
