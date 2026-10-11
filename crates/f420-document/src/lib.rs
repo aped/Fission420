@@ -4,6 +4,7 @@
 //! The [`Document`] (feature definitions + parameters) is authoritative. Geometry
 //! ([`Evaluation`]) is a disposable cache produced by [`regenerate`].
 
+mod hole;
 mod io;
 mod model;
 mod regen;

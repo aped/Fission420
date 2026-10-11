@@ -355,6 +355,8 @@ impl SketchEditor {
             Ok(f420_sketch::Profile::Circle { radius, .. }) => {
                 Ok(format!("circle Ø{} mm", f420_sketch::fmt_mm(2.0 * radius)))
             }
+            // TODO(arc-ui): area / wording for line+arc loops.
+            Ok(f420_sketch::Profile::Loop(v)) => Ok(format!("closed loop, {} edges", v.len())),
             Err(e) => Err(e.to_string()),
         }
     }
@@ -391,6 +393,7 @@ impl SketchEditor {
                     Entity::Circle { center, radius, .. } => {
                         (dist(pos, self.sketch.point_xy(*center)?) - radius).abs()
                     }
+                    Entity::Arc { .. } => return None, // TODO(arc-ui): arc picking
                 };
                 (d <= tol).then_some((e.id(), d))
             })
@@ -481,6 +484,7 @@ impl SketchEditor {
             || self.sketch.entities.iter().any(|e| match e {
                 Entity::Line { a, b, .. } => *a == id || *b == id,
                 Entity::Circle { center, .. } => *center == id,
+                Entity::Arc { .. } => e.points().contains(&id), // TODO(arc-ui)
             })
     }
 
@@ -984,6 +988,7 @@ impl SketchEditor {
             return;
         };
         let c = match ent {
+            Entity::Arc { .. } => return, // TODO(arc-ui): Radius dimension on arcs
             Entity::Circle { radius, .. } => Constraint::Diameter {
                 circle: e,
                 dim: Dimension::new(self.sketch.unique_dimension_name("diameter"), 2.0 * radius),

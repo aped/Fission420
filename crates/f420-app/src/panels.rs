@@ -811,6 +811,8 @@ impl F420App {
                     Some(f420_sketch::Entity::Circle { radius, .. }) => {
                         format!("Circle C{} Ø{} mm", e.0, f420_sketch::fmt_mm(2.0 * radius))
                     }
+                    // TODO(arc-ui): arc inspector text.
+                    Some(f420_sketch::Entity::Arc { .. }) => format!("Arc A{}", e.0),
                     None => continue,
                 },
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),
