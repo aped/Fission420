@@ -80,7 +80,10 @@ fn main() {
         let _ = s.drag_point(c[2], target);
         t.push(t0.elapsed().as_secs_f64() * 1e3);
     }
-    report("blocked corner drag (dimensioned rectangle, conflict diagnosis)", t);
+    report(
+        "blocked corner drag (dimensioned rectangle, conflict diagnosis)",
+        t,
+    );
 
     // Under-constrained rectangle corner (no dimensions): resize drag.
     s.constraints.truncate(5);
