@@ -13,9 +13,16 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::MIN_MESH_CHORD_*` | max(1e-3 mm, 1e-5 × bbox diagonal) | mesh | lower bound on chord (prevents runaway allocation) |
 | `tol::MESH_CHORD` | 0.01 mm | mesh | default chordal tolerance for display/STL |
 | sketch solver tolerance | see crates/f420-sketch | numerical | Newton residual convergence |
+| `DIST_GRAD_FLOOR` (solver.rs) | 1e-12 mm | numerical | below this length the `Distance` gradient uses a fixed unit direction (coincident start points) |
 | viewport pick tolerance | pixels | viewport | picking only; never touches model |
 
 Acceptance tolerances (GOAL.md) live in tests and the headless demo, not in model code.
+
+Solver convergence is judged on equation residuals (`max(1e-9 mm, 1e-12 × sketch scale)`), not
+on coordinates. Through nonlinear rows (the `Distance` constraint) solved coordinates can differ
+from the exact solution by a few residuals (observed 4e-9 mm on a 3-4-5 triangle), so tests and
+the acceptance scenarios compare solved coordinates at 1e-8 mm (10× the residual tolerance);
+volumes and bounds keep the GOAL.md tolerances.
 
 Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware; fine for parts of
 ~1 mm to ~10 m, unverified beyond (review finding 6).

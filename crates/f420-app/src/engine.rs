@@ -594,4 +594,121 @@ mod tests {
         assert!(r[0].response.error.is_none());
         assert!(!r[1].superseded() && r[1].response.ok);
     }
+
+    /// Timing harness for docs/behavior/timings.md (not a pass/fail test):
+    /// `cargo test --release -p f420-app --lib engine::tests::timings -- --ignored --nocapture`
+    /// Round trip = submit() to poll() returning the reply, through the real
+    /// threaded engine (worker execute + display tessellation + channel).
+    #[test]
+    #[ignore = "timing harness; run explicitly"]
+    fn timings() {
+        const RUNS: usize = 7;
+        fn stats(name: &str, mut v: Vec<f64>) {
+            v.sort_by(f64::total_cmp);
+            println!(
+                "TIMING {name}: median {:.1} ms, min {:.1}, max {:.1} (n={})",
+                v[v.len() / 2],
+                v[0],
+                v[v.len() - 1],
+                v.len()
+            );
+        }
+        fn round_trip(e: &mut Engine, c: Command) -> (Reply, f64) {
+            let t = Instant::now();
+            assert!(e.submit(c));
+            let r = collect(e, 1).remove(0);
+            assert!(r.response.ok, "{:?}", r.response.error);
+            (r, t.elapsed().as_secs_f64() * 1000.0)
+        }
+        let plate = |w: f64| {
+            let mut c = setup();
+            c[1] = Command::CreateSketch {
+                name: None,
+                plane: SketchPlane::WorldXY,
+                template: SketchTemplate::CenteredRectangle {
+                    width: w,
+                    height: 50.0,
+                    center: None,
+                },
+            };
+            c.push(Command::CreateSketch {
+                name: None,
+                plane: f420_commands::end_cap_of(FeatureId(2)),
+                template: SketchTemplate::CenteredCircle {
+                    diameter: 10.0,
+                    center: None,
+                },
+            });
+            c.push(Command::CutThroughAll {
+                name: None,
+                sketch: FeatureId(3),
+            });
+            c
+        };
+        let mut e = Engine::new(ExecMode::Threaded, None);
+        assert!(e.submit_all(plate(80.0)));
+        assert!(collect(&mut e, 5).iter().all(|r| r.response.ok));
+        // SetParameter width on the plate with a cut: regeneration (sketch solve,
+        // extrude, boolean cut, B-rep volume) + display tessellation. Values never
+        // repeat, so the prefix cache cannot serve the cut.
+        let (mut rt, mut worker) = (vec![], vec![]);
+        for i in 0..RUNS {
+            let (r, ms) = round_trip(&mut e, width_edit(90.0 + i as f64));
+            rt.push(ms);
+            worker.push(r.elapsed().as_secs_f64() * 1000.0);
+        }
+        stats("plate SetParameter width round trip (regen with cut)", rt);
+        stats("plate SetParameter width worker time", worker);
+        // Undo of the same: served from the regeneration cache.
+        let (mut rt, mut worker) = (vec![], vec![]);
+        for _ in 0..RUNS.min(5) {
+            let (r, ms) = round_trip(&mut e, Command::Undo);
+            rt.push(ms);
+            worker.push(r.elapsed().as_secs_f64() * 1000.0);
+        }
+        stats("plate Undo round trip (cached prefix)", rt);
+        stats("plate Undo worker time", worker);
+        // Full plate regeneration from scratch through the session only (no
+        // tessellation): the cost of Open / from_document with a cut.
+        let mut cold = vec![];
+        for i in 0..RUNS {
+            let mut s = Session::new();
+            let cmds = plate(80.0 + i as f64);
+            let t = Instant::now();
+            for c in &cmds {
+                assert!(s.execute(c).ok);
+            }
+            cold.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        stats(
+            "plate full build via Session (5 commands, no tessellation)",
+            cold,
+        );
+        // SetParameter on a body without booleans (box): baseline round trip.
+        let mut e2 = Engine::new(ExecMode::Threaded, None);
+        assert!(e2.submit_all(setup()));
+        collect(&mut e2, 3);
+        let mut rt = vec![];
+        for i in 0..RUNS {
+            rt.push(round_trip(&mut e2, width_edit(60.0 + i as f64)).1);
+        }
+        stats("box SetParameter width round trip (no boolean)", rt);
+        // Scenario B extrude (5-vertex editor loop).
+        let (mut rt, mut worker) = (vec![], vec![]);
+        for _ in 0..RUNS {
+            let mut e3 = Engine::new(ExecMode::Threaded, None);
+            let steps = f420_commands::scenarios::scenario_b_workflow(
+                std::path::Path::new("/nonexistent/unused.f420.json"),
+                std::path::Path::new("/nonexistent"),
+            )
+            .unwrap_or_else(|err| panic!("{err}"));
+            assert!(e3.submit_all(steps[..2].iter().map(|s| s.cmd.clone()).collect()));
+            collect(&mut e3, 2);
+            let (r, ms) = round_trip(&mut e3, steps[2].cmd.clone());
+            rt.push(ms);
+            worker.push(r.elapsed().as_secs_f64() * 1000.0);
+        }
+        stats("scenario B extrude round trip", rt);
+        stats("scenario B extrude worker time", worker);
+    }
 }
