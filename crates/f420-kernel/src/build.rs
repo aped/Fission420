@@ -18,9 +18,9 @@ fn v3(a: [f64; 3]) -> Vector3 {
 /// sensitive to where arc vertices fall (see ADR 0001). Deterministic, fixed list.
 const SEAM_ANGLES: [f64; 4] = [0.0, 0.41, 1.27, 2.03];
 /// Boolean tolerances tried per seam (first is the policy value `tol::BOOLEAN`).
-const BOOLEAN_TOLS: [f64; 3] = [tol::BOOLEAN, 0.02, 0.1];
+pub(crate) const BOOLEAN_TOLS: [f64; 3] = [tol::BOOLEAN, 0.02, 0.1];
 
-fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
+pub(crate) fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
     profile_face_seam(profile, frame, 0.0)
 }
 
@@ -236,7 +236,7 @@ pub fn cut_blind(target: &Body, profile: &Profile, frame: &Frame, depth: f64) ->
 /// from `target`, retrying Truck's boolean over [`SEAM_ANGLES`] x [`BOOLEAN_TOLS`]
 /// (same exact geometry each time). The first single closed result is returned with
 /// its intersection edges made explicit ([`with_exact_edges`]).
-fn subtract_prism(
+pub(crate) fn subtract_prism(
     target: &Body,
     profile: &Profile,
     start: &Frame,
@@ -289,7 +289,7 @@ fn subtract_attempt(
 /// Replace the boolean's implicit intersection edges with verified exact curves where
 /// supported (see `crate::exact`). Falls back to the unchanged body if nothing was
 /// replaced or the rebuilt solid is not a single closed shell.
-fn with_exact_edges(body: Body) -> Body {
+pub(crate) fn with_exact_edges(body: Body) -> Body {
     match exact::exactify(&body.solid) {
         (Some(solid), _) => {
             let rebuilt = Body { solid };
@@ -303,7 +303,7 @@ fn with_exact_edges(body: Body) -> Body {
     }
 }
 
-fn check_single_closed(body: &Body, what: &str) -> Result<()> {
+pub(crate) fn check_single_closed(body: &Body, what: &str) -> Result<()> {
     let shells = body.solid.boundaries();
     if shells.len() != 1 {
         return Err(KernelError::InvalidResult(format!(

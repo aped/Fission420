@@ -13,7 +13,7 @@
 //! use `tol / r` (rad), i.e. the same distance measured along the arc.
 
 use crate::arc::ccw_angle;
-use crate::{Constraint, Entity, PointId, Sketch, SketchError, solve_tolerance};
+use crate::{Constraint, Entity, EntityId, PointId, Sketch, SketchError, solve_tolerance};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
@@ -75,6 +75,12 @@ enum EdgeKind {
 }
 
 pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
+    extract_with_entities(s).map(|(p, _)| p)
+}
+
+/// Like [`extract`], also returning the sketch entity that generates each profile
+/// segment (polygon edge `i` runs from vertex `i` to `i + 1`; a circle has one).
+pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId>), SketchError> {
     let residual = s.residual()?;
     let tol = solve_tolerance(s.scale());
     if residual > tol {
@@ -97,20 +103,34 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
 
     // (start point, end point, kind) per line/arc; circles separately.
     let mut curves: Vec<(PointId, PointId, EdgeKind)> = Vec::new();
+    let mut curve_ids: Vec<EntityId> = Vec::new();
     let mut circles: Vec<(PointId, f64)> = Vec::new();
+    let mut circle_ids: Vec<EntityId> = Vec::new();
     for e in s.entities.iter().filter(|e| !s.is_construction(e.id())) {
         match e {
-            Entity::Line { a, b, .. } => curves.push((*a, *b, EdgeKind::Line)),
+            Entity::Line { a, b, id } => {
+                curves.push((*a, *b, EdgeKind::Line));
+                curve_ids.push(*id);
+            }
             Entity::Arc {
-                center, start, end, ..
-            } => curves.push((
-                *start,
-                *end,
-                EdgeKind::Arc {
-                    center: coord(center),
-                },
-            )),
-            Entity::Circle { center, radius, .. } => circles.push((*center, *radius)),
+                center,
+                start,
+                end,
+                id,
+            } => {
+                curves.push((
+                    *start,
+                    *end,
+                    EdgeKind::Arc {
+                        center: coord(center),
+                    },
+                ));
+                curve_ids.push(*id);
+            }
+            Entity::Circle { center, radius, id } => {
+                circles.push((*center, *radius));
+                circle_ids.push(*id);
+            }
         }
     }
     let n_arcs = curves
@@ -127,10 +147,13 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
                     "circle radius {r} mm is not positive"
                 )));
             }
-            return Ok(Profile::Circle {
-                center: coord(&c),
-                radius: r,
-            });
+            return Ok((
+                Profile::Circle {
+                    center: coord(&c),
+                    radius: r,
+                },
+                circle_ids,
+            ));
         }
         (0, 0) => {
             return Err(SketchError::UnsupportedProfile(
@@ -241,6 +264,7 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
             }
         })
         .collect();
+    let mut ents: Vec<EntityId> = walk.iter().map(|&(e, _)| curve_ids[e]).collect();
     let k = segs.len();
     let geo: Vec<Prim> = (0..k)
         .map(|i| Prim::of(&segs[i], segs[(i + 1) % k].start()))
@@ -280,6 +304,7 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
     }
     if area < 0.0 {
         segs = reversed(&segs);
+        ents.reverse();
     }
     // Start at the lowest vertex (within tol), then leftmost.
     let ymin = segs
@@ -291,12 +316,14 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
         .min_by(|&i, &j| segs[i].start()[0].total_cmp(&segs[j].start()[0]))
         .unwrap_or(0);
     segs.rotate_left(first);
+    ents.rotate_left(first);
     if n_arcs == 0 {
-        return Ok(Profile::Polygon(
-            segs.iter().map(LoopSegment::start).collect(),
+        return Ok((
+            Profile::Polygon(segs.iter().map(LoopSegment::start).collect()),
+            ents,
         ));
     }
-    Ok(Profile::Loop(segs))
+    Ok((Profile::Loop(segs), ents))
 }
 
 /// The same loop traversed the other way.

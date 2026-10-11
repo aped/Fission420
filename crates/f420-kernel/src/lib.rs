@@ -9,6 +9,7 @@ mod build;
 mod exact;
 mod measure;
 mod mesh;
+mod ops;
 mod step;
 
 pub use build::{cut_blind, cut_through_all, extrude, revolve};
@@ -17,6 +18,10 @@ pub use measure::{
     planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
+pub use ops::{
+    bounds, cut_prism, extent_along, join_prism, plane_has_face, profile_within_face,
+    through_all_margin,
+};
 pub use step::export_step;
 
 use serde::{Deserialize, Serialize};

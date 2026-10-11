@@ -685,6 +685,13 @@ impl Sketch {
     pub fn profile(&self) -> Result<Profile, SketchError> {
         profile::extract(self)
     }
+
+    /// [`Sketch::profile`] plus the entity generating each segment (polygon edge
+    /// `i` runs from vertex `i` to vertex `i + 1`; a circle profile has one entry).
+    /// Entity ids are stable, so they name generated side faces persistently.
+    pub fn profile_with_entities(&self) -> Result<(Profile, Vec<EntityId>), SketchError> {
+        profile::extract_with_entities(self)
+    }
 }
 
 #[cfg(test)]

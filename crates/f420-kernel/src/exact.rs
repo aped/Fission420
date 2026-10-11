@@ -97,6 +97,9 @@ pub(crate) fn exact_edge(
     p0: Point3,
     p1: Point3,
 ) -> Result<Curve> {
+    if let (Surface::Plane(a), Surface::Plane(b)) = (ic.surface0(), ic.surface1()) {
+        return plane_plane_edge(ic, &a, &b, p0, p1);
+    }
     let (plane, other) = match (ic.surface0(), ic.surface1()) {
         (Surface::Plane(p), o) | (o, Surface::Plane(p)) => (p, o),
         _ => return Err(unsupported("intersection without a planar face")),
@@ -169,6 +172,52 @@ pub(crate) fn exact_edge(
         prev_t = t;
     }
     Ok(Curve::NurbsCurve(sub))
+}
+
+/// Two planes meet in a straight line, so the edge between its vertices is exactly
+/// the segment `p0 -> p1`. Verified: both ends on both planes, and the original
+/// curve's samples on the segment at non-decreasing parameter.
+fn plane_plane_edge(
+    ic: &IntersectionCurve<Leader, Surface>,
+    a: &Plane,
+    b: &Plane,
+    p0: Point3,
+    p1: Point3,
+) -> Result<Curve> {
+    let (na, nb) = (a.normal(), b.normal());
+    if na.cross(nb).magnitude() < 1e-9 {
+        return Err(unsupported("parallel planes"));
+    }
+    for p in [p0, p1] {
+        if (p - a.origin()).dot(na).abs() > REBUILD_TOL
+            || (p - b.origin()).dot(nb).abs() > REBUILD_TOL
+        {
+            return Err(unsupported("edge vertex not on both planes"));
+        }
+    }
+    let d = p1 - p0;
+    let len2 = d.magnitude2();
+    if len2 < 1e-18 {
+        return Err(unsupported("zero-length edge"));
+    }
+    let (l0, l1) = ic.leader().range_tuple();
+    let mut prev = -1e-9;
+    for k in 0..=VERIFY_SAMPLES + 1 {
+        let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
+        let q = ic
+            .search_triple(l)
+            .ok_or_else(|| unsupported("cannot evaluate original edge"))?
+            .0;
+        let t = (q - p0).dot(d) / len2;
+        let off = (q - (p0 + d * t)).magnitude();
+        if off > VERIFY_TOL || t < prev || !(-1e-9..=1.0 + 1e-9).contains(&t) {
+            return Err(unsupported(
+                "original edge is not the segment between its vertices",
+            ));
+        }
+        prev = t;
+    }
+    Ok(Curve::Line(Line(p0, p1)))
 }
 
 /// Outcome of [`exactify`].
