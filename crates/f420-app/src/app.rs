@@ -310,6 +310,8 @@ pub struct F420App {
     pub(crate) reattach: Option<crate::reattach::Reattach>,
     /// Parameters panel edit buffers.
     pub(crate) params: crate::params_ui::ParamsPanel,
+    /// First face of a two-face measurement (cleared on any document change).
+    pub(crate) measure_from: Option<crate::view3d::FaceInfo>,
     /// Sketch named by the last BrokenReference refusal (offered for repair).
     pub(crate) broken_sketch: Option<FeatureId>,
     /// Scripted screenshot scene (see [`crate::scenes`]).
@@ -384,6 +386,7 @@ impl F420App {
             import_summary: None,
             reattach: None,
             params: Default::default(),
+            measure_from: None,
             broken_sketch: None,
             scene_steps: VecDeque::new(),
             scene_fitted: true,
@@ -882,6 +885,9 @@ impl F420App {
                 }
                 _ => {}
             }
+        }
+        if doc_changed || summary.revision != self.summary.revision {
+            self.measure_from = None;
         }
         let edited_param = match &command {
             Command::SetParameter { feature, name, .. }

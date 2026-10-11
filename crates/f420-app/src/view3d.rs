@@ -58,6 +58,9 @@ pub struct FaceInfo {
     /// Feature this face reliably comes from (see module docs).
     pub owner: Option<FeatureId>,
     pub description: String,
+    /// Planar B-rep faces: the exact plane (from the document summary, f64),
+    /// used for measurements; None for curved/mesh faces.
+    pub plane: Option<f420_kernel::FacePlane>,
 }
 
 impl FaceInfo {
@@ -247,6 +250,18 @@ pub fn analyse_faces(
                     ),
                 )
             };
+            // The exact plane of this display face (same body, same outward
+            // normal, coplanar within the display tolerance).
+            let plane = planar
+                .then(|| {
+                    bs.and_then(|b| {
+                        b.planes.iter().copied().find(|p| {
+                            dot(n0, p.normal) > 1.0 - 1e-4
+                                && dot(sub(p0, p.point), p.normal).abs() <= plane_tol
+                        })
+                    })
+                })
+                .flatten();
             FaceInfo {
                 group,
                 planar,
@@ -255,6 +270,7 @@ pub fn analyse_faces(
                 reference,
                 owner,
                 description,
+                plane,
             }
         })
         .collect()

@@ -184,3 +184,42 @@ fn enclosure_fit_clearance_from_the_panel() {
     let ll = p.iter().find(|x| x.name == "lip_length").unwrap();
     assert!((ll.value.unwrap() - 75.3).abs() < 1e-9);
 }
+
+/// SESSION_4 §4: selection-based measurement of the enclosure: wall thickness
+/// (base outer -X face to the cavity's -X wall) and the lip's per-side
+/// clearance (lip outer -X face of the lid to the cavity wall of the base),
+/// exact from the B-rep planes.
+#[test]
+fn measure_wall_and_lip_clearance_between_faces() {
+    let mut h = harness();
+    let doc = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.f420.json");
+    h.state_mut().request(Command::Open { path: doc });
+    settle(&mut h);
+    let find = |h: &Harness<'_, F420App>, body: u32, nx: f64, x: f64| {
+        h.state()
+            .faces()
+            .iter()
+            .find(|f| {
+                f.body.map(|b| b.0) == Some(body)
+                    && f.plane.is_some_and(|p| {
+                        (p.normal[0] - nx).abs() < 1e-9 && (p.point[0] - x).abs() < 1e-9
+                    })
+            })
+            .map(|f| f.group)
+            .unwrap_or_else(|| panic!("no face body {body} n {nx} x {x}"))
+    };
+    let outer = find(&h, 1, -1.0, 0.0);
+    let cavity_wall = find(&h, 1, 1.0, 2.0);
+    let lip_outer = find(&h, 2, -1.0, 2.25);
+    h.state_mut().select_face(Some(outer));
+    let _ = h.try_run();
+    click(&mut h, "Measure from this face");
+    h.state_mut().select_face(Some(cavity_wall));
+    let _ = h.try_run();
+    h.get_by_label_contains("Distance between parallel faces: 2 mm");
+    click(&mut h, "Clear measurement");
+    click(&mut h, "Measure from this face");
+    h.state_mut().select_face(Some(lip_outer));
+    let _ = h.try_run();
+    h.get_by_label_contains("Distance between parallel faces: 0.25 mm");
+}

@@ -660,6 +660,7 @@ impl F420App {
         if let Some(info) = self.selected_face().cloned() {
             ui.label(RichText::new("Selected face").strong());
             ui.label(&info.description);
+            self.face_measure_ui(ui, &info);
             match (info.reference, info.sketch_blocker()) {
                 (Some(r), _) => {
                     if ui
@@ -856,6 +857,70 @@ impl F420App {
                 ));
             }
         });
+    }
+
+    /// Two-face measurement: exact distance between parallel planar faces
+    /// (walls, floor, cavity, mating clearance) or the angle between them,
+    /// from the B-rep planes in the document summary (not the display mesh).
+    fn face_measure_ui(&mut self, ui: &mut egui::Ui, info: &crate::view3d::FaceInfo) {
+        let Some(p) = info.plane else {
+            if !info.planar {
+                ui.small("Curved face: no plane to measure from.");
+            }
+            return;
+        };
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        ui.small(format!(
+            "Plane: normal ({:.4}, {:.4}, {:.4}), offset {:.4} mm",
+            p.normal[0],
+            p.normal[1],
+            p.normal[2],
+            dot(p.normal, p.point)
+        ));
+        match &self.measure_from {
+            Some(a) if a.group != info.group => {
+                if let Some(q) = a.plane {
+                    let c = dot(q.normal, p.normal);
+                    let text = if (c.abs() - 1.0).abs() < 1e-9 {
+                        let d = [
+                            p.point[0] - q.point[0],
+                            p.point[1] - q.point[1],
+                            p.point[2] - q.point[2],
+                        ];
+                        format!(
+                            "Distance between parallel faces: {} mm",
+                            crate::params_ui::fmt_value(dot(d, q.normal).abs())
+                        )
+                    } else {
+                        format!(
+                            "Angle between the faces' normals: {}°",
+                            crate::params_ui::fmt_value(c.clamp(-1.0, 1.0).acos().to_degrees())
+                        )
+                    };
+                    ui.label(RichText::new(text).strong());
+                    ui.small(format!("from: {}", a.description));
+                }
+                if ui.small_button("Clear measurement").clicked() {
+                    self.measure_from = None;
+                }
+            }
+            Some(_) => {
+                ui.small("Measuring from this face: select another planar face.");
+                if ui.small_button("Clear measurement").clicked() {
+                    self.measure_from = None;
+                }
+            }
+            None => {
+                if ui
+                    .small_button("Measure from this face")
+                    .named("Measure from this face")
+                    .on_hover_text("Then select a second planar face: exact distance (parallel faces) or angle")
+                    .clicked()
+                {
+                    self.measure_from = Some(info.clone());
+                }
+            }
+        }
     }
 
     fn parameter_editor(&mut self, ui: &mut egui::Ui) {
