@@ -224,6 +224,35 @@ impl F420App {
         cam.ray(l.x, l.y, w, h)
     }
 
+    /// Screen rect of a dimension label of the selected finished sketch, or of
+    /// the open sketch session (tests and scripted demos).
+    pub fn dimension_label(&self, name: &str) -> Option<egui::Rect> {
+        if let Some(s) = &self.sketch {
+            let i = s
+                .editor
+                .sketch
+                .constraints
+                .iter()
+                .position(|c| c.dimension().is_some_and(|d| d.name == name))?;
+            return s.editor.screen_target(Item::Constraint(i));
+        }
+        let f = self
+            .summary
+            .features
+            .iter()
+            .find(|f| Some(f.id) == self.selected)?;
+        let i = f
+            .sketch
+            .as_ref()?
+            .constraints
+            .iter()
+            .position(|c| c.dimension().is_some_and(|d| d.name == name))?;
+        self.doc_dim_targets
+            .iter()
+            .find(|(k, _)| *k == i)
+            .map(|(_, r)| *r)
+    }
+
     /// Display-mesh face under a screen position.
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
@@ -528,7 +557,7 @@ impl F420App {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let l = ui.label(format!("{} (mm)", ed.name));
+                        let l = ui.label(format!("Edit {} (mm)", ed.name));
                         let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(80.0));
                         let r = r.labelled_by(l.id);
                         let (enter, esc) = ui.input(|i| {
@@ -747,7 +776,7 @@ impl F420App {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let l = ui.label(format!("{name} (mm)"));
+                        let l = ui.label(format!("Edit {name} (mm)"));
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut buf)
                                 .id(id)

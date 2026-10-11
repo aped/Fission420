@@ -70,7 +70,7 @@ impl SketchTool {
         match self {
             SketchTool::Select => {
                 "Click to select (Shift adds) · drag a vertex or circle rim to move it · \
-                 double-click a dimension to edit · Del deletes"
+                 click a selected dimension (or double-click) to edit · Del deletes"
             }
             SketchTool::Line => {
                 "Click points to draw connected lines · click the first point to close · \
@@ -730,6 +730,18 @@ impl SketchEditor {
                         } else {
                             self.selection.push(item);
                         }
+                    }
+                    // Clicking the already-selected dimension edits it (as does a double click).
+                    Some(Item::Constraint(i))
+                        if self.selection == [Item::Constraint(i)]
+                            && self
+                                .sketch
+                                .constraints
+                                .get(i)
+                                .and_then(|c| c.dimension())
+                                .is_some() =>
+                    {
+                        self.begin_dim_edit(i, false)
                     }
                     Some(item) => self.selection = vec![item],
                     None if !shift => self.selection.clear(),
