@@ -2,3 +2,5 @@ target/
 artifacts/
 .claude/
 spikes/*/Cargo.lock
+__pycache__/
+*.pyc
