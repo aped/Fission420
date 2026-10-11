@@ -94,6 +94,9 @@ pub struct DisplayBody {
 pub struct DisplayScene {
     pub mesh: RenderMesh,
     pub bodies: Vec<DisplayBody>,
+    /// Visible bodies that could not be tessellated ("name: error"); they are
+    /// left out of the scene so the other bodies still display.
+    pub skipped: Vec<String>,
 }
 
 impl DisplayScene {
@@ -252,6 +255,7 @@ fn display_mesh(session: &Session) -> MeshUpdate {
 }
 
 /// Tessellate every visible body into one mesh with per-body group ranges.
+/// A body that fails to tessellate is listed in `skipped`, not drawn.
 /// B-rep bodies get one group per B-rep face; a mesh body is one group.
 /// Tints follow the body's position in creation order (stable under
 /// visibility changes); mesh bodies use [`MESH_TINT`].
@@ -264,11 +268,15 @@ pub fn display_scene(ev: &f420_document::Evaluation) -> Result<DisplayScene, Str
             continue;
         }
         let (tm, mesh_body) = match &b.geometry {
-            BodyGeometry::Brep(body) => (
-                f420_kernel::tessellate_display(body, DISPLAY_CHORD)
-                    .map_err(|e| format!("{}: {e}", b.name))?,
-                false,
-            ),
+            BodyGeometry::Brep(body) => {
+                match f420_kernel::tessellate_display(body, DISPLAY_CHORD) {
+                    Ok(tm) => (tm, false),
+                    Err(e) => {
+                        scene.skipped.push(format!("{}: {e}", b.name));
+                        continue;
+                    }
+                }
+            }
             BodyGeometry::Mesh(mb) => (mb.mesh.clone(), true),
         };
         let rm = to_render_mesh(&tm);

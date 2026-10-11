@@ -964,6 +964,9 @@ impl F420App {
             MeshUpdate::Unchanged => {}
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
             MeshUpdate::Replace(scene) => {
+                for e in &scene.skipped {
+                    self.diag(true, "Display", format!("not displayed: {e}"));
+                }
                 let m = &scene.mesh;
                 let mut accepted = true;
                 if let Some(vp) = self.viewport.as_mut() {
