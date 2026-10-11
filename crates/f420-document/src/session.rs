@@ -109,7 +109,8 @@ impl Model {
                 .body_by_id(id)
                 .is_some_and(|b| b.measurements.is_none() && b.geometry.brep().is_some());
             if pending {
-                self.cache.store_measurements(&self.doc, id, m.clone());
+                self.cache
+                    .store_measurements(&self.doc, &self.eval, id, m.clone());
                 self.eval.set_body_measurements(id, m);
                 any = true;
             }

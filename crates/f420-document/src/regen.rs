@@ -259,6 +259,12 @@ struct ExtrudeOut {
     /// Tool span `[a, b]` along the sketch normal actually used (after
     /// overlap/margin adjustments).
     span: (f64, f64),
+    /// Cut: the span before the blind-cut margin adjustments (re-derived for
+    /// each pattern/mirror copy, whose surroundings differ from the seed's).
+    nominal: (f64, f64),
+    /// Outward side (+1/-1 along the sketch normal) of the target face in the
+    /// sketch plane, if any.
+    side: Option<f64>,
     /// The sketch plane holds a face of the target (Join/Cut from a face).
     on_face: bool,
     /// New/Join (material added) vs Cut (material removed).
@@ -304,8 +310,9 @@ impl Snapshot {
 /// Memo of regeneration states keyed by the exact serialized feature definitions of
 /// the evaluated prefix (so any upstream change misses). Bounded FIFO. Results are
 /// identical to uncached regeneration because regeneration is deterministic and
-/// B-rep results are never mutated after creation. Embedded files are referenced
-/// by immutable blob id, so keys stay small.
+/// B-rep results are never mutated after creation. Embedded files enter the key
+/// as blob id plus length and FNV-1a hash (ids are reused after undo), so keys
+/// stay small.
 #[derive(Default)]
 pub struct RegenCache {
     states: HashMap<String, Snapshot>,
@@ -331,10 +338,18 @@ impl RegenCache {
         }
     }
 
-    /// Remember measurements computed out of band for body `body` of `doc`'s
-    /// current geometry (deferred measurement).
-    pub fn store_measurements(&mut self, doc: &Document, body: BodyId, m: Measurements) {
-        if let Ok(Some(key)) = body_key(doc, body)
+    /// Remember measurements computed out of band for body `body` of `eval`,
+    /// the current evaluation of `doc` (deferred measurement). They are filed
+    /// under the prefix ending at the body's [`EvalBody::last_feature`], the
+    /// same key regeneration itself reads, so the two cannot diverge.
+    pub fn store_measurements(
+        &mut self,
+        doc: &Document,
+        eval: &Evaluation,
+        body: BodyId,
+        m: Measurements,
+    ) {
+        if let Ok(Some(key)) = body_key(doc, eval, body)
             && self.states.contains_key(&key)
         {
             self.measurements.insert((key, body), m);
@@ -342,29 +357,39 @@ impl RegenCache {
     }
 }
 
-/// Serialized-history keys of every prefix of the evaluation order.
+/// Serialized-history keys of every prefix of the evaluation order. A feature
+/// that reads an embedded file also contributes the file's length and hash:
+/// blob ids are reused after undo, so the id alone does not name the contents.
 fn prefix_keys(doc: &Document, order: &[FeatureId]) -> Result<Vec<String>> {
     let mut keys = Vec::with_capacity(order.len());
     let mut key = String::new();
     for id in order {
-        let f = serde_json::to_string(doc.feature(*id)?)
+        let feature = doc.feature(*id)?;
+        let f = serde_json::to_string(feature)
             .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
         key.push_str(&f);
+        // A missing blob fails regeneration of this feature anyway.
+        if let Some(b) = feature.blob().and_then(|b| doc.blob(b).ok()) {
+            key.push_str(&format!("\tblob {} {}", b.len, b.fnv64));
+        }
         key.push('\n');
         keys.push(key.clone());
     }
     Ok(keys)
 }
 
-/// Cache key of the prefix ending at the last feature that touches `body`.
-fn body_key(doc: &Document, body: BodyId) -> Result<Option<String>> {
+/// Cache key of the prefix ending at `body`'s last feature in `eval` (the
+/// evaluation of `doc`).
+fn body_key(doc: &Document, eval: &Evaluation, body: BodyId) -> Result<Option<String>> {
+    let Some(last) = eval.body_by_id(body).map(|b| b.last_feature) else {
+        return Ok(None);
+    };
     let order = doc.evaluation_order()?;
     let keys = prefix_keys(doc, &order)?;
-    let last = order.iter().rposition(|id| {
-        doc.feature(*id)
-            .is_ok_and(|f| f.created_bodies().contains(&body) || f.target_body() == Some(body))
-    });
-    Ok(last.map(|i| keys[i].clone()))
+    Ok(order
+        .iter()
+        .position(|id| *id == last)
+        .map(|i| keys[i].clone()))
 }
 
 /// Regenerate the whole document. Pure function of the document; deterministic.
@@ -896,6 +921,8 @@ fn extrude_feature(
         entities,
         holes,
         span: (0.0, 0.0),
+        nominal: (0.0, 0.0),
+        side,
         on_face: side.is_some(),
         removes: false,
         joined: false,
@@ -919,6 +946,7 @@ fn extrude_feature(
                     "{id}: 'through all' is only available for Cut"
                 )));
             }
+            let mut nominal_bounds = None;
             // A tool end lying on a face of the target would make coplanar boolean
             // faces (Truck 0.6 returns no result): move that end into the material
             // by a small overlap, which is only exact when the profile lies on the
@@ -952,15 +980,37 @@ fn extrude_feature(
                          clear 'reverse'"
                     )));
                 }
-                let delta = JOIN_OVERLAP.min(distance / 2.0);
-                // Material is on the -side of the face's outward normal.
+                // Material is on the -side of the face's outward normal. Keep the
+                // overlap within half the body's depth below the plane, so it
+                // cannot poke out of a plate thinner than the overlap.
+                let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
+                let depth = if side > 0.0 { -lo } else { hi };
+                let delta = JOIN_OVERLAP.min(distance / 2.0).min(depth / 2.0);
                 if dir > 0.0 {
                     a = -side * delta;
                 } else {
                     b = -side * delta;
                 }
+                nominal_bounds = Some((tb, ob));
             }
             let joined = k::join_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            // The overlap must stay inside the material: the result may not
+            // reach past the target and the nominal (overlap-free) tool.
+            if let Some((tb, ob)) = nominal_bounds {
+                let rb = k::bounds(&joined).map_err(kernel(id))?;
+                let eps = 10.0 * k::tol::KERNEL_LINEAR;
+                if (0..3).any(|i| {
+                    rb.min[i] < tb.min[i].min(ob.min[i]) - eps
+                        || rb.max[i] > tb.max[i].max(ob.max[i]) + eps
+                }) {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: the join's overlap into the support ({delta_mm:.3} mm) would \
+                         poke through the material under the sketch face; the support is \
+                         too thin there",
+                        delta_mm = (if dir > 0.0 { a } else { b }).abs()
+                    )));
+                }
+            }
             replace_body(st, id, target, joined);
             out.body = target;
             out.joined = true;
@@ -971,36 +1021,22 @@ fn extrude_feature(
             if extent == Extent::ThroughAll {
                 let (lo, hi) = k::extent_along(&t, &frame).map_err(kernel(id))?;
                 (a, b) = (lo - margin, hi + margin);
-            } else if let Some(side) = side {
-                if dir * side > 0.0 {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the cut points away from the material of {target}; clear 'reverse'"
-                    )));
-                }
-                // Start the cutter a margin outside the face so its cap is never
-                // coplanar with it (run-2 rule).
-                if dir > 0.0 {
-                    a = side * margin;
-                } else {
-                    b = side * margin;
-                }
+            } else if let Some(side) = side
+                && dir * side > 0.0
+            {
+                return Err(DocError::Validation(format!(
+                    "{id}: the cut points away from the material of {target}; clear 'reverse'"
+                )));
             }
+            out.nominal = (a, b);
+            out.side = side;
+            let mut refused = None;
             if extent == Extent::Distance {
-                // A blind cut whose floor lands exactly on a face of the target
-                // whose material lies on the tool's side (e.g. the bottom face for
-                // a cut through the full thickness) would leave coplanar faces
-                // (Truck 0.6 returns no result). Material ends there, so moving
-                // the floor a margin past it removes exactly the same material.
-                let far = if dir > 0.0 { b } else { a };
-                if let Ok(Some(side_far)) = k::coplanar_face_side(&t, &frame.offset(far)) {
-                    if dir > 0.0 && side_far > 0.0 {
-                        b += margin;
-                    } else if dir < 0.0 && side_far < 0.0 {
-                        a -= margin;
-                    }
-                }
+                ((a, b), refused) = blind_cut_span(&t, &frame, &kp, (a, b), dir, side, margin)
+                    .map_err(kernel(id))?;
             }
-            let cut = k::cut_prism(&t, &kp, &frame.offset(a), b - a).map_err(kernel(id))?;
+            let cut = k::cut_prism(&t, &kp, &frame.offset(a), b - a)
+                .map_err(|e| coplanar_cut_error(id, refused, e))?;
             replace_body(st, id, target, cut);
             out.body = target;
         }
@@ -1010,6 +1046,119 @@ fn extrude_feature(
     }
     out.span = (a, b);
     Ok(out)
+}
+
+/// Which end of a blind cut stayed on a coplanar face because moving it would
+/// remove material that must stay.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CoplanarEnd {
+    Start,
+    Floor,
+}
+
+/// Margin adjustments of a blind Cut's nominal span `(a, b)` (along `frame.z`,
+/// tool direction `dir`, `side` = outward side of the target face in the
+/// sketch plane). A tool end lying on a face of `t` whose material is on the
+/// tool's side would make coplanar boolean faces (Truck 0.6 returns no result),
+/// so that end is moved `margin` past the face, but only where that removes
+/// nothing extra ([`margin_is_free`]). Returns the span and the end that had to
+/// stay coplanar, if any.
+fn blind_cut_span(
+    t: &Body,
+    frame: &Frame,
+    kp: &k::Profile,
+    (mut a, mut b): (f64, f64),
+    dir: f64,
+    side: Option<f64>,
+    margin: f64,
+) -> k::Result<((f64, f64), Option<CoplanarEnd>)> {
+    let mut refused = None;
+    // Start: a cut sketched on a face of the target starts on that face.
+    if let Some(side) = side {
+        if margin_is_free(t, frame, kp, side, margin)? {
+            if dir > 0.0 {
+                a = side * margin;
+            } else {
+                b = side * margin;
+            }
+        } else {
+            refused = Some(CoplanarEnd::Start);
+        }
+    }
+    // Floor: e.g. the bottom face for a cut through the full thickness.
+    let far = if dir > 0.0 { b } else { a };
+    let far_frame = frame.offset(far);
+    if let Ok(Some(side_far)) = k::coplanar_face_side(t, &far_frame)
+        && side_far * dir > 0.0
+    {
+        if margin_is_free(t, &far_frame, kp, dir, margin)? {
+            if dir > 0.0 {
+                b += margin;
+            } else {
+                a -= margin;
+            }
+        } else {
+            refused = Some(CoplanarEnd::Floor);
+        }
+    }
+    Ok(((a, b), refused))
+}
+
+/// Whether `t` has no material in the prism of `kp` from `plane` to `margin`
+/// beyond it (`beyond` = +1/-1 along `plane.z`), so a cutter end may be moved
+/// there without removing anything extra. Cheap sufficient tests first: the
+/// profile lies inside a face of the plane facing `beyond` (air directly past
+/// it; material returning within `margin` is not detected), or nothing of `t`
+/// lies past the plane at all. Otherwise a probe cut of that slab (starting
+/// `MIN_LENGTH` past the plane, so it has no coplanar face): removing material
+/// means it is not free; a probe that fails for another reason counts as not
+/// free.
+fn margin_is_free(
+    t: &Body,
+    plane: &Frame,
+    kp: &k::Profile,
+    beyond: f64,
+    margin: f64,
+) -> k::Result<bool> {
+    if matches!(k::coplanar_face_side(t, plane), Ok(Some(s)) if s * beyond > 0.0)
+        && k::profile_within_face(t, plane, kp)?
+    {
+        return Ok(true);
+    }
+    let (lo, hi) = k::extent_along(t, plane)?;
+    let eps = 10.0 * k::tol::KERNEL_LINEAR;
+    if (beyond > 0.0 && hi <= eps) || (beyond < 0.0 && lo >= -eps) {
+        return Ok(true);
+    }
+    let gap = k::tol::MIN_LENGTH;
+    if margin <= gap {
+        return Ok(false);
+    }
+    let start = plane.offset(if beyond > 0.0 { gap } else { -margin });
+    Ok(matches!(
+        k::cut_prism(t, kp, &start, margin - gap),
+        Err(k::KernelError::InvalidInput(_))
+    ))
+}
+
+/// A cut whose end had to stay on a coplanar face failed in the kernel: say why.
+fn coplanar_cut_error(id: FeatureId, end: Option<CoplanarEnd>, e: k::KernelError) -> DocError {
+    let what = match end {
+        None => return kernel(id)(e),
+        Some(CoplanarEnd::Start) => {
+            "the sketch plane holds a face under part of the profile while material rises \
+             above the plane elsewhere under it"
+        }
+        Some(CoplanarEnd::Floor) => {
+            "the cut's floor lies on a face that covers only part of the profile while \
+             material continues past the floor elsewhere"
+        }
+    };
+    DocError::ProductLimit(format!(
+        "{id}: {what}; the cutter cannot start or stop exactly there (Truck 0.6 fails on \
+         coplanar faces) and moving it would remove material that must stay. Change the \
+         depth, or split the profile so each part is wholly on or off the face ({e})"
+    ))
 }
 
 /// Apply one transformed copy of extrusion `e`'s tool (`frame` replaces the
@@ -1030,6 +1179,16 @@ fn apply_tool_copy(
         feature: id,
         detail: format!("{what}: {err}"),
     };
+    if e.removes && e.extent == Extent::Distance {
+        // The blind-cut margins depend on the material around this copy.
+        let margin = k::through_all_margin(body).map_err(err)?;
+        let ((a, b), refused) =
+            blind_cut_span(body, frame, &kp, e.nominal, e.dir, e.side, margin).map_err(err)?;
+        return k::cut_prism(body, &kp, &frame.offset(a), b - a).map_err(|x| match x {
+            x if refused.is_some() => coplanar_cut_error(id, refused, x),
+            x => err(x),
+        });
+    }
     if e.removes {
         return k::cut_prism(body, &kp, &start, len).map_err(err);
     }
@@ -1142,7 +1301,8 @@ fn circular_pattern(
             angle.to_degrees()
         )));
     }
-    if f64::from(count - 1) * angle > std::f64::consts::TAU + 1e-9 {
+    // A full turn puts the last instance back on the seed.
+    if f64::from(count - 1) * angle >= std::f64::consts::TAU - 1e-9 {
         return Err(DocError::Validation(format!(
             "{id}: {count} instances {:.6}° apart overlap after a full turn",
             angle.to_degrees()
@@ -1217,6 +1377,10 @@ fn mirror_feature(
         z: cross(x, y),
     };
     e.span = (-e.span.1, -e.span.0);
+    // Along the reflected frame's normal (−R z) the tool and the face sides flip.
+    e.nominal = (-e.nominal.1, -e.nominal.0);
+    e.dir = -e.dir;
+    e.side = e.side.map(|s| -s);
     let body = brep_target(st, id, e.body)?;
     let out = apply_tool_copy(&body, &e, &frame, "mirrored copy", id)?;
     replace_body(st, id, e.body, out);
