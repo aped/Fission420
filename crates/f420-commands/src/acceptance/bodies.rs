@@ -8,7 +8,7 @@ use f420_document::{BodyId, DocError, FaceRef, FaceRole, FeatureId, SketchPlane}
 use f420_kernel::{Frame, VolumeResult};
 
 impl Run<'_> {
-    fn body(&self, id: BodyId) -> Option<BodySummary> {
+    pub(super) fn body(&self, id: BodyId) -> Option<BodySummary> {
         self.s.summary().bodies.into_iter().find(|b| b.id == id)
     }
 
@@ -634,6 +634,15 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         floor.is_some_and(|f| (f.frame.origin[0] - 55.0).abs() < 1e-9),
     );
 
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("side_pocket.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+
     r.step = "3B.4 removing the support is an explicit reference error".into();
     // Upstream topology edit in the editor's terms: delete the profile line that
     // generates the x=70 face and close the outline through a new apex point
@@ -956,10 +965,403 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
         Command::DeleteFeature { feature: hole },
         "is used by",
     );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("pattern.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
     let path = r.out_dir.join("pattern.f420.json");
     let x = r.exec(Command::Save { path: path.clone() });
     r.ok("save", &x);
     let x = r.exec(Command::Open { path });
     r.ok("reopen", &x);
     r.check_body_solid("reopened", b, v(3.0), [0.0, 0.0, 0.0], [80.0, 20.0, 5.0]);
+}
+
+/// Backlog 5 (mirror) and Join patterns: a centred bar, a boss and a hole on its
+/// left half mirrored across world YZ, and the boss patterned once along +x.
+pub(super) fn scenario_mirror(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3M.1 bar, boss, mirror".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let Some(sb) = r.polygon(
+        "Bar",
+        SketchPlane::WorldXY,
+        &[[-40.0, 0.0], [40.0, 0.0], [40.0, 20.0], [-40.0, 20.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Bar", sb, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(bar) = r.ok("extrude bar 80x20x10", &x) else {
+        return;
+    };
+    let top = SketchPlane::Face(FaceRef {
+        feature: bar,
+        role: FaceRole::ExtrudeEndCap,
+    });
+    let Some(sboss) = r.polygon(
+        "Boss",
+        top,
+        &[[-35.0, 5.0], [-25.0, 5.0], [-25.0, 15.0], [-35.0, 15.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Boss", sboss, 5.0, ExtrudeOp::Join, None, false, None);
+    let Some(boss) = r.ok("join boss 10x10x5", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Mirror {
+        name: None,
+        feature: boss,
+        plane: SketchPlane::WorldYZ,
+    });
+    r.ok("mirror boss across YZ", &x);
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 16000 + 2 * 500.
+    r.check_body_solid(
+        "bar + 2 bosses",
+        b,
+        17000.0,
+        [-40.0, 0.0, 0.0],
+        [40.0, 20.0, 15.0],
+    );
+
+    r.step = "3M.2 hole, mirror, pattern the boss".into();
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Hole".into()),
+        plane: top,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 6.0,
+            center: Some([-5.0, 10.0]),
+        },
+    });
+    let Some(sh) = r.ok("hole sketch", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Hole", sh, 0.0, ExtrudeOp::Cut, None, true, None);
+    let Some(hole) = r.ok("through-all hole", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Mirror {
+        name: None,
+        feature: hole,
+        plane: SketchPlane::WorldYZ,
+    });
+    r.ok("mirror hole across YZ", &x);
+    let x = r.exec(Command::LinearPattern {
+        name: None,
+        feature: boss,
+        count: 2,
+        spacing: 14.0,
+        direction: [1.0, 0.0],
+    });
+    r.ok("pattern boss x2 at 14 mm (join pattern)", &x);
+    let want = 16000.0 + 3.0 * 500.0 - 2.0 * PI * 9.0 * 10.0;
+    r.check_body_solid("final", b, want, [-40.0, 0.0, 0.0], [40.0, 20.0, 15.0]);
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("mirror_pattern.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    // A mirrored join that would land off the support face is refused: mirror the
+    // boss across world XZ (y -> -y: outside the bar's top face).
+    r.refused(
+        "mirror boss across XZ (off the face)",
+        Command::Mirror {
+            name: None,
+            feature: boss,
+            plane: SketchPlane::WorldXZ,
+        },
+        "not inside a face",
+    );
+}
+
+/// Backlog 6: equal-distance chamfer of a box edge named by its two faces.
+pub(super) fn scenario_chamfer(r: &mut Run<'_>) {
+    r.s = crate::Session::new();
+    r.step = "3E.1 chamfer the top-front edge".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let Some(sb) = r.polygon(
+        "Block",
+        SketchPlane::WorldXY,
+        &[[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Block", sb, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(blk) = r.ok("extrude 40x30x10", &x) else {
+        return;
+    };
+    let faces = r.feature_summary(blk).map(|f| f.faces).unwrap_or_default();
+    let top = faces
+        .iter()
+        .find(|f| f.reference.role == FaceRole::ExtrudeEndCap)
+        .map(|f| f.reference);
+    let front = faces
+        .iter()
+        .find(|f| {
+            matches!(f.reference.role, FaceRole::ExtrudeSide { .. })
+                && (f.frame.z[1] + 1.0).abs() < 1e-12
+        })
+        .map(|f| f.reference);
+    let bottom = faces
+        .iter()
+        .find(|f| f.reference.role == FaceRole::ExtrudeStartCap)
+        .map(|f| f.reference);
+    let (Some(top), Some(front), Some(bottom)) = (top, front, bottom) else {
+        r.check(
+            "top/front/bottom faces offered",
+            "present",
+            "missing",
+            false,
+        );
+        return;
+    };
+    let x = r.exec(Command::Chamfer {
+        name: None,
+        a: top,
+        b: front,
+        distance: 2.0,
+    });
+    let Some(ch) = r.ok("chamfer 2 mm", &x) else {
+        return;
+    };
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 12000 - 0.5 * 2 * 2 * 40.
+    r.check_body_solid(
+        "chamfered block",
+        b,
+        11920.0,
+        [0.0, 0.0, 0.0],
+        [40.0, 30.0, 10.0],
+    );
+    let x = r.exec(Command::SetParameter {
+        feature: ch,
+        name: "distance".into(),
+        value: 3.0,
+    });
+    r.ok("distance = 3", &x);
+    // 12000 - 0.5 * 9 * 40.
+    r.check_body_solid(
+        "chamfer 3 mm",
+        b,
+        11820.0,
+        [0.0, 0.0, 0.0],
+        [40.0, 30.0, 10.0],
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("chamfer.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    r.refused(
+        "chamfer between parallel faces",
+        Command::Chamfer {
+            name: None,
+            a: top,
+            b: bottom,
+            distance: 1.0,
+        },
+        "parallel",
+    );
+    r.refused(
+        "chamfer larger than the face",
+        Command::SetParameter {
+            feature: ch,
+            name: "distance".into(),
+            value: 12.0,
+        },
+        "reaches past",
+    );
+}
+
+/// Backlog 7: SVG planar paths → sketch (outer + holes) → solid; sketch → SVG.
+pub(super) fn scenario_svg(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3S.1 FreeCAD SVG -> sketch -> solid".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../f420-exchange/tests/fixtures/svg/freecad_plate.svg");
+    let x = r.exec(Command::ImportSvg {
+        path: src,
+        plane: SketchPlane::WorldXY,
+        name: Some("Plate outline".into()),
+        units_to_mm: None,
+        allow_partial: false,
+    });
+    let Some(sk) = r.ok("import_svg (FreeCAD Draft export, mm, reflected group)", &x) else {
+        return;
+    };
+    r.check(
+        "units reported",
+        "declared in file",
+        x.message.clone().unwrap_or_default(),
+        x.message
+            .as_deref()
+            .is_some_and(|m| m.contains("declared in file")),
+    );
+    let x = r.exec(Command::extrude(Some("Plate".into()), sk, 5.0));
+    r.ok("extrude 5 (region with two holes, one feature)", &x);
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 60x40 - Ø12 hole - slot (10 x 8 + two r4 half discs), x 5; sketch = FreeCAD
+    // coordinates + (0.6, -40.6) (the file's group transform and the y flip).
+    let want = 5.0 * (2400.0 - 36.0 * PI - (80.0 + 16.0 * PI));
+    r.check_body_solid("plate", b, want, [0.6, -40.6, 0.0], [60.6, -0.6, 5.0]);
+    let out = r.out_dir.join("svg_plate.svg");
+    let x = r.exec(Command::ExportSvg {
+        path: out.clone(),
+        sketch: sk,
+    });
+    r.ok("export_svg (external check: tools/check_run3_steps.sh)", &x);
+    let mut t = crate::Session::new();
+    t.execute(&Command::NewDocument);
+    let x = t.execute(&Command::ImportSvg {
+        path: out,
+        plane: SketchPlane::WorldXY,
+        name: None,
+        units_to_mm: None,
+        allow_partial: false,
+    });
+    let back = x.feature.and_then(|f| {
+        t.execute(&Command::extrude(None, f, 5.0))
+            .summary
+            .and_then(|s| s.bodies.first().and_then(|b| b.measurements.clone()))
+    });
+    let v = back.as_ref().and_then(|m| match m.volume {
+        VolumeResult::Value { volume, .. } => Some(volume),
+        _ => None,
+    });
+    r.check(
+        "own SVG export re-imported: same solid and placement",
+        format!("{want:.6} at the same bounds"),
+        format!("{v:?} {:?}", back.as_ref().map(|m| m.bounds)),
+        v.is_some_and(|v| (v - want).abs() <= vol_tol(want))
+            && back.is_some_and(|m| {
+                (m.bounds.min[0] - 0.6).abs() < 1e-9 && (m.bounds.max[1] + 0.6).abs() < 1e-9
+            }),
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("svg_plate.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+}
+
+/// Circular pattern: a bolt circle of six Ø8 holes on a Ø100 disc.
+pub(super) fn scenario_circular(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3O.1 bolt circle".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Disc".into()),
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 100.0,
+            center: None,
+        },
+    });
+    let Some(sd) = r.ok("disc sketch Ø100", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Disc", sd, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(disc) = r.ok("extrude 10", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Bolt hole".into()),
+        plane: SketchPlane::Face(FaceRef {
+            feature: disc,
+            role: FaceRole::ExtrudeEndCap,
+        }),
+        template: SketchTemplate::CenteredCircle {
+            diameter: 8.0,
+            center: Some([35.0, 0.0]),
+        },
+    });
+    let Some(sh) = r.ok("hole sketch at (35, 0) on top", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Bolt hole", sh, 0.0, ExtrudeOp::Cut, None, true, None);
+    let Some(hole) = r.ok("through-all", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CircularPattern {
+        name: None,
+        feature: hole,
+        count: 6,
+        angle_deg: 60.0,
+        center: [0.0, 0.0],
+    });
+    let Some(pat) = r.ok("circular pattern x6 at 60°", &x) else {
+        return;
+    };
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    let v = |n: f64| PI * 2500.0 * 10.0 - n * PI * 16.0 * 10.0;
+    r.check_body_solid(
+        "disc with 6 holes",
+        b,
+        v(6.0),
+        [-50.0, -50.0, 0.0],
+        [50.0, 50.0, 10.0],
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("bolt_circle.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    r.step = "3O.2 edits".into();
+    for (p, val) in [("count", 4.0), ("angle_deg", 90.0)] {
+        let x = r.exec(Command::SetParameter {
+            feature: pat,
+            name: p.into(),
+            value: val,
+        });
+        r.ok(&format!("{p} = {val}"), &x);
+    }
+    r.check_body_solid(
+        "disc with 4 holes at 90°",
+        b,
+        v(4.0),
+        [-50.0, -50.0, 0.0],
+        [50.0, 50.0, 10.0],
+    );
+    r.refused(
+        "7 instances at 60° wrap past a full turn",
+        Command::SetParameter {
+            feature: pat,
+            name: "count".into(),
+            value: 8.0,
+        },
+        "full turn",
+    );
 }

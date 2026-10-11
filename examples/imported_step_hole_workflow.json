@@ -1,0 +1,57 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "import_step",
+    "path": "crates/f420-kernel/tests/fixtures/step/box_40x30x10_mm.step"
+  },
+  {
+    "cmd": "import_step",
+    "path": "crates/f420-kernel/tests/fixtures/step/truncated.step",
+    "expect_ok": false
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Hole sketch",
+    "plane": {
+      "Face": {
+        "feature": 1,
+        "role": {
+          "Imported": {
+            "body": 1,
+            "face": 5
+          }
+        }
+      }
+    },
+    "template": "centered_circle",
+    "diameter": 6.0,
+    "center": [
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "cmd": "extrude",
+    "name": "Hole",
+    "sketch": 2,
+    "op": "cut",
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "cmd": "measure"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/imported_step_hole.f420.json"
+  },
+  {
+    "cmd": "export_step",
+    "path": "artifacts/imported_step_hole.step",
+    "bodies": [
+      1
+    ]
+  }
+]

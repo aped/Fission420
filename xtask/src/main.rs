@@ -155,6 +155,30 @@ fn main() -> ExitCode {
                 "examples/scenario_r_workflow.json",
             ],
         ),
+        (
+            "imported STEP + hole example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/imported_step_hole_workflow.json",
+            ],
+        ),
+        (
+            "DXF + STL import example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "f420-cli",
+                "--",
+                "run",
+                "examples/dxf_stl_import_workflow.json",
+            ],
+        ),
     ];
     for (name, args) in stages {
         if !run(name, args) {

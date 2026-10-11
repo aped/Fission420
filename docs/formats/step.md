@@ -168,3 +168,6 @@ revolved cylinder face) -> exact volume.
   `MANIFOLD_SOLID_BREP` per body, named; one PRODUCT, one shape representation; FreeCAD does
   not display the brep names). Check: `tools/check_step_multi.sh` (FreeCAD: 3 valid solids,
   volumes within 7e-7 mm^3 of analytic).
+
+## Command-level evidence
+Acceptance scenario C (`crates/f420-commands/src/acceptance/formats.rs`, steps "C.1"-"C.8") runs these fixtures through `Session::execute`: import, imported-face sketch + through-all cut, save/delete source/reopen, export validated by FreeCAD (`tools/check_formats.sh`), curved/unit/multi-solid imports and failed imports leaving the document unchanged. Edge cases: `crates/f420-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.

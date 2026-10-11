@@ -50,3 +50,6 @@ an open mesh never gets a volume.
 open box 4 boundary edges and no volume, `solid`-header binary detected, truncated / malformed /
 NaN / unterminated / over-limit inputs rejected with the right error. Writer output validated by
 FreeCAD (`tools/fixtures/stl/validate_writer.sh`: solid, volume 1000, PASS).
+
+## Command-level evidence
+Acceptance scenario D (`crates/f420-commands/src/acceptance/formats.rs`, steps "D.1"-"D.6"): ASCII/binary at mm and inch, open mesh, malformed files, exact operations refused on mesh bodies, mesh STL export (validated by `tools/check_formats.sh`), reload without the sources. Summary matrix: `docs/FORMAT_SUPPORT.md`.

@@ -240,6 +240,12 @@ pub enum FeatureKind {
         to_mm: f64,
         body: BodyId,
     },
+    /// Base feature: mesh bodies from an embedded 3MF package, one per build item
+    /// in file order (units declared by the file).
+    Import3mf {
+        blob: BlobId,
+        bodies: Vec<BodyId>,
+    },
     /// Repeat the tool of `seed` (an Extrude Cut) `count - 1` more times, each
     /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
     /// normalized), on the seed's target body. The seed is instance 0.
@@ -248,6 +254,30 @@ pub enum FeatureKind {
         count: u32,
         spacing: f64,
         direction: [f64; 2],
+    },
+    /// Apply the reflection of `seed`'s tool (an Extrude Join or Cut) across
+    /// `plane` (a world plane through the origin or a planar face) to the seed's
+    /// target body. The seed itself stays; this adds the mirrored copy.
+    Mirror {
+        seed: FeatureId,
+        plane: SketchPlane,
+    },
+    /// Repeat the tool of `seed` (an Extrude Join/Cut) `count - 1` more times,
+    /// each rotated by a further `angle` (radians; parameter `angle_deg`, counter-
+    /// clockwise about the seed sketch's normal) about `center` (seed sketch-plane
+    /// coordinates), on the seed's target body. The seed is instance 0.
+    CircularPattern {
+        seed: FeatureId,
+        count: u32,
+        angle: f64,
+        center: [f64; 2],
+    },
+    /// Equal-distance chamfer of the straight convex edge where planar faces `a`
+    /// and `b` (semantic references on one body) meet, `distance` mm along each.
+    Chamfer {
+        a: FaceRef,
+        b: FaceRef,
+        distance: f64,
     },
 }
 
@@ -284,8 +314,24 @@ impl Feature {
             | FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
-            FeatureKind::LinearPattern { seed, .. } => vec![*seed],
-            FeatureKind::ImportStep { .. } | FeatureKind::ImportMesh { .. } => vec![],
+            FeatureKind::LinearPattern { seed, .. } | FeatureKind::CircularPattern { seed, .. } => {
+                vec![*seed]
+            }
+            FeatureKind::Mirror {
+                seed,
+                plane: SketchPlane::Face(r),
+            } => vec![*seed, r.feature],
+            FeatureKind::Mirror { seed, .. } => vec![*seed],
+            FeatureKind::Chamfer { a, b, .. } => {
+                let mut v = vec![a.feature];
+                if b.feature != a.feature {
+                    v.push(b.feature);
+                }
+                v
+            }
+            FeatureKind::ImportStep { .. }
+            | FeatureKind::ImportMesh { .. }
+            | FeatureKind::Import3mf { .. } => vec![],
         }
     }
 
@@ -298,7 +344,9 @@ impl Feature {
             }
             | FeatureKind::Revolve { body, .. }
             | FeatureKind::ImportMesh { body, .. } => vec![*body],
-            FeatureKind::ImportStep { bodies, .. } => bodies.clone(),
+            FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
+                bodies.clone()
+            }
             _ => vec![],
         }
     }
@@ -319,9 +367,9 @@ impl Feature {
     /// Embedded blob this feature reads, if any.
     pub fn blob(&self) -> Option<BlobId> {
         match &self.kind {
-            FeatureKind::ImportStep { blob, .. } | FeatureKind::ImportMesh { blob, .. } => {
-                Some(*blob)
-            }
+            FeatureKind::ImportStep { blob, .. }
+            | FeatureKind::ImportMesh { blob, .. }
+            | FeatureKind::Import3mf { blob, .. } => Some(*blob),
             _ => None,
         }
     }
@@ -344,12 +392,21 @@ impl Feature {
                 ..
             } => vec![],
             FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
-            FeatureKind::Cut { .. } | FeatureKind::ImportStep { .. } => vec![],
-            FeatureKind::ImportMesh { .. } => vec![],
+            FeatureKind::Cut { .. }
+            | FeatureKind::ImportStep { .. }
+            | FeatureKind::Mirror { .. } => {
+                vec![]
+            }
+            FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
+            FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::LinearPattern { count, spacing, .. } => vec![
                 ("count".into(), f64::from(*count)),
                 ("spacing".into(), *spacing),
+            ],
+            FeatureKind::CircularPattern { count, angle, .. } => vec![
+                ("count".into(), f64::from(*count)),
+                ("angle_deg".into(), angle.to_degrees()),
             ],
         }
     }
@@ -419,7 +476,10 @@ impl Feature {
                 *distance = value;
                 Ok(())
             }
-            FeatureKind::LinearPattern { count, .. } if name == "count" => {
+            FeatureKind::LinearPattern { count, .. }
+            | FeatureKind::CircularPattern { count, .. }
+                if name == "count" =>
+            {
                 if value.fract() != 0.0 || !(2.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
                     return Err(DocError::Validation(format!(
                         "{id}.count: pattern count must be an integer in 2..={MAX_PATTERN_COUNT}, \
@@ -429,6 +489,16 @@ impl Feature {
                 *count = value as u32;
                 Ok(())
             }
+            FeatureKind::CircularPattern { angle, .. } if name == "angle_deg" => {
+                if value <= 0.0 || value >= 360.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.angle_deg: angle between instances must be in (0, 360) degrees, \
+                         got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
+                Ok(())
+            }
             FeatureKind::LinearPattern { spacing, .. } if name == "spacing" => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
@@ -436,6 +506,15 @@ impl Feature {
                     )));
                 }
                 *spacing = value;
+                Ok(())
+            }
+            FeatureKind::Chamfer { distance, .. } if name == "distance" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.distance: chamfer distance must be > 0 mm, got {value}"
+                    )));
+                }
+                *distance = value;
                 Ok(())
             }
             FeatureKind::Pocket { depth, .. } if name == "depth" => {

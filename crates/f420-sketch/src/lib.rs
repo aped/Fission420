@@ -181,6 +181,16 @@ pub enum Constraint {
     /// equation, the signed distance `u × (p − a) = 0` (mm). The point may not
     /// be one of the line's own endpoints.
     PointOnLine { point: PointId, line: EntityId },
+    /// Signed counter-clockwise angle from line `a`'s direction (its first to
+    /// its second point) to line `b`'s, `dim.value` degrees in (0, 180). 1
+    /// equation, `S · wrap(θ − θ0)` with θ = atan2(u_a × u_b, u_a · u_b) and
+    /// `S` the sketch scale (residual in mm, like [`Constraint::Parallel`]); the
+    /// wrap to (−π, π] makes the solution unique (no θ0 + 180° twin).
+    Angle {
+        a: EntityId,
+        b: EntityId,
+        dim: Dimension,
+    },
 }
 
 impl Constraint {
@@ -190,7 +200,8 @@ impl Constraint {
             | Constraint::VerticalDistance { dim, .. }
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
-            | Constraint::Radius { dim, .. } => Some(dim),
+            | Constraint::Radius { dim, .. }
+            | Constraint::Angle { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -201,7 +212,8 @@ impl Constraint {
             | Constraint::VerticalDistance { dim, .. }
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
-            | Constraint::Radius { dim, .. } => Some(dim),
+            | Constraint::Radius { dim, .. }
+            | Constraint::Angle { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -465,6 +477,16 @@ impl Sketch {
     /// non-positive values and unknown names; on error the sketch is unchanged.
     pub fn set_dimension(&mut self, name: &str, value: f64) -> Result<(), SketchError> {
         check_dim_value(name, value)?;
+        let is_angle = self
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::Angle { dim, .. } if dim.name == name));
+        if is_angle && value >= 180.0 {
+            return Err(SketchError::InvalidDimension {
+                name: name.to_owned(),
+                value,
+            });
+        }
         let dim = self
             .constraints
             .iter_mut()
@@ -605,13 +627,22 @@ impl Sketch {
                 }
                 Constraint::Parallel { a, b }
                 | Constraint::Perpendicular { a, b }
-                | Constraint::EqualLength { a, b } => {
+                | Constraint::EqualLength { a, b }
+                | Constraint::Angle { a, b, .. } => {
                     need_entity(i, a, "line")?;
                     need_entity(i, b, "line")?;
                     if a == b {
                         return Err(SketchError::InvalidValue(format!(
                             "constraint {i}: needs two different lines"
                         )));
+                    }
+                    if let Constraint::Angle { dim, .. } = c
+                        && !(dim.value > 0.0 && dim.value < 180.0)
+                    {
+                        return Err(SketchError::InvalidDimension {
+                            name: dim.name.clone(),
+                            value: dim.value,
+                        });
                     }
                 }
                 Constraint::PointOnLine { point, line } => {
@@ -723,6 +754,8 @@ mod tests_edit;
 #[cfg(test)]
 mod tests_arc;
 
+#[cfg(test)]
+mod tests_angle;
 #[cfg(test)]
 mod tests_lines;
 #[cfg(test)]

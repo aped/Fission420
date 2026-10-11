@@ -282,6 +282,15 @@ impl Sketch {
             Constraint::Parallel { a, b } => format!("Parallel L{}, L{}", a.0, b.0),
             Constraint::Perpendicular { a, b } => format!("Perpendicular L{}, L{}", a.0, b.0),
             Constraint::EqualLength { a, b } => format!("Equal length L{}, L{}", a.0, b.0),
+            Constraint::Angle { a, b, dim } => {
+                format!(
+                    "{} = {}° (L{} → L{})",
+                    dim.name,
+                    fmt_mm(dim.value),
+                    a.0,
+                    b.0
+                )
+            }
             Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
         }
     }
@@ -449,7 +458,8 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::EqualRadius { .. }
         | Constraint::Parallel { .. }
         | Constraint::Perpendicular { .. }
-        | Constraint::EqualLength { .. } => vec![],
+        | Constraint::EqualLength { .. }
+        | Constraint::Angle { .. } => vec![],
     }
 }
 
@@ -463,7 +473,8 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         Constraint::EqualRadius { a, b }
         | Constraint::Parallel { a, b }
         | Constraint::Perpendicular { a, b }
-        | Constraint::EqualLength { a, b } => vec![*a, *b],
+        | Constraint::EqualLength { a, b }
+        | Constraint::Angle { a, b, .. } => vec![*a, *b],
         Constraint::PointOnLine { line, .. } => vec![*line],
         _ => vec![],
     }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written from the SVG 1.1 spec (not by Fission420): 80 x 50 mm plate outline
+     with rounded right end (circular arc via path A), a Ø10 hole and a 10 x 6 slot
+     inside a translated group. 1 user unit = 1 mm. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="60mm" viewBox="0 0 100 60">
+  <title>plate</title>
+  <path d="M 10 55 H 65 A 25 25 0 0 0 65 5 L 10 5 Z" fill="none" stroke="black"/>
+  <circle cx="30" cy="30" r="5"/>
+  <g transform="translate(50 30)">
+    <rect x="0" y="-3" width="10" height="6"/>
+  </g>
+</svg>
