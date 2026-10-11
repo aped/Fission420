@@ -5,6 +5,7 @@
 //! scenarios follow: blind pocket ("P.") and three-point arcs ("R.").
 
 mod arcs;
+mod formats;
 mod scenarios;
 use crate::{Command, Response, Session, SketchTemplate, end_cap_of};
 use f420_document::{FeatureId, SketchPlane};
@@ -220,6 +221,8 @@ pub fn run(out_dir: &Path) -> Report {
     scenarios::scenario_b(&mut r);
     scenarios::scenario_pocket(&mut r);
     arcs::scenario_r(&mut r);
+    formats::scenario_c(&mut r);
+    formats::scenario_d(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {
