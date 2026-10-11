@@ -43,10 +43,20 @@
 | 17:50 | pocket UI (Through all / Blind depth) cc30adc | UI test |
 | 18:02 | deferred measurement 9da2e20: plate edit geometry 2395 -> 575 ms | engine tests, docs/behavior/timings.md |
 | 18:10 | template sketches edit in the editor keeping center_x/center_y | UI test |
+| 18:20 | arcs worker merged (stretch 2: 3-point arcs, Radius/Tangent/EqualRadius, line+arc loops, scenario R) + arc UI 4fbd0f7 | xtask 200 tests, acceptance 440/0 |
+| 18:40 | automated real-input live walkthrough (tools/live_walkthrough.sh + tools/live/*.txt, probe assertions) fa80cc5 | 4/4 PASS |
+| 19:00 | measurement thread deep-copies bodies (Truck shares geometry behind mutexes); failed measurements end; harness pointer nudge (eframe/Wayland frame-callback pacing, egui #8326) | traced, see report |
+| 19:05 | kernel worker merged (stretch 3: exact post-boolean NURBS edges; measure 1818 -> 0.9 ms, tessellate 380 -> 1.6 ms, bracket 69 s -> 2.7 s) | xtask 206 tests in 37 s, FreeCAD 8/8 |
+| 19:08 | independent review: 13 findings, 12 fixed (+ #7 earlier), unit test | |
+| 19:12 | delete feature (command + UI), Midpoint constraint, README, live script e (pocket/rename/delete) | 5/5 live PASS |
 
 ## Next
-- Arcs worker (stretch 2: three-point arcs, sketch/kernel/document/commands) running; then the editor arc tool (app).
-- Integration reserve from 22:53: xtask check, external validation, live re-run, MORNING_REPORT_RUN_2.md.
+- Constraints worker (Parallel/Perpendicular/EqualLength/PointOnLine + construction geometry, sketch crate) running; then editor UI for them.
+- Integration reserve from 22:53 (start earlier if done): xtask check, external validation, live walkthrough x2, finalize MORNING_REPORT_RUN_2.md.
+
+## Known issues
+- Headless-compositor frame pacing: eframe on Wayland repaints only after a compositor frame callback (egui #8326); in the private headless mutter the frame clock occasionally goes quiet while the app waits for a worker reply, so replies are applied only at the next input event. The live harness nudges the pointer while waiting. Not verified on a physical display (desktop locked all night).
+- One unreproduced swallowed toolbar click right after dismissing the unsaved-changes dialog (live, once).
 
 ## Evidence locations (run 2)
 - UI tests: crates/f420-app/tests/sketch_workflow.rs (A/B/C), ui_workflow.rs + placement.rs (run 1, updated)
