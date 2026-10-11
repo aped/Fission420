@@ -46,3 +46,18 @@ No new third-party crates: `f420-exchange` depends only on `f420-sketch`, `serde
 External tools used only to generate/validate fixtures (not linked, not shipped, not a project
 dependency): FreeCAD 1.1.4 flatpak (LGPL-2.1, `Mesh`, `Import.writeDXFShape`/`readDXF`) and
 ezdxf 1.4.2 (MIT, https://github.com/mozman/ezdxf) in a throwaway venv under `artifacts/venv`.
+
+## STEP import / multi-body export (run 3)
+
+No new crates. STEP import (`f420-kernel/src/step_in/`) uses the ruststep parser through
+truck-stepio's re-export (`truck_stepio::r#in::ruststep`), so there is no direct dependency.
+
+| crate | version (Cargo.lock) | license | source | used by |
+|---|---|---|---|---|
+| truck-stepio | 0.3.0 (default features: `in`, `out`) | Apache-2.0 | https://crates.io/crates/truck-stepio | f420-kernel (STEP writer; parser re-export) |
+| ruststep | 0.4.0 (transitive via truck-stepio) | Apache-2.0 | https://crates.io/crates/ruststep | f420-kernel import: Part 21 parser only (AST); entity conversion is our own code |
+| ruststep-derive | 0.4.0 (transitive) | Apache-2.0 | https://crates.io/crates/ruststep-derive | (proc macros of ruststep) |
+
+Test fixtures under `crates/f420-kernel/tests/fixtures/step/` were generated with FreeCAD 1.1.4
+(LGPL-2.1, external tool, not linked) from primitives in our own script
+(`tools/fixtures/step/generate.py`); they contain no third-party design data.

@@ -9,14 +9,31 @@ pub struct Bounds {
     pub max: [f64; 3],
 }
 
+/// How a [`VolumeResult::Value`] was computed. Unit variants only (the type stays
+/// `Copy + Eq`); the accuracy is in `error_estimate`. Serialized by variant name, so
+/// existing documents with `"BrepBoundaryIntegralZ"` keep deserializing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VolumeMethod {
     /// Divergence theorem with F = (0, 0, z): V = sum over faces of the integral of
-    /// z * n_z dA. Faces must be planes or surfaces with n_z == 0 (Z-ruled walls).
-    /// Planar face integrals become Green's-theorem line integrals over the exact
-    /// B-rep edge curves, evaluated by dense chord sums on exact curve points with
-    /// Richardson extrapolation. Not a mesh volume.
+    /// z * n_z dA. Curved faces must be Z-ruled (n_z == 0) or lie in a plane
+    /// z = const; planar faces may have any orientation. Planar face integrals become
+    /// Green's-theorem line integrals over the exact B-rep edge curves, evaluated by
+    /// dense chord sums on exact curve points with Richardson extrapolation. Not a
+    /// mesh volume.
     BrepBoundaryIntegralZ,
+    /// As [`VolumeMethod::BrepBoundaryIntegralZ`] with F = (x, 0, 0): curved faces
+    /// must be X-ruled (n_x == 0) or lie in a plane x = const. Used when Z does not
+    /// apply (e.g. a hole drilled along X).
+    BrepBoundaryIntegralX,
+    /// As [`VolumeMethod::BrepBoundaryIntegralZ`] with F = (0, y, 0): curved faces
+    /// must be Y-ruled (n_y == 0) or lie in a plane y = const. Tried after Z and X.
+    BrepBoundaryIntegralY,
+    /// Fallback when no axis-ruled boundary integral applies (e.g. a torus): signed
+    /// volume of the welded watertight tessellation at two chord tolerances; the
+    /// finer value is reported and `error_estimate` is the difference between the
+    /// two levels. An estimate, not an exact or bounded value (see
+    /// `tessellation_volume` in measure.rs).
+    TessellationEstimate,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,8 +144,45 @@ pub(crate) fn raw_bounds(solid: &Solid) -> Result<Bounds> {
     Ok(b)
 }
 
-/// 1/2 * closed-loop sum of (x dy - y dx) over a wire, `n` chords per edge.
-fn wire_area_xy(w: &Wire, n: usize) -> Option<f64> {
+/// Integration axis `a` of the boundary-integral volume (F = (p . a) a, div F = 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    Z,
+    X,
+    Y,
+}
+
+impl Axis {
+    /// Order in which axes are tried. Z first keeps the original method (and its exact
+    /// arithmetic) for every body it supported before X and Y were added.
+    const ORDER: [Axis; 3] = [Axis::Z, Axis::X, Axis::Y];
+
+    /// World coordinate indices (u, v, k): k is the axis and (e_u, e_v, e_k) is
+    /// right-handed, so a wire that is counter-clockwise about +a has positive
+    /// projected area in (u, v). For Z this is (x, y, z).
+    fn indices(self) -> (usize, usize, usize) {
+        match self {
+            Axis::Z => (0, 1, 2),
+            Axis::X => (1, 2, 0),
+            Axis::Y => (2, 0, 1),
+        }
+    }
+
+    fn method(self) -> VolumeMethod {
+        match self {
+            Axis::Z => VolumeMethod::BrepBoundaryIntegralZ,
+            Axis::X => VolumeMethod::BrepBoundaryIntegralX,
+            Axis::Y => VolumeMethod::BrepBoundaryIntegralY,
+        }
+    }
+}
+
+const EVAL_FAIL: &str = "intersection curve evaluation failed";
+
+/// 1/2 * closed-loop sum of (p_u dp_v - p_v dp_u) over a wire, `n` chords per edge:
+/// the signed area of the wire projected on the (u, v) coordinate plane. For
+/// (u, v) = (x, y) this is the original `x dy - y dx` sum, bit for bit.
+fn wire_area_proj(w: &Wire, n: usize, u: usize, v: usize) -> Option<f64> {
     let mut a = 0.0;
     for e in w.edge_iter() {
         let c = e.oriented_curve();
@@ -136,18 +190,20 @@ fn wire_area_xy(w: &Wire, n: usize) -> Option<f64> {
         let mut prev = eval_curve(&c, t0)?;
         for i in 1..=n {
             let p = eval_curve(&c, t0 + (t1 - t0) * i as f64 / n as f64)?;
-            a += prev.x * p.y - p.x * prev.y;
+            a += prev[u] * p[v] - p[u] * prev[v];
             prev = p;
         }
     }
     Some(a / 2.0)
 }
 
-enum ZClass {
-    /// n_z == 0 everywhere: contributes nothing to the integral of z n_z dA.
-    Vertical,
-    /// Lies in the plane z = c with normal +-Z (e.g. a revolved annulus).
-    Horizontal(f64),
+/// Classification of a non-`Plane` face surface relative to an axis a.
+enum AxisClass {
+    /// n . a == 0 everywhere (ruled along a): contributes nothing to the integral of
+    /// (p . a)(n . a) dA.
+    Ruled,
+    /// Lies in the plane p . a = c with normal +-a (e.g. a revolved annulus).
+    Perpendicular(f64),
 }
 
 fn bound(b: std::ops::Bound<f64>) -> Option<f64> {
@@ -158,39 +214,88 @@ fn bound(b: std::ops::Bound<f64>) -> Option<f64> {
 }
 
 /// Classify a non-`Plane` surface by dense sampling of its (finite) parameter domain.
-/// Anything that is neither Z-ruled nor a horizontal plane is unsupported.
-fn classify_by_sampling(s: &Surface) -> std::result::Result<ZClass, String> {
+/// Anything that is neither ruled along the axis nor a plane perpendicular to it is
+/// unsupported. For Z this is the original Z-ruled / horizontal test.
+fn classify_by_sampling(s: &Surface, axis: Axis) -> std::result::Result<AxisClass, String> {
+    let (u, v, k) = axis.indices();
     let ((a0, a1), (b0, b1)) = s.parameter_range();
     let (Some(u0), Some(u1), Some(v0), Some(v1)) = (bound(a0), bound(a1), bound(b0), bound(b1))
     else {
         return Err("unbounded surface parameter range".into());
     };
     const K: usize = 16;
-    let (mut vertical, mut horizontal) = (true, true);
-    let z0 = s.subs(u0, v0).z;
+    let (mut ruled, mut perpendicular) = (true, true);
+    let c0 = s.subs(u0, v0)[k];
     for i in 0..=K {
         for j in 0..=K {
-            let (u, v) = (
+            let (pu, pv) = (
                 u0 + (u1 - u0) * i as f64 / K as f64,
                 v0 + (v1 - v0) * j as f64 / K as f64,
             );
-            let nn = s.normal(u, v);
-            if !nn.x.is_finite() || !nn.z.is_finite() {
+            let nn = s.normal(pu, pv);
+            if !nn[u].is_finite() || !nn[k].is_finite() {
                 continue; // degenerate point (e.g. on the axis of a revolution); judged by neighbours
             }
-            vertical &= nn.z.abs() <= 1e-12;
-            horizontal &= nn.x.abs() + nn.y.abs() <= 1e-12 && (s.subs(u, v).z - z0).abs() <= 1e-9;
+            ruled &= nn[k].abs() <= 1e-12;
+            perpendicular &=
+                nn[u].abs() + nn[v].abs() <= 1e-12 && (s.subs(pu, pv)[k] - c0).abs() <= 1e-9;
         }
     }
-    match (vertical, horizontal) {
-        (true, _) => Ok(ZClass::Vertical),
-        (_, true) => Ok(ZClass::Horizontal(z0)),
-        _ => Err("curved face is neither Z-ruled nor horizontal".into()),
+    match (ruled, perpendicular) {
+        (true, _) => Ok(AxisClass::Ruled),
+        (_, true) => Ok(AxisClass::Perpendicular(c0)),
+        _ => Err(format!(
+            "curved face is neither {axis:?}-ruled nor perpendicular to {axis:?}"
+        )),
     }
 }
 
-fn volume_z(solid: &Solid, n: usize) -> std::result::Result<f64, String> {
-    let mut v = 0.0;
+/// Whether every curved face of `solid` is ruled along / perpendicular to `axis`
+/// (planar faces of any orientation are always supported).
+fn axis_supported(solid: &Solid, axis: Axis) -> std::result::Result<(), String> {
+    for f in solid.face_iter() {
+        let s = f.surface();
+        if !matches!(s, Surface::Plane(_)) {
+            classify_by_sampling(&s, axis)?;
+        }
+    }
+    Ok(())
+}
+
+/// Integral of (p . a) dA over a planar face that is neither parallel nor
+/// perpendicular to the axis, times (n_plane . a). Green's theorem in the plane's own
+/// orthonormal frame (o, e1, e2), e1 x e2 = n_plane: with s, t the frame coordinates,
+/// the integral is (o . a) A + (e1 . a) M_s + (e2 . a) M_t, where A, M_s, M_t are the
+/// signed area and first moments of all boundary wires (inner loops have the opposite
+/// sense and subtract). The wires carry the face orientation, so when the outward
+/// normal is -n_plane both A, M and the normal flip sign and the product is
+/// unchanged: the result is the face's contribution (p . a)(n_out . a) dA.
+fn tilted_plane_integral(f: &Face, pl: &Plane, axis: Axis, n: usize) -> Option<f64> {
+    let (_, _, k) = axis.indices();
+    let np = pl.normal();
+    let e1 = pl.u_axis().normalize();
+    let e2 = np.cross(e1);
+    let o = pl.origin();
+    let mut m = [0.0; 3];
+    for w in f.boundaries() {
+        let wm = wire_moments_by(&w, n, |p| {
+            let d = p - o;
+            [d.dot(e1), d.dot(e2)]
+        })?;
+        for i in 0..3 {
+            m[i] += wm[i];
+        }
+    }
+    Some(np[k] * (o[k] * m[0] + e1[k] * m[1] + e2[k] * m[2]))
+}
+
+/// Boundary-integral volume with F = (p . a) a at `n` chords per edge. Faces
+/// perpendicular to the axis use the projected-area arithmetic of the original
+/// Z-only method (identical results for Z); tilted planar faces use
+/// [`tilted_plane_integral`]; curved faces must classify (see [`classify_by_sampling`]).
+fn volume_axis(solid: &Solid, axis: Axis, n: usize) -> std::result::Result<f64, String> {
+    let (u, v, k) = axis.indices();
+    let mut vol = 0.0;
     for f in solid.face_iter() {
         match f.surface() {
             Surface::Plane(pl) => {
@@ -198,57 +303,143 @@ fn volume_z(solid: &Solid, n: usize) -> std::result::Result<f64, String> {
                 if !f.orientation() {
                     nrm = -nrm;
                 }
-                if nrm.x.abs() + nrm.y.abs() < 1e-12 {
-                    let z = pl.origin().z;
+                if nrm[u].abs() + nrm[v].abs() < 1e-12 {
+                    let c = pl.origin()[k];
                     let mut area = 0.0;
                     for w in f.boundaries() {
-                        area +=
-                            wire_area_xy(&w, n).ok_or("intersection curve evaluation failed")?;
+                        area += wire_area_proj(&w, n, u, v).ok_or(EVAL_FAIL)?;
                     }
-                    v += z * area;
-                } else if nrm.z.abs() > 1e-12 {
-                    return Err("planar face not parallel or perpendicular to Z".into());
+                    vol += c * area;
+                } else if nrm[k].abs() > 1e-12 {
+                    vol += tilted_plane_integral(f, &pl, axis, n).ok_or(EVAL_FAIL)?;
                 }
             }
-            other => match classify_by_sampling(&other)? {
-                ZClass::Vertical => {}
-                ZClass::Horizontal(z) => {
+            other => match classify_by_sampling(&other, axis)? {
+                AxisClass::Ruled => {}
+                AxisClass::Perpendicular(c) => {
                     let mut area = 0.0;
                     for w in f.boundaries() {
-                        area +=
-                            wire_area_xy(&w, n).ok_or("intersection curve evaluation failed")?;
+                        area += wire_area_proj(&w, n, u, v).ok_or(EVAL_FAIL)?;
                     }
-                    v += z * area;
+                    vol += c * area;
                 }
             },
         }
     }
-    Ok(v)
+    Ok(vol)
 }
 
-fn volume(solid: &Solid) -> VolumeResult {
-    let r = (|| -> std::result::Result<(f64, f64), String> {
-        let n = VOLUME_CHORDS;
-        // The three refinement levels are independent; evaluate them concurrently.
-        let [a, b, c] = std::thread::scope(|sc| {
-            let hs = [n / 2, n, 2 * n].map(|k| sc.spawn(move || volume_z(solid, k)));
-            hs.map(|h| {
-                h.join()
-                    .unwrap_or_else(|_| Err("volume worker panicked".into()))
-            })
-        });
-        let (a, b, c) = (a?, b?, c?);
-        let r1 = (4.0 * b - a) / 3.0;
-        let r2 = (4.0 * c - b) / 3.0;
-        Ok((r2, (r2 - r1).abs()))
-    })();
-    match r {
+/// Exact-path volume about `axis`: three chord levels (n/2, n, 2n), Richardson
+/// extrapolation, error estimate = difference of the two extrapolants.
+fn exact_volume(solid: &Solid, axis: Axis) -> std::result::Result<(f64, f64), String> {
+    let n = VOLUME_CHORDS;
+    // The three refinement levels are independent; evaluate them concurrently.
+    let [a, b, c] = std::thread::scope(|sc| {
+        let hs = [n / 2, n, 2 * n].map(|k| sc.spawn(move || volume_axis(solid, axis, k)));
+        hs.map(|h| {
+            h.join()
+                .unwrap_or_else(|_| Err("volume worker panicked".into()))
+        })
+    });
+    let (a, b, c) = (a?, b?, c?);
+    let r1 = (4.0 * b - a) / 3.0;
+    let r2 = (4.0 * c - b) / 3.0;
+    Ok((r2, (r2 - r1).abs()))
+}
+
+/// Coarse chord of the tessellation fallback, relative to the bounding diagonal.
+const FALLBACK_CHORD_REL: f64 = 1e-4;
+/// Fine chord = coarse chord / this.
+const FALLBACK_REFINE: f64 = 4.0;
+
+/// Fallback volume: signed (divergence theorem) volume of the welded tessellation at
+/// chords c = max(1e-4 x bbox diagonal, 4 x the minimum mesh chord) and c / 4. Both
+/// meshes must be watertight. Returns (fine volume, |coarse - fine|).
+///
+/// Why the difference is a usable estimate: the tessellation vertices lie on the
+/// exact surfaces, so the mesh is inscribed and its volume error is driven by the
+/// sagitta, which is O(chord) (O(h^2) in edge length h). For smooth curved faces
+/// the error behaves like E(c) ~ K c, so E(c) - E(c/4) ~ (3/4) K c = 3 E(c/4): the
+/// difference over-estimates the fine error by about 3x once the meshes are in the
+/// asymptotic regime. For convex(-ish) faces both errors have the same sign (the
+/// inscribed mesh lies inside), which is what makes the difference dominate the
+/// fine error rather than cancel. It is still an estimate, not a bound: Truck's
+/// triangulation is not guaranteed to honour the chord exactly or to refine
+/// uniformly, saddle regions (e.g. a torus' inner half) partially cancel, and
+/// features smaller than the chord can be missed entirely. Observed (torus R 40,
+/// r 10, tests/volume_general.rs): errors at chord rel 1e-3 / 3e-4 / 1e-4 were
+/// -4.4e-3 / -1.1e-3 / -3.3e-4 relative (linear in the chord), estimate / error ~3,
+/// ~180 ms for revolve + measure (revolve measures once itself) at the chosen 1e-4.
+fn tessellation_volume(body: &Body) -> std::result::Result<(f64, f64), String> {
+    let b = raw_bounds(&body.solid).map_err(|e| e.to_string())?;
+    let diag = (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let min_chord = tol::MIN_MESH_CHORD_ABS.max(diag * tol::MIN_MESH_CHORD_REL);
+    let coarse = (diag * FALLBACK_CHORD_REL).max(FALLBACK_REFINE * min_chord);
+    let fine = coarse / FALLBACK_REFINE;
+    let level = |chord: f64| -> std::result::Result<f64, String> {
+        let m = crate::mesh::tessellate(body, chord).map_err(|e| e.to_string())?;
+        let c = crate::mesh::check_mesh(&m);
+        if !c.watertight {
+            return Err(format!(
+                "tessellation at chord {chord:.3e} mm is not watertight \
+                 ({} boundary, {} non-manifold, {} misoriented edges)",
+                c.boundary_edges, c.nonmanifold_edges, c.misoriented_edges
+            ));
+        }
+        Ok(c.mesh_volume)
+    };
+    let [vc, vf] = std::thread::scope(|sc| {
+        let hs = [coarse, fine].map(|c| sc.spawn(move || level(c)));
+        hs.map(|h| {
+            h.join()
+                .unwrap_or_else(|_| Err("tessellation worker panicked".into()))
+        })
+    });
+    let (vc, vf) = (vc?, vf?);
+    Ok((vf, (vc - vf).abs()))
+}
+
+/// Volume of `body`: the exact boundary integral about the first axis (Z, X, Y) whose
+/// curved faces are all ruled along or perpendicular to it; otherwise (or if the
+/// exact evaluation fails) the tessellation estimate; `Unavailable` if both fail.
+fn volume(body: &Body) -> VolumeResult {
+    let solid = &body.solid;
+    let mut reasons = Vec::new();
+    for axis in Axis::ORDER {
+        if let Err(e) = axis_supported(solid, axis) {
+            reasons.push(format!("{axis:?}: {e}"));
+            continue;
+        }
+        match exact_volume(solid, axis) {
+            Ok((volume, error_estimate)) => {
+                return VolumeResult::Value {
+                    volume,
+                    error_estimate,
+                    method: axis.method(),
+                };
+            }
+            Err(e) => {
+                // Another axis would evaluate the same edge curves; go to the fallback.
+                reasons.push(format!("{axis:?}: {e}"));
+                break;
+            }
+        }
+    }
+    match tessellation_volume(body) {
         Ok((volume, error_estimate)) => VolumeResult::Value {
             volume,
             error_estimate,
-            method: VolumeMethod::BrepBoundaryIntegralZ,
+            method: VolumeMethod::TessellationEstimate,
         },
-        Err(reason) => VolumeResult::Unavailable { reason },
+        Err(e) => {
+            reasons.push(format!("tessellation fallback: {e}"));
+            VolumeResult::Unavailable {
+                reason: reasons.join("; "),
+            }
+        }
     }
 }
 
@@ -270,7 +461,7 @@ pub fn measure(body: &Body) -> Result<Measurements> {
             edge_count: s.edge_iter().count() / 2,
             vertex_count: unique_vertices(s),
             bounds: raw_bounds(s)?,
-            volume: volume(s),
+            volume: volume(body),
         })
     })?
 }
@@ -319,17 +510,23 @@ pub struct InnerLoop {
 
 /// Area and first moments (A, Mx, My) of a wire via chord sums on exact curve points.
 fn wire_moments(w: &Wire, n: usize) -> Option<[f64; 3]> {
+    wire_moments_by(w, n, |p| [p.x, p.y])
+}
+
+/// Signed area and first moments (A, M_s, M_t) of a wire after mapping each exact curve
+/// point to 2D coordinates (s, t) with `to2d`; chord sums, `n` chords per edge.
+fn wire_moments_by(w: &Wire, n: usize, to2d: impl Fn(Point3) -> [f64; 2]) -> Option<[f64; 3]> {
     let (mut a, mut mx, mut my) = (0.0, 0.0, 0.0);
     for e in w.edge_iter() {
         let c = e.oriented_curve();
         let (t0, t1) = c.range_tuple();
-        let mut prev = eval_curve(&c, t0)?;
+        let mut prev = to2d(eval_curve(&c, t0)?);
         for i in 1..=n {
-            let p = eval_curve(&c, t0 + (t1 - t0) * i as f64 / n as f64)?;
-            let cr = prev.x * p.y - p.x * prev.y;
+            let p = to2d(eval_curve(&c, t0 + (t1 - t0) * i as f64 / n as f64)?);
+            let cr = prev[0] * p[1] - p[0] * prev[1];
             a += cr;
-            mx += (prev.x + p.x) * cr;
-            my += (prev.y + p.y) * cr;
+            mx += (prev[0] + p[0]) * cr;
+            my += (prev[1] + p[1]) * cr;
             prev = p;
         }
     }

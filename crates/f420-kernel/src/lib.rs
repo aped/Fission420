@@ -11,6 +11,7 @@ mod measure;
 mod mesh;
 mod ops;
 mod step;
+mod step_in;
 
 pub use build::{cut_blind, cut_through_all, extrude, revolve};
 pub use measure::{
@@ -22,7 +23,11 @@ pub use ops::{
     bounds, coplanar_face_side, cut_prism, extent_along, join_prism, plane_has_face, profile_within_face,
     through_all_margin,
 };
-pub use step::export_step;
+pub use step::{export_step, export_step_bodies};
+pub use step_in::{
+    ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
+    import_step,
+};
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;

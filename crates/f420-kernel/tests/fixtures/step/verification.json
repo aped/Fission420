@@ -1,0 +1,275 @@
+{
+ "freecad": [
+  "1",
+  "1",
+  "4",
+  "45039 (Git)"
+ ],
+ "occ": "7.8.1",
+ "files": {
+  "box_40x30x10_inch.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 12000.0,
+   "solid_volumes": [
+    12000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    40.0,
+    30.0,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "box_40x30x10_m.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 12000.0,
+   "solid_volumes": [
+    12000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    40.0,
+    30.0,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "box_40x30x10_mm.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 12000.0,
+   "solid_volumes": [
+    12000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    40.0,
+    30.0,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "cylinder_d20_h15_mm.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 3,
+   "isValid": true,
+   "volume": 4712.38898038469,
+   "solid_volumes": [
+    4712.38898038469
+   ],
+   "bbox": [
+    -10.0,
+    -10.0,
+    0.0,
+    10.0,
+    10.0,
+    15.0
+   ],
+   "surfaces": [
+    "Cylinder",
+    "Plane"
+   ]
+  },
+  "freecad_relabel_inch.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 196644768.0,
+   "solid_volumes": [
+    196644768.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    1016.0,
+    762.0,
+    254.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "freecad_relabel_m.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 12000000000000.0,
+   "solid_volumes": [
+    12000000000000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    40000.0,
+    30000.0,
+    10000.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "garbage.step": {
+   "ok": false,
+   "error": "Error in reading STEP"
+  },
+  "missing_unit.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 6,
+   "isValid": true,
+   "volume": 12000.0,
+   "solid_volumes": [
+    12000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    40.0,
+    30.0,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "plate_hole_mm.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 7,
+   "isValid": true,
+   "volume": 18571.68146928204,
+   "solid_volumes": [
+    18571.68146928204
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    60.0,
+    40.0,
+    8.0
+   ],
+   "surfaces": [
+    "Cylinder",
+    "Plane"
+   ]
+  },
+  "sphere_r10_mm.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 1,
+   "isValid": true,
+   "volume": 4188.790204786392,
+   "solid_volumes": [
+    4188.790204786392
+   ],
+   "bbox": [
+    -5.0,
+    -5.0,
+    -5.0,
+    15.0,
+    15.0,
+    15.0
+   ],
+   "surfaces": [
+    "Sphere"
+   ]
+  },
+  "torus_R20_r5_mm.step": {
+   "ok": true,
+   "solids": 1,
+   "faces": 1,
+   "isValid": true,
+   "volume": 9869.604401089357,
+   "solid_volumes": [
+    9869.604401089357
+   ],
+   "bbox": [
+    -25.0000001,
+    -25.0000001,
+    -5.0000001,
+    25.0000001,
+    25.0000001,
+    5.0000001
+   ],
+   "surfaces": [
+    "Toroid"
+   ]
+  },
+  "truncated.step": {
+   "ok": false,
+   "error": "Error in reading STEP"
+  },
+  "two_boxes_assembly_mm.step": {
+   "ok": true,
+   "solids": 2,
+   "faces": 12,
+   "isValid": true,
+   "volume": 2000.0000000000002,
+   "solid_volumes": [
+    999.9999999999998,
+    1000.0
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    67.32050807568658,
+    18.66025403784709,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  },
+  "two_boxes_compound_mm.step": {
+   "ok": true,
+   "solids": 2,
+   "faces": 12,
+   "isValid": true,
+   "volume": 1999.9999999999773,
+   "solid_volumes": [
+    999.9999999999998,
+    999.9999999999768
+   ],
+   "bbox": [
+    0.0,
+    0.0,
+    0.0,
+    67.320508075689,
+    18.6602540378479,
+    10.0
+   ],
+   "surfaces": [
+    "Plane"
+   ]
+  }
+ }
+}
