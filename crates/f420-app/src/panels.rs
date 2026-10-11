@@ -90,6 +90,15 @@ impl F420App {
                 });
             }
             if ui
+                .add_enabled(open, egui::Button::new("Import…"))
+                .probe("Import…")
+                .on_hover_text("Import STEP / STL / DXF into this document (one undoable step)")
+                .on_disabled_hover_text("Open or create a document first")
+                .clicked()
+            {
+                self.open_import_dialog();
+            }
+            if ui
                 .add_enabled(open, egui::Button::new("Close"))
                 .probe("Close")
                 .clicked()
@@ -105,6 +114,7 @@ impl F420App {
                     self.dialog = Some(Dialog::ExportStl {
                         path: self.default_path("stl"),
                         chord: "0.01".into(),
+                        scope: self.default_export_scope(),
                     });
                     ui.close();
                 }
@@ -115,6 +125,32 @@ impl F420App {
                 {
                     self.dialog = Some(Dialog::ExportStep {
                         path: self.default_path("step"),
+                        scope: self.default_export_scope(),
+                    });
+                    ui.close();
+                }
+                let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
+                if ui
+                    .add_enabled(
+                        open && has_sketch,
+                        egui::Button::new("Export DXF (sketch)…"),
+                    )
+                    .probe("Export DXF (sketch)…")
+                    .on_disabled_hover_text("Needs a sketch")
+                    .clicked()
+                {
+                    let sketch = self
+                        .selected
+                        .filter(|id| {
+                            self.summary
+                                .features
+                                .iter()
+                                .any(|f| f.id == *id && f.kind == "sketch")
+                        })
+                        .or_else(|| self.unused_sketch());
+                    self.dialog = Some(Dialog::ExportDxf {
+                        path: self.default_path("dxf"),
+                        sketch,
                     });
                     ui.close();
                 }
@@ -1094,6 +1130,7 @@ impl F420App {
         let extrudes: Vec<&FeatureSummary> =
             features.iter().filter(|f| f.kind == "extrude").collect();
         let mut ok = false;
+        let mut ok_allowed = true;
         let mut cancel = false;
         let mut error: Option<String> = None;
         let opened = self.last_dialog != Some(dlg.title());
@@ -1176,9 +1213,10 @@ impl F420App {
                     Dialog::SaveAs { path } | Dialog::Open { path } => {
                         text_field(ui, "File path", path);
                     }
-                    Dialog::ExportStl { path, chord } => {
+                    Dialog::ExportStl { path, chord, scope } => {
                         text_field(ui, "STL path", path);
                         num_field(ui, "Chord tolerance (mm)", chord);
+                        ok_allowed &= self.export_scope_ui(ui, scope, false).is_none();
                         ui.small("Exports the last committed model revision (queued after pending edits).");
                         if let Some(mc) = &self.last_export {
                             ui.label(format!(
@@ -1189,24 +1227,34 @@ impl F420App {
                             ));
                         }
                     }
-                    Dialog::ExportStep { path } => {
+                    Dialog::ExportStep { path, scope } => {
                         text_field(ui, "STEP path", path);
+                        ok_allowed &= self.export_scope_ui(ui, scope, true).is_none();
                         ui.label(
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
                         );
                         ui.small("Exports the last committed model revision (queued after pending edits).");
                     }
+                    Dialog::ExportDxf { path, sketch } => {
+                        ok_allowed &= self.export_dxf_ui(ui, path, sketch);
+                    }
+                    Dialog::Import(form) => {
+                        ok_allowed &= self.import_form_ui(ui, form);
+                        if form.pending {
+                            ui.small("Cancel closes this dialog only: a running import still completes, and Undo removes it.");
+                        }
+                    }
                 }
                 ui.horizontal(|ui| {
                     ok = ui
-                        .add_enabled(!busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
+                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
                         .clicked();
                     cancel = ui.button("Cancel").probe("Cancel").clicked();
                 });
                 ui.weak("Enter = OK · Esc = Cancel");
             });
         AUTOFOCUS.with(|a| a.set(false));
-        ok |= enter && !opened && !busy_blocks(&dlg, busy);
+        ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
         if cancel {
             self.last_dialog = None;
@@ -1220,7 +1268,11 @@ impl F420App {
                     return;
                 }
                 Ok(cmd) => {
-                    let keep = matches!(dlg, Dialog::ExportStl { .. });
+                    let keep = matches!(dlg, Dialog::ExportStl { .. } | Dialog::Import(_));
+                    if let Dialog::Import(f) = &mut dlg {
+                        f.pending = true;
+                        f.error = None;
+                    }
                     self.request(cmd);
                     if keep {
                         self.dialog = Some(dlg);

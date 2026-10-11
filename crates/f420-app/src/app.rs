@@ -81,10 +81,17 @@ pub(crate) enum Dialog {
     ExportStl {
         path: String,
         chord: String,
+        scope: crate::exchange::ExportScope,
     },
     ExportStep {
         path: String,
+        scope: crate::exchange::ExportScope,
     },
+    ExportDxf {
+        path: String,
+        sketch: Option<FeatureId>,
+    },
+    Import(crate::exchange::ImportForm),
 }
 
 impl Dialog {
@@ -100,6 +107,8 @@ impl Dialog {
             Dialog::Open { .. } => "Open document",
             Dialog::ExportStl { .. } => "Export STL",
             Dialog::ExportStep { .. } => "Export STEP",
+            Dialog::ExportDxf { .. } => "Export DXF",
+            Dialog::Import(_) => "Import",
         }
     }
 }
@@ -255,6 +264,8 @@ pub struct F420App {
     /// (a newly opened editor selects its text so typing replaces it).
     pub(crate) sketch_dim_opened: Option<usize>,
     pub(crate) show_help: bool,
+    /// Summary of the last successful import (window until closed).
+    pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
     /// Commands in flight with their submit time (FIFO; latency measurement).
     in_flight: VecDeque<(String, Instant)>,
     /// Last command round trips (name, latency) for the status bar / report.
@@ -317,6 +328,7 @@ impl F420App {
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
             show_help: false,
+            import_summary: None,
             in_flight: VecDeque::new(),
             latencies: VecDeque::new(),
             frame_ema: None,
@@ -382,6 +394,10 @@ impl F420App {
     }
     pub fn frame_time(&self) -> Option<Duration> {
         self.frame_ema
+    }
+    /// Summary of the last successful import, while its window is open.
+    pub fn import_summary(&self) -> Option<&crate::exchange::ImportSummary> {
+        self.import_summary.as_ref()
     }
     /// Analysed faces of the current display mesh.
     pub fn faces(&self) -> &[FaceInfo] {
@@ -876,6 +892,7 @@ impl F420App {
         }
         self.faces =
             crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
+        self.import_reply(&command, &response);
         self.sync_viewport_selection();
     }
 
@@ -1550,6 +1567,7 @@ impl F420App {
         self.confirm_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
+        self.import_summary_ui(&ctx);
         if busy || self.summary.measuring {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -1799,15 +1817,20 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::Open { path } => Command::Open {
             path: nonempty_path(path)?,
         },
-        Dialog::ExportStl { path, chord } => Command::ExportStl {
+        Dialog::ExportStl { path, chord, scope } => Command::ExportStl {
             path: nonempty_path(path)?,
             chord: Some(parse_num("chord", chord)?),
-            bodies: None,
+            bodies: scope.bodies(),
         },
-        Dialog::ExportStep { path } => Command::ExportStep {
+        Dialog::ExportStep { path, scope } => Command::ExportStep {
             path: nonempty_path(path)?,
-            bodies: None,
+            bodies: scope.bodies(),
         },
+        Dialog::ExportDxf { path, sketch } => Command::ExportDxf {
+            path: nonempty_path(path)?,
+            sketch: need(sketch, "sketch")?,
+        },
+        Dialog::Import(form) => form.command()?,
     })
 }
 
