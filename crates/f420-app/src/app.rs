@@ -739,6 +739,10 @@ impl F420App {
             if same {
                 if r.response.ok {
                     self.measurements = r.measurements;
+                    // Per-body (and per-feature) measurements of the same
+                    // revision: the document itself is unchanged.
+                    self.summary.bodies = r.summary.bodies;
+                    self.summary.features = r.summary.features;
                 } else if let Some(e) = &r.response.error {
                     self.diag(true, error_kind(e), e.to_string());
                 }

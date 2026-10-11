@@ -348,3 +348,38 @@ fn threemf_import_export_and_svg_sketch() {
     assert_eq!(f.len(), n + 1, "{:?}", h.state().diagnostics().last());
     assert_eq!(f.last().unwrap().kind, "sketch");
 }
+
+/// Every imported B-rep body ends up measured in the app's summary (deferred
+/// measurement through the threaded engine), never stuck at "No measurements".
+#[test]
+fn imported_solids_are_all_measured_in_the_app() {
+    let mut h = harness(ExecMode::Threaded);
+    click(&mut h, "New");
+    import(
+        &mut h,
+        &fixture("f420-kernel/tests/fixtures/step/two_boxes_compound_mm.step"),
+    );
+    click(&mut h, "Close summary");
+    import(
+        &mut h,
+        &fixture("f420-kernel/tests/fixtures/step/plate_hole_mm.step"),
+    );
+    let start = Instant::now();
+    loop {
+        settle(&mut h);
+        let s = h.state().summary().clone();
+        if s.bodies.len() == 3 && s.bodies.iter().all(|b| b.measurements.is_some()) {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "unmeasured: {:?} measuring={}",
+            s.bodies
+                .iter()
+                .map(|b| (&b.name, b.measurements.is_some()))
+                .collect::<Vec<_>>(),
+            s.measuring
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

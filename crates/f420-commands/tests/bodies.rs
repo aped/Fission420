@@ -396,3 +396,27 @@ fn dxf_import_notes_persist_on_the_sketch_feature() {
     ok(&mut s, Command::Open { path: p });
     assert!(notes(&s).iter().any(|n| n.starts_with("units:")));
 }
+
+#[test]
+fn deferred_measurement_of_imported_bodies() {
+    let mut s = Session::new();
+    s.set_defer_measurements(true);
+    ok(&mut s, Command::NewDocument);
+    for f in ["two_boxes_compound_mm.step", "plate_hole_mm.step"] {
+        ok(
+            &mut s,
+            Command::ImportStep {
+                path: fixture(&format!("crates/f420-kernel/tests/fixtures/step/{f}")),
+                units_to_mm: None,
+            },
+        );
+    }
+    let (doc, rev, bodies) = s.pending_measurement().expect("pending");
+    assert_eq!(bodies.len(), 3);
+    let m: Vec<_> = bodies
+        .iter()
+        .map(|(id, b)| (*id, f420_kernel::measure(b).unwrap()))
+        .collect();
+    assert!(s.adopt_measurements(doc, rev, m));
+    assert!(s.summary().bodies.iter().all(|b| b.measurements.is_some()));
+}
