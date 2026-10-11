@@ -48,8 +48,8 @@ impl SketchTool {
         match self {
             SketchTool::Select => "Select",
             SketchTool::Line => "Line",
-            SketchTool::CenterRectangle => "Center Rectangle",
-            SketchTool::CornerRectangle => "2-Point Rectangle",
+            SketchTool::CenterRectangle => "Center Rect",
+            SketchTool::CornerRectangle => "2-Point Rect",
             SketchTool::Circle => "Circle",
             SketchTool::Dimension => "Dimension",
         }
@@ -290,13 +290,19 @@ impl SketchEditor {
 
     pub fn status(&self) -> (StateKind, String) {
         let r = &self.report;
+        if self.sketch.entities.is_empty() {
+            return (
+                StateKind::Under,
+                "Empty sketch: draw with Line (L), Rectangle (R) or Circle (C)".into(),
+            );
+        }
         match r.status {
             SolveStatus::FullyConstrained => {
                 (StateKind::Full, "✔ Fully constrained (DOF 0)".into())
             }
             SolveStatus::UnderConstrained => (
                 StateKind::Under,
-                format!("◐ Under-constrained: {} degree(s) of freedom", r.dof),
+                format!("~ Under-constrained: {} degree(s) of freedom", r.dof),
             ),
             SolveStatus::OverConstrained => (
                 StateKind::Conflict,
@@ -328,6 +334,9 @@ impl SketchEditor {
 
     /// Profile state for the inspector (closed loop / circle, or why not).
     pub fn profile_state(&self) -> Result<String, String> {
+        if self.sketch.entities.is_empty() {
+            return Err("nothing drawn yet".into());
+        }
         match self.sketch.profile() {
             Ok(f420_sketch::Profile::Polygon(v)) => {
                 let a: f64 = (0..v.len())

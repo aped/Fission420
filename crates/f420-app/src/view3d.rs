@@ -15,7 +15,7 @@
 //! The analysis is display-side only; commands always carry semantic references
 //! that the regenerator re-validates against the exact B-rep.
 
-use eframe::egui::{self, Color32, Pos2, Stroke};
+use eframe::egui::{self, Color32, Pos2, Response, Stroke};
 use f420_commands::{Command, FeatureSummary};
 use f420_document::{FaceRef, FaceRole, FeatureId};
 use f420_viewport::{Camera, GridPlane, Ray, RenderMesh, ViewPreset};
@@ -550,43 +550,20 @@ impl F420App {
             });
         let Some(at) = anchor else { return };
         let mut buf = ed.buffer.clone();
-        let (mut apply, mut cancel) = (false, false);
-        egui::Area::new(egui::Id::new("doc_dim_edit"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(at)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let l = ui.label(format!("Edit {} (mm)", ed.name));
-                        let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(80.0));
-                        let r = r.labelled_by(l.id);
-                        let (enter, esc) = ui.input(|i| {
-                            (
-                                i.key_pressed(egui::Key::Enter),
-                                i.key_pressed(egui::Key::Escape),
-                            )
-                        });
-                        if !r.has_focus() && !enter && !esc {
-                            r.request_focus();
-                        }
-                        apply |= enter && (r.lost_focus() || r.has_focus());
-                        cancel |= esc;
-                        if ui.button("Set dimension").clicked() {
-                            apply = true;
-                        }
-                        if ui.button("Cancel dimension").clicked() {
-                            cancel = true;
-                        }
-                    });
-                    ui.weak("Enter applies · Esc cancels");
-                });
-            });
+        let (apply, cancel) = inline_number_editor(
+            ui.ctx(),
+            "doc_dim_edit",
+            at,
+            &format!("Edit {} (mm)", ed.name),
+            &mut buf,
+            ed.focus,
+        );
         if cancel {
             self.doc_dim_edit = None;
             return;
         }
         if apply {
-            match buf.trim().parse::<f64>() {
+            match buf.trim().trim_end_matches("mm").trim().parse::<f64>() {
                 Ok(v) if v.is_finite() && v > 0.0 => {
                     self.doc_dim_edit = None;
                     self.request(Command::SetParameter {
@@ -748,10 +725,12 @@ impl F420App {
     /// Inline numeric editor for a dimension inside the sketch editor.
     fn sketch_dim_input(&mut self, ui: &egui::Ui) {
         let rect = self.view_rect;
+        let last_open = self.sketch_dim_opened;
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
         let Some(ed) = s.editor.dim_edit.clone() else {
+            self.sketch_dim_opened = None;
             return;
         };
         let name = s
@@ -768,51 +747,26 @@ impl F420App {
             .or_else(|| rect.map(|r| r.center_top() + egui::vec2(-80.0, 40.0)));
         let Some(at) = at else { return };
         let mut buf = ed.buffer.clone();
-        let (mut apply, mut cancel) = (false, false);
-        let id = egui::Id::new(("sketch_dim_edit", ed.constraint));
-        egui::Area::new(egui::Id::new("sketch_dim_area"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(at)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let l = ui.label(format!("Edit {name} (mm)"));
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut buf)
-                                .id(id)
-                                .desired_width(80.0),
-                        );
-                        let r = r.labelled_by(l.id);
-                        let (enter, esc) = ui.input(|i| {
-                            (
-                                i.key_pressed(egui::Key::Enter),
-                                i.key_pressed(egui::Key::Escape),
-                            )
-                        });
-                        // The inline editor keeps focus until Enter/Escape/a button.
-                        if !r.has_focus() && !enter && !esc {
-                            r.request_focus();
-                        }
-                        apply |= enter && (r.lost_focus() || r.has_focus());
-                        cancel |= esc;
-                        if ui.button("Set dimension").clicked() {
-                            apply = true;
-                        }
-                        if ui.button("Cancel dimension").clicked() {
-                            cancel = true;
-                        }
-                    });
-                    ui.weak("Enter applies · Esc cancels");
-                });
-            });
+        let first = last_open != Some(ed.constraint);
+        let (apply, cancel) = inline_number_editor(
+            ui.ctx(),
+            "sketch_dim_edit",
+            at,
+            &format!("Edit {name} (mm)"),
+            &mut buf,
+            first,
+        );
         if let Some(d) = &mut s.editor.dim_edit {
             d.buffer = buf;
         }
         if cancel {
             s.editor.cancel_dim_edit();
-        } else if apply {
-            s.editor.apply_dim_edit();
+        } else if apply && !s.editor.apply_dim_edit() {
+            // Keep the editor open with everything selected for retyping.
+            self.sketch_dim_opened = None;
+            return;
         }
+        self.sketch_dim_opened = Some(ed.constraint);
     }
 
     // ----- chrome: banner, hints, pending indicator -----
@@ -896,7 +850,7 @@ impl F420App {
             chip(
                 &painter,
                 egui::pos2(rect.max.x - 330.0, rect.min.y + 8.0),
-                "⟳ Regenerating… showing the last valid model".into(),
+                "Regenerating… showing the last valid model".into(),
                 Color32::from_rgb(255, 210, 120),
             );
         }
@@ -955,9 +909,69 @@ impl F420App {
     }
 }
 
+/// Inline numeric editor popup at `at`. Keeps keyboard focus until Enter,
+/// Escape or a button; `select_all` selects the current text (on open, so
+/// typing replaces the value). Returns (apply, cancel).
+fn inline_number_editor(
+    ctx: &egui::Context,
+    key: &str,
+    at: Pos2,
+    label: &str,
+    buf: &mut String,
+    select_all: bool,
+) -> (bool, bool) {
+    let (mut apply, mut cancel) = (false, false);
+    let id = egui::Id::new((key, "field"));
+    egui::Area::new(egui::Id::new(key))
+        .order(egui::Order::Foreground)
+        .fixed_pos(at)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let l = ui.label(label);
+                    let mut out = egui::TextEdit::singleline(buf)
+                        .id(id)
+                        .desired_width(80.0)
+                        .show(ui);
+                    if select_all {
+                        let n = buf.chars().count();
+                        out.state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(n),
+                            )));
+                        out.state.store(ui.ctx(), id);
+                    }
+                    let r = Response::clone(&out.response).labelled_by(l.id);
+                    let (enter, esc) = ui.input(|i| {
+                        (
+                            i.key_pressed(egui::Key::Enter),
+                            i.key_pressed(egui::Key::Escape),
+                        )
+                    });
+                    if !r.has_focus() && !enter && !esc {
+                        r.request_focus();
+                    }
+                    apply |= enter && (r.lost_focus() || r.has_focus());
+                    cancel |= esc;
+                    if ui.button("Set dimension").clicked() {
+                        apply = true;
+                    }
+                    if ui.button("Cancel dimension").clicked() {
+                        cancel = true;
+                    }
+                });
+                ui.weak("Enter applies · Esc cancels");
+            });
+        });
+    (apply, cancel)
+}
+
 /// A rounded label with a dark background at `at` (top-left); returns its rect.
 pub fn chip(painter: &egui::Painter, at: Pos2, text: String, color: Color32) -> egui::Rect {
-    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.5), color);
+    let wrap = (painter.clip_rect().max.x - at.x - 20.0).max(120.0);
+    let galley = painter.layout(text, egui::FontId::proportional(13.5), color, wrap);
     let r = egui::Rect::from_min_size(at, galley.size() + egui::vec2(10.0, 6.0));
     painter.rect_filled(r, 4.0, Color32::from_black_alpha(185));
     painter.galley(r.min + egui::vec2(5.0, 3.0), galley, color);

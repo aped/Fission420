@@ -182,13 +182,13 @@ impl Sketch {
             Constraint::Horizontal { line } => format!("Horizontal L{}", line.0),
             Constraint::Vertical { line } => format!("Vertical L{}", line.0),
             Constraint::HorizontalDistance { a, b, dim: d } => {
-                format!("{} (horizontal {}→{})", dim(d), p(a), p(b))
+                format!("{} (horizontal {} to {})", dim(d), p(a), p(b))
             }
             Constraint::VerticalDistance { a, b, dim: d } => {
-                format!("{} (vertical {}→{})", dim(d), p(a), p(b))
+                format!("{} (vertical {} to {})", dim(d), p(a), p(b))
             }
             Constraint::Distance { a, b, dim: d } => {
-                format!("{} (distance {}–{})", dim(d), p(a), p(b))
+                format!("{} (distance {} to {})", dim(d), p(a), p(b))
             }
             Constraint::SymmetricAboutPoint { a, b, center } => {
                 format!("Symmetric {} / {} about {}", p(a), p(b), p(center))

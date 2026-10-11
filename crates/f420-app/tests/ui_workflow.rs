@@ -52,10 +52,6 @@ fn click(h: &mut Harness<'_, F420App>, label: &str) {
     settle(h);
 }
 
-fn click_contains(h: &mut Harness<'_, F420App>, label: &str) {
-    h.get_by_label_contains(label).click();
-    settle(h);
-}
 
 /// Focus the text field labelled `label`, select all, type `text`.
 fn type_into(h: &mut Harness<'_, F420App>, label: &str, text: &str) {
@@ -181,10 +177,10 @@ fn full_workflow_through_widgets() {
     assert_eq!(field_value(&h, "width (mm)").as_deref(), Some("100"));
 
     // Step 7: undo/redo via toolbar buttons.
-    click_contains(&mut h, "Undo:");
+    click(&mut h, "Undo");
     assert_volume(&h, V_80X50);
     assert_eq!(field_value(&h, "width (mm)").as_deref(), Some("80"));
-    click_contains(&mut h, "Redo:");
+    click(&mut h, "Redo");
     assert_volume(&h, V_100X50);
 
     // Step 6: depth 12 through the inspector; the hole sketch follows the top face.

@@ -39,7 +39,7 @@ pub const PALETTE: Palette = Palette {
     glyph: Color32::from_rgb(200, 200, 210),
     conflict: Color32::from_rgb(255, 90, 90),
     preview: Color32::from_rgb(255, 205, 60),
-    plane: Color32::from_rgba_premultiplied(40, 80, 140, 40),
+    plane: Color32::from_rgba_premultiplied(8, 16, 30, 30),
 };
 
 /// Projection of sketch-plane points to absolute screen positions.
@@ -466,7 +466,7 @@ pub fn paint_plane(painter: &egui::Painter, pr: &Projector, half_extent: f64) {
         painter.add(egui::Shape::convex_polygon(
             corners.clone(),
             PALETTE.plane,
-            Stroke::new(1.0, Color32::from_rgba_premultiplied(90, 140, 200, 90)),
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 80, 115, 110)),
         ));
     }
     let axis = |to: [f64; 2], c: Color32| {

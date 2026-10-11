@@ -174,7 +174,7 @@ fn extents(s: &f420_sketch::Sketch) -> ([f64; 2], [f64; 2]) {
 /// Draw a centred rectangle on the open sketch and dimension it W × H through
 /// the Dimension tool and inline editors.
 fn centred_rectangle(h: &mut Harness<'_, F420App>, w: &str, hgt: &str) {
-    click(h, "Center Rectangle");
+    click(h, "Center Rect");
     sk_click(h, [0.2, 0.1]); // snaps to the sketch origin
     sk_click(h, [33.0, 21.0]);
     let s = session_sketch(h);
@@ -305,15 +305,15 @@ fn scenario_a_dimension_driven_plate_with_attached_hole() {
     );
 
     // Undo / redo the thickness and width edits.
-    h.get_by_label_contains("Undo: Set").click();
+    h.get_by_label("Undo").click();
     settle(&mut h);
     assert_volume(&h, v100);
-    h.get_by_label_contains("Undo: Set").click();
+    h.get_by_label("Undo").click();
     settle(&mut h);
     assert_volume(&h, v80);
-    h.get_by_label_contains("Redo: Set").click();
+    h.get_by_label("Redo").click();
     settle(&mut h);
-    h.get_by_label_contains("Redo: Set").click();
+    h.get_by_label("Redo").click();
     settle(&mut h);
     assert_volume(&h, 100.0 * 50.0 * 12.0 - PI * 25.0 * 12.0);
 
@@ -545,7 +545,11 @@ fn scenario_c_drag_escape_undo_and_conflicts() {
     // Finish; a document undo removes the whole sketch in one step.
     click(&mut h, "Finish Sketch");
     assert_eq!(h.state().summary().features.len(), 1);
-    h.get_by_label_contains("Undo: Create sketch").click();
+    assert_eq!(
+        h.state().summary().can_undo.as_deref(),
+        Some("Create sketch")
+    );
+    h.get_by_label("Undo").click();
     settle(&mut h);
     assert!(h.state().summary().features.is_empty());
 
@@ -710,7 +714,7 @@ fn queued_edits_and_document_switch_while_busy() {
         h.get_by_label("Apply").click();
         let _ = h.try_run();
     }
-    h.get_by_label_contains("Undo:").click();
+    h.get_by_label("Undo").click();
     let _ = h.try_run();
     assert!(h.state().busy(), "edits are still regenerating");
     h.state_mut().guarded(Guarded::Open(other.clone()));

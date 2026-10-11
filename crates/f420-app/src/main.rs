@@ -30,6 +30,8 @@ struct Args {
     sync: bool,
     /// Save a screenshot to this directory each time F12 is pressed (live-window evidence).
     shot_dir: Option<PathBuf>,
+    /// Start maximized (window coordinates = monitor coordinates in a headless compositor).
+    maximized: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -40,6 +42,7 @@ fn parse_args() -> Result<Args, String> {
         demo_place: None,
         sync: false,
         shot_dir: None,
+        maximized: false,
     };
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -53,6 +56,7 @@ fn parse_args() -> Result<Args, String> {
             Some("--demo-place") => out.demo_place = Some(false),
             Some("--demo-place-preview") => out.demo_place = Some(true),
             Some("--sync") => out.sync = true,
+            Some("--maximized") => out.maximized = true,
             Some("--shot-dir") => {
                 let p = args
                     .next()
@@ -61,7 +65,7 @@ fn parse_args() -> Result<Args, String> {
             }
             Some("-h" | "--help") => {
                 return Err(
-                    "usage: f420-app [--demo | --demo-place | --demo-place-preview] [--sync] \
+                    "usage: f420-app [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
                      [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)]"
                         .to_string(),
                 );
@@ -86,6 +90,7 @@ struct Shell {
     shots_taken: u32,
     f12_pending: bool,
     title: String,
+    trace_input: bool,
     result: Arc<Mutex<Result<(), String>>>,
 }
 
@@ -178,9 +183,42 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Stri
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// `F420_TRACE_INPUT=1`: log pointer-button and key events as egui receives them
+/// from the windowing system (evidence that real input reaches the window).
+fn trace_input(ctx: &egui::Context) {
+    ctx.input(|i| {
+        for e in &i.events {
+            match e {
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers,
+                } => eprintln!(
+                    "input: pointer {button:?} {} at ({:.1}, {:.1}) mods {modifiers:?}",
+                    if *pressed { "down" } else { "up" },
+                    pos.x,
+                    pos.y
+                ),
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => eprintln!("input: key {key:?} mods {modifiers:?}"),
+                egui::Event::Text(t) => eprintln!("input: text {t:?}"),
+                _ => {}
+            }
+        }
+    });
+}
+
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.trace_input {
+            trace_input(&ctx);
+        }
         // Unsaved changes: intercept the window-manager close and ask first.
         if ctx.input(|i| i.viewport().close_requested()) && !self.app.allow_close() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -210,7 +248,8 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("Fission420")
             .with_app_id("fission420")
-            .with_inner_size([1400.0, 860.0]),
+            .with_inner_size([1400.0, 860.0])
+            .with_maximized(args.maximized),
         // The viewport renders to its own offscreen depth buffer.
         depth_buffer: 0,
         renderer: eframe::Renderer::Wgpu,
@@ -245,6 +284,7 @@ fn main() -> ExitCode {
                 shots_taken: 0,
                 f12_pending: false,
                 title: String::new(),
+                trace_input: std::env::var_os("F420_TRACE_INPUT").is_some_and(|v| v == "1"),
                 result: result_app,
             }))
         }),

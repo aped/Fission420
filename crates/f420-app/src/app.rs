@@ -237,14 +237,17 @@ pub struct F420App {
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
+    /// Constraint whose inline sketch-dimension editor was open last frame
+    /// (a newly opened editor selects its text so typing replaces it).
+    pub(crate) sketch_dim_opened: Option<usize>,
     pub(crate) show_help: bool,
     /// Commands in flight with their submit time (FIFO; latency measurement).
     in_flight: VecDeque<(String, Instant)>,
     /// Last command round trips (name, latency) for the status bar / report.
     pub(crate) latencies: VecDeque<(String, Duration)>,
-    /// Exponential moving average of frame time.
+    /// Exponential moving average of UI CPU time per frame (`ui()` duration;
+    /// egui repaints on demand, so wall-clock frame intervals are meaningless).
     pub(crate) frame_ema: Option<Duration>,
-    last_frame: Option<Instant>,
     /// Sketch to start once the requested new document exists.
     pending_new_sketch: bool,
 }
@@ -293,11 +296,11 @@ impl F420App {
             rename: None,
             doc_dim_edit: None,
             doc_dim_targets: vec![],
+            sketch_dim_opened: None,
             show_help: false,
             in_flight: VecDeque::new(),
             latencies: VecDeque::new(),
             frame_ema: None,
-            last_frame: None,
             pending_new_sketch: false,
         }
     }
@@ -1332,14 +1335,7 @@ impl F420App {
     /// Whole-application UI. Works with or without a GPU viewport.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        let now = Instant::now();
-        if let Some(t) = self.last_frame.replace(now) {
-            let dt = now - t;
-            self.frame_ema = Some(match self.frame_ema {
-                Some(e) => e.mul_f64(0.9) + dt.mul_f64(0.1),
-                None => dt,
-            });
-        }
+        let frame_start = Instant::now();
         while let Some(r) = self.engine.poll() {
             self.handle_reply(r);
         }
@@ -1402,6 +1398,11 @@ impl F420App {
         if busy {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+        let dt = frame_start.elapsed();
+        self.frame_ema = Some(match self.frame_ema {
+            Some(e) => e.mul_f64(0.9) + dt.mul_f64(0.1),
+            None => dt,
+        });
     }
 
     /// Keyboard shortcuts. Ignored while a text field has focus so typing

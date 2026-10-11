@@ -35,7 +35,7 @@ pub(crate) fn state_text(f: &FeatureSummary) -> Option<(String, Color32)> {
     Some(match st {
         SolveStatus::FullyConstrained => ("✔ Fully constrained".into(), OK_COLOR),
         SolveStatus::UnderConstrained => (
-            format!("◐ Under-constrained ({} DOF)", f.solve_dof.unwrap_or(0)),
+            format!("~ Under-constrained ({} DOF)", f.solve_dof.unwrap_or(0)),
             UNDER_COLOR,
         ),
         SolveStatus::OverConstrained => ("✖ Over-constrained (redundant)".into(), BAD_COLOR),
@@ -104,24 +104,27 @@ impl F420App {
                 }
             });
             ui.separator();
-            let undo = match &self.summary.can_undo {
-                Some(l) => format!("Undo: {l}"),
-                None => "Undo".into(),
+            // Fixed labels so the bar never shifts; the action is in the tooltip.
+            let undo_tip = match &self.summary.can_undo {
+                Some(l) => format!("Undo: {l} (Ctrl+Z)"),
+                None => "Nothing to undo".into(),
             };
             if ui
-                .add_enabled(self.summary.can_undo.is_some(), egui::Button::new(undo))
-                .on_hover_text("Ctrl+Z")
+                .add_enabled(self.summary.can_undo.is_some(), egui::Button::new("Undo"))
+                .on_hover_text(&undo_tip)
+                .on_disabled_hover_text(&undo_tip)
                 .clicked()
             {
                 self.request(Command::Undo);
             }
-            let redo = match &self.summary.can_redo {
-                Some(l) => format!("Redo: {l}"),
-                None => "Redo".into(),
+            let redo_tip = match &self.summary.can_redo {
+                Some(l) => format!("Redo: {l} (Ctrl+Shift+Z)"),
+                None => "Nothing to redo".into(),
             };
             if ui
-                .add_enabled(self.summary.can_redo.is_some(), egui::Button::new(redo))
-                .on_hover_text("Ctrl+Shift+Z")
+                .add_enabled(self.summary.can_redo.is_some(), egui::Button::new("Redo"))
+                .on_hover_text(&redo_tip)
+                .on_disabled_hover_text(&redo_tip)
                 .clicked()
             {
                 self.request(Command::Redo);
@@ -346,7 +349,6 @@ impl F420App {
         let mut cancel = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Sketch");
-            ui.label(RichText::new(&s.title).weak());
             ui.separator();
             ui.add_enabled_ui(!committing, |ui| {
                 let ed = &mut s.editor;
@@ -904,7 +906,7 @@ impl F420App {
                     .as_ref()
                     .map_or("unsaved".into(), |p| p.display().to_string());
                 let dirty = if self.summary.dirty {
-                    RichText::new("● modified").color(Color32::from_rgb(255, 200, 90))
+                    RichText::new("* modified").color(Color32::from_rgb(255, 200, 90))
                 } else {
                     RichText::new("saved").weak()
                 };
@@ -923,7 +925,7 @@ impl F420App {
             }
             if let Some(ft) = self.frame_ema {
                 ui.label(
-                    RichText::new(format!("frame {:.1} ms", ft.as_secs_f64() * 1e3))
+                    RichText::new(format!("UI {:.1} ms/frame", ft.as_secs_f64() * 1e3))
                         .weak()
                         .small(),
                 );
