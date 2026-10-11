@@ -58,9 +58,11 @@ fn curve_range(c: &Curve) -> (f64, f64) {
     c.range_tuple()
 }
 
-/// Bounds from vertices plus dense samples of every edge curve. Exact when extrema
-/// lie on vertices or straight edges (true for plates with interior holes); otherwise
-/// within the chord sampling error of curved edges.
+/// Bounds from vertices plus dense samples of every edge curve, with each axis
+/// extremum refined by a golden-section search between its neighbouring samples.
+/// Exact when extrema lie on vertices or straight edges; for explicit curved edges
+/// (NURBS arcs) exact to the search precision (unimodal near the extremum, true for
+/// circular arcs); boolean intersection curves keep the sampling error.
 pub(crate) fn raw_bounds(solid: &Solid) -> Result<Bounds> {
     let mut b = Bounds {
         min: [f64::INFINITY; 3],
@@ -81,12 +83,40 @@ pub(crate) fn raw_bounds(solid: &Solid) -> Result<Bounds> {
             continue;
         }
         let (t0, t1) = curve_range(&c);
-        for i in 0..=BOUNDS_SAMPLES {
-            let t = t0 + (t1 - t0) * i as f64 / BOUNDS_SAMPLES as f64;
-            let p = eval_curve(&c, t).ok_or_else(|| {
-                KernelError::Internal("intersection curve evaluation failed".into())
-            })?;
+        let fail = || KernelError::Internal("intersection curve evaluation failed".into());
+        let ts: Vec<f64> = (0..=BOUNDS_SAMPLES)
+            .map(|i| t0 + (t1 - t0) * i as f64 / BOUNDS_SAMPLES as f64)
+            .collect();
+        let mut pts = Vec::with_capacity(ts.len());
+        for &t in &ts {
+            let p = eval_curve(&c, t).ok_or_else(fail)?;
             add(p);
+            pts.push(p);
+        }
+        // Refine each axis extremum between the neighbouring samples (golden-section
+        // search), so extrema between samples (e.g. an arc's quadrant point) are exact
+        // to the curve evaluation rather than to the sampling density. Skipped for
+        // boolean intersection curves: each evaluation is a costly projection, and
+        // under the product limits (cuts strictly inside the profile) they never
+        // carry a bounding extremum.
+        if matches!(c, Curve::IntersectionCurve(_)) {
+            continue;
+        }
+        for axis in 0..3 {
+            for sign in [1.0, -1.0] {
+                let best = (0..pts.len())
+                    .max_by(|&i, &j| (sign * pts[i][axis]).total_cmp(&(sign * pts[j][axis])))
+                    .unwrap_or(0);
+                let (mut a, mut b) = (ts[best.saturating_sub(1)], ts[(best + 1).min(ts.len() - 1)]);
+                let f = |t: f64| eval_curve(&c, t).map(|p| (sign * p[axis], p));
+                const G: f64 = 0.618_033_988_749_894_8;
+                for _ in 0..60 {
+                    let (x1, x2) = (b - G * (b - a), a + G * (b - a));
+                    let (f1, f2) = (f(x1).ok_or_else(fail)?, f(x2).ok_or_else(fail)?);
+                    if f1.0 >= f2.0 { b = x2 } else { a = x1 }
+                }
+                add(f(0.5 * (a + b)).ok_or_else(fail)?.1);
+            }
         }
     }
     if b.min.iter().chain(&b.max).any(|v| !v.is_finite()) {

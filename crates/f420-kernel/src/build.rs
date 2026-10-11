@@ -1,5 +1,7 @@
 //! Solid construction: extrusion and through-all cut.
-use crate::{Body, Frame, KernelError, Profile, Result, guarded, measure, tol};
+use crate::{
+    Body, Frame, KernelError, LoopSegment, Profile, Result, arc_signed_sweep, guarded, measure, tol,
+};
 use truck_modeling::*;
 
 fn p3(a: [f64; 3]) -> Point3 {
@@ -33,6 +35,7 @@ fn profile_face_seam(profile: &Profile, frame: &Frame, seam: f64) -> Result<Face
                 .map(|i| builder::line(&verts[i], &verts[(i + 1) % n]))
                 .collect()
         }
+        Profile::Loop(segs) => loop_wire(segs, frame)?,
         Profile::Circle { center, radius } => {
             let c = frame.to_world(*center);
             let start = frame.to_world([
@@ -50,6 +53,84 @@ fn profile_face_seam(profile: &Profile, frame: &Frame, seam: f64) -> Result<Face
     let n = face_normal(&face);
     let z = v3(frame.z);
     Ok(if n.dot(z) < 0.0 { face.inverse() } else { face })
+}
+
+/// Closed wire of a line/arc loop with shared vertices. Each arc becomes
+/// `k = ceil(|sweep| / (pi/2))` edges (see [`arc_spans`]).
+fn loop_wire(segs: &[LoopSegment], frame: &Frame) -> Result<Wire> {
+    let verts: Vec<Vertex> = segs
+        .iter()
+        .map(|s| builder::vertex(p3(frame.to_world(s.start()))))
+        .collect();
+    let n = verts.len();
+    let mut wire = Wire::new();
+    for (i, seg) in segs.iter().enumerate() {
+        let (v0, v1) = (&verts[i], &verts[(i + 1) % n]);
+        match seg {
+            LoopSegment::Line { .. } => wire.push_back(builder::line(v0, v1)),
+            LoopSegment::Arc { start, center, ccw } => {
+                let end = segs[(i + 1) % n].start();
+                let spans = arc_spans(*start, end, *center, *ccw, frame)?;
+                let k = spans.len();
+                let mut prev = v0.clone();
+                for (j, (curve, joint)) in spans.into_iter().enumerate() {
+                    let next = if j + 1 == k {
+                        v1.clone()
+                    } else {
+                        builder::vertex(p3(joint))
+                    };
+                    wire.push_back(Edge::new(&prev, &next, Curve::NurbsCurve(curve)));
+                    prev = next;
+                }
+            }
+        }
+    }
+    Ok(wire)
+}
+
+/// Exact circular arc as `k = ceil(|sweep| / (pi/2))` rational quadratic Bezier
+/// spans (one per edge) with weights (1, cos(phi/2), 1), phi = sweep / k. A single
+/// span is never used for sweeps >= pi (its middle weight would be <= 0), and spans
+/// are separate edges rather than one C0 multi-span curve: OpenCascade's volume
+/// integration of a C0 (double-knot) extruded B-spline was observed to be off by
+/// 0.2 % (FreeCAD 1.1, half disc), while single-span patches are exact. Returns each
+/// span with its end point (world). The first and last control points are exactly
+/// the loop vertices. Control points are mapped through the (affine) frame, which is
+/// exact for NURBS.
+pub(crate) fn arc_spans(
+    start: [f64; 2],
+    end: [f64; 2],
+    center: [f64; 2],
+    ccw: bool,
+    frame: &Frame,
+) -> Result<Vec<(NurbsCurve<Vector4>, [f64; 3])>> {
+    let r = (start[0] - center[0]).hypot(start[1] - center[1]);
+    let sweep = arc_signed_sweep(start, end, center, ccw);
+    let a0 = (start[1] - center[1]).atan2(start[0] - center[0]);
+    let k = ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).max(1);
+    let phi = sweep / k as f64;
+    let w = (phi / 2.0).cos();
+    let on = |t: f64, rr: f64| [center[0] + rr * t.cos(), center[1] + rr * t.sin()];
+    let hom = |p: [f64; 2], w: f64| {
+        let q = frame.to_world(p);
+        Vector4::new(q[0] * w, q[1] * w, q[2] * w, w)
+    };
+    let mut out = Vec::with_capacity(k);
+    let mut p0 = start;
+    for j in 0..k {
+        let t0 = a0 + phi * j as f64;
+        let p2 = if j + 1 == k { end } else { on(t0 + phi, r) };
+        let ctrl = vec![
+            hom(p0, 1.0),
+            hom(on(t0 + phi / 2.0, r / w), w),
+            hom(p2, 1.0),
+        ];
+        let bs = BSplineCurve::try_new(KnotVec::bezier_knot(2), ctrl)
+            .map_err(|e| KernelError::Internal(format!("arc curve construction failed: {e:?}")))?;
+        out.push((NurbsCurve::new(bs), frame.to_world(p2)));
+        p0 = p2;
+    }
+    Ok(out)
 }
 
 fn face_normal(face: &Face) -> Vector3 {
@@ -111,7 +192,7 @@ pub fn cut_through_all(target: &Body, profile: &Profile, frame: &Frame) -> Resul
     let length = hi - lo + 2.0 * margin;
     let seams: &[f64] = match profile {
         Profile::Circle { .. } => &SEAM_ANGLES,
-        Profile::Polygon(_) => &SEAM_ANGLES[..1],
+        Profile::Polygon(_) | Profile::Loop(_) => &SEAM_ANGLES[..1],
     };
     let mut failures = Vec::new();
     let attempts = seams
@@ -168,7 +249,7 @@ pub fn cut_blind(target: &Body, profile: &Profile, frame: &Frame, depth: f64) ->
     let length = depth + margin;
     let seams: &[f64] = match profile {
         Profile::Circle { .. } => &SEAM_ANGLES,
-        Profile::Polygon(_) => &SEAM_ANGLES[..1],
+        Profile::Polygon(_) | Profile::Loop(_) => &SEAM_ANGLES[..1],
     };
     let mut failures = Vec::new();
     let attempts = seams
@@ -217,6 +298,33 @@ fn check_single_closed(body: &Body, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// Smallest x over a line/arc loop: segment endpoints, plus `cx - r` for an arc
+/// whose angular span contains the direction pi (-x).
+fn loop_min_x(segs: &[LoopSegment]) -> f64 {
+    let n = segs.len();
+    let mut m = f64::INFINITY;
+    for (i, s) in segs.iter().enumerate() {
+        let p = s.start();
+        m = m.min(p[0]);
+        if let LoopSegment::Arc { center, ccw, .. } = s {
+            let q = segs[(i + 1) % n].start();
+            let r = (p[0] - center[0]).hypot(p[1] - center[1]);
+            // Express as a CCW span [a0, a0 + sweep] and test whether it covers pi.
+            let (from, sweep) = if *ccw {
+                (p, arc_signed_sweep(p, q, *center, true))
+            } else {
+                (q, -arc_signed_sweep(p, q, *center, false))
+            };
+            let a0 = (from[1] - center[1]).atan2(from[0] - center[0]);
+            let d = (std::f64::consts::PI - a0).rem_euclid(2.0 * std::f64::consts::PI);
+            if d <= sweep {
+                m = m.min(center[0] - r);
+            }
+        }
+    }
+    m
+}
+
 /// Revolve a closed profile about the frame's local Y axis (through the frame origin) by
 /// `angle` radians, 0 < angle <= 2*pi. The profile must lie strictly on the +X side
 /// of the axis (no self-intersection, no degenerate apex).
@@ -232,6 +340,7 @@ pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
     let min_x = match profile {
         Profile::Polygon(pts) => pts.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min),
         Profile::Circle { center, radius } => center[0] - radius,
+        Profile::Loop(segs) => loop_min_x(segs),
     };
     if min_x < tol::MIN_LENGTH {
         return Err(KernelError::InvalidInput(format!(

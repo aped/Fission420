@@ -43,6 +43,13 @@ pub mod tol {
     pub const MIN_MESH_CHORD_REL: f64 = 1.0e-5;
     /// Default chordal tolerance for display/STL tessellation.
     pub const MESH_CHORD: f64 = 0.01;
+    /// Largest accepted difference (mm) between an arc's start radius and its end
+    /// radius in a [`crate::Profile::Loop`]. The arc curve is built from the start
+    /// radius with its last control point placed exactly on the end vertex, so a
+    /// mismatch distorts only the last span by at most this much; keeping it at
+    /// Truck's own linear tolerance keeps the edge consistent with its vertices.
+    /// Upstream sketches are solved to `max(1e-9, 1e-12 * scale)` mm, far below.
+    pub const ARC_RADIUS_MATCH: f64 = KERNEL_LINEAR;
 }
 
 /// Errors from geometric operations. Always recoverable; never panics to the caller.
@@ -128,6 +135,63 @@ impl Frame {
     }
 }
 
+/// One segment of a [`Profile::Loop`]. Each segment ends where the next one
+/// starts (the last wraps to the first).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LoopSegment {
+    Line {
+        start: [f64; 2],
+    },
+    /// Circular arc about `center` with radius `|start - center|`, traversed
+    /// counter-clockwise when `ccw` (clockwise otherwise). Sweep in (0, 2*pi).
+    Arc {
+        start: [f64; 2],
+        center: [f64; 2],
+        ccw: bool,
+    },
+}
+
+impl LoopSegment {
+    pub fn start(&self) -> [f64; 2] {
+        match self {
+            LoopSegment::Line { start } | LoopSegment::Arc { start, .. } => *start,
+        }
+    }
+}
+
+/// Signed sweep (rad) of an arc from `start` to `end` about `center`: in (0, 2*pi]
+/// when `ccw`, in [-2*pi, 0) otherwise (a zero angular difference counts as a full
+/// turn; callers reject coincident endpoints first).
+pub(crate) fn arc_signed_sweep(start: [f64; 2], end: [f64; 2], center: [f64; 2], ccw: bool) -> f64 {
+    let a0 = (start[1] - center[1]).atan2(start[0] - center[0]);
+    let a1 = (end[1] - center[1]).atan2(end[0] - center[0]);
+    let tau = 2.0 * std::f64::consts::PI;
+    let d = if ccw { a1 - a0 } else { a0 - a1 };
+    let mut s = d.rem_euclid(tau);
+    if s <= 0.0 {
+        s = tau;
+    }
+    if ccw { s } else { -s }
+}
+
+/// Exact signed area of a loop: shoelace over the chords plus, for each arc, the
+/// signed circular-segment area (r^2 / 2)(theta - sin theta).
+pub(crate) fn loop_signed_area(segs: &[LoopSegment]) -> f64 {
+    let n = segs.len();
+    let mut a = 0.0;
+    for i in 0..n {
+        let p = segs[i].start();
+        let q = segs[(i + 1) % n].start();
+        a += 0.5 * (p[0] * q[1] - q[0] * p[1]);
+        if let LoopSegment::Arc { center, ccw, .. } = &segs[i] {
+            let r = (p[0] - center[0]).hypot(p[1] - center[1]);
+            let t = arc_signed_sweep(p, q, *center, *ccw);
+            a += 0.5 * r * r * (t - t.sin());
+        }
+    }
+    a
+}
+
 /// Closed planar profile in frame-local 2D coordinates (mm).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Profile {
@@ -137,6 +201,10 @@ pub enum Profile {
         center: [f64; 2],
         radius: f64,
     },
+    /// Closed loop of lines and circular arcs, counter-clockwise overall.
+    /// Simplicity (no self-intersection) is the caller's responsibility
+    /// (`f420_sketch` profile extraction checks it).
+    Loop(Vec<LoopSegment>),
 }
 
 impl Profile {
@@ -167,6 +235,53 @@ impl Profile {
                 if area2 <= 0.0 {
                     return Err(KernelError::InvalidInput(
                         "polygon must be counter-clockwise with positive area".into(),
+                    ));
+                }
+                Ok(())
+            }
+            Profile::Loop(segs) => {
+                if segs.len() < 2 {
+                    return Err(KernelError::InvalidInput("loop needs >= 2 segments".into()));
+                }
+                let n = segs.len();
+                for (i, seg) in segs.iter().enumerate() {
+                    let p = seg.start();
+                    let q = segs[(i + 1) % n].start();
+                    let center = match seg {
+                        LoopSegment::Arc { center, .. } => Some(*center),
+                        LoopSegment::Line { .. } => None,
+                    };
+                    if p.iter()
+                        .chain(center.iter().flatten())
+                        .any(|v| !v.is_finite())
+                    {
+                        return Err(KernelError::InvalidInput(
+                            "loop has a non-finite coordinate".into(),
+                        ));
+                    }
+                    if (p[0] - q[0]).hypot(p[1] - q[1]) < tol::MIN_LENGTH {
+                        return Err(KernelError::InvalidInput(format!(
+                            "loop segment {i} has a degenerate chord"
+                        )));
+                    }
+                    if let Some(c) = center {
+                        let r0 = (p[0] - c[0]).hypot(p[1] - c[1]);
+                        let r1 = (q[0] - c[0]).hypot(q[1] - c[1]);
+                        if r0 < tol::MIN_LENGTH {
+                            return Err(KernelError::InvalidInput(format!(
+                                "loop arc {i} radius too small"
+                            )));
+                        }
+                        if (r0 - r1).abs() > tol::ARC_RADIUS_MATCH {
+                            return Err(KernelError::InvalidInput(format!(
+                                "loop arc {i} end is not on its circle (radius {r0} vs {r1} mm)"
+                            )));
+                        }
+                    }
+                }
+                if loop_signed_area(segs) <= 0.0 {
+                    return Err(KernelError::InvalidInput(
+                        "loop must be counter-clockwise with positive area".into(),
                     ));
                 }
                 Ok(())
