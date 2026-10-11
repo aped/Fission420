@@ -194,12 +194,14 @@ pub enum Command {
     },
     /// Import every build item of a 3MF package as a mesh body (units from the
     /// file; source embedded). Display/export only, like STL.
+    #[serde(rename = "import_3mf")]
     Import3mf {
         path: PathBuf,
     },
     /// Write `bodies` (default: all visible) as one 3MF object each: B-rep
     /// bodies tessellated at `chord` (watertightness checked), mesh bodies as
     /// imported; `unit` (default millimeter) is the file's declared unit.
+    #[serde(rename = "export_3mf")]
     Export3mf {
         path: PathBuf,
         #[serde(default)]

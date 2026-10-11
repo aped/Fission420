@@ -322,3 +322,40 @@ fn threemf_import_and_multi_body_export_round_trip() {
     assert!((vols[2] - 4000.0).abs() < 1e-6, "{vols:?}");
     assert_eq!(back[2].name, s.summary().bodies[2].name);
 }
+
+#[test]
+fn every_command_serializes_under_its_documented_name() {
+    let p = PathBuf::from("x");
+    for c in [
+        Command::Import3mf { path: p.clone() },
+        Command::Export3mf {
+            path: p.clone(),
+            chord: None,
+            bodies: None,
+            unit: None,
+        },
+        Command::ImportSvg {
+            path: p.clone(),
+            plane: SketchPlane::WorldXY,
+            name: None,
+            units_to_mm: None,
+            allow_partial: false,
+        },
+        Command::ExportSvg {
+            path: p.clone(),
+            sketch: f420_document::FeatureId(1),
+        },
+        Command::CircularPattern {
+            name: None,
+            feature: f420_document::FeatureId(1),
+            count: 2,
+            angle_deg: 10.0,
+            center: [0.0, 0.0],
+        },
+    ] {
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["cmd"], c.name(), "{v}");
+        let back: Command = serde_json::from_value(v).unwrap();
+        assert_eq!(back, c);
+    }
+}

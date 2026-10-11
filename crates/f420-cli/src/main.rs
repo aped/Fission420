@@ -111,7 +111,9 @@ fn run_script(path: PathBuf) -> ExitCode {
     let mut session = Session::new();
     let mut unexpected = 0;
     for (i, s) in steps.iter().enumerate() {
+        let t0 = std::time::Instant::now();
         let mut r = session.execute(&s.cmd);
+        r.elapsed_ms = Some(t0.elapsed().as_secs_f64() * 1e3);
         r.summary = None; // keep lines short; use {"cmd":"inspect"} to get the summary
         if matches!(s.cmd, Command::Inspect) {
             r.summary = Some(session.summary());
