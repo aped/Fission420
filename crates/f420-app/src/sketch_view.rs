@@ -353,11 +353,22 @@ pub fn paint_sketch(
                     (mid[0] - m[0]).signum() as f32,
                     -(mid[1] - m[1]).signum() as f32,
                 );
-                let off = if matches!(c, Constraint::Horizontal { .. }) {
+                let mut off = if matches!(c, Constraint::Horizontal { .. }) {
                     egui::vec2(0.0, 13.0 * inward.y)
                 } else {
                     egui::vec2(13.0 * inward.x, 0.0)
                 };
+                // Slide along the line if a point marker sits under the glyph.
+                let crowded = |at: Pos2| {
+                    s.points
+                        .iter()
+                        .filter_map(|q| pr.screen([q.x, q.y]))
+                        .any(|q| q.distance(at) < 14.0)
+                };
+                if crowded(sm + off) {
+                    let along = (pr.screen(pb).unwrap_or(sm) - sm).normalized();
+                    off += along * 24.0;
+                }
                 let t = if matches!(c, Constraint::Horizontal { .. }) {
                     "H"
                 } else {
