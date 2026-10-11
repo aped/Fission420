@@ -16,16 +16,18 @@
 //!
 //! Geometric/profile tolerances reuse the solve tolerance (a length in mm).
 
+mod arc;
 mod edit;
 mod profile;
 mod solver;
 
+pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
 pub use edit::{DragOutcome, DragResult, fmt_mm};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-pub use profile::Profile;
+pub use profile::{LoopSegment, Profile};
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -70,12 +72,33 @@ pub enum Entity {
         center: PointId,
         radius: f64,
     },
+    /// Circular arc traversed counter-clockwise from `start` to `end` about
+    /// `center` (sweep in (0, 2π)). All three are ordinary solver points; the
+    /// entity implies the equation `|start − center| = |end − center|`, which
+    /// is always part of the system and never reported as a user constraint.
+    Arc {
+        id: EntityId,
+        center: PointId,
+        start: PointId,
+        end: PointId,
+    },
 }
 
 impl Entity {
     pub fn id(&self) -> EntityId {
         match self {
-            Entity::Line { id, .. } | Entity::Circle { id, .. } => *id,
+            Entity::Line { id, .. } | Entity::Circle { id, .. } | Entity::Arc { id, .. } => *id,
+        }
+    }
+
+    /// Every point the entity uses (endpoints, centre).
+    pub fn points(&self) -> Vec<PointId> {
+        match self {
+            Entity::Line { a, b, .. } => vec![*a, *b],
+            Entity::Circle { center, .. } => vec![*center],
+            Entity::Arc {
+                center, start, end, ..
+            } => vec![*center, *start, *end],
         }
     }
 }
@@ -124,6 +147,14 @@ pub enum Constraint {
     },
     /// `2 * radius = dim.value`; 1 equation.
     Diameter { circle: EntityId, dim: Dimension },
+    /// Arc: `|start − center| = dim.value`; circle: `radius = dim.value`; 1 equation.
+    Radius { entity: EntityId, dim: Dimension },
+    /// The line is tangent to the arc at the endpoint they share (same
+    /// `PointId`): the radius vector at that point is perpendicular to the
+    /// line. 1 equation, `(P − C)·(Q − P)/|Q − P| = 0` (P shared point, C arc
+    /// centre, Q the line's other end). The line and the arc must share exactly
+    /// one endpoint.
+    Tangent { line: EntityId, arc: EntityId },
     /// `a == b`; 2 equations.
     Coincident { a: PointId, b: PointId },
     /// Euclidean `|b - a| = dim.value` (aligned length); 1 nonlinear equation.
@@ -140,7 +171,8 @@ impl Constraint {
             Constraint::HorizontalDistance { dim, .. }
             | Constraint::VerticalDistance { dim, .. }
             | Constraint::Distance { dim, .. }
-            | Constraint::Diameter { dim, .. } => Some(dim),
+            | Constraint::Diameter { dim, .. }
+            | Constraint::Radius { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -150,7 +182,8 @@ impl Constraint {
             Constraint::HorizontalDistance { dim, .. }
             | Constraint::VerticalDistance { dim, .. }
             | Constraint::Distance { dim, .. }
-            | Constraint::Diameter { dim, .. } => Some(dim),
+            | Constraint::Diameter { dim, .. }
+            | Constraint::Radius { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -231,6 +264,10 @@ pub enum SketchError {
     UnsupportedProfile(String),
     #[error("degenerate profile: {0}")]
     DegenerateProfile(String),
+    /// A three-point arc that cannot be built (collinear/coincident points or a
+    /// radius beyond [`MAX_ARC_RADIUS_RATIO`] × chord).
+    #[error("degenerate arc: {0}")]
+    DegenerateArc(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -253,6 +290,30 @@ fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
         });
     }
     Ok(())
+}
+
+/// For a `Tangent` constraint: `(shared point, arc centre, line's other end)`.
+/// The line and the arc must share exactly one endpoint `PointId`.
+pub(crate) fn tangent_shared_point(
+    line: &Entity,
+    arc: &Entity,
+) -> Result<(PointId, PointId, PointId), &'static str> {
+    let (
+        Entity::Line { a, b, .. },
+        Entity::Arc {
+            center, start, end, ..
+        },
+    ) = (line, arc)
+    else {
+        return Err("tangent needs a line and an arc");
+    };
+    let shared = |p: &PointId| p == start || p == end;
+    match (shared(a), shared(b)) {
+        (true, false) => Ok((*a, *center, *b)),
+        (false, true) => Ok((*b, *center, *a)),
+        (true, true) => Err("tangent line and arc share both endpoints"),
+        (false, false) => Err("tangent line and arc must share an endpoint"),
+    }
 }
 
 impl Sketch {
@@ -401,12 +462,9 @@ impl Sketch {
                 Err(SketchError::MissingPoint(*id))
             }
         };
-        let mut kinds: HashMap<EntityId, bool> = HashMap::new(); // true = line
+        let mut kinds: HashMap<EntityId, &Entity> = HashMap::new();
         for e in &self.entities {
-            if kinds
-                .insert(e.id(), matches!(e, Entity::Line { .. }))
-                .is_some()
-            {
+            if kinds.insert(e.id(), e).is_some() {
                 return Err(SketchError::DuplicateEntity(e.id()));
             }
             match e {
@@ -427,16 +485,40 @@ impl Sketch {
                         )));
                     }
                 }
+                Entity::Arc {
+                    id,
+                    center,
+                    start,
+                    end,
+                } => {
+                    need_point(center)?;
+                    need_point(start)?;
+                    need_point(end)?;
+                    if start == end || start == center || end == center {
+                        return Err(SketchError::InvalidValue(format!(
+                            "arc {id:?} must use three distinct points (centre, start, end)"
+                        )));
+                    }
+                }
             }
         }
-        let need_entity = |index: usize, id: &EntityId, line: bool| match kinds.get(id) {
-            None => Err(SketchError::MissingEntity(*id)),
-            Some(&k) if k != line => Err(SketchError::WrongEntityKind {
-                index,
-                entity: *id,
-                expected: if line { "line" } else { "circle" },
-            }),
-            Some(_) => Ok(()),
+        let need_entity = |index: usize, id: &EntityId, expected: &'static str| {
+            let e = kinds.get(id).ok_or(SketchError::MissingEntity(*id))?;
+            let ok = match expected {
+                "line" => matches!(e, Entity::Line { .. }),
+                "circle" => matches!(e, Entity::Circle { .. }),
+                "arc" => matches!(e, Entity::Arc { .. }),
+                _ => matches!(e, Entity::Circle { .. } | Entity::Arc { .. }),
+            };
+            if ok {
+                Ok(*e)
+            } else {
+                Err(SketchError::WrongEntityKind {
+                    index,
+                    entity: *id,
+                    expected,
+                })
+            }
         };
         let mut names = HashSet::new();
         for (i, c) in self.constraints.iter().enumerate() {
@@ -450,7 +532,7 @@ impl Sketch {
                     }
                 }
                 Constraint::Horizontal { line } | Constraint::Vertical { line } => {
-                    need_entity(i, line, true)?
+                    need_entity(i, line, "line")?;
                 }
                 Constraint::HorizontalDistance { a, b, .. }
                 | Constraint::VerticalDistance { a, b, .. }
@@ -464,7 +546,19 @@ impl Sketch {
                     need_point(b)?;
                     need_point(center)?;
                 }
-                Constraint::Diameter { circle, .. } => need_entity(i, circle, false)?,
+                Constraint::Diameter { circle, .. } => {
+                    need_entity(i, circle, "circle")?;
+                }
+                Constraint::Radius { entity, .. } => {
+                    need_entity(i, entity, "arc or circle")?;
+                }
+                Constraint::Tangent { line, arc } => {
+                    let l = need_entity(i, line, "line")?;
+                    let a = need_entity(i, arc, "arc")?;
+                    tangent_shared_point(l, a).map_err(|why| {
+                        SketchError::InvalidValue(format!("constraint {i}: {why}"))
+                    })?;
+                }
             }
             if let Some(d) = c.dimension() {
                 check_dim_value(&d.name, d.value)?;
@@ -542,3 +636,6 @@ mod tests;
 
 #[cfg(test)]
 mod tests_edit;
+
+#[cfg(test)]
+mod tests_arc;

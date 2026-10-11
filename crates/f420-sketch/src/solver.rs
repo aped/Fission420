@@ -31,6 +31,29 @@ enum Eq {
     Scaled { c: usize, k: f64, v: f64 },
     /// `|(x[b], x[b+1]) - (x[a], x[a+1])| - v` (a, b are x columns of points)
     Dist { a: usize, b: usize, v: f64 },
+    /// `|a - c| - |b - d|` (x columns of points): equal distances. Used for the
+    /// equation an `Arc` implies (`c = d = centre`).
+    SameDist {
+        c: usize,
+        a: usize,
+        d: usize,
+        b: usize,
+    },
+    /// `(p - c)·(q - p) / |q - p|`: component of the radius vector `p - c` along
+    /// the line `p -> q` (mm); zero when the line is tangent at `p`.
+    Tangent { p: usize, c: usize, q: usize },
+}
+
+/// Unit vector from `a` to `b` (x columns) and the distance; a fixed unit
+/// direction below [`DIST_GRAD_FLOOR`].
+fn unit(x: &[f64], a: usize, b: usize) -> (f64, f64, f64) {
+    let (dx, dy) = (x[b] - x[a], x[b + 1] - x[a + 1]);
+    let l = dx.hypot(dy);
+    if l > DIST_GRAD_FLOOR {
+        (dx / l, dy / l, l)
+    } else {
+        (1.0, 0.0, l)
+    }
 }
 
 /// Below this length (mm) the distance gradient is undefined; the Jacobian row
@@ -45,6 +68,13 @@ impl Eq {
             Eq::Mid { a, b, m } => 0.5 * (x[a] + x[b]) - x[m],
             Eq::Scaled { c, k, v } => k * x[c] - v,
             Eq::Dist { a, b, v } => (x[b] - x[a]).hypot(x[b + 1] - x[a + 1]) - v,
+            Eq::SameDist { c, a, d, b } => {
+                (x[a] - x[c]).hypot(x[a + 1] - x[c + 1]) - (x[b] - x[d]).hypot(x[b + 1] - x[d + 1])
+            }
+            Eq::Tangent { p, c, q } => {
+                let (ux, uy, _) = unit(x, p, q);
+                (x[p] - x[c]) * ux + (x[p + 1] - x[c + 1]) * uy
+            }
         }
     }
 
@@ -63,17 +93,42 @@ impl Eq {
             }
             Eq::Scaled { c, k, .. } => j[(row, c)] += k,
             Eq::Dist { a, b, .. } => {
-                let (dx, dy) = (x[b] - x[a], x[b + 1] - x[a + 1]);
-                let l = dx.hypot(dy);
-                let (ux, uy) = if l > DIST_GRAD_FLOOR {
-                    (dx / l, dy / l)
-                } else {
-                    (1.0, 0.0)
-                };
+                let (ux, uy, _) = unit(x, a, b);
                 j[(row, b)] += ux;
                 j[(row, b + 1)] += uy;
                 j[(row, a)] -= ux;
                 j[(row, a + 1)] -= uy;
+            }
+            Eq::SameDist { c, a, d, b } => {
+                let (ux, uy, _) = unit(x, c, a);
+                j[(row, a)] += ux;
+                j[(row, a + 1)] += uy;
+                j[(row, c)] -= ux;
+                j[(row, c + 1)] -= uy;
+                let (vx, vy, _) = unit(x, d, b);
+                j[(row, b)] -= vx;
+                j[(row, b + 1)] -= vy;
+                j[(row, d)] += vx;
+                j[(row, d + 1)] += vy;
+            }
+            Eq::Tangent { p, c, q } => {
+                // f = v·u with v = p - c, u = (q - p)/L. df/dv = u;
+                // df/d(q - p) = (v - (v·u) u) / L (zero below the length floor,
+                // where u is a fixed direction).
+                let (ux, uy, l) = unit(x, p, q);
+                let (vx, vy) = (x[p] - x[c], x[p + 1] - x[c + 1]);
+                let vu = vx * ux + vy * uy;
+                let (wx, wy) = if l > DIST_GRAD_FLOOR {
+                    ((vx - vu * ux) / l, (vy - vu * uy) / l)
+                } else {
+                    (0.0, 0.0)
+                };
+                j[(row, p)] += ux - wx;
+                j[(row, p + 1)] += uy - wy;
+                j[(row, c)] -= ux;
+                j[(row, c + 1)] -= uy;
+                j[(row, q)] += wx;
+                j[(row, q + 1)] += wy;
             }
         }
     }
@@ -123,6 +178,7 @@ impl System {
         let mut radius_col = Vec::new();
         let mut lines = HashMap::new();
         let mut circles = HashMap::new();
+        let mut arcs = HashMap::new();
         for (ei, e) in s.entities.iter().enumerate() {
             match e {
                 Entity::Line { id, a, b } => {
@@ -133,8 +189,17 @@ impl System {
                     radius_col.push((ei, initial.len()));
                     initial.push(*radius);
                 }
+                Entity::Arc {
+                    id,
+                    center,
+                    start,
+                    end,
+                } => {
+                    arcs.insert(*id, (point_col[center], point_col[start], point_col[end]));
+                }
             }
         }
+        let entity = |id: &crate::EntityId| s.entities.iter().find(|e| e.id() == *id);
         let mut eqs = Vec::new();
         let mut owner = Vec::new();
         for (ci, c) in s.constraints.iter().enumerate() {
@@ -198,9 +263,41 @@ impl System {
                         v: 0.0,
                     });
                 }
+                Constraint::Radius { entity, dim } => {
+                    if let Some(&(c, a, _)) = arcs.get(entity) {
+                        push(Eq::Dist {
+                            a: c,
+                            b: a,
+                            v: dim.value,
+                        });
+                    } else if let Some(&c) = circles.get(entity) {
+                        push(Eq::Fix { c, v: dim.value });
+                    }
+                }
+                Constraint::Tangent { line, arc } => {
+                    if let (Some(l), Some(a)) = (entity(line), entity(arc))
+                        && let Ok((p, c, q)) = crate::tangent_shared_point(l, a)
+                    {
+                        push(Eq::Tangent {
+                            p: point_col[&p],
+                            c: point_col[&c],
+                            q: point_col[&q],
+                        });
+                    }
+                }
             }
         }
+        // Pseudo-owner for equations that are not user constraints (arc-implied
+        // equal radius, drag pins): never removed or reported by diagnosis.
         let pin_owner = s.constraints.len();
+        for e in &s.entities {
+            if let Entity::Arc { id, .. } = e
+                && let Some(&(c, a, b)) = arcs.get(id)
+            {
+                eqs.push(Eq::SameDist { c, a, d: c, b });
+                owner.push(pin_owner);
+            }
+        }
         for pin in pins {
             let e = match *pin {
                 Pin::Coord { p, axis, value } => point_col.get(&p).map(|&c| Eq::Fix {
@@ -546,6 +643,80 @@ mod tests {
         let bcol = sys.point_col[&PointId(2)];
         assert!((j[(last, bcol)] - dx / l).abs() < 1e-12);
         assert!((j[(last, bcol + 1)] - dy / l).abs() < 1e-12);
+    }
+
+    /// Arc rows (implied equal radius, Radius, Tangent) against central finite
+    /// differences at a generic (unsolved) configuration.
+    #[test]
+    fn arc_rows_jacobian_matches_finite_differences() {
+        let pt = |id: u32, x: f64, y: f64| SketchPoint {
+            id: PointId(id),
+            x,
+            y,
+        };
+        let s = Sketch {
+            origin: None,
+            points: vec![
+                pt(0, 0.4, -0.3),
+                pt(1, 9.1, 1.2),
+                pt(2, -1.5, 8.7),
+                pt(3, 13.0, -6.0),
+            ],
+            entities: vec![
+                Entity::Arc {
+                    id: EntityId(1),
+                    center: PointId(0),
+                    start: PointId(1),
+                    end: PointId(2),
+                },
+                Entity::Line {
+                    id: EntityId(2),
+                    a: PointId(3),
+                    b: PointId(1),
+                },
+            ],
+            constraints: vec![
+                Constraint::Radius {
+                    entity: EntityId(1),
+                    dim: Dimension::new("r", 9.0),
+                },
+                Constraint::Tangent {
+                    line: EntityId(2),
+                    arc: EntityId(1),
+                },
+            ],
+        };
+        s.validate().unwrap();
+        let sys = System::build(&s);
+        assert_eq!(sys.eqs.len(), 3, "radius, tangent, implied equal radius");
+        assert_eq!(
+            sys.owner[2],
+            s.constraints.len(),
+            "implied row has the pseudo-owner"
+        );
+        let rows = sys.all_rows();
+        let x0 = sys.initial.clone();
+        let j = sys.jacobian(&x0, &rows);
+        let h = 1e-6;
+        let mut max_err: f64 = 0.0;
+        for c in 0..sys.n {
+            let (mut xp, mut xm) = (x0.clone(), x0.clone());
+            xp[c] += h;
+            xm[c] -= h;
+            let (rp, rm) = (sys.residuals(&xp, &rows), sys.residuals(&xm, &rows));
+            for r in 0..rows.len() {
+                let fd = (rp[r] - rm[r]) / (2.0 * h);
+                max_err = max_err.max((fd - j[(r, c)]).abs());
+            }
+        }
+        assert!(
+            max_err < 1e-7,
+            "Jacobian vs finite differences: {max_err:e}"
+        );
+        // Tangent residual by hand: P = (9.1, 1.2), C = (0.4, -0.3), Q = (13, -6):
+        // (P - C)·(Q - P)/|Q - P| = (8.7*3.9 + 1.5*(-7.2)) / sqrt(3.9^2 + 7.2^2).
+        let want = (8.7 * 3.9 - 1.5 * 7.2) / (3.9f64 * 3.9 + 7.2 * 7.2).sqrt();
+        assert!((sys.eqs[1].eval(&x0) - want).abs() < 1e-12);
     }
 
     /// Coincident endpoints: the Distance gradient falls back to a unit
