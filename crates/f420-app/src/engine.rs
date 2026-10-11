@@ -362,10 +362,13 @@ struct MeasureSlot {
     shutdown: bool,
 }
 
+/// (doc id, revision, bodies measured, failures "body: error"). Bodies are
+/// measured independently so one failure does not withhold the others.
 type Measured = (
     u64,
     u64,
-    Result<Vec<(f420_document::BodyId, Measurements)>, String>,
+    Vec<(f420_document::BodyId, Measurements)>,
+    Vec<String>,
 );
 
 /// `F420_TRACE_ENGINE=1`: log the deferred-measurement pipeline to stderr.
@@ -402,23 +405,24 @@ fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
         };
         trace(|| format!("measure start doc {} rev {}", job.doc_id, job.revision));
         let t0 = Instant::now();
-        let r = job
-            .bodies
-            .iter()
-            .map(|(id, b)| f420_kernel::measure(b).map(|m| (*id, m)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string());
+        let (mut ok, mut failed) = (Vec::new(), Vec::new());
+        for (id, b) in &job.bodies {
+            match f420_kernel::measure(b) {
+                Ok(m) => ok.push((*id, m)),
+                Err(e) => failed.push(format!("body {id}: {e}")),
+            }
+        }
         trace(|| {
             format!(
                 "measure done doc {} rev {} in {:.0} ms ok={}",
                 job.doc_id,
                 job.revision,
                 t0.elapsed().as_secs_f64() * 1e3,
-                r.is_ok()
+                failed.is_empty()
             )
         });
         if out
-            .send(WorkerIn::Measured((job.doc_id, job.revision, r)))
+            .send(WorkerIn::Measured((job.doc_id, job.revision, ok, failed)))
             .is_err()
         {
             return;
@@ -427,33 +431,33 @@ fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
 }
 
 /// Follow-up reply for a finished measurement, or `None` if it is stale.
-fn adopt(session: &mut Session, (doc_id, revision, result): Measured) -> Option<Reply> {
-    let response = match result {
-        Ok(m) => {
-            if !session.adopt_measurements(doc_id, revision, m) {
-                trace(|| format!("stale measurement doc {doc_id} rev {revision} dropped"));
-                return None; // stale: the document moved on
-            }
-            trace(|| format!("adopted doc {doc_id} rev {revision}"));
-            Response {
-                ok: true,
-                command: "measure".into(),
-                message: Some(format!("measured revision {revision}")),
-                ..Default::default()
-            }
+fn adopt(session: &mut Session, (doc_id, revision, ok, failed): Measured) -> Option<Reply> {
+    // Bodies that measured are kept (and cached) even when another failed.
+    let adopted = !ok.is_empty() && session.adopt_measurements(doc_id, revision, ok);
+    let response = if failed.is_empty() {
+        if !adopted {
+            trace(|| format!("stale measurement doc {doc_id} rev {revision} dropped"));
+            return None; // stale: the document moved on
         }
-        Err(e) => {
-            if !session.fail_measurements(doc_id, revision) {
-                return None; // stale failure: nothing to report
-            }
-            Response {
-                ok: false,
-                command: "measure".into(),
-                error: Some(f420_document::DocError::Validation(format!(
-                    "measurement of revision {revision} failed: {e}"
-                ))),
-                ..Default::default()
-            }
+        trace(|| format!("adopted doc {doc_id} rev {revision}"));
+        Response {
+            ok: true,
+            command: "measure".into(),
+            message: Some(format!("measured revision {revision}")),
+            ..Default::default()
+        }
+    } else {
+        if !session.fail_measurements(doc_id, revision) && !adopted {
+            return None; // stale failure: nothing to report
+        }
+        Response {
+            ok: false,
+            command: "measure".into(),
+            error: Some(f420_document::DocError::Validation(format!(
+                "measurement of revision {revision} failed: {}",
+                failed.join("; ")
+            ))),
+            ..Default::default()
         }
     };
     Some(Reply {
@@ -555,7 +559,8 @@ fn worker(
                 (
                     doc_id,
                     revision,
-                    Err("could not copy the body for measurement".into()),
+                    Vec::new(),
+                    vec!["could not copy the body for measurement".into()],
                 ),
             ) {
                 if tx.send(r).is_err() {
@@ -737,6 +742,44 @@ mod tests {
     use f420_document::{FeatureId, SketchPlane};
 
     const S1: FeatureId = FeatureId(1);
+
+    /// Review run 3 #17: one body failing to measure does not withhold the
+    /// others' measurements.
+    #[test]
+    fn a_failed_body_measurement_keeps_the_others() {
+        let mut s = Session::new();
+        s.set_defer_measurements(true);
+        s.execute(&Command::NewDocument);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../f420-kernel/tests/fixtures/step/two_boxes_compound_mm.step");
+        let r = s.execute(&Command::ImportStep {
+            path,
+            units_to_mm: None,
+        });
+        assert!(r.ok, "{:?}", r.error);
+        let (doc, rev, bodies) = s.pending_measurement().expect("pending");
+        assert_eq!(bodies.len(), 2);
+        let (good, bad) = (bodies[0].0, bodies[1].0);
+        let m = f420_kernel::measure(&bodies[0].1).unwrap();
+        let reply = adopt(
+            &mut s,
+            (
+                doc,
+                rev,
+                vec![(good, m)],
+                vec![format!("body {bad}: injected")],
+            ),
+        )
+        .expect("current revision: reported");
+        assert!(!reply.response.ok);
+        let by_id = |id| s.summary().bodies.into_iter().find(|b| b.id == id).unwrap();
+        assert!(by_id(good).measurements.is_some());
+        assert!(by_id(bad).measurements.is_none());
+        assert!(
+            !s.model().unwrap().measurements_pending(),
+            "not waited on forever"
+        );
+    }
 
     thread_local! {
         /// Deferred-measurement follow-ups seen while collecting command replies.
