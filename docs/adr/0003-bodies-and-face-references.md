@@ -72,13 +72,24 @@ Edge ordering therefore never flips axes.
   reversed blind Cut or Join from a face (pointing into air / into the material) is refused,
   so in that case Reverse has no valid use and the UI disables it.
 * Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured,
-  spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2)` *into* the support
-  side. This is only correct when the profile lies inside the support face; the regenerator
-  checks the profile against the face region and refuses otherwise (product limit, explicit).
-* Blind cut from a face sketch starts a margin outside the face (run-2 rule) and ends exactly at
-  depth, except when the floor lands exactly on a face whose material lies on the tool's side
-  (a cut through the full thickness): the floor then moves a margin past it, which removes
-  exactly the same material and avoids a coplanar boolean.
+  spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2, depth/2)` *into* the
+  support side, where `depth` is the target's extent below the face (so the overlap cannot
+  poke out of a plate thinner than 0.5 mm). This is only correct when the profile lies inside
+  the support face; the regenerator checks the profile against the face region and refuses
+  otherwise (product limit, explicit). It also refuses a result whose bounds reach past both
+  the target and the overlap-free tool. Known gap (run-3 review finding 5, ignored test
+  `join_over_thin_skin_does_not_poke_into_cavity`): over an internal cavity less than δ below
+  the face the overlap still pokes into the cavity.
+* Blind cuts move an end lying on a face of the target whose material is on the tool's side
+  (the sketch face for a cut from a face; the floor when it lands exactly on such a face, e.g.
+  a cut through the full thickness) a margin past that face, avoiding a coplanar boolean. This
+  is done only where it removes nothing extra: the profile lies inside that face, or the target
+  has nothing past the plane, or a probe cut of the profile slab from `MIN_LENGTH` to the
+  margin past the plane removes nothing. Otherwise the end stays on the plane (a raised step
+  over part of a cut-from-face profile, a boss continuing past part of the floor); if Truck
+  then fails on the coplanar faces, the cut is refused with a `ProductLimit` that says so,
+  never cut with extra material removed. Pattern and mirror copies of a blind cut re-derive
+  these margins at each copy's location.
 * A Join that does not touch the target is reported as such before the face-containment rule.
 * A Join/Cut tool whose bounds do not overlap the target is refused ("does not intersect").
   Results must be one closed shell; a multi-shell result is refused (no silent split bodies).
