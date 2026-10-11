@@ -157,6 +157,7 @@ fn mesh_bodies_are_display_and_export_only() {
             path: dir.path().join("m.stl"),
             chord: None,
             bodies: None,
+            print: Default::default(),
         },
     );
     // Deleting the import removes its body and its embedded file.
@@ -302,6 +303,7 @@ fn threemf_import_and_multi_body_export_round_trip() {
             chord: None,
             bodies: None,
             unit: Some(f420_exchange::threemf::ThreeMfUnit::Inch),
+            print: Default::default(),
         },
     );
     assert!(r.message.unwrap().contains("3 objects"));
@@ -333,6 +335,7 @@ fn every_command_serializes_under_its_documented_name() {
             chord: None,
             bodies: None,
             unit: None,
+            print: Default::default(),
         },
         Command::ImportSvg {
             path: p.clone(),

@@ -52,7 +52,7 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("resaved.f420.json");
     assert!(s.execute(&Command::Save { path: out.clone() }).ok);
-    assert_eq!(version(&out), 3);
+    assert_eq!(version(&out), u64::from(f420_document::FORMAT_VERSION));
     let mut t = Session::new();
     assert!(t.execute(&Command::Open { path: out }).ok);
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
@@ -97,17 +97,28 @@ fn committed_examples() {
     check("examples/bracket.f420.json", None, BRACKET);
 }
 
+/// Frozen copies of the run-3 (v3) documents: they load into v4 unchanged.
 #[test]
 fn v3_run3_examples() {
+    let d = "crates/f420-commands/tests/fixtures/native_v3";
+    for (name, v) in [
+        ("plate", PLATE),
+        ("scenario_a", SCENARIO_A),
+        ("scenario_b", scenario_b()),
+        ("scenario_r", SCENARIO_R),
+        ("bracket", BRACKET),
+    ] {
+        check(&format!("{d}/{name}.f420.json"), Some(3), v);
+    }
     // Imported FreeCAD box with a centred Ø6 through hole.
     check(
-        "examples/imported_step_hole.f420.json",
+        &format!("{d}/imported_step_hole.f420.json"),
         Some(3),
         12000.0 - 90.0 * PI,
     );
     // DXF notch plate (the STL body is a mesh: no B-rep measurements).
     check(
-        "examples/dxf_stl_import.f420.json",
+        &format!("{d}/dxf_stl_import.f420.json"),
         Some(3),
         3.0 * (800.0 - 12.5 * PI),
     );

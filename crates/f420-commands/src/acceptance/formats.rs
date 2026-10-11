@@ -902,6 +902,7 @@ fn d_stl(r: &mut Run<'_>) {
         path: out.clone(),
         chord: None,
         bodies: Some(vec![mesh_mm]),
+        print: Default::default(),
     });
     r.ok("export_stl (mesh body, as imported)", &x);
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);

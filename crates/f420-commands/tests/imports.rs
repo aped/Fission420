@@ -373,6 +373,7 @@ fn mesh_body_rename_hide_and_explicit_export_selection() {
         path: dir.path().join("none.stl"),
         chord: None,
         bodies: None,
+        print: Default::default(),
     });
     assert!(!r.ok);
     // ...but an explicit selection exports the hidden mesh body.
@@ -383,6 +384,7 @@ fn mesh_body_rename_hide_and_explicit_export_selection() {
             path: p.clone(),
             chord: None,
             bodies: Some(vec![m]),
+            print: Default::default(),
         },
     );
     assert_eq!(std::fs::metadata(&p).unwrap().len(), 84 + 50 * 4);

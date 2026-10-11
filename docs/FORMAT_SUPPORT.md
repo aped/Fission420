@@ -16,9 +16,9 @@ ADR 0004 (format adapters).
 | Native v2 (run 2) | **yes** (migrated) | no | parametric history | mm | `Open` |
 | Native v3 (run 3) | **yes** | **yes** | history + bodies + embedded import sources | mm | `Open` / `Save` |
 | STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step`; UI Import…, Export STEP… |
-| STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl`; UI Import…, Export STL… |
+| STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required; export writes mm | `import_stl`, `export_stl` (print options: docs/PRINT_EXPORT.md); UI Import…, Export STL… |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf`; UI Import…, Export DXF (sketch)… |
-| 3MF `.3mf` | **yes**, core subset → one mesh body per build item | **yes**, one object per body (B-rep tessellated, watertight-checked; meshes as imported) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf`; UI Import…, Export 3MF… |
+| 3MF `.3mf` | **yes**, core subset → one mesh body per build item | **yes**, one object per body (B-rep tessellated, solid-checked; meshes as imported, solid-checked unless `allow_open_meshes`) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf`; UI Import…, Export 3MF… |
 | SVG `.svg` | **yes**: lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes**: sketch lines/arcs/circles | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg`; UI Import…, Export SVG (sketch)… |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
@@ -42,7 +42,7 @@ B-rep reconstruction, recovered feature history from STEP.
 | STEP import | `ImportStep` base feature, one body per `MANIFOLD_SOLID_BREP` (per placed instance) | | |
 | STEP export | each selected B-rep body as one `MANIFOLD_SOLID_BREP`; explicitly selected mesh bodies refused, default selection skips (and names) them | refused | |
 | STL import | never (no reconstruction) | `ImportMesh` base feature, one mesh body per file | |
-| STL export | tessellated (chord tolerance, watertightness checked; not written if not watertight) | written as imported | |
+| STL export | tessellated (chord, optional `angle_deg`; closed/manifold/oriented/outward checked, nothing written otherwise) | written as imported if a valid solid, else refused unless `allow_open_meshes` (labelled reference mesh) | |
 | DXF import | | | new sketch on a chosen plane or planar face, no constraints except the origin |
 | DXF export | | | a sketch's lines/arcs/circles in its local 2D coordinates |
 
@@ -125,6 +125,13 @@ malformed/NaN/truncated/unterminated files are refused with the document unchang
 export and Cut of a mesh body are refused and nothing is written; the mesh body exports as a
 684-byte binary STL validated by a Python reader and FreeCAD (V 1000, solid).
 
+**Run 4 print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
+manifold vertices, orientation, positive volume; self-intersection not checked), `angle_deg`,
+export-only placement/layout, P1S/manual bed fit, `separate_files`, `allow_open_meshes`,
+per-body report. Evidence: `crates/f420-commands/tests/print_export.rs`,
+`crates/f420-kernel/tests/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,
+FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/run4/print/validation/`).
+
 **Known losses**: no units, colour, topology or exact geometry; binary STL is f32
 (~7 significant digits); ASCII export exists in the crate but is not a command option.
 
@@ -161,7 +168,7 @@ linetype and colour; design intent (constraints); sketch placement on export.
 `f420_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)), wired by
 the coordinator as `import_3mf` (base feature `Import3mf`, source embedded, one mesh body per
 build item, display/export only) and `export_3mf` (`bodies` default all visible, `unit`,
-`chord`). Command-level evidence: `crates/f420-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
+`chord`, run-4 print options: [`PRINT_EXPORT.md`](PRINT_EXPORT.md); geometry only, no slicer settings). Command-level evidence: `crates/f420-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
 (FreeCAD two-box fixture imported; three-body export in inch re-imported with exact
 volumes). UI: Import… and Export 3MF… (`exchange_ui.rs::threemf_import_export_and_svg_sketch`
 imports the FreeCAD two-box fixture without a unit prompt and exports all visible bodies).

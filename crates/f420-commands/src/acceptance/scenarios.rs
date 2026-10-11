@@ -89,6 +89,7 @@ impl Run<'_> {
             path: stl.clone(),
             chord: Some(0.01),
             bodies: None,
+            print: Default::default(),
         });
         self.ok("export_stl", &x);
         match &x.mesh_check {

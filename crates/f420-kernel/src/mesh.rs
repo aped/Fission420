@@ -130,11 +130,21 @@ impl Welder {
     }
 }
 
+/// Relative zero-area threshold for [`MeshCheck::degenerate_triangles`]:
+/// `|(b - a) x (c - a)| <= DEGENERATE_REL_AREA * (longest edge)^2`. Dimensionless.
+pub const DEGENERATE_REL_AREA: f64 = 1e-12;
+
+/// What [`check_mesh`] says about self-intersection (it does not test it).
+pub const SELF_INTERSECTION_NOT_CHECKED: &str = "not checked";
+
+/// Topological/geometric diagnostics of an indexed triangle mesh. All topology is
+/// by vertex **index** (call [`weld_exact`] first on meshes with unshared corners).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshCheck {
     pub triangles: usize,
     pub vertices: usize,
-    /// Every undirected edge is used by exactly two triangles with opposite direction.
+    /// Every undirected edge is used by exactly two triangles with opposite
+    /// direction, and every triangle has three distinct in-range vertices.
     pub watertight: bool,
     pub boundary_edges: usize,
     pub nonmanifold_edges: usize,
@@ -144,20 +154,170 @@ pub struct MeshCheck {
     pub bounds_min: [f64; 3],
     pub bounds_max: [f64; 3],
     pub chord_tolerance: f64,
+    /// Every edge is used by exactly two triangles (direction not considered).
+    #[serde(default)]
+    pub closed_edges: bool,
+    /// Vertices whose incident triangles form more than one edge-connected fan
+    /// (e.g. two shells touching at a point).
+    #[serde(default)]
+    pub nonmanifold_vertices: usize,
+    /// Every two-triangle edge is traversed in opposite directions.
+    #[serde(default)]
+    pub orientation_consistent: bool,
+    /// `mesh_volume > 0`: triangles wound counter-clockwise seen from outside.
+    #[serde(default)]
+    pub outward: bool,
+    /// Zero-area triangles with three distinct vertices (see [`DEGENERATE_REL_AREA`]).
+    #[serde(default)]
+    pub degenerate_triangles: usize,
+    /// Triangles with a repeated or out-of-range vertex index (excluded from the
+    /// edge analysis).
+    #[serde(default)]
+    pub invalid_triangles: usize,
+    /// Edge-connected components (shells).
+    #[serde(default)]
+    pub shells: usize,
+    /// Always [`SELF_INTERSECTION_NOT_CHECKED`]: triangle-triangle intersection is
+    /// not tested, so a closed, manifold, outward mesh may still intersect itself.
+    #[serde(default = "not_checked")]
+    pub self_intersection: String,
+}
+
+fn not_checked() -> String {
+    SELF_INTERSECTION_NOT_CHECKED.to_string()
+}
+
+impl MeshCheck {
+    /// Closed, manifold (edges and vertices), consistently and outwardly oriented,
+    /// every triangle valid. Degenerate (zero-area) triangles are reported but do
+    /// not invalidate a mesh that is otherwise a closed solid.
+    pub fn is_valid_solid(&self) -> bool {
+        self.watertight
+            && self.closed_edges
+            && self.nonmanifold_vertices == 0
+            && self.invalid_triangles == 0
+            && self.outward
+    }
+
+    /// Human-readable reasons why [`MeshCheck::is_valid_solid`] fails (empty when valid).
+    pub fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.triangles == 0 {
+            p.push("no triangles".into());
+        }
+        if self.boundary_edges > 0 {
+            p.push(format!(
+                "{} boundary (open) edges: the surface has holes",
+                self.boundary_edges
+            ));
+        }
+        if self.nonmanifold_edges > 0 {
+            p.push(format!(
+                "{} non-manifold edges (shared by 3+ triangles)",
+                self.nonmanifold_edges
+            ));
+        }
+        if self.misoriented_edges > 0 {
+            p.push(format!(
+                "{} inconsistently oriented edges (flipped triangles)",
+                self.misoriented_edges
+            ));
+        }
+        if self.nonmanifold_vertices > 0 {
+            p.push(format!(
+                "{} non-manifold vertices (shells touching at a point)",
+                self.nonmanifold_vertices
+            ));
+        }
+        if self.invalid_triangles > 0 {
+            p.push(format!(
+                "{} triangles with repeated/out-of-range vertices",
+                self.invalid_triangles
+            ));
+        }
+        if self.triangles > 0 && !self.outward {
+            p.push(format!(
+                "signed volume {:.6} mm^3 is not positive (inside-out or open)",
+                self.mesh_volume
+            ));
+        }
+        p
+    }
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross3(u: [f64; 3], v: [f64; 3]) -> [f64; 3] {
+    [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ]
+}
+
+fn norm3(a: [f64; 3]) -> f64 {
+    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
+}
+
+fn uf_find(parent: &mut [usize], mut i: usize) -> usize {
+    while parent[i] != i {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+    }
+    i
+}
+
+fn uf_union(parent: &mut [usize], a: usize, b: usize) {
+    let (ra, rb) = (uf_find(parent, a), uf_find(parent, b));
+    if ra != rb {
+        parent[ra.max(rb)] = ra.min(rb);
+    }
 }
 
 pub fn check_mesh(m: &TriMesh) -> MeshCheck {
+    let nv = m.positions.len();
+    let valid = |t: &[u32; 3]| {
+        t.iter().all(|&i| (i as usize) < nv) && t[0] != t[1] && t[1] != t[2] && t[0] != t[2]
+    };
     let mut edges: HashMap<(u32, u32), (i32, i32)> = HashMap::new();
     let mut vol = 0.0;
-    for t in &m.triangles {
+    let (mut invalid, mut degenerate) = (0, 0);
+    // (vertex, triangle, other corner, other corner) for the vertex-fan test.
+    let mut corners: Vec<(u32, usize, u32, u32)> = Vec::with_capacity(3 * m.triangles.len());
+    let mut parent: Vec<usize> = (0..m.triangles.len()).collect();
+    let mut edge_tri: HashMap<(u32, u32), usize> = HashMap::new();
+    for (ti, t) in m.triangles.iter().enumerate() {
+        if !valid(t) {
+            invalid += 1;
+            continue;
+        }
         for k in 0..3 {
             let (a, b) = (t[k], t[(k + 1) % 3]);
-            let e = edges.entry((a.min(b), a.max(b))).or_default();
-            if a < b { e.0 += 1 } else { e.1 += 1 }
+            let key = (a.min(b), a.max(b));
+            let e = edges.entry(key).or_default();
+            if a < b {
+                e.0 += 1
+            } else {
+                e.1 += 1
+            }
+            match edge_tri.get(&key) {
+                Some(&o) => uf_union(&mut parent, o, ti),
+                None => {
+                    edge_tri.insert(key, ti);
+                }
+            }
+            corners.push((t[k], ti, t[(k + 1) % 3], t[(k + 2) % 3]));
         }
         let [p, q, r] = t.map(|i| m.positions[i as usize]);
         vol += p[0] * (q[1] * r[2] - q[2] * r[1]) - p[1] * (q[0] * r[2] - q[2] * r[0])
             + p[2] * (q[0] * r[1] - q[1] * r[0]);
+        let (u, v, w) = (sub3(q, p), sub3(r, p), sub3(r, q));
+        let longest = norm3(u).max(norm3(v)).max(norm3(w));
+        if norm3(cross3(u, v)) <= DEGENERATE_REL_AREA * longest * longest {
+            degenerate += 1;
+        }
     }
     let (mut boundary, mut nonmanifold, mut misoriented) = (0, 0, 0);
     for (f, b) in edges.values() {
@@ -168,6 +328,43 @@ pub fn check_mesh(m: &TriMesh) -> MeshCheck {
             _ => nonmanifold += 1,
         }
     }
+    // Vertex fans: the triangles around a vertex, joined through the edges at that
+    // vertex; more than one group is a non-manifold vertex.
+    corners.sort_unstable_by_key(|c| (c.0, c.1));
+    let mut nonmanifold_vertices = 0;
+    let mut i = 0;
+    while i < corners.len() {
+        let v = corners[i].0;
+        let mut j = i;
+        while j < corners.len() && corners[j].0 == v {
+            j += 1;
+        }
+        let group = &corners[i..j];
+        if group.len() > 1 {
+            let mut local: Vec<usize> = (0..group.len()).collect();
+            let mut by_other: HashMap<u32, usize> = HashMap::new();
+            for (gi, c) in group.iter().enumerate() {
+                for w in [c.2, c.3] {
+                    match by_other.get(&w) {
+                        Some(&o) => uf_union(&mut local, o, gi),
+                        None => {
+                            by_other.insert(w, gi);
+                        }
+                    }
+                }
+            }
+            let fans = (0..group.len())
+                .filter(|&g| uf_find(&mut local, g) == g)
+                .count();
+            if fans > 1 {
+                nonmanifold_vertices += 1;
+            }
+        }
+        i = j;
+    }
+    let shells = (0..m.triangles.len())
+        .filter(|&t| valid(&m.triangles[t]) && uf_find(&mut parent, t) == t)
+        .count();
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
     for p in &m.positions {
@@ -176,20 +373,209 @@ pub fn check_mesh(m: &TriMesh) -> MeshCheck {
             hi[i] = hi[i].max(p[i]);
         }
     }
+    let mesh_volume = vol / 6.0;
     MeshCheck {
         triangles: m.triangles.len(),
         vertices: m.positions.len(),
         watertight: boundary == 0
             && nonmanifold == 0
             && misoriented == 0
+            && invalid == 0
             && !m.triangles.is_empty(),
         boundary_edges: boundary,
         nonmanifold_edges: nonmanifold,
         misoriented_edges: misoriented,
-        mesh_volume: vol / 6.0,
+        mesh_volume,
         bounds_min: lo,
         bounds_max: hi,
         chord_tolerance: m.chord_tolerance,
+        closed_edges: boundary == 0 && nonmanifold == 0 && !m.triangles.is_empty(),
+        nonmanifold_vertices,
+        orientation_consistent: misoriented == 0,
+        outward: mesh_volume > 0.0,
+        degenerate_triangles: degenerate,
+        invalid_triangles: invalid,
+        shells,
+        self_intersection: not_checked(),
+    }
+}
+
+/// Copy of `m` with bitwise-equal positions (`-0.0 == 0.0`) merged in first-use
+/// order and triangles re-indexed (a merged vertex keeps its first normal). For
+/// checking meshes stored with unshared corners (imported mesh bodies).
+pub fn weld_exact(m: &TriMesh) -> TriMesh {
+    let key = |p: [f64; 3]| p.map(|c| if c == 0.0 { 0u64 } else { c.to_bits() });
+    let mut map: HashMap<[u64; 3], u32> = HashMap::new();
+    let mut out = TriMesh {
+        chord_tolerance: m.chord_tolerance,
+        ..Default::default()
+    };
+    let mut remap = Vec::with_capacity(m.positions.len());
+    for (i, p) in m.positions.iter().enumerate() {
+        let id = *map.entry(key(*p)).or_insert_with(|| {
+            out.positions.push(*p);
+            out.normals.push(
+                <[_]>::get(&m.normals, i)
+                    .copied()
+                    .unwrap_or([0.0, 0.0, 1.0]),
+            );
+            (out.positions.len() - 1) as u32
+        });
+        remap.push(id);
+    }
+    out.triangles = m
+        .triangles
+        .iter()
+        .map(|t| t.map(|i| <[_]>::get(&remap, i as usize).copied().unwrap_or(u32::MAX)))
+        .collect();
+    out.tri_face = m.tri_face.clone();
+    out
+}
+
+/// Largest angle (degrees) between the normals of two triangles that share an
+/// edge and belong to the same B-rep face (`tri_face`): the facet-to-facet angular
+/// deviation of the tessellation of curved faces. Edges between different B-rep
+/// faces (model edges) are excluded, so a planar-only mesh gives 0.
+pub fn max_facet_angle_deg(m: &TriMesh) -> f64 {
+    let normal = |t: &[u32; 3]| {
+        let [p, q, r] = t.map(|i| m.positions[i as usize]);
+        let n = cross3(sub3(q, p), sub3(r, p));
+        let l = norm3(n);
+        (l > 0.0).then(|| n.map(|c| c / l))
+    };
+    let mut first: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut worst: f64 = 0.0;
+    for (ti, t) in m.triangles.iter().enumerate() {
+        if t.iter().any(|&i| i as usize >= m.positions.len()) {
+            continue;
+        }
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            let key = (a.min(b), a.max(b));
+            match first.get(&key) {
+                Some(&o) if <[_]>::get(&m.tri_face, o) == <[_]>::get(&m.tri_face, ti) => {
+                    if let (Some(n1), Some(n2)) = (normal(&m.triangles[o]), normal(t)) {
+                        let d = (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]).clamp(-1.0, 1.0);
+                        worst = worst.max(d.acos().to_degrees());
+                    }
+                }
+                Some(_) => {}
+                None => {
+                    first.insert(key, ti);
+                }
+            }
+        }
+    }
+    worst
+}
+
+/// Rigid placement `p' = R p + t` with `R` a proper rotation (orthonormal, det +1).
+/// Construction refuses reflections and non-orthonormal matrices, so a placed mesh
+/// keeps volume, distances and handedness (outward winding stays outward).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RigidTransform {
+    /// Row-major rotation.
+    pub rotation: [[f64; 3]; 3],
+    pub translation: [f64; 3],
+}
+
+impl RigidTransform {
+    pub const IDENTITY: RigidTransform = RigidTransform {
+        rotation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        translation: [0.0; 3],
+    };
+
+    /// Checked constructor: `rotation` must be orthonormal with det +1 within 1e-9.
+    pub fn new(rotation: [[f64; 3]; 3], translation: [f64; 3]) -> Result<Self> {
+        let r = rotation;
+        let finite = r
+            .iter()
+            .flatten()
+            .chain(&translation)
+            .all(|c| c.is_finite());
+        let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+            - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+            + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+        let mut ortho = true;
+        for i in 0..3 {
+            for j in 0..3 {
+                let d: f64 = (0..3).map(|k| r[i][k] * r[j][k]).sum();
+                ortho &= (d - if i == j { 1.0 } else { 0.0 }).abs() <= 1e-9;
+            }
+        }
+        if !finite || !ortho || (det - 1.0).abs() > 1e-9 {
+            return Err(KernelError::InvalidInput(format!(
+                "placement must be a proper rotation (orthonormal, det +1); det = {det}"
+            )));
+        }
+        Ok(Self {
+            rotation,
+            translation,
+        })
+    }
+
+    /// Proper rotation taking direction `n` to `-Z` (shortest arc; for `n = +Z`
+    /// a half turn about X).
+    pub fn rotation_to_minus_z(n: [f64; 3]) -> Result<Self> {
+        let l = norm3(n);
+        if !(l.is_finite() && l > 0.0) {
+            return Err(KernelError::InvalidInput("zero face normal".into()));
+        }
+        let a = n.map(|c| c / l);
+        let c = -a[2]; // a . (0, 0, -1)
+        let r = if c > 1.0 - 1e-12 {
+            Self::IDENTITY.rotation
+        } else if c < -1.0 + 1e-12 {
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]
+        } else {
+            // Rodrigues: R = I + [v]x + [v]x^2 / (1 + c), v = a x (0, 0, -1).
+            let v = cross3(a, [0.0, 0.0, -1.0]);
+            let vx = [[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]];
+            let mut r = Self::IDENTITY.rotation;
+            for i in 0..3 {
+                for j in 0..3 {
+                    let vx2: f64 = (0..3).map(|k| vx[i][k] * vx[k][j]).sum();
+                    r[i][j] += vx[i][j] + vx2 / (1.0 + c);
+                }
+            }
+            r
+        };
+        Self::new(r, [0.0; 3])
+    }
+
+    pub fn apply(&self, p: [f64; 3]) -> [f64; 3] {
+        let t = self.translation;
+        let v = self.rotate(p);
+        [v[0] + t[0], v[1] + t[1], v[2] + t[2]]
+    }
+
+    pub fn rotate(&self, v: [f64; 3]) -> [f64; 3] {
+        let r = &self.rotation;
+        [
+            r[0][0] * v[0] + r[0][1] * v[1] + r[0][2] * v[2],
+            r[1][0] * v[0] + r[1][1] * v[1] + r[1][2] * v[2],
+            r[2][0] * v[0] + r[2][1] * v[1] + r[2][2] * v[2],
+        ]
+    }
+
+    /// `self` followed by a translation by `t`.
+    pub fn then_translate(mut self, t: [f64; 3]) -> Self {
+        for (a, b) in self.translation.iter_mut().zip(t) {
+            *a += b;
+        }
+        self
+    }
+
+    /// Copy of `m` placed by `self`; triangle order and winding unchanged (a proper
+    /// rotation keeps outward winding outward).
+    pub fn apply_mesh(&self, m: &TriMesh) -> TriMesh {
+        TriMesh {
+            positions: m.positions.iter().map(|p| self.apply(*p)).collect(),
+            normals: m.normals.iter().map(|n| self.rotate(*n)).collect(),
+            triangles: m.triangles.clone(),
+            tri_face: m.tri_face.clone(),
+            chord_tolerance: m.chord_tolerance,
+        }
     }
 }
 

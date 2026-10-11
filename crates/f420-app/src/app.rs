@@ -570,6 +570,7 @@ impl F420App {
                 path: stl,
                 chord: Some(0.01),
                 bodies: None,
+                print: Default::default(),
             }),
             Set {
                 feature: "Plate",
@@ -2052,6 +2053,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             path: nonempty_path(path)?,
             chord: Some(parse_num("chord", chord)?),
             bodies: scope.bodies(),
+            print: Default::default(),
         },
         Dialog::ExportStep { path, scope } => Command::ExportStep {
             path: nonempty_path(path)?,
@@ -2083,6 +2085,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             chord: Some(parse_num("chord", chord)?),
             bodies: scope.bodies(),
             unit: Some(*unit),
+            print: Default::default(),
         },
         Dialog::Import(form) => form.command()?,
         Dialog::Pattern {

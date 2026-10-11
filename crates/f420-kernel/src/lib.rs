@@ -21,7 +21,10 @@ pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
     planar_faces_on, z_face_inner_loops,
 };
-pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
+pub use mesh::{
+    MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh, check_mesh,
+    max_facet_angle_deg, tessellate, tessellate_display, weld_exact, write_stl_binary,
+};
 pub use ops::{
     bounds, coplanar_face_side, cut_prism, cut_region, extent_along, join_prism, join_region,
     plane_has_face, profile_within_face, through_all_margin,
