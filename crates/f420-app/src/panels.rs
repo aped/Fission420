@@ -1513,7 +1513,7 @@ impl F420App {
                     }
                     Dialog::Import(form) => {
                         ok_allowed &= self.import_form_ui(ui, form);
-                        if form.pending {
+                        if form.pending.is_some() {
                             ui.small("Cancel closes this dialog only: a running import still completes, and Undo removes it.");
                         }
                     }
@@ -1542,11 +1542,11 @@ impl F420App {
                 }
                 Ok(cmd) => {
                     let keep = matches!(dlg, Dialog::ExportStl { .. } | Dialog::Import(_));
+                    let token = self.request_token(cmd);
                     if let Dialog::Import(f) = &mut dlg {
-                        f.pending = true;
+                        f.pending = token;
                         f.error = None;
                     }
-                    self.request(cmd);
                     if keep {
                         self.dialog = Some(dlg);
                     }

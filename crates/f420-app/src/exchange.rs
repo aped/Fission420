@@ -83,8 +83,10 @@ pub struct ImportForm {
     /// Face selected when the dialog opened (offered as a DXF plane).
     pub face: Option<(FaceRef, String)>,
     pub allow_partial: bool,
-    /// Submitted; waiting for the engine's reply.
-    pub pending: bool,
+    /// Submitted: the request token (sequence number) of the import command
+    /// whose reply this form waits for. A reply with another token (an import
+    /// from a cancelled or replaced form) never touches this form.
+    pub pending: Option<u64>,
     /// Last failure (the document is unchanged).
     pub error: Option<String>,
 }
@@ -183,7 +185,7 @@ impl F420App {
             plane: DxfPlane::WorldXY,
             face,
             allow_partial: false,
-            pending: false,
+            pending: None,
             error: None,
         }));
     }
@@ -198,15 +200,17 @@ impl F420App {
 
     /// Engine reply to an import: close the dialog and summarize, or keep it
     /// open with the error (asking for units when the file has none).
-    pub(crate) fn import_reply(&mut self, cmd: &Command, response: &Response) {
+    /// `token` is the reply's request sequence number: only the form that
+    /// submitted that request is resolved.
+    pub(crate) fn import_reply(&mut self, cmd: &Command, response: &Response, token: u64) {
         if !is_import(cmd) {
             return;
         }
         let form = match &mut self.dialog {
-            Some(crate::app::Dialog::Import(f)) if f.pending => f,
+            Some(crate::app::Dialog::Import(f)) if f.pending == Some(token) => f,
             _ => return,
         };
-        form.pending = false;
+        form.pending = None;
         if !response.ok {
             let msg = response
                 .error
@@ -357,7 +361,7 @@ impl F420App {
         if fmt == Some(Format::Step) {
             ui.small("Each solid becomes a separate exact body (no feature history). The file is embedded in the document.");
         }
-        if form.pending {
+        if form.pending.is_some() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("Importing… (parsing and validating on the worker thread)");
@@ -369,7 +373,7 @@ impl F420App {
                 format!("Import failed, the document is unchanged: {e}"),
             );
         }
-        !form.pending && fmt.is_some()
+        form.pending.is_none() && fmt.is_some()
     }
 
     /// Body selection controls shared by the STL and STEP export dialogs.

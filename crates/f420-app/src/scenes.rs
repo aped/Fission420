@@ -49,13 +49,19 @@ fn rect(w: f64, h: f64, c: [f64; 2], plane: SketchPlane) -> Command {
 /// Import through the dialog path (summary + fit on reply).
 fn import(app: &mut F420App, path: PathBuf, unit: usize, partial: bool) {
     app.open_import_dialog();
-    if let Some(Dialog::Import(f)) = &mut app.dialog {
-        f.path = path.display().to_string();
-        f.unit = unit;
-        f.allow_partial = partial;
-        if let Ok(cmd) = f.command() {
-            f.pending = true;
-            app.request(cmd);
+    let cmd = match &mut app.dialog {
+        Some(Dialog::Import(f)) => {
+            f.path = path.display().to_string();
+            f.unit = unit;
+            f.allow_partial = partial;
+            f.command().ok()
+        }
+        _ => None,
+    };
+    if let Some(cmd) = cmd {
+        let token = app.request_token(cmd);
+        if let Some(Dialog::Import(f)) = &mut app.dialog {
+            f.pending = token;
         }
     }
 }

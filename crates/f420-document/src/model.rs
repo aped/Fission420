@@ -660,6 +660,60 @@ impl Document {
         d
     }
 
+    /// Body that `f` modifies without creating it: a Join/Cut/Pocket target,
+    /// the seed's target for patterns and mirrors, the faces' body for a
+    /// chamfer.
+    pub fn modified_body(&self, f: &Feature) -> Option<BodyId> {
+        if let Some(t) = f.target_body() {
+            return Some(t);
+        }
+        match &f.kind {
+            FeatureKind::LinearPattern { seed, .. }
+            | FeatureKind::CircularPattern { seed, .. }
+            | FeatureKind::Mirror { seed, .. } => {
+                self.feature(*seed).ok().and_then(Feature::target_body)
+            }
+            FeatureKind::Chamfer { a, .. } => self.face_body(a),
+            _ => None,
+        }
+    }
+
+    /// Body owning the face `r` names (from the definitions only).
+    fn face_body(&self, r: &FaceRef) -> Option<BodyId> {
+        match r.role {
+            FaceRole::Imported { body, .. } => Some(body),
+            _ => {
+                let f = self.feature(r.feature).ok()?;
+                match f.created_bodies().first() {
+                    Some(b) => Some(*b),
+                    None => f.target_body(),
+                }
+            }
+        }
+    }
+
+    /// [`Document::dependencies_of`] plus the ordering constraint between
+    /// features acting on the same body: a feature that modifies a body comes
+    /// after the previous feature (in history) that created or modified it.
+    /// Without this, re-attaching a sketch to a face of a later feature could
+    /// silently swap two modifiers of one body; with it, that is a cycle and
+    /// the edit is refused. Not used for deletion (deleting a modifier that
+    /// nothing references is allowed).
+    pub fn ordering_dependencies_of(&self, f: &Feature) -> Vec<FeatureId> {
+        let mut d = self.dependencies_of(f);
+        if let Some(b) = self.modified_body(f)
+            && let Some(p) = self.features.iter().position(|x| x.id == f.id)
+            && let Some(prev) = self.features[..p]
+                .iter()
+                .rev()
+                .find(|x| x.created_bodies().contains(&b) || self.modified_body(x) == Some(b))
+            && !d.contains(&prev.id)
+        {
+            d.push(prev.id);
+        }
+        d
+    }
+
     /// Features that depend on `id` (explicitly or through a body target).
     pub fn dependents_of(&self, id: FeatureId) -> Vec<FeatureId> {
         self.features
@@ -829,7 +883,7 @@ impl Document {
         let mut indeg = vec![0usize; n];
         let mut users: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (i, f) in self.features.iter().enumerate() {
-            for d in self.dependencies_of(f) {
+            for d in self.ordering_dependencies_of(f) {
                 let j = pos(d).ok_or(DocError::BrokenReference {
                     from: f.id,
                     detail: format!("depends on missing feature {d}"),

@@ -283,6 +283,10 @@ pub struct F420App {
     pub(crate) fitted: bool,
     demo: VecDeque<DemoStep>,
     replies_seen: u64,
+    /// Commands accepted by the engine. The engine answers every command once,
+    /// in order, so the n-th non-follow-up reply answers request n: this is the
+    /// request token stale import replies are matched against.
+    submitted: u64,
     /// Active placement tool (rays from the view camera feed it).
     pub(crate) placement: Option<Placement>,
     /// Finished placement whose pre-filled dialog is open; drawn until it closes.
@@ -360,6 +364,7 @@ impl F420App {
             fitted: false,
             demo: VecDeque::new(),
             replies_seen: 0,
+            submitted: 0,
             placement: None,
             held_preview: None,
             fallback_camera: Camera {
@@ -719,15 +724,24 @@ impl F420App {
 
     /// Send a document command to the engine (the only way UI mutates state).
     pub fn request(&mut self, cmd: Command) {
+        self.request_token(cmd);
+    }
+
+    /// [`F420App::request`], returning the request token (sequence number)
+    /// its reply will carry (None if the worker is gone).
+    pub fn request_token(&mut self, cmd: Command) -> Option<u64> {
         let name = cmd.name().to_string();
         if self.engine.submit(cmd) {
             self.in_flight.push_back((name, Instant::now()));
+            self.submitted += 1;
+            Some(self.submitted)
         } else {
             self.diag(
                 true,
                 "Worker",
                 "session worker thread is not running; restart the app".into(),
             );
+            None
         }
     }
 
@@ -846,7 +860,7 @@ impl F420App {
             self.broken_sketch = None;
             // Dialogs hold ids of the old document (ids restart per document);
             // a pending import is the exception: its reply is this one.
-            if !matches!(&self.dialog, Some(Dialog::Import(f)) if f.pending) {
+            if !matches!(&self.dialog, Some(Dialog::Import(f)) if f.pending.is_some()) {
                 self.dialog = None;
             }
             self.import_summary = None;
@@ -1000,8 +1014,101 @@ impl F420App {
         }
         self.faces =
             crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
-        self.import_reply(&command, &response);
+        self.import_reply(&command, &response, self.replies_seen);
+        if response.ok && matches!(command, Command::Undo | Command::Redo) {
+            self.close_dialog_after_undo(&command);
+        }
+        self.revalidate_dialog();
         self.sync_viewport_selection();
+    }
+
+    /// Feature and body ids an open dialog acts on.
+    fn dialog_refs(d: &Dialog) -> (Vec<FeatureId>, Vec<f420_document::BodyId>) {
+        use crate::exchange::ExportScope;
+        let scope = |s: &ExportScope| match s {
+            ExportScope::Selected(v) => v.clone(),
+            ExportScope::AllVisible => vec![],
+        };
+        match d {
+            Dialog::Extrude(f) => (
+                f.sketch.into_iter().collect(),
+                f.target.into_iter().collect(),
+            ),
+            Dialog::Revolve { sketch, .. } | Dialog::Cut { sketch, .. } => {
+                (sketch.iter().copied().collect(), vec![])
+            }
+            Dialog::CircleOnFace { extrude, .. } => (extrude.iter().copied().collect(), vec![]),
+            Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
+            Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
+            Dialog::Chamfer { a, b, .. } => (
+                std::iter::once(a.feature)
+                    .chain(b.map(|b| b.feature))
+                    .collect(),
+                vec![],
+            ),
+            Dialog::ExportStl { scope: s, .. }
+            | Dialog::ExportStep { scope: s, .. }
+            | Dialog::Export3mf { scope: s, .. } => (vec![], scope(s)),
+            Dialog::Import(f) => (f.face.iter().map(|(r, _)| r.feature).collect(), vec![]),
+            Dialog::Rectangle { .. }
+            | Dialog::RectangleXz { .. }
+            | Dialog::SaveAs { .. }
+            | Dialog::Open { .. } => (vec![], vec![]),
+        }
+    }
+
+    /// Undo/Redo can roll the id allocators back, so an id held by an open
+    /// dialog may later name a different object: close dialogs (and the
+    /// re-attach window) that hold ids instead of letting them act on it.
+    fn close_dialog_after_undo(&mut self, cmd: &Command) {
+        let what = if matches!(cmd, Command::Undo) {
+            "Undo"
+        } else {
+            "Redo"
+        };
+        if let Some(d) = &self.dialog {
+            let (f, b) = Self::dialog_refs(d);
+            let pending_import = matches!(d, Dialog::Import(x) if x.pending.is_some());
+            if (!f.is_empty() || !b.is_empty()) && !pending_import {
+                let title = d.title();
+                self.dialog = None;
+                self.diag(
+                    false,
+                    "info",
+                    format!("{what} changed the document: closed \"{title}\" (it referred to objects that may no longer exist)"),
+                );
+            }
+        }
+        if self.reattach.take().is_some() {
+            self.diag(
+                false,
+                "info",
+                format!("{what} changed the document: closed \"Re-attach sketch\""),
+            );
+        }
+    }
+
+    /// Close a dialog whose feature/body ids no longer exist (Delete, a
+    /// failed regeneration elsewhere, ...). Never acts on a missing id.
+    fn revalidate_dialog(&mut self) {
+        let Some(d) = &self.dialog else {
+            return;
+        };
+        let (fs, bs) = Self::dialog_refs(d);
+        let missing_f = fs
+            .iter()
+            .find(|f| !self.summary.features.iter().any(|x| x.id == **f));
+        let missing_b = bs
+            .iter()
+            .find(|b| !self.summary.bodies.iter().any(|x| x.id == **b));
+        let why = match (missing_f, missing_b) {
+            (Some(f), _) => format!("feature {f} no longer exists"),
+            (None, Some(b)) => format!("body {b} no longer exists"),
+            (None, None) => return,
+        };
+        let title = d.title();
+        self.dialog = None;
+        self.diag(true, "Dialog", format!("closed \"{title}\": {why}"));
     }
 
     /// Rebuild inspector buffers from the document while keeping the user's
