@@ -32,9 +32,25 @@
 //!   commands queued after it.
 //! * Profiling: `response.elapsed_ms` ([`Reply::elapsed`]) is the worker time for
 //!   the command including display tessellation.
+//!
+//! # Deferred measurement (threaded mode)
+//!
+//! Exact B-rep measurement dominates regeneration of cut bodies (~1.8 s of
+//! ~2.4 s for the 80×50 plate with a hole, release build). In threaded mode the
+//! session defers it ([`Session::set_defer_measurements`]): a command's reply
+//! carries the new geometry and `summary.measuring == true`, and a separate
+//! measurement thread measures the newest body (latest job wins; jobs for
+//! superseded revisions are dropped before they start). The result is fed back
+//! to the session through the worker, which then sends a *follow-up* reply
+//! ([`Reply::followup`], command [`Command::Measure`]) tagged with the document
+//! id and revision it describes. Follow-ups are not answers to submitted
+//! commands (they don't count against [`Engine::busy`]). The UI applies one
+//! only if it still shows that document revision, so a late measurement can
+//! never be presented as describing newer geometry.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -78,6 +94,9 @@ pub struct Reply {
     pub summary: DocSummary,
     pub measurements: Option<Measurements>,
     pub mesh: MeshUpdate,
+    /// Deferred-measurement follow-up (not the answer to a submitted command):
+    /// `measurements` describe `summary.doc_id` / `summary.revision`.
+    pub followup: bool,
 }
 
 impl Reply {
@@ -137,6 +156,7 @@ fn superseded_reply(session: &Session, cmd: Command, key: &str) -> Reply {
             .model()
             .and_then(|m| m.evaluation().measurements.clone()),
         mesh: MeshUpdate::Unchanged,
+        followup: false,
     }
 }
 
@@ -178,6 +198,7 @@ pub fn execute(session: &mut Session, cmd: Command) -> Reply {
         summary,
         measurements,
         mesh,
+        followup: false,
     }
 }
 
@@ -207,20 +228,149 @@ pub fn to_render_mesh(tm: &f420_kernel::TriMesh) -> RenderMesh {
     }
 }
 
-/// Worker loop: FIFO over submitted batches, draining everything already queued
-/// before each command so [`handle_next`] can see what follows it.
-fn worker(rx: Receiver<Vec<Command>>, tx: Sender<Reply>, repaint: Option<Box<dyn Fn() + Send>>) {
-    let mut session = Session::new();
-    let mut queue: VecDeque<Command> = VecDeque::new();
+/// Input of the session worker: one channel, so a blocking receive wakes on
+/// commands and on measurement results alike.
+enum WorkerIn {
+    Commands(Vec<Command>),
+    Measured(Measured),
+    /// Sent by [`Engine`]'s `Drop` (the measurer holds a sender clone, so channel
+    /// disconnection alone cannot end the worker).
+    Shutdown,
+}
+
+/// A body to measure, tagged with the state it belongs to.
+struct MeasureJob {
+    doc_id: u64,
+    revision: u64,
+    body: f420_kernel::Body,
+}
+
+/// Latest-job-wins slot shared with the measurement thread.
+#[derive(Default)]
+struct MeasureSlot {
+    job: Option<MeasureJob>,
+    shutdown: bool,
+}
+
+type Measured = (u64, u64, Result<Measurements, String>);
+
+fn measurer(slot: Arc<(Mutex<MeasureSlot>, Condvar)>, out: Sender<WorkerIn>) {
+    let (lock, cv) = &*slot;
     loop {
-        if queue.is_empty() {
-            match rx.recv() {
-                Ok(batch) => queue.extend(batch),
-                Err(_) => break, // engine dropped and the queue is drained
+        let job = {
+            let Ok(mut g) = lock.lock() else { return };
+            loop {
+                if g.shutdown {
+                    return;
+                }
+                if let Some(j) = g.job.take() {
+                    break j;
+                }
+                g = match cv.wait(g) {
+                    Ok(g) => g,
+                    Err(_) => return,
+                };
+            }
+        };
+        let r = f420_kernel::measure(&job.body).map_err(|e| e.to_string());
+        if out
+            .send(WorkerIn::Measured((job.doc_id, job.revision, r)))
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
+/// Follow-up reply for a finished measurement, or `None` if it is stale.
+fn adopt(session: &mut Session, (doc_id, revision, result): Measured) -> Option<Reply> {
+    let response = match result {
+        Ok(m) => {
+            if !session.adopt_measurements(doc_id, revision, m) {
+                return None; // stale: the document moved on
+            }
+            Response {
+                ok: true,
+                command: "measure".into(),
+                message: Some(format!("measured revision {revision}")),
+                ..Default::default()
             }
         }
-        while let Ok(batch) = rx.try_recv() {
-            queue.extend(batch);
+        Err(e) => Response {
+            ok: false,
+            command: "measure".into(),
+            error: Some(f420_document::DocError::Validation(format!(
+                "measurement of revision {revision} failed: {e}"
+            ))),
+            ..Default::default()
+        },
+    };
+    Some(Reply {
+        command: Command::Measure,
+        response,
+        summary: session.summary(),
+        measurements: session
+            .model()
+            .and_then(|m| m.evaluation().measurements.clone()),
+        mesh: MeshUpdate::Unchanged,
+        followup: true,
+    })
+}
+
+/// Worker loop: FIFO over submitted batches, draining everything already queued
+/// before each command so [`handle_next`] can see what follows it. Deferred
+/// measurements are computed on a helper thread and adopted between commands.
+fn worker(
+    rx: Receiver<WorkerIn>,
+    self_tx: Sender<WorkerIn>,
+    tx: Sender<Reply>,
+    repaint: Option<Box<dyn Fn() + Send>>,
+) {
+    let mut session = Session::new();
+    session.set_defer_measurements(true);
+    let slot = Arc::new((Mutex::new(MeasureSlot::default()), Condvar::new()));
+    let measurer_handle = {
+        let slot = slot.clone();
+        std::thread::Builder::new()
+            .name("f420-measure".into())
+            .spawn(move || measurer(slot, self_tx))
+            .ok()
+    };
+    let notify = || {
+        if let Some(r) = &repaint {
+            r();
+        }
+    };
+    let mut queue: VecDeque<Command> = VecDeque::new();
+    let mut stopping = false;
+    'run: loop {
+        if stopping && queue.is_empty() {
+            break; // Shutdown received and every queued command answered
+        }
+        // Block only when there is nothing queued; then drain without blocking.
+        let mut inbox = Vec::new();
+        if queue.is_empty() {
+            match rx.recv() {
+                Ok(m) => inbox.push(m),
+                Err(_) => break,
+            }
+        }
+        while let Ok(m) = rx.try_recv() {
+            inbox.push(m);
+        }
+        for m in inbox {
+            match m {
+                WorkerIn::Commands(batch) => queue.extend(batch),
+                WorkerIn::Measured(done) => {
+                    if let Some(r) = adopt(&mut session, done) {
+                        if tx.send(r).is_err() {
+                            break 'run;
+                        }
+                        notify();
+                    }
+                }
+                WorkerIn::Shutdown => stopping = true,
+            }
         }
         let Some(reply) = handle_next(&mut session, &mut queue) else {
             continue;
@@ -228,9 +378,28 @@ fn worker(rx: Receiver<Vec<Command>>, tx: Sender<Reply>, repaint: Option<Box<dyn
         if tx.send(reply).is_err() {
             break;
         }
-        if let Some(r) = &repaint {
-            r();
+        notify();
+        // Queue the newest unmeasured body (replacing any older pending job).
+        if let Some((doc_id, revision, body)) = session.pending_measurement() {
+            let (lock, cv) = &*slot;
+            if let Ok(mut g) = lock.lock() {
+                g.job = Some(MeasureJob {
+                    doc_id,
+                    revision,
+                    body,
+                });
+                cv.notify_one();
+            }
         }
+    }
+    let (lock, cv) = &*slot;
+    if let Ok(mut g) = lock.lock() {
+        g.shutdown = true;
+        g.job = None;
+        cv.notify_one();
+    }
+    if let Some(h) = measurer_handle {
+        let _ = h.join();
     }
 }
 
@@ -240,7 +409,7 @@ enum Backend {
         ready: VecDeque<Reply>,
     },
     Threaded {
-        tx: Option<Sender<Vec<Command>>>,
+        tx: Option<Sender<WorkerIn>>,
         rx: Receiver<Reply>,
         handle: Option<JoinHandle<()>>,
     },
@@ -262,11 +431,12 @@ impl Engine {
                 ready: VecDeque::new(),
             },
             ExecMode::Threaded => {
-                let (tx, worker_rx) = channel::<Vec<Command>>();
+                let (tx, worker_rx) = channel::<WorkerIn>();
                 let (worker_tx, rx) = channel::<Reply>();
+                let self_tx = tx.clone();
                 let handle = std::thread::Builder::new()
                     .name("f420-session".into())
-                    .spawn(move || worker(worker_rx, worker_tx, repaint))
+                    .spawn(move || worker(worker_rx, self_tx, worker_tx, repaint))
                     .ok();
                 Backend::Threaded {
                     tx: Some(tx),
@@ -313,7 +483,10 @@ impl Engine {
                 true
             }
             Backend::Threaded { tx, handle, .. } => {
-                let sent = handle.is_some() && tx.as_ref().is_some_and(|t| t.send(cmds).is_ok());
+                let sent = handle.is_some()
+                    && tx
+                        .as_ref()
+                        .is_some_and(|t| t.send(WorkerIn::Commands(cmds)).is_ok());
                 if sent {
                     self.in_flight += n;
                 } else {
@@ -330,7 +503,9 @@ impl Engine {
             Backend::Sync { ready, .. } => ready.pop_front(),
             Backend::Threaded { rx, .. } => match rx.try_recv() {
                 Ok(r) => {
-                    self.in_flight = self.in_flight.saturating_sub(1);
+                    if !r.followup {
+                        self.in_flight = self.in_flight.saturating_sub(1);
+                    }
                     Some(r)
                 }
                 Err(TryRecvError::Empty) => None,
@@ -357,7 +532,11 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         if let Backend::Threaded { tx, handle, .. } = &mut self.backend {
-            tx.take(); // closes the channel; the worker finishes its queue, then exits
+            // The worker answers everything already queued, then exits (the
+            // measurement thread holds a sender, so closing alone is not enough).
+            if let Some(t) = tx.take() {
+                let _ = t.send(WorkerIn::Shutdown);
+            }
             if let Some(h) = handle.take() {
                 let _ = h.join();
             }
@@ -373,12 +552,20 @@ mod tests {
 
     const S1: FeatureId = FeatureId(1);
 
-    /// Wait (bounded) for exactly `n` replies.
+    thread_local! {
+        /// Deferred-measurement follow-ups seen while collecting command replies.
+        static FOLLOWUPS: std::cell::RefCell<Vec<Reply>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Wait (bounded) for exactly `n` command replies (deferred-measurement
+    /// follow-ups are not answers to commands; they are stashed for
+    /// [`followup_for`]).
     fn collect(e: &mut Engine, n: usize) -> Vec<Reply> {
         let deadline = Instant::now() + Duration::from_secs(300);
         let mut out = Vec::new();
         while out.len() < n {
             match e.poll() {
+                Some(r) if r.followup => FOLLOWUPS.with(|f| f.borrow_mut().push(r)),
                 Some(r) => out.push(r),
                 None => {
                     assert!(!e.worker_lost(), "worker lost");
@@ -392,7 +579,10 @@ mod tests {
             }
         }
         assert!(!e.busy(), "all submitted commands answered");
-        assert!(e.poll().is_none(), "no extra replies");
+        while let Some(r) = e.poll() {
+            assert!(r.followup, "no extra command replies");
+            FOLLOWUPS.with(|f| f.borrow_mut().push(r));
+        }
         out
     }
 
@@ -443,6 +633,76 @@ mod tests {
         r.last()
             .map(|r| r.summary.clone())
             .unwrap_or_else(|| panic!())
+    }
+
+    /// Wait (bounded) for the deferred-measurement follow-up of `revision`;
+    /// follow-ups for other (earlier) revisions are skipped.
+    fn followup_for(e: &mut Engine, revision: u64) -> Reply {
+        let stashed = FOLLOWUPS.with(|f| {
+            let mut f = f.borrow_mut();
+            let i = f.iter().position(|r| r.summary.revision == revision)?;
+            Some(f.remove(i))
+        });
+        if let Some(r) = stashed {
+            return r;
+        }
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            match e.poll() {
+                Some(r) if r.followup && r.summary.revision == revision => return r,
+                Some(r) if r.followup => {
+                    assert!(r.summary.revision < revision, "follow-up from the future");
+                }
+                Some(r) => panic!("unexpected command reply {:?}", r.command),
+                None => {
+                    assert!(Instant::now() < deadline, "no measurement follow-up");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+        }
+    }
+
+    fn volume(m: &Option<Measurements>) -> f64 {
+        match m.as_ref().map(|m| &m.volume) {
+            Some(f420_kernel::VolumeResult::Value { volume, .. }) => *volume,
+            other => panic!("no volume: {other:?}"),
+        }
+    }
+
+    /// Threaded mode defers B-rep measurement: the command reply carries new
+    /// geometry with `summary.measuring`, the follow-up carries the volume for
+    /// exactly that revision; a measurement overtaken by a newer edit is never
+    /// delivered.
+    #[test]
+    fn deferred_measurement_follows_geometry_and_is_never_stale() {
+        let mut e = Engine::new(ExecMode::Threaded, None);
+        let base = ready(&mut e);
+        assert!(e.submit(width_edit(100.0)));
+        let r = collect(&mut e, 1).remove(0);
+        assert!(r.response.ok);
+        assert!(
+            matches!(r.mesh, MeshUpdate::Replace(_)),
+            "geometry is in the reply"
+        );
+        assert!(r.summary.measuring && r.measurements.is_none());
+        let f = followup_for(&mut e, r.summary.revision);
+        assert_eq!(f.summary.doc_id, r.summary.doc_id);
+        assert!(!f.summary.measuring);
+        assert!((volume(&f.measurements) - 100.0 * 50.0 * 10.0).abs() < 1e-6);
+        // Two edits back to back (not coalesced): follow-ups only ever describe
+        // the revision they name, and the newest revision gets measured.
+        assert!(e.submit_all(vec![width_edit(90.0), Command::Inspect, width_edit(95.0)]));
+        let rs = collect(&mut e, 3);
+        let last = rs.last().unwrap().summary.revision;
+        assert!(last > base.revision);
+        let f = followup_for(&mut e, last);
+        assert!((volume(&f.measurements) - 95.0 * 50.0 * 10.0).abs() < 1e-6);
+        // Undo twice, back to the width-100 state measured above: its
+        // measurements come from the cache in the reply itself (nothing pending).
+        assert!(e.submit_all(vec![Command::Undo, Command::Undo]));
+        let u = collect(&mut e, 2).remove(1);
+        assert!(!u.summary.measuring);
+        assert!((volume(&u.measurements) - 100.0 * 50.0 * 10.0).abs() < 1e-6);
     }
 
     /// Five rapid width edits and an Undo, queued atomically: the first four are
@@ -651,14 +911,19 @@ mod tests {
         // SetParameter width on the plate with a cut: regeneration (sketch solve,
         // extrude, boolean cut, B-rep volume) + display tessellation. Values never
         // repeat, so the prefix cache cannot serve the cut.
-        let (mut rt, mut worker) = (vec![], vec![]);
+        let (mut rt, mut worker, mut measured) = (vec![], vec![], vec![]);
         for i in 0..RUNS {
+            let t = Instant::now();
             let (r, ms) = round_trip(&mut e, width_edit(90.0 + i as f64));
             rt.push(ms);
             worker.push(r.elapsed().as_secs_f64() * 1000.0);
+            let f = followup_for(&mut e, r.summary.revision);
+            assert!(f.response.ok && f.measurements.is_some());
+            measured.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        stats("plate SetParameter width round trip (regen with cut)", rt);
+        stats("plate SetParameter width round trip (geometry; measurement deferred)", rt);
         stats("plate SetParameter width worker time", worker);
+        stats("plate SetParameter width until measurements arrive", measured);
         // Undo of the same: served from the regeneration cache.
         let (mut rt, mut worker) = (vec![], vec![]);
         for _ in 0..RUNS.min(5) {

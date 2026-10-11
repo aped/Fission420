@@ -15,6 +15,7 @@ pub use io::{
 pub use model::*;
 pub use regen::{
     Evaluation, FeatureResult, RegenCache, ResolvedFace, regenerate, regenerate_cached,
+    regenerate_cached_opts,
 };
 pub use session::{Model, ParamChange};
 

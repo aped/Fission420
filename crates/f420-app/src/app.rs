@@ -264,6 +264,7 @@ impl F420App {
             summary: DocSummary {
                 doc_id: 0,
                 open: false,
+                measuring: false,
                 path: None,
                 dirty: false,
                 revision: 0,
@@ -340,9 +341,9 @@ impl F420App {
     pub fn replies_seen(&self) -> u64 {
         self.replies_seen
     }
-    /// No command in flight and no demo steps left.
+    /// No command in flight, no deferred measurement outstanding, no demo steps left.
     pub fn idle(&self) -> bool {
-        !self.engine.busy() && self.demo.is_empty()
+        !self.engine.busy() && self.demo.is_empty() && !self.summary.measuring
     }
     pub fn feature_by_name(&self, name: &str) -> Option<&FeatureSummary> {
         self.summary.features.iter().find(|f| f.name == name)
@@ -654,6 +655,20 @@ impl F420App {
     }
 
     fn handle_reply(&mut self, r: Reply) {
+        if r.followup {
+            // Deferred measurement: apply only if it describes what is shown.
+            let same = r.summary.doc_id == self.summary.doc_id
+                && r.summary.revision == self.summary.revision;
+            if same {
+                if r.response.ok {
+                    self.measurements = r.measurements;
+                } else if let Some(e) = &r.response.error {
+                    self.diag(true, error_kind(e), e.to_string());
+                }
+                self.summary.measuring = r.summary.measuring;
+            }
+            return;
+        }
         self.replies_seen += 1;
         if let Some((name, t0)) = self.in_flight.pop_front() {
             self.latencies.push_back((name, t0.elapsed()));
@@ -1411,7 +1426,7 @@ impl F420App {
         self.confirm_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
-        if busy {
+        if busy || self.summary.measuring {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         let dt = frame_start.elapsed();

@@ -183,6 +183,10 @@ pub struct DocSummary {
     #[serde(default)]
     pub doc_id: u64,
     pub open: bool,
+    /// The body's measurements were deferred and are not available yet
+    /// (interactive clients only; see `Session::set_defer_measurements`).
+    #[serde(default)]
+    pub measuring: bool,
     pub path: Option<PathBuf>,
     pub dirty: bool,
     pub revision: u64,
@@ -225,6 +229,8 @@ pub struct Session {
     path: Option<PathBuf>,
     /// Bumped whenever the open document is replaced or closed.
     doc_id: u64,
+    /// Skip B-rep measurement during edits (see `set_defer_measurements`).
+    defer_measurements: bool,
 }
 
 impl Default for Session {
@@ -239,11 +245,50 @@ impl Session {
             model: None,
             path: None,
             doc_id: 0,
+            defer_measurements: false,
         }
     }
 
     pub fn model(&self) -> Option<&Model> {
         self.model.as_ref()
+    }
+
+    /// Interactive clients: skip the expensive B-rep measurements while editing
+    /// and supply them later with [`Session::adopt_measurements`]. Responses then
+    /// carry `measurements: None` and `summary.measuring: true` until adopted.
+    /// `save` and `measure` always measure synchronously first. Off by default
+    /// (CLI, tests and the acceptance runner get measurements in every response).
+    pub fn set_defer_measurements(&mut self, on: bool) {
+        self.defer_measurements = on;
+        if let Some(m) = &mut self.model {
+            m.set_defer_measurements(on);
+        }
+    }
+
+    /// Body awaiting deferred measurement: `(doc_id, revision, body)`.
+    pub fn pending_measurement(&self) -> Option<(u64, u64, f420_kernel::Body)> {
+        let m = self.model.as_ref()?;
+        if !m.measurements_pending() {
+            return None;
+        }
+        Some((self.doc_id, m.revision, m.evaluation().body.clone()?))
+    }
+
+    /// Install out-of-band measurements if they still describe the current
+    /// document revision. Returns true when adopted.
+    pub fn adopt_measurements(&mut self, doc_id: u64, revision: u64, m: Measurements) -> bool {
+        doc_id == self.doc_id
+            && self
+                .model
+                .as_mut()
+                .is_some_and(|model| model.adopt_measurements(revision, m))
+    }
+
+    fn fresh_model_settings(&mut self) {
+        let defer = self.defer_measurements;
+        if let Some(m) = &mut self.model {
+            m.set_defer_measurements(defer);
+        }
     }
 
     pub fn path(&self) -> Option<&Path> {
@@ -289,6 +334,7 @@ impl Session {
                 self.model = Some(Model::new());
                 self.path = None;
                 self.doc_id += 1;
+                self.fresh_model_settings();
             }
             Command::CreateSketch {
                 name,
@@ -455,6 +501,7 @@ impl Session {
             Command::Redo => r.message = Some(format!("redid: {}", self.model_mut()?.redo()?)),
             Command::Save { path } => {
                 let m = self.model_mut()?;
+                m.complete_measurements()?;
                 save_file(path, m.document(), Some(m.evaluation()))?;
                 m.dirty = false;
                 self.path = Some(path.clone());
@@ -472,6 +519,7 @@ impl Session {
                 self.model = Some(model);
                 self.path = Some(path.clone());
                 self.doc_id += 1;
+                self.fresh_model_settings();
                 r.message = Some(msg);
             }
             Command::Close => {
@@ -523,6 +571,7 @@ impl Session {
             }
             Command::Measure => {
                 let m = self.model_mut()?;
+                m.complete_measurements()?;
                 r.measurements = m.evaluation().measurements.clone();
             }
             Command::Inspect => {}
@@ -536,6 +585,7 @@ impl Session {
             return DocSummary {
                 doc_id: self.doc_id,
                 open: false,
+                measuring: false,
                 path: None,
                 dirty: false,
                 revision: 0,
@@ -547,6 +597,7 @@ impl Session {
         DocSummary {
             doc_id: self.doc_id,
             open: true,
+            measuring: m.measurements_pending(),
             path: self.path.clone(),
             dirty: m.dirty,
             revision: m.revision,

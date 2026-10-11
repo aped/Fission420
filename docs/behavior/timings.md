@@ -40,3 +40,32 @@ Observations (labelled by confidence):
   the same parameter (`Reply::superseded`). A burst of edits of one parameter therefore costs
   at most two regenerations (the one already running when the burst arrives, plus the last
   value), not one per edit. Running kernel work is not interrupted.
+
+## Deferred measurement (run 2, coordinator)
+
+Profiling one plate-with-hole regeneration stage by stage
+(`cargo run --release -p f420-app --example regen_profile`, same machine):
+
+| stage | time |
+|---|---|
+| extrude | 0.0 ms |
+| `cut_through_all` (Truck boolean) | 155–183 ms |
+| `measure` (B-rep boundary-integral volume, bounds, topology) | ~1805 ms |
+| `tessellate_display` (0.05 mm chord) | ~377 ms |
+
+So the earlier inference that the boolean dominates was wrong: exact measurement is ~75 %.
+The threaded engine now defers it (see the module docs of `crates/f420-app/src/engine.rs`):
+the reply carries the new geometry and `summary.measuring`, a measurement thread (latest job
+wins) computes the volume, and a follow-up reply tagged with document id + revision delivers
+it; the UI shows "Measuring volume… (geometry is current)" meanwhile and ignores a follow-up
+for any revision it no longer shows. Headless clients (CLI, acceptance, tests in Sync mode)
+are unchanged and still receive measurements in every response; `save`/`measure` complete a
+pending measurement synchronously.
+
+| operation (threaded engine, release, 7 runs) | median | min | max |
+|---|---|---|---|
+| plate `set_parameter width` → geometry reply | 575 ms | 550 ms | 597 ms |
+| same → measurements arrive | 2394 ms | 2365 ms | 3646 ms |
+
+Remaining geometry latency is the boolean plus display tessellation (kernel-side; not
+optimized this run).

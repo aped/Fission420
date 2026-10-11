@@ -186,7 +186,42 @@ pub fn regenerate(doc: &Document) -> Result<Evaluation> {
 }
 
 /// Like [`regenerate`], reusing and filling `cache` for unchanged history prefixes.
-pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> Result<Evaluation> {
+pub fn regenerate_cached(doc: &Document, cache: Option<&mut RegenCache>) -> Result<Evaluation> {
+    regenerate_cached_opts(doc, cache, true)
+}
+
+/// Serialized-history key of the whole document (the cache key of its full prefix).
+fn full_key(doc: &Document) -> Result<String> {
+    let mut key = String::new();
+    for id in doc.evaluation_order()? {
+        let f = serde_json::to_string(doc.feature(id)?)
+            .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
+        key.push_str(&f);
+        key.push('\n');
+    }
+    Ok(key)
+}
+
+impl RegenCache {
+    /// Remember measurements computed out of band for `doc`'s current geometry
+    /// (deferred measurement); later regenerations of the same history reuse them.
+    pub fn store_measurements(&mut self, doc: &Document, m: Measurements) {
+        if let Ok(key) = full_key(doc)
+            && self.states.contains_key(&key)
+        {
+            self.measurements.insert(key, m);
+        }
+    }
+}
+
+/// Like [`regenerate_cached`]; with `measure == false` the (expensive) B-rep
+/// measurements are skipped unless already cached, leaving
+/// `Evaluation::measurements == None` for a body (deferred measurement).
+pub fn regenerate_cached_opts(
+    doc: &Document,
+    mut cache: Option<&mut RegenCache>,
+    measure_body: bool,
+) -> Result<Evaluation> {
     let order = doc.evaluation_order()?;
     let mut keys = Vec::with_capacity(order.len());
     let mut key = String::new();
@@ -439,16 +474,17 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                 .as_deref()
                 .and_then(|c| c.measurements.get(&full).cloned());
             let m = match cached {
-                Some(m) => m,
-                None => measure(results[i].id, b)?,
+                Some(m) => Some(m),
+                None if measure_body => Some(measure(results[i].id, b)?),
+                None => None,
             };
-            if let Some(c) = cache
+            if let (Some(c), Some(m)) = (cache, &m)
                 && c.states.contains_key(&full)
             {
                 c.measurements.insert(full, m.clone());
             }
-            results[i].measurements = Some(m.clone());
-            Some(m)
+            results[i].measurements = m.clone();
+            m
         }
         _ => None,
     };

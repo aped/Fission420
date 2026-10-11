@@ -866,6 +866,14 @@ impl F420App {
     pub(crate) fn status_bar(&mut self, ui: &mut egui::Ui, busy: bool) {
         ui.horizontal_wrapped(|ui| {
             let stale = busy;
+            if !busy && self.summary.measuring {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Measuring volume… (geometry is current)")
+                        .italics()
+                        .weak(),
+                );
+            } else {
             match &self.measurements {
                 Some(m) => {
                     let mut vol = match &m.volume {
@@ -906,6 +914,7 @@ impl F420App {
                 None => {
                     ui.label(if stale { "Regenerating…" } else { "No body" });
                 }
+            }
             }
             ui.separator();
             if self.summary.open {

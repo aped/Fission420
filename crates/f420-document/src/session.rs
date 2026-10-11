@@ -1,6 +1,7 @@
 //! Transactions and undo/redo over the authoritative document.
-use crate::regen::{RegenCache, regenerate_cached};
+use crate::regen::{RegenCache, regenerate_cached, regenerate_cached_opts};
 use crate::{DocError, Document, Evaluation, FeatureId, Result};
+use f420_kernel::Measurements;
 use serde::{Deserialize, Serialize};
 
 /// Record of a committed parameter change (for UIs / logs).
@@ -26,6 +27,9 @@ pub struct Model {
     pub dirty: bool,
     /// Memo of regenerated history prefixes (geometry cache only; never authoritative).
     cache: RegenCache,
+    /// Skip B-rep measurement during edits (an interactive client measures out of
+    /// band and hands the result back with [`Model::adopt_measurements`]).
+    defer_measurements: bool,
 }
 
 /// Cap on undo depth; documents are small, so this is generous.
@@ -47,6 +51,7 @@ impl Model {
             revision: 0,
             dirty: false,
             cache: RegenCache::default(),
+            defer_measurements: false,
         }
     }
 
@@ -62,7 +67,41 @@ impl Model {
             revision: 0,
             dirty: false,
             cache,
+            defer_measurements: false,
         })
+    }
+
+    /// See the `defer_measurements` field. Headless clients keep the default (off).
+    pub fn set_defer_measurements(&mut self, on: bool) {
+        self.defer_measurements = on;
+    }
+
+    /// The current body has not been measured yet (deferred measurement).
+    pub fn measurements_pending(&self) -> bool {
+        self.eval.body.is_some() && self.eval.measurements.is_none()
+    }
+
+    /// Install measurements computed out of band for `revision`. Ignored (false)
+    /// if the model has moved on or already has measurements.
+    pub fn adopt_measurements(&mut self, revision: u64, m: Measurements) -> bool {
+        if revision != self.revision || !self.measurements_pending() {
+            return false;
+        }
+        self.cache.store_measurements(&self.doc, m.clone());
+        self.eval.measurements = Some(m);
+        true
+    }
+
+    /// Measure synchronously if measurement was deferred (Save, Measure).
+    pub fn complete_measurements(&mut self) -> Result<()> {
+        if self.measurements_pending() {
+            self.eval = regenerate_cached(&self.doc, Some(&mut self.cache))?;
+        }
+        Ok(())
+    }
+
+    fn regen(&mut self, doc: &Document) -> Result<Evaluation> {
+        regenerate_cached_opts(doc, Some(&mut self.cache), !self.defer_measurements)
     }
 
     /// (hits, misses) of the regeneration cache, for diagnostics.
@@ -86,7 +125,7 @@ impl Model {
     ) -> Result<T> {
         let mut candidate = self.doc.clone();
         let out = edit(&mut candidate)?;
-        let eval = regenerate_cached(&candidate, Some(&mut self.cache))?;
+        let eval = self.regen(&candidate)?;
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
         self.undo.push((label.to_string(), old));
@@ -143,7 +182,7 @@ impl Model {
     /// Undo the last committed change. Returns its label.
     pub fn undo(&mut self) -> Result<String> {
         let (label, prev) = self.undo.pop().ok_or(DocError::NothingTo("undo".into()))?;
-        match regenerate_cached(&prev, Some(&mut self.cache)) {
+        match self.regen(&prev) {
             Ok(eval) => {
                 let cur = std::mem::replace(&mut self.doc, prev);
                 self.eval = eval;
@@ -162,7 +201,7 @@ impl Model {
     /// Redo the last undone change. Returns its label.
     pub fn redo(&mut self) -> Result<String> {
         let (label, next) = self.redo.pop().ok_or(DocError::NothingTo("redo".into()))?;
-        match regenerate_cached(&next, Some(&mut self.cache)) {
+        match self.regen(&next) {
             Ok(eval) => {
                 let cur = std::mem::replace(&mut self.doc, next);
                 self.eval = eval;
