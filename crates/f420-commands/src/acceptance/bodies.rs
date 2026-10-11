@@ -8,7 +8,7 @@ use f420_document::{BodyId, DocError, FaceRef, FaceRole, FeatureId, SketchPlane}
 use f420_kernel::{Frame, VolumeResult};
 
 impl Run<'_> {
-    fn body(&self, id: BodyId) -> Option<BodySummary> {
+    pub(super) fn body(&self, id: BodyId) -> Option<BodySummary> {
         self.s.summary().bodies.into_iter().find(|b| b.id == id)
     }
 

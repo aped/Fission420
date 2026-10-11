@@ -6,6 +6,7 @@
 
 mod arcs;
 mod bodies;
+mod formats;
 mod scenarios;
 use crate::{Command, Response, Session, SketchTemplate, end_cap_of};
 use f420_document::{FeatureId, SketchPlane};
@@ -227,6 +228,8 @@ pub fn run(out_dir: &Path) -> Report {
     bodies::scenario_pattern(&mut r);
     bodies::scenario_mirror(&mut r);
     bodies::scenario_chamfer(&mut r);
+    formats::scenario_c(&mut r);
+    formats::scenario_d(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {

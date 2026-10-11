@@ -88,3 +88,6 @@ OCS arc, unsupported diagnostics (all-or-nothing, partial, layer filter), join t
 malformed/limit inputs and a garbage-input no-panic sweep; export → reimport round trip
 (supplementary). Writer validated with FreeCAD 1.1.4 and ezdxf 1.4.2
 (`tools/fixtures/dxf/validate_export.sh`, `ezdxf_check.py`): all PASS.
+
+## Command-level evidence
+Acceptance scenario D (`crates/f420-commands/src/acceptance/formats.rs`, steps "D.7"-"D.11"): FreeCAD contour -> sketch -> edit -> extrude -> STEP (FreeCAD-validated), DXF export read back by our importer and by FreeCAD (`tools/check_formats.sh`), declared inch and unitless files, reload without the sources; DXF onto an imported STEP face: `crates/f420-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.
