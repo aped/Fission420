@@ -10,6 +10,7 @@ mod exact;
 mod measure;
 mod mesh;
 mod step;
+mod step_in;
 
 pub use build::{cut_blind, cut_through_all, extrude, revolve};
 pub use measure::{
@@ -18,6 +19,10 @@ pub use measure::{
 };
 pub use mesh::{MeshCheck, TriMesh, check_mesh, tessellate, tessellate_display, write_stl_binary};
 pub use step::{export_step, export_step_bodies};
+pub use step_in::{
+    ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
+    import_step,
+};
 
 use serde::{Deserialize, Serialize};
 use truck_modeling::Solid;
