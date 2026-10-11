@@ -339,7 +339,7 @@ pub fn paint_sketch(
             }
             Constraint::SymmetricAboutPoint { center, .. } => {
                 if let Some(sp) = s.point_xy(*center).and_then(|p| pr.screen(p)) {
-                    targets.push((item, glyph("Sym", sp + egui::vec2(16.0, 12.0))));
+                    targets.push((item, glyph("Sym", sp + egui::vec2(22.0, 16.0))));
                 }
             }
             Constraint::FixedPoint { p, .. } if s.origin != Some(*p) => {

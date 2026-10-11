@@ -883,9 +883,10 @@ impl F420App {
                 None => format!("Face: {} — Create Sketch is available", info.description),
                 Some(why) => format!("Face: {} — {why}", info.description),
             };
+            // Right of the axis triad (bottom-left, ~90 points).
             chip(
                 &painter,
-                egui::pos2(rect.min.x + 10.0, rect.max.y - 34.0),
+                egui::pos2(rect.min.x + 110.0, rect.max.y - 34.0),
                 text,
                 Color32::from_gray(225),
             );
