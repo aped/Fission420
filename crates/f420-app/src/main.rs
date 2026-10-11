@@ -257,8 +257,10 @@ fn write_probe(path: &std::path::Path, app: &F420App, last: &mut String) {
             ss.editor.sketch.dimensions().len()
         )
     });
+    static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
-        "{{\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing}}}",
+        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing}}}",
         s.open,
         s.revision,
         s.features.len(),

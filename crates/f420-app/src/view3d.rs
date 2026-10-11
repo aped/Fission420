@@ -26,6 +26,11 @@ use crate::probe::Probe as _;
 use crate::sketch_edit::{Item, SketchTool, StateKind, View};
 use crate::sketch_view::{self, PALETTE, Projector, SketchStyle};
 
+/// Press-to-release movement (points) below which a press is a click.
+const CLICK_SLOP_PX: f32 = 6.0;
+/// Maximum interval (s) between two clicks of a double click.
+const DOUBLE_CLICK_S: f64 = 0.3;
+
 /// Number-row view shortcuts (shown in Help).
 pub const VIEW_KEYS: &[(egui::Key, ViewPreset)] = &[
     (egui::Key::Num7, ViewPreset::Top),
@@ -643,13 +648,7 @@ impl F420App {
             rect,
             frame: s.frame,
         };
-        let (shift, origin, latest) = ui.input(|i| {
-            (
-                i.modifiers.shift,
-                i.pointer.press_origin(),
-                i.pointer.latest_pos(),
-            )
-        });
+        let shift = ui.input(|i| i.modifiers.shift);
         let grid = grid_mm.map(f64::from).or_else(|| {
             let ppm = f420_viewport::pixels_per_mm(&cam, rect.height());
             Some(f64::from(f420_viewport::adaptive_grid_spacing(
@@ -666,48 +665,114 @@ impl F420App {
         if ed.dim_edit.is_some() {
             return;
         }
-        let prim = egui::PointerButton::Primary;
-        if let Some(h) = resp.hover_pos().or(latest.filter(|_| ed.dragging()))
-            && let Some(p) = pr.unproject(h)
-        {
-            ed.pointer_move(p, Some(h), &view_at(p));
-        } else if !ed.dragging() {
-            ed.cursor = None;
-            ed.hover = None;
-        }
-        if resp.drag_started_by(prim)
-            && let Some(o) = origin
-            && let Some(p) = pr.unproject(o)
-        {
-            if ed.tool == SketchTool::Select {
-                ed.press(p, Some(o), &view_at(p));
-            } else {
-                ed.pointer_move(p, Some(o), &view_at(p));
-                ed.click(p, Some(o), &view_at(p), shift);
+        // Clicks and drags are derived from the raw primary-button events in
+        // order, each at its own position. egui's response-level click uses the
+        // pointer's latest position and reports one click per frame, which
+        // misplaces or drops clicks when a slow frame batches a release with the
+        // next movement (observed with real input).
+        let layer = ui.layer_id();
+        let ctx = ui.ctx().clone();
+        let (events, now) = ui.input(|i| (i.events.clone(), i.time));
+        let in_view = |p: Pos2| rect.contains(p) && ctx.layer_id_at(p) == Some(layer);
+        let trace = std::env::var_os("F420_TRACE_ENGINE").is_some();
+        let mut saw_pointer = false;
+        for ev in events {
+            match ev {
+                egui::Event::PointerMoved(m) => {
+                    saw_pointer = true;
+                    if let Some(o) = s.press
+                        && !s.press_dragging
+                        && o.distance(m) > CLICK_SLOP_PX
+                    {
+                        // Drag starts at the press position.
+                        s.press_dragging = true;
+                        if let Some(p) = pr.unproject(o) {
+                            if ed.tool == SketchTool::Select {
+                                ed.press(p, Some(o), &view_at(p));
+                            } else {
+                                ed.pointer_move(p, Some(o), &view_at(p));
+                                ed.click(p, Some(o), &view_at(p), shift);
+                            }
+                        }
+                    }
+                    if (s.press.is_some() || in_view(m))
+                        && let Some(p) = pr.unproject(m)
+                    {
+                        ed.pointer_move(p, Some(m), &view_at(p));
+                    }
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } if in_view(pos) => {
+                    saw_pointer = true;
+                    s.press = Some(pos);
+                    s.press_dragging = false;
+                    if let Some(p) = pr.unproject(pos) {
+                        ed.pointer_move(p, Some(pos), &view_at(p));
+                    }
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                } => {
+                    let Some(origin) = s.press.take() else {
+                        continue;
+                    };
+                    saw_pointer = true;
+                    let dragged = std::mem::take(&mut s.press_dragging);
+                    let Some(p) = pr.unproject(pos) else { continue };
+                    let v = View {
+                        snapping: !modifiers.shift,
+                        ..view_at(p)
+                    };
+                    if trace {
+                        eprintln!(
+                            "{:.3} ui: sketch release at {pos:?} (pressed {origin:?}) dragged={dragged} tool={:?}",
+                            crate::engine::trace_clock(),
+                            ed.tool
+                        );
+                    }
+                    ed.pointer_move(p, Some(pos), &v);
+                    if dragged {
+                        if ed.tool == SketchTool::Select {
+                            ed.release();
+                        } else {
+                            ed.click(p, Some(pos), &v, modifiers.shift);
+                        }
+                        s.last_click = None;
+                    } else {
+                        ed.click(p, Some(pos), &v, modifiers.shift);
+                        let double = s.last_click.is_some_and(|(lp, lt)| {
+                            now - lt < DOUBLE_CLICK_S && lp.distance(pos) <= CLICK_SLOP_PX
+                        });
+                        if double {
+                            ed.double_click(p, Some(pos), &v);
+                            s.last_click = None;
+                        } else {
+                            s.last_click = Some((pos, now));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
-        if resp.drag_stopped_by(prim) {
-            if ed.tool == SketchTool::Select {
-                ed.release();
-            } else if let Some(l) = latest
-                && let Some(p) = pr.unproject(l)
-                // A long press without movement is not a second click.
-                && origin.is_some_and(|o| o.distance(l) > 6.0)
+        // Keep the hover preview current between pointer events.
+        if !saw_pointer {
+            if let Some(h) = resp.hover_pos()
+                && let Some(p) = pr.unproject(h)
             {
-                ed.click(p, Some(l), &view_at(p), shift);
+                if !ed.dragging() {
+                    ed.pointer_move(p, Some(h), &view_at(p));
+                }
+            } else if !ed.dragging() && s.press.is_none() {
+                ed.cursor = None;
+                ed.hover = None;
             }
-        }
-        if resp.clicked_by(prim)
-            && let Some(c) = resp.interact_pointer_pos()
-            && let Some(p) = pr.unproject(c)
-        {
-            ed.click(p, Some(c), &view_at(p), shift);
-        }
-        if resp.double_clicked()
-            && let Some(c) = resp.interact_pointer_pos()
-            && let Some(p) = pr.unproject(c)
-        {
-            ed.double_click(p, Some(c), &view_at(p));
         }
         if resp.clicked_by(egui::PointerButton::Secondary) {
             ed.finish_chain();

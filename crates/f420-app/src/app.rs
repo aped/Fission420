@@ -133,6 +133,12 @@ pub struct SketchSession {
     pub saved_camera: Option<Camera>,
     /// Finish was pressed; waiting for the commit reply.
     pub committing: bool,
+    /// Primary press inside the view (screen position), until its release.
+    pub(crate) press: Option<egui::Pos2>,
+    /// The current press has moved beyond the click slop (a drag).
+    pub(crate) press_dragging: bool,
+    /// Last click (position, time) for double-click detection.
+    pub(crate) last_click: Option<(egui::Pos2, f64)>,
 }
 
 /// Actions that discard the open document and therefore need confirmation
@@ -1088,6 +1094,9 @@ impl F420App {
             doc_id: self.summary.open.then_some(self.summary.doc_id),
             saved_camera,
             committing: false,
+            press: None,
+            press_dragging: false,
+            last_click: None,
         });
         self.orient_to_sketch();
     }
