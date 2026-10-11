@@ -226,7 +226,11 @@ impl F420App {
                 .as_ref()
                 .map(|s| s.id)
                 .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Cut { sketch });
+            self.dialog = Some(Dialog::Cut {
+                sketch,
+                blind: false,
+                depth: "5".into(),
+            });
         }
         let revolve_block = if !has_sketch {
             Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
@@ -462,6 +466,7 @@ impl F420App {
                 "extrude" => "Extrude",
                 "revolve" => "Revolve",
                 "cut_through_all" => "Cut",
+                "pocket" => "Pocket",
                 k => k,
             };
             ui.horizontal(|ui| {
@@ -587,8 +592,12 @@ impl F420App {
                         });
                     }
                     let cb = self.cut_blocker(&f);
-                    if action(ui, "Cut through all with this sketch…", cb.as_deref()) {
-                        self.dialog = Some(Dialog::Cut { sketch: Some(f.id) });
+                    if action(ui, "Cut with this sketch…", cb.as_deref()) {
+                        self.dialog = Some(Dialog::Cut {
+                            sketch: Some(f.id),
+                            blind: false,
+                            depth: "5".into(),
+                        });
                     }
                 });
                 match &f.profile_error {
@@ -1014,8 +1023,22 @@ impl F420App {
                         ui.small("Centre in the end cap's frame (the profile sketch's X/Y).");
                         ui.small("Attached semantically to the extrusion's end cap face.");
                     }
-                    Dialog::Cut { sketch } => {
+                    Dialog::Cut {
+                        sketch,
+                        blind,
+                        depth,
+                    } => {
                         feature_combo(ui, "Cut profile sketch", sketch, &sketches);
+                        ui.horizontal(|ui| {
+                            ui.radio_value(blind, false, "Through all");
+                            ui.radio_value(blind, true, "Blind depth");
+                        });
+                        if *blind {
+                            num_field(ui, "Pocket depth (mm)", depth);
+                            ui.small("Cut from the sketch's cap face into the material; must be shallower than the part.");
+                        } else {
+                            ui.small("Removes material in both directions along the sketch normal.");
+                        }
                     }
                     Dialog::SaveAs { path } | Dialog::Open { path } => {
                         text_field(ui, "File path", path);

@@ -741,3 +741,57 @@ fn help_and_escape_in_model_mode() {
     assert!(h.query_by_label_contains("Ctrl+Z undo").is_none());
     let _ = Modifiers::NONE;
 }
+
+/// Stretch 1: blind circular pocket with explicit depth vs through-all choice.
+#[test]
+fn blind_pocket_through_cut_dialog() {
+    let mut h = harness(ExecMode::Sync);
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Rectangle on XY…");
+    click(&mut h, "OK");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Circle on face…");
+    click(&mut h, "OK");
+    click(&mut h, "Cut through all…");
+    h.get_by_label("Blind depth").click();
+    let _ = h.try_run();
+    type_into(&mut h, "Pocket depth (mm)", "4");
+    click(&mut h, "OK");
+    let pocket = h.state().summary().features.last().unwrap().clone();
+    assert_eq!(pocket.kind, "pocket");
+    assert_volume(&h, 80.0 * 50.0 * 10.0 - PI * 25.0 * 4.0);
+    let m = h.state().measurements().unwrap();
+    assert_eq!(m.shell_count, 1);
+    assert!(m.all_shells_closed);
+    // Depth is an editable parameter; an over-deep pocket is refused unchanged.
+    click(&mut h, &pocket.name);
+    type_into(&mut h, "depth (mm)", "6");
+    click(&mut h, "Apply");
+    assert_volume(&h, 80.0 * 50.0 * 10.0 - PI * 25.0 * 6.0);
+    let rev = h.state().summary().revision;
+    type_into(&mut h, "depth (mm)", "12");
+    click(&mut h, "Apply");
+    assert_eq!(
+        h.state().summary().revision,
+        rev,
+        "over-deep pocket rejected"
+    );
+    assert!(h.state().diagnostics().last().unwrap().error);
+    assert_volume(&h, 80.0 * 50.0 * 10.0 - PI * 25.0 * 6.0);
+    // The pocket's faces are attributed to it for highlighting: one planar floor
+    // plus its cylindrical wall (Truck splits the wall into several faces).
+    let owned: Vec<_> = h
+        .state()
+        .faces()
+        .iter()
+        .filter(|f| f.owner == Some(pocket.id))
+        .collect();
+    assert_eq!(owned.iter().filter(|f| f.planar).count(), 1, "{owned:?}");
+    assert!(owned.iter().any(|f| !f.planar), "{owned:?}");
+    assert!(owned.iter().all(|f| f.reference.is_none()));
+}

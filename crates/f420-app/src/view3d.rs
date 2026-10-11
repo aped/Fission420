@@ -112,7 +112,7 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
         .find(|f| f.kind == "extrude" || f.kind == "revolve");
     let holes: Vec<(FeatureId, [f64; 3], [f64; 3], f64)> = features
         .iter()
-        .filter(|f| f.kind == "cut_through_all")
+        .filter(|f| f.kind == "cut_through_all" || f.kind == "pocket")
         .filter_map(|c| {
             let s = features
                 .iter()
@@ -142,6 +142,26 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
                 })
                 .flatten()
                 .map(|fs| fs.reference);
+            let floor = planar
+                .then(|| {
+                    features.iter().filter(|f| f.kind == "pocket").find(|pk| {
+                        let depth = pk
+                            .parameters
+                            .iter()
+                            .find(|(n, _)| n == "depth")
+                            .map_or(0.0, |(_, v)| *v);
+                        holes.iter().any(|(id, c, axis, r)| {
+                            *id == pk.id
+                                && dot(n0, *axis).abs() > 1.0 - 1e-4
+                                && (dot(sub(p0, *c), *axis) + depth).abs() <= plane_tol
+                                && pts
+                                    .iter()
+                                    .all(|p| norm(cross(sub(*p, *c), *axis)) <= r + cyl_tol)
+                        })
+                    })
+                })
+                .flatten()
+                .map(|pk| pk.id);
             let hole = (!planar)
                 .then(|| {
                     holes.iter().find(|(_, c, axis, r)| {
@@ -172,6 +192,8 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
                         r.role
                     ),
                 )
+            } else if let Some(id) = floor {
+                (Some(id), format!("Floor of {}", name(id)))
             } else if let Some((id, ..)) = hole {
                 (Some(*id), format!("Hole wall of {}", name(*id)))
             } else if let Some(b) = base {

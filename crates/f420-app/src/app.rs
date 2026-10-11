@@ -69,8 +69,11 @@ pub(crate) enum Dialog {
         cx: String,
         cy: String,
     },
+    /// Circular cut from a cap sketch: through all, or a blind pocket of `depth`.
     Cut {
         sketch: Option<FeatureId>,
+        blind: bool,
+        depth: String,
     },
     SaveAs {
         path: String,
@@ -95,7 +98,7 @@ impl Dialog {
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
             Dialog::Revolve { .. } => "New revolve (about world Z)",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
-            Dialog::Cut { .. } => "New through-all cut",
+            Dialog::Cut { .. } => "New cut",
             Dialog::SaveAs { .. } => "Save document as",
             Dialog::Open { .. } => "Open document",
             Dialog::ExportStl { .. } => "Export STL",
@@ -667,6 +670,13 @@ impl F420App {
             ..
         } = r;
         let doc_changed = summary.doc_id != self.summary.doc_id;
+        // A superseded edit was skipped by the worker because a newer edit of the
+        // same parameter is queued; its summary is not a result. Keep the user's
+        // buffers and wait for the reply that carries the result.
+        if response.superseded {
+            self.summary = summary;
+            return;
+        }
         if response.ok {
             let mut text = format!("{} ok", response.command);
             if let Some(f) = response.feature {
@@ -1159,6 +1169,11 @@ impl F420App {
             .any(|f| f.kind == "extrude" || f.kind == "revolve")
     }
 
+    /// Cut/pocket features (both consume a circular cap sketch).
+    pub(crate) fn is_cut_kind(kind: &str) -> bool {
+        kind == "cut_through_all" || kind == "pocket"
+    }
+
     pub(crate) fn feature_name(&self, id: FeatureId) -> String {
         self.summary
             .features
@@ -1215,7 +1230,7 @@ impl F420App {
             .sketch
             .as_ref()
             .is_some_and(|s| matches!(s.profile(), Ok(f420_sketch::Profile::Circle { .. })));
-        (!circle).then(|| "Only circular through-all cuts are supported (product limit)".into())
+        (!circle).then(|| "Only circular cuts and pockets are supported (product limit)".into())
     }
 
     // ----- demo -----
@@ -1603,9 +1618,22 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                 center: Some([parse_num("center X", cx)?, parse_num("center Y", cy)?]),
             },
         },
-        Dialog::Cut { sketch } => Command::CutThroughAll {
+        Dialog::Cut {
+            sketch,
+            blind: false,
+            ..
+        } => Command::CutThroughAll {
             name: None,
             sketch: need(sketch, "profile sketch")?,
+        },
+        Dialog::Cut {
+            sketch,
+            blind: true,
+            depth,
+        } => Command::Pocket {
+            name: None,
+            sketch: need(sketch, "profile sketch")?,
+            depth: parse_num("depth", depth)?,
         },
         Dialog::SaveAs { path } => Command::Save {
             path: nonempty_path(path)?,

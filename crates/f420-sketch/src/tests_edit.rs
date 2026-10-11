@@ -351,7 +351,7 @@ fn constraint_labels_are_human_readable() {
     assert_eq!(
         s.constraint_label(width_idx),
         format!(
-            "width = 80 mm (horizontal P{}→P{})",
+            "width = 80 mm (horizontal P{} to P{})",
             r.corners[0].0, r.corners[1].0
         )
     );
