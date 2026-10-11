@@ -249,6 +249,13 @@ pub enum FeatureKind {
         spacing: f64,
         direction: [f64; 2],
     },
+    /// Apply the reflection of `seed`'s tool (an Extrude Join or Cut) across
+    /// `plane` (a world plane through the origin or a planar face) to the seed's
+    /// target body. The seed itself stays; this adds the mirrored copy.
+    Mirror {
+        seed: FeatureId,
+        plane: SketchPlane,
+    },
 }
 
 impl FeatureKind {
@@ -285,6 +292,11 @@ impl Feature {
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
             FeatureKind::LinearPattern { seed, .. } => vec![*seed],
+            FeatureKind::Mirror {
+                seed,
+                plane: SketchPlane::Face(r),
+            } => vec![*seed, r.feature],
+            FeatureKind::Mirror { seed, .. } => vec![*seed],
             FeatureKind::ImportStep { .. } | FeatureKind::ImportMesh { .. } => vec![],
         }
     }
@@ -344,7 +356,11 @@ impl Feature {
                 ..
             } => vec![],
             FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
-            FeatureKind::Cut { .. } | FeatureKind::ImportStep { .. } => vec![],
+            FeatureKind::Cut { .. }
+            | FeatureKind::ImportStep { .. }
+            | FeatureKind::Mirror { .. } => {
+                vec![]
+            }
             FeatureKind::ImportMesh { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::LinearPattern { count, spacing, .. } => vec![

@@ -980,3 +980,108 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
     r.ok("reopen", &x);
     r.check_body_solid("reopened", b, v(3.0), [0.0, 0.0, 0.0], [80.0, 20.0, 5.0]);
 }
+
+/// Backlog 5 (mirror) and Join patterns: a centred bar, a boss and a hole on its
+/// left half mirrored across world YZ, and the boss patterned once along +x.
+pub(super) fn scenario_mirror(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3M.1 bar, boss, mirror".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let Some(sb) = r.polygon(
+        "Bar",
+        SketchPlane::WorldXY,
+        &[[-40.0, 0.0], [40.0, 0.0], [40.0, 20.0], [-40.0, 20.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Bar", sb, 10.0, ExtrudeOp::NewBody, None, false, None);
+    let Some(bar) = r.ok("extrude bar 80x20x10", &x) else {
+        return;
+    };
+    let top = SketchPlane::Face(FaceRef {
+        feature: bar,
+        role: FaceRole::ExtrudeEndCap,
+    });
+    let Some(sboss) = r.polygon(
+        "Boss",
+        top,
+        &[[-35.0, 5.0], [-25.0, 5.0], [-25.0, 15.0], [-35.0, 15.0]],
+    ) else {
+        return;
+    };
+    let x = r.extrude_op("Boss", sboss, 5.0, ExtrudeOp::Join, None, false, None);
+    let Some(boss) = r.ok("join boss 10x10x5", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Mirror {
+        name: None,
+        feature: boss,
+        plane: SketchPlane::WorldYZ,
+    });
+    r.ok("mirror boss across YZ", &x);
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 16000 + 2 * 500.
+    r.check_body_solid(
+        "bar + 2 bosses",
+        b,
+        17000.0,
+        [-40.0, 0.0, 0.0],
+        [40.0, 20.0, 15.0],
+    );
+
+    r.step = "3M.2 hole, mirror, pattern the boss".into();
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Hole".into()),
+        plane: top,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 6.0,
+            center: Some([-5.0, 10.0]),
+        },
+    });
+    let Some(sh) = r.ok("hole sketch", &x) else {
+        return;
+    };
+    let x = r.extrude_op("Hole", sh, 0.0, ExtrudeOp::Cut, None, true, None);
+    let Some(hole) = r.ok("through-all hole", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Mirror {
+        name: None,
+        feature: hole,
+        plane: SketchPlane::WorldYZ,
+    });
+    r.ok("mirror hole across YZ", &x);
+    let x = r.exec(Command::LinearPattern {
+        name: None,
+        feature: boss,
+        count: 2,
+        spacing: 14.0,
+        direction: [1.0, 0.0],
+    });
+    r.ok("pattern boss x2 at 14 mm (join pattern)", &x);
+    let want = 16000.0 + 3.0 * 500.0 - 2.0 * PI * 9.0 * 10.0;
+    r.check_body_solid("final", b, want, [-40.0, 0.0, 0.0], [40.0, 20.0, 15.0]);
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("mirror_pattern.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+    // A mirrored join that would land off the support face is refused: mirror the
+    // boss across world XZ (y -> -y: outside the bar's top face).
+    r.refused(
+        "mirror boss across XZ (off the face)",
+        Command::Mirror {
+            name: None,
+            feature: boss,
+            plane: SketchPlane::WorldXZ,
+        },
+        "not inside a face",
+    );
+}

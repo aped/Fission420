@@ -105,6 +105,14 @@ pub enum Command {
         spacing: f64,
         direction: [f64; 2],
     },
+    /// Add the mirror image of an Extrude Join/Cut's tool across `plane` (world
+    /// plane through the origin, or a planar face) to the seed's target body.
+    Mirror {
+        #[serde(default)]
+        name: Option<String>,
+        feature: FeatureId,
+        plane: SketchPlane,
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -227,6 +235,7 @@ impl Command {
             Command::Pocket { .. } => "pocket",
             Command::Revolve { .. } => "revolve",
             Command::LinearPattern { .. } => "linear_pattern",
+            Command::Mirror { .. } => "mirror",
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
@@ -734,6 +743,18 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Mirror {
+                name,
+                feature,
+                plane,
+            } => {
+                let (name, seed, plane) = (name.clone(), *feature, *plane);
+                let id = self.model_mut()?.transact("Mirror", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Mirror"));
+                    Ok(d.push(n, FeatureKind::Mirror { seed, plane }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetParameter {
                 feature,
                 name,
@@ -1192,6 +1213,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::ImportStep { .. } => ("import_step", None),
                 FeatureKind::ImportMesh { .. } => ("import_mesh", None),
                 FeatureKind::LinearPattern { .. } => ("linear_pattern", None),
+                FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {

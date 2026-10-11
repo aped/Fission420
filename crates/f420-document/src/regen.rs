@@ -259,6 +259,8 @@ struct ExtrudeOut {
     /// Tool span `[a, b]` along the sketch normal actually used (after
     /// overlap/margin adjustments).
     span: (f64, f64),
+    /// The sketch plane holds a face of the target (Join/Cut from a face).
+    on_face: bool,
     /// New/Join (material added) vs Cut (material removed).
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
@@ -576,6 +578,16 @@ pub fn regenerate_cached_opts(
                     &mut st, id, *seed, *count, *spacing, *direction,
                 )?);
             }
+            FeatureKind::Mirror { seed, plane } => {
+                let frame = match plane {
+                    SketchPlane::WorldXY => Frame::XY,
+                    SketchPlane::WorldXZ => Frame::XZ,
+                    SketchPlane::WorldYZ => FRAME_YZ,
+                    SketchPlane::Face(fr) => resolve_face(id, fr, &st)?.frame,
+                };
+                r.frame = Some(frame);
+                r.body = Some(mirror_feature(&mut st, id, *seed, &frame)?);
+            }
             FeatureKind::ImportMesh { blob, to_mm, body } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;
@@ -833,6 +845,7 @@ fn extrude_feature(
         entities,
         holes,
         span: (0.0, 0.0),
+        on_face: side.is_some(),
         removes: false,
         joined: false,
         body: BodyId(0),
@@ -948,16 +961,38 @@ fn extrude_feature(
     Ok(out)
 }
 
-/// Linear pattern of an Extrude Cut: the seed's exact tool (same span along
-/// the sketch normal) translated in the sketch plane, cut from the seed's target.
-fn linear_pattern(
-    st: &mut Snapshot,
+/// Apply one transformed copy of extrusion `e`'s tool (`frame` replaces the
+/// seed's sketch frame; the span along its normal is the seed's) to `body`.
+/// Join copies sketched on a face must again lie inside a face of the body (the
+/// seed's overlap into the material is only exact there).
+fn apply_tool_copy(
+    body: &Body,
+    e: &ExtrudeOut,
+    frame: &Frame,
+    what: &str,
     id: FeatureId,
-    seed: FeatureId,
-    count: u32,
-    spacing: f64,
-    direction: [f64; 2],
-) -> Result<BodyId> {
+) -> Result<Body> {
+    let kp = to_kernel(&e.profile);
+    let start = frame.offset(e.span.0);
+    let len = e.span.1 - e.span.0;
+    let err = |err: k::KernelError| DocError::Kernel {
+        feature: id,
+        detail: format!("{what}: {err}"),
+    };
+    if e.removes {
+        return k::cut_prism(body, &kp, &start, len).map_err(err);
+    }
+    if e.on_face && !k::profile_within_face(body, frame, &kp).map_err(err)? {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: {what}: the joined copy is not inside a face of the target (its \
+             sketch plane holds no face under the whole profile)"
+        )));
+    }
+    k::join_prism(body, &kp, &start, len).map_err(err)
+}
+
+/// Pattern/mirror seeds: an evaluated Extrude Join or Cut.
+fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<ExtrudeOut> {
     let e = st
         .extrudes
         .get(&seed)
@@ -966,11 +1001,26 @@ fn linear_pattern(
             from: id,
             detail: format!("{seed} is not an evaluated extrusion"),
         })?;
-    if !e.removes {
+    if !e.removes && !e.joined {
         return Err(DocError::ProductLimit(format!(
-            "{id}: patterns are supported for Extrude Cut features ({seed} is not a cut)"
+            "{id}: patterns and mirrors copy Extrude Join or Cut features ({seed} creates a \
+             body)"
         )));
     }
+    Ok(e)
+}
+
+/// Linear pattern of an Extrude Join/Cut: the seed's exact tool (same span along
+/// the sketch normal) translated in the sketch plane, applied to the seed's target.
+fn linear_pattern(
+    st: &mut Snapshot,
+    id: FeatureId,
+    seed: FeatureId,
+    count: u32,
+    spacing: f64,
+    direction: [f64; 2],
+) -> Result<BodyId> {
+    let e = copy_seed(st, id, seed)?;
     if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
         return Err(DocError::Validation(format!(
             "{id}.count: must be in 2..={}, got {count}",
@@ -995,7 +1045,6 @@ fn linear_pattern(
         f.x[1] * d[0] + f.y[1] * d[1],
         f.x[2] * d[0] + f.y[2] * d[1],
     ];
-    let kp = to_kernel(&e.profile);
     let mut body = brep_target(st, id, e.body)?;
     for i in 1..count {
         let t = spacing * f64::from(i);
@@ -1007,14 +1056,51 @@ fn linear_pattern(
             ],
             ..f
         };
-        body = k::cut_prism(&body, &kp, &frame.offset(e.span.0), e.span.1 - e.span.0).map_err(
-            |err| DocError::Kernel {
-                feature: id,
-                detail: format!("instance {} of {count}: {err}", i + 1),
-            },
+        body = apply_tool_copy(
+            &body,
+            &e,
+            &frame,
+            &format!("instance {} of {count}", i + 1),
+            id,
         )?;
     }
     replace_body(st, id, e.body, body);
+    Ok(e.body)
+}
+
+/// Mirror of an Extrude Join/Cut across the plane of `mirror` (z = plane
+/// normal): the reflected tool, applied to the seed's target. A reflection
+/// reverses orientation, so the copy uses the right-handed frame (R o, R x, R y,
+/// R x × R y = −R z) with the same 2D profile, and the span along the normal is
+/// negated (−b..−a) so the tool still extends along R z.
+fn mirror_feature(
+    st: &mut Snapshot,
+    id: FeatureId,
+    seed: FeatureId,
+    mirror: &Frame,
+) -> Result<BodyId> {
+    let mut e = copy_seed(st, id, seed)?;
+    let n = mirror.z;
+    let refl_v = |v: [f64; 3]| {
+        let d = 2.0 * dot(v, n);
+        [v[0] - d * n[0], v[1] - d * n[1], v[2] - d * n[2]]
+    };
+    let refl_p = |p: [f64; 3]| {
+        let d = 2.0 * dot(sub(p, mirror.origin), n);
+        [p[0] - d * n[0], p[1] - d * n[1], p[2] - d * n[2]]
+    };
+    let f = e.start;
+    let (x, y) = (refl_v(f.x), refl_v(f.y));
+    let frame = Frame {
+        origin: refl_p(f.origin),
+        x,
+        y,
+        z: cross(x, y),
+    };
+    e.span = (-e.span.1, -e.span.0);
+    let body = brep_target(st, id, e.body)?;
+    let out = apply_tool_copy(&body, &e, &frame, "mirrored copy", id)?;
+    replace_body(st, id, e.body, out);
     Ok(e.body)
 }
 

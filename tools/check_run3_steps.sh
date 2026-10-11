@@ -50,4 +50,9 @@ check nested_loops.step "[(80*50 - 25*math.pi - 60)*10]" "[0,0,0,80,50,10]" \
 # 3P: 80x20x5 bar, Ø5 through holes at x = 10, 40, 70 (y = 10).
 check pattern.step "[80*20*5 - 3*math.pi*2.5**2*5]" "[0,0,0,80,20,5]" \
   "[[10,10,2.5],[40,10,2.5],[70,10,2.5],[25,10,2.5],[55,10,2.5]]" "[False, False, False, True, True]"
+# 3M: bar [-40,40]x[0,20]x10; bosses 10x10x5 at x [-35,-25] (seed), [25,35] (mirror),
+#     [-21,-11] (pattern); Ø6 through holes at (-5,10) and (5,10) (mirror).
+check mirror_pattern.step "[16000 + 3*500 - 2*math.pi*9*10]" "[-40,0,0,40,20,15]" \
+  "[[-30,10,12],[30,10,12],[-16,10,12],[16,10,12],[-5,10,5],[5,10,5],[0,10,5]]" \
+  "[True, True, True, False, False, False, True]"
 exit $status
