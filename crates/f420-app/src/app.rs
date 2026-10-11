@@ -413,6 +413,10 @@ impl F420App {
     pub fn replies_seen(&self) -> u64 {
         self.replies_seen
     }
+    /// A started `--scene` has run all its steps and fitted the view.
+    pub fn scene_fitted(&self) -> bool {
+        self.scene_fitted && self.scene_steps.is_empty()
+    }
     /// No command in flight, no deferred measurement outstanding, no demo steps left.
     pub fn idle(&self) -> bool {
         !self.engine.busy()
