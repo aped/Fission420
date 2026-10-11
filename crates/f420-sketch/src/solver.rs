@@ -44,6 +44,40 @@ enum Eq {
     Tangent { p: usize, c: usize, q: usize },
     /// `|a - c| - x[r]` (point x columns `c`, `a`; radius column `r`).
     DistVar { c: usize, a: usize, r: usize },
+    /// Line-line angle: `k · (u_a × u_b)` (`perp == false`, parallel) or
+    /// `k · (u_a · u_b)` (`perp == true`, perpendicular), where `u_a` is the
+    /// unit direction `a0 -> a1`, `u_b` the unit direction `b0 -> b1` and `k`
+    /// the sketch scale (mm, fixed when the system is built). The residual is
+    /// `k sin θ` / `k cos θ` in mm and every Jacobian entry is `k / length`,
+    /// dimensionless.
+    LineAngle {
+        a0: usize,
+        a1: usize,
+        b0: usize,
+        b1: usize,
+        k: f64,
+        perp: bool,
+    },
+    /// `u × (p - a)` with `u` the unit direction `a -> b`: signed distance (mm)
+    /// of point `p` from the infinite line through `a`, `b`.
+    PointLine { p: usize, a: usize, b: usize },
+}
+
+/// Adds the partial derivatives of `f(u)` (with `u = (q - p)/|q - p|`, the
+/// unit direction from point column `p` to `q`) into `row`, given the
+/// gradient `g = df/du`: `df/d(q - p) = (g - (g·u) u) / |q - p|`. Zero below
+/// [`DIST_GRAD_FLOOR`], where [`unit`] returns a fixed direction.
+fn add_unit_grad(x: &[f64], j: &mut DMatrix<f64>, row: usize, p: usize, q: usize, g: (f64, f64)) {
+    let (ux, uy, l) = unit(x, p, q);
+    if l <= DIST_GRAD_FLOOR {
+        return;
+    }
+    let gu = g.0 * ux + g.1 * uy;
+    let (wx, wy) = ((g.0 - gu * ux) / l, (g.1 - gu * uy) / l);
+    j[(row, q)] += wx;
+    j[(row, q + 1)] += wy;
+    j[(row, p)] -= wx;
+    j[(row, p + 1)] -= wy;
 }
 
 /// Unit vector from `a` to `b` (x columns) and the distance; a fixed unit
@@ -78,6 +112,26 @@ impl Eq {
                 (x[p] - x[c]) * ux + (x[p + 1] - x[c + 1]) * uy
             }
             Eq::DistVar { c, a, r } => (x[a] - x[c]).hypot(x[a + 1] - x[c + 1]) - x[r],
+            Eq::LineAngle {
+                a0,
+                a1,
+                b0,
+                b1,
+                k,
+                perp,
+            } => {
+                let (ax, ay, _) = unit(x, a0, a1);
+                let (bx, by, _) = unit(x, b0, b1);
+                if perp {
+                    k * (ax * bx + ay * by)
+                } else {
+                    k * (ax * by - ay * bx)
+                }
+            }
+            Eq::PointLine { p, a, b } => {
+                let (ux, uy, _) = unit(x, a, b);
+                ux * (x[p + 1] - x[a + 1]) - uy * (x[p] - x[a])
+            }
         }
     }
 
@@ -140,6 +194,38 @@ impl Eq {
                 j[(row, c)] -= ux;
                 j[(row, c + 1)] -= uy;
                 j[(row, r)] -= 1.0;
+            }
+            Eq::LineAngle {
+                a0,
+                a1,
+                b0,
+                b1,
+                k,
+                perp,
+            } => {
+                let (ax, ay, _) = unit(x, a0, a1);
+                let (bx, by, _) = unit(x, b0, b1);
+                // perp: f = k u_a·u_b, df/du_a = k u_b, df/du_b = k u_a.
+                // parallel: f = k (ax by − ay bx), df/du_a = k (by, −bx),
+                // df/du_b = k (−ay, ax).
+                let (ga, gb) = if perp {
+                    ((k * bx, k * by), (k * ax, k * ay))
+                } else {
+                    ((k * by, -k * bx), (-k * ay, k * ax))
+                };
+                add_unit_grad(x, j, row, a0, a1, ga);
+                add_unit_grad(x, j, row, b0, b1, gb);
+            }
+            Eq::PointLine { p, a, b } => {
+                // f = u × v with v = p − a: df/dv = (−uy, ux) (moves p and a);
+                // df/du = (vy, −vx) (through u = (b − a)/|b − a|).
+                let (ux, uy, _) = unit(x, a, b);
+                let (vx, vy) = (x[p] - x[a], x[p + 1] - x[a + 1]);
+                j[(row, p)] -= uy;
+                j[(row, p + 1)] += ux;
+                j[(row, a)] += uy;
+                j[(row, a + 1)] -= ux;
+                add_unit_grad(x, j, row, a, b, (vy, -vx));
             }
         }
     }
@@ -211,6 +297,8 @@ impl System {
             }
         }
         let entity = |id: &crate::EntityId| s.entities.iter().find(|e| e.id() == *id);
+        // Fixed per build: scales the unit-vector line-angle rows to mm.
+        let angle_scale = s.scale();
         let mut eqs = Vec::new();
         let mut owner = Vec::new();
         for (ci, c) in s.constraints.iter().enumerate() {
@@ -315,6 +403,33 @@ impl System {
                             c: point_col[&c],
                             q: point_col[&q],
                         });
+                    }
+                }
+                Constraint::Parallel { a, b } | Constraint::Perpendicular { a, b } => {
+                    if let (Some(&(a0, a1)), Some(&(b0, b1))) = (lines.get(a), lines.get(b)) {
+                        push(Eq::LineAngle {
+                            a0,
+                            a1,
+                            b0,
+                            b1,
+                            k: angle_scale,
+                            perp: matches!(c, Constraint::Perpendicular { .. }),
+                        });
+                    }
+                }
+                Constraint::EqualLength { a, b } => {
+                    if let (Some(&(a0, a1)), Some(&(b0, b1))) = (lines.get(a), lines.get(b)) {
+                        push(Eq::SameDist {
+                            c: a0,
+                            a: a1,
+                            d: b0,
+                            b: b1,
+                        });
+                    }
+                }
+                Constraint::PointOnLine { point, line } => {
+                    if let (Some(&p), Some(&(a, b))) = (point_col.get(point), lines.get(line)) {
+                        push(Eq::PointLine { p, a, b });
                     }
                 }
             }
@@ -585,6 +700,7 @@ mod tests {
         };
         let s = Sketch {
             origin: None,
+            construction: Default::default(),
             points: vec![
                 pt(0, 0.3, -0.2),
                 pt(1, 4.1, 1.7),
@@ -689,6 +805,7 @@ mod tests {
         };
         let s = Sketch {
             origin: None,
+            construction: Default::default(),
             points: vec![
                 pt(0, 0.4, -0.3),
                 pt(1, 9.1, 1.2),
@@ -785,6 +902,7 @@ mod tests {
     fn distance_row_is_finite_at_zero_length() {
         let s = Sketch {
             origin: None,
+            construction: Default::default(),
             points: vec![
                 SketchPoint {
                     id: PointId(0),
@@ -808,5 +926,119 @@ mod tests {
         let j = sys.jacobian(&sys.initial, &sys.all_rows());
         assert!(j.iter().all(|v| v.is_finite()));
         assert_eq!(rank(&j), 1);
+    }
+
+    /// Central-difference check of selected rows; step `h` (mm), max absolute
+    /// error returned.
+    fn fd_error(sys: &System, x0: &[f64], h: f64) -> f64 {
+        let rows = sys.all_rows();
+        let j = sys.jacobian(x0, &rows);
+        let mut max_err: f64 = 0.0;
+        for c in 0..sys.n {
+            let (mut xp, mut xm) = (x0.to_vec(), x0.to_vec());
+            xp[c] += h;
+            xm[c] -= h;
+            let (rp, rm) = (sys.residuals(&xp, &rows), sys.residuals(&xm, &rows));
+            for r in 0..rows.len() {
+                let fd = (rp[r] - rm[r]) / (2.0 * h);
+                max_err = max_err.max((fd - j[(r, c)]).abs());
+            }
+        }
+        max_err
+    }
+
+    /// Two lines L1 = P0->P1, L2 = P2->P3, point P4; every line relation.
+    fn line_relations(pts: [(f64, f64); 5]) -> Sketch {
+        let mut s = Sketch::default();
+        for (x, y) in pts {
+            s.add_point(x, y);
+        }
+        let l1 = s.add_line(PointId(0), PointId(1));
+        let l2 = s.add_line(PointId(2), PointId(3));
+        s.constraints = vec![
+            Constraint::Parallel { a: l1, b: l2 },
+            Constraint::Perpendicular { a: l1, b: l2 },
+            Constraint::EqualLength { a: l1, b: l2 },
+            Constraint::PointOnLine {
+                point: PointId(4),
+                line: l1,
+            },
+            Constraint::PointOnLine {
+                point: PointId(4),
+                line: l2,
+            },
+        ];
+        s.validate().unwrap();
+        s
+    }
+
+    /// Parallel / Perpendicular / EqualLength / PointOnLine rows against
+    /// central finite differences at a generic configuration, and the
+    /// residuals against hand-computed values.
+    #[test]
+    fn line_relation_rows_match_finite_differences() {
+        let s = line_relations([
+            (0.4, -0.3),
+            (9.1, 1.2),
+            (-1.5, 8.7),
+            (3.0, 13.0),
+            (2.0, 3.0),
+        ]);
+        let sys = System::build(&s);
+        assert_eq!(sys.eqs.len(), 5);
+        let x0 = sys.initial.clone();
+        let err = fd_error(&sys, &x0, 1e-6);
+        assert!(err < 1e-7, "Jacobian vs finite differences: {err:e}");
+
+        // Hand values. d1 = (8.7, 1.5), d2 = (4.5, 4.3); k = sketch scale = 13.
+        let (d1, d2) = ((8.7f64, 1.5f64), (4.5f64, 4.3f64));
+        let (n1, n2) = (d1.0.hypot(d1.1), d2.0.hypot(d2.1));
+        let k = 13.0;
+        let cross = (d1.0 * d2.1 - d1.1 * d2.0) / (n1 * n2);
+        let dot = (d1.0 * d2.0 + d1.1 * d2.1) / (n1 * n2);
+        let want = [
+            k * cross,
+            k * dot,
+            n1 - n2,
+            // P4 − P0 = (1.6, 3.3) against u1 = d1/|d1|.
+            (d1.0 * 3.3 - d1.1 * 1.6) / n1,
+            // P4 − P2 = (3.5, −5.7) against u2.
+            (d2.0 * -5.7 - d2.1 * 3.5) / n2,
+        ];
+        for (i, w) in want.iter().enumerate() {
+            let got = sys.eqs[i].eval(&x0);
+            assert!((got - w).abs() < 1e-12, "row {i}: {got} vs {w}");
+        }
+    }
+
+    /// Near-degenerate short lines (1e-3 mm and 1e-5 mm in a 13 mm sketch):
+    /// the rows stay finite and the analytic Jacobian still matches finite
+    /// differences (relative to the largest entry; steps well below the
+    /// line length).
+    #[test]
+    fn line_relation_rows_near_degenerate() {
+        for len in [1e-3, 1e-5] {
+            let s = line_relations([
+                (0.4, -0.3),
+                (0.4 + 0.6 * len, -0.3 + 0.8 * len),
+                (-1.5, 8.7),
+                (3.0, 13.0),
+                (2.0, 3.0),
+            ]);
+            let sys = System::build(&s);
+            let x0 = sys.initial.clone();
+            let j = sys.jacobian(&x0, &sys.all_rows());
+            assert!(j.iter().all(|v| v.is_finite()));
+            let jmax = j.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+            // Entries scale like k / len (k = 13 mm).
+            assert!(jmax <= 2.0 * 13.0 / len, "jmax {jmax}");
+            let err = fd_error(&sys, &x0, len * 1e-4);
+            assert!(err <= 1e-5 * jmax, "len {len}: {err:e} vs {jmax:e}");
+        }
+        // Exactly zero-length line: finite rows (fixed fallback direction).
+        let s = line_relations([(1.0, 1.0), (1.0, 1.0), (-1.5, 8.7), (3.0, 13.0), (2.0, 3.0)]);
+        let sys = System::build(&s);
+        let j = sys.jacobian(&sys.initial, &sys.all_rows());
+        assert!(j.iter().all(|v| v.is_finite()));
     }
 }

@@ -86,6 +86,26 @@ impl Sketch {
         id
     }
 
+    /// Mark entity `id` as construction (`on`) or normal geometry. Construction
+    /// entities are solved and constrained as usual but ignored by profile
+    /// extraction. Returns false (sketch unchanged) if the entity does not exist.
+    pub fn set_construction(&mut self, id: EntityId, on: bool) -> bool {
+        if self.entity(id).is_none() {
+            return false;
+        }
+        if on {
+            self.construction.insert(id);
+        } else {
+            self.construction.remove(&id);
+        }
+        true
+    }
+
+    /// True when entity `id` is construction geometry.
+    pub fn is_construction(&self, id: EntityId) -> bool {
+        self.construction.contains(&id)
+    }
+
     /// The sketch-origin point, created (fixed at (0, 0)) if absent.
     pub fn ensure_origin(&mut self) -> PointId {
         if let Some(o) = self.origin
@@ -113,7 +133,8 @@ impl Sketch {
     }
 
     /// Remove an entity and everything that only existed for it:
-    /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent/EqualRadius);
+    /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent/EqualRadius/
+    ///   Parallel/Perpendicular/EqualLength/PointOnLine) and its construction flag;
     /// * its endpoints/centre (an arc's centre included) that no other entity uses, with every constraint
     ///   that references them;
     /// * construction points (points used by no entity, such as a rectangle
@@ -128,6 +149,7 @@ impl Sketch {
             return false;
         };
         let e = self.entities.remove(pos);
+        self.construction.remove(&id);
         let ends: Vec<PointId> = e.points();
         self.constraints
             .retain(|c| !constraint_entities(c).contains(&id));
@@ -255,6 +277,10 @@ impl Sketch {
                 };
                 format!("Equal radius {} · {}", name(a), name(b))
             }
+            Constraint::Parallel { a, b } => format!("Parallel L{}, L{}", a.0, b.0),
+            Constraint::Perpendicular { a, b } => format!("Perpendicular L{}, L{}", a.0, b.0),
+            Constraint::EqualLength { a, b } => format!("Equal length L{}, L{}", a.0, b.0),
+            Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
         }
     }
 
@@ -412,12 +438,16 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => vec![*a, *b],
         Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
+        Constraint::PointOnLine { point, .. } => vec![*point],
         Constraint::Horizontal { .. }
         | Constraint::Vertical { .. }
         | Constraint::Diameter { .. }
         | Constraint::Radius { .. }
         | Constraint::Tangent { .. }
-        | Constraint::EqualRadius { .. } => vec![],
+        | Constraint::EqualRadius { .. }
+        | Constraint::Parallel { .. }
+        | Constraint::Perpendicular { .. }
+        | Constraint::EqualLength { .. } => vec![],
     }
 }
 
@@ -428,7 +458,11 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         Constraint::Diameter { circle, .. } => vec![*circle],
         Constraint::Radius { entity, .. } => vec![*entity],
         Constraint::Tangent { line, arc } => vec![*line, *arc],
-        Constraint::EqualRadius { a, b } => vec![*a, *b],
+        Constraint::EqualRadius { a, b }
+        | Constraint::Parallel { a, b }
+        | Constraint::Perpendicular { a, b }
+        | Constraint::EqualLength { a, b } => vec![*a, *b],
+        Constraint::PointOnLine { line, .. } => vec![*line],
         _ => vec![],
     }
 }

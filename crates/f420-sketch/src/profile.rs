@@ -5,6 +5,9 @@
 //! Line-only loops keep the run-1 [`Profile::Polygon`] form; loops with arcs
 //! are [`Profile::Loop`].
 //!
+//! Construction entities (`Sketch::construction`) are ignored here: they take
+//! part in solving only.
+//!
 //! Tolerance: every geometric test uses the sketch solve tolerance
 //! `tol = solve_tolerance(scale)` (mm); angular tests on an arc of radius `r`
 //! use `tol / r` (rad), i.e. the same distance measured along the arc.
@@ -95,7 +98,7 @@ pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
     // (start point, end point, kind) per line/arc; circles separately.
     let mut curves: Vec<(PointId, PointId, EdgeKind)> = Vec::new();
     let mut circles: Vec<(PointId, f64)> = Vec::new();
-    for e in &s.entities {
+    for e in s.entities.iter().filter(|e| !s.is_construction(e.id())) {
         match e {
             Entity::Line { a, b, .. } => curves.push((*a, *b, EdgeKind::Line)),
             Entity::Arc {
