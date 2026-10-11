@@ -58,4 +58,23 @@ check mirror_pattern.step "[16000 + 3*500 - 2*math.pi*9*10]" "[-40,0,0,40,20,15]
 # 3E: 40x30x10 block, top-front edge (y=0, z=10) chamfered 3 mm: removes 0.5*3*3*40.
 check chamfer.step "[12000 - 0.5*9*40]" "[0,0,0,40,30,10]" \
   "[[20,0.5,9.5],[20,2.9,9.5],[20,1.0,7.5],[20,15,5]]" "[False, True, True, True]"
+# 3S: FreeCAD SVG plate (60x40, Ø12 hole, 10x8 slot with r4 ends) extruded 5; sketch
+#     coordinates = FreeCAD + (0.6, -40.6). Probes: hole centre (20.6,-20.6), slot centre
+#     (43.6,-20.6) out; material at (5.6,-5.6).
+check svg_plate.step "[5*(2400 - 36*math.pi - (80 + 16*math.pi))]" "[0.6,-40.6,0,60.6,-0.6,5]" \
+  "[[20.6,-20.6,2.5],[43.6,-20.6,2.5],[5.6,-5.6,2.5]]" "[False, False, True]"
+# 3S: our SVG export read by FreeCAD's own importer: edge lengths 200 + 12pi + 20 + 8pi, extents 60 x 40.
+out=$(timeout 180 flatpak run --env="F420_SVG=$DIR/svg_plate.svg" --filesystem="$DIR" --filesystem="$REPO" \
+  --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/freecad_check_svg.py" 2>&1 | grep FREECAD_RESULT) || status=1
+echo "$out" > "$DIR/svg_plate_svg_freecad.txt"
+python3 - "$out" <<'PY' || status=1
+import json, math, sys
+r = json.loads(sys.argv[1].split(" ", 1)[1])
+exp_len = 220 + 20 * math.pi
+ok = r.get("ok") and abs(r.get("length", 0) - exp_len) <= 1e-6 * exp_len \
+    and all(abs(a - b) <= 1e-6 for a, b in zip(r.get("size") or [0, 0], [60, 40]))
+print(f"  svg_plate.svg via FreeCAD importSVG: edges={r.get('edges')} length={r.get('length')} (expected {exp_len:.9f}) size={r.get('size')}")
+print(f"svg_plate.svg: {'PASS' if ok else 'FAIL'}")
+sys.exit(0 if ok else 1)
+PY
 exit $status

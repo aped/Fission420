@@ -28,8 +28,10 @@ implemented; listing them here is not a claim of support. Ordered roughly by val
 - STEP: wider entity coverage (`BREP_WITH_VOIDS`, `MAPPED_ITEM` placements, shells/surfaces,
   colours/names round trip), AP242 specifics, assemblies as components (today: flattened
   placements of supported representations only, see docs/formats/step.md).
-- 3MF import/export of multiple mesh objects with units (continuation backlog of run 3).
-- SVG planar paths (units, transforms, unsupported-curve diagnostics).
+- 3MF: colours/materials kept on bodies, UI dialogs (today: command/CLI import/export of mesh
+  objects with units).
+- SVG: Bézier curves (exact as sketch splines once the sketcher has them), elliptical arcs,
+  `use` expansion, text to outlines (today: lines/rects/circles/circular arcs, docs/formats/svg.md).
 - DXF: SPLINE/ELLIPSE, blocks/INSERT with transforms, dimension import as constraints.
 - IGES, OBJ: possible later; DWG and F3D/F3Z: no plan (closed formats).
 

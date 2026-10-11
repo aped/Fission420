@@ -198,6 +198,25 @@ pub enum Command {
         #[serde(default)]
         unit: Option<f420_exchange::threemf::ThreeMfUnit>,
     },
+    /// Import the planar paths of an SVG file (subset: docs/formats/svg.md) as a
+    /// new unconstrained sketch on `plane`. `units_to_mm` (mm per user unit) is
+    /// used only when the file declares no physical size.
+    ImportSvg {
+        path: PathBuf,
+        plane: SketchPlane,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        units_to_mm: Option<f64>,
+        #[serde(default)]
+        allow_partial: bool,
+    },
+    /// Write a sketch's lines/arcs/circles as SVG (local 2D coordinates, mm, y
+    /// negated for SVG's y-down axis).
+    ExportSvg {
+        path: PathBuf,
+        sketch: FeatureId,
+    },
     /// Write a sketch's lines/arcs/circles as an R12 ASCII DXF (mm).
     ExportDxf {
         path: PathBuf,
@@ -274,6 +293,8 @@ impl Command {
             Command::ImportStl { .. } => "import_stl",
             Command::ImportDxf { .. } => "import_dxf",
             Command::ExportDxf { .. } => "export_dxf",
+            Command::ImportSvg { .. } => "import_svg",
+            Command::ExportSvg { .. } => "export_svg",
             Command::Import3mf { .. } => "import_3mf",
             Command::Export3mf { .. } => "export_3mf",
             Command::DeleteFeature { .. } => "delete_feature",
@@ -1024,6 +1045,75 @@ impl Session {
                     })?;
                 r.feature = Some(id);
                 r.message = Some(notes.join("; "));
+            }
+            Command::ImportSvg {
+                path,
+                plane,
+                name,
+                units_to_mm,
+                allow_partial,
+            } => {
+                let bytes = read_import(path)?;
+                let opts = f420_exchange::svg::SvgImportOptions {
+                    allow_partial: *allow_partial,
+                    unit_override_to_mm: *units_to_mm,
+                    ..Default::default()
+                };
+                let imp = f420_exchange::svg::import(&bytes, &opts)
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                let mut notes = vec![format!(
+                    "units: {} ({} mm per user unit, {})",
+                    imp.units.name,
+                    imp.units.to_mm,
+                    if imp.units.declared {
+                        "declared in file"
+                    } else {
+                        "chosen at import"
+                    }
+                )];
+                notes.push(format!(
+                    "imported {}",
+                    imp.imported
+                        .iter()
+                        .map(|c| format!("{} x{}", c.entity_type, c.count))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                for sk in &imp.skipped {
+                    notes.push(format!(
+                        "skipped {} x{} ({})",
+                        sk.entity_type, sk.count, sk.reason
+                    ));
+                }
+                notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
+                let (plane, name, sketch) = (*plane, name.clone(), imp.sketch);
+                let stem = file_stem(path);
+                let id = self
+                    .model_mut()?
+                    .transact(&format!("Import {stem}.svg"), |d| {
+                        let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
+                        Ok(d.push(n, FeatureKind::Sketch { plane, sketch }))
+                    })?;
+                r.feature = Some(id);
+                r.message = Some(notes.join("; "));
+            }
+            Command::ExportSvg { path, sketch } => {
+                let m = self.model_mut()?;
+                let solved = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == *sketch)
+                    .and_then(|f| f.solved_sketch.clone())
+                    .ok_or_else(|| DocError::Validation(format!("{sketch} is not a sketch")))?;
+                let text = f420_exchange::svg::export(&solved)
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                write_atomic(path, text.as_bytes())?;
+                r.message = Some(format!(
+                    "wrote {} ({} bytes, SVG, mm, local sketch coordinates with y negated)",
+                    path.display(),
+                    text.len()
+                ));
             }
             Command::ExportDxf { path, sketch } => {
                 let m = self.model_mut()?;

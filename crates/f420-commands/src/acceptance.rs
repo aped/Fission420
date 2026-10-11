@@ -228,6 +228,7 @@ pub fn run(out_dir: &Path) -> Report {
     bodies::scenario_pattern(&mut r);
     bodies::scenario_mirror(&mut r);
     bodies::scenario_chamfer(&mut r);
+    bodies::scenario_svg(&mut r);
     formats::scenario_c(&mut r);
     formats::scenario_d(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();

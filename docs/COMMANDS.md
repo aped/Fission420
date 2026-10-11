@@ -52,6 +52,8 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `import_dxf` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?`, `layers?` | 2D subset (docs/formats/dxf.md) → a new unconstrained sketch on `plane`; unitless files need `units_to_mm`; unsupported entities refuse the import unless `allow_partial` (then listed in the message) |
 | `import_3mf` | `path` | every build item of a 3MF package (subset: docs/formats/threemf.md) → one mesh body each (units from the file, transforms applied); bytes embedded; colours/extensions reported, not kept |
 | `export_3mf` | `path`, `chord?`, `bodies?`, `unit?` (`millimeter` default, `micron`…`meter`) | one object per body (default all visible): B-rep tessellated and checked watertight, mesh bodies as imported; never fused |
+| `import_svg` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?` | SVG planar paths (subset: docs/formats/svg.md) → a new unconstrained sketch on `plane`; files without a physical size need `units_to_mm` (mm per user unit); y flipped (SVG y points down) |
+| `export_svg` | `path`, `sketch` | the solved sketch's lines/arcs/circles, local 2D coordinates in mm with y negated |
 | `export_dxf` | `path`, `sketch` | the solved sketch's lines/arcs/circles in its local 2D coordinates, mm, R12 ASCII |
 | `delete_feature` | `feature` | removes a feature nothing depends on, explicitly or as a join/cut target of a body it creates (one undo step); refused naming the dependents otherwise; bodies and embedded files no longer created/used are dropped |
 | `undo` / `redo` | | document-level snapshots |

@@ -18,7 +18,7 @@ ADR 0004 (format adapters).
 | STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl` |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf` |
 | 3MF `.3mf` | **yes** (command/CLI; no UI dialog yet), core subset → one mesh body per build item | **yes** (command/CLI), one object per body (B-rep tessellated, watertight-checked; meshes as imported) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf` |
-| SVG `.svg` | no (later backlog) | no | | | |
+| SVG `.svg` | **yes** (command/CLI; no UI dialog yet): lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes** (command/CLI): sketch lines/arcs/circles | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg` ([formats/svg.md](formats/svg.md)) |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
 "Reachable through" lists the typed command (`crates/f420-commands`, also `f420-cli run`).

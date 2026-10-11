@@ -1190,3 +1190,82 @@ pub(super) fn scenario_chamfer(r: &mut Run<'_>) {
         "reaches past",
     );
 }
+
+/// Backlog 7: SVG planar paths → sketch (outer + holes) → solid; sketch → SVG.
+pub(super) fn scenario_svg(r: &mut Run<'_>) {
+    use std::f64::consts::PI;
+    r.s = crate::Session::new();
+    r.step = "3S.1 FreeCAD SVG -> sketch -> solid".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../f420-exchange/tests/fixtures/svg/freecad_plate.svg");
+    let x = r.exec(Command::ImportSvg {
+        path: src,
+        plane: SketchPlane::WorldXY,
+        name: Some("Plate outline".into()),
+        units_to_mm: None,
+        allow_partial: false,
+    });
+    let Some(sk) = r.ok("import_svg (FreeCAD Draft export, mm, reflected group)", &x) else {
+        return;
+    };
+    r.check(
+        "units reported",
+        "declared in file",
+        x.message.clone().unwrap_or_default(),
+        x.message
+            .as_deref()
+            .is_some_and(|m| m.contains("declared in file")),
+    );
+    let x = r.exec(Command::extrude(Some("Plate".into()), sk, 5.0));
+    r.ok("extrude 5 (region with two holes, one feature)", &x);
+    let Some(b) = r.s.summary().bodies.first().map(|b| b.id) else {
+        return;
+    };
+    // 60x40 - Ø12 hole - slot (10 x 8 + two r4 half discs), x 5; sketch = FreeCAD
+    // coordinates + (0.6, -40.6) (the file's group transform and the y flip).
+    let want = 5.0 * (2400.0 - 36.0 * PI - (80.0 + 16.0 * PI));
+    r.check_body_solid("plate", b, want, [0.6, -40.6, 0.0], [60.6, -0.6, 5.0]);
+    let out = r.out_dir.join("svg_plate.svg");
+    let x = r.exec(Command::ExportSvg {
+        path: out.clone(),
+        sketch: sk,
+    });
+    r.ok("export_svg (external check: tools/check_run3_steps.sh)", &x);
+    let mut t = crate::Session::new();
+    t.execute(&Command::NewDocument);
+    let x = t.execute(&Command::ImportSvg {
+        path: out,
+        plane: SketchPlane::WorldXY,
+        name: None,
+        units_to_mm: None,
+        allow_partial: false,
+    });
+    let back = x.feature.and_then(|f| {
+        t.execute(&Command::extrude(None, f, 5.0))
+            .summary
+            .and_then(|s| s.bodies.first().and_then(|b| b.measurements.clone()))
+    });
+    let v = back.as_ref().and_then(|m| match m.volume {
+        VolumeResult::Value { volume, .. } => Some(volume),
+        _ => None,
+    });
+    r.check(
+        "own SVG export re-imported: same solid and placement",
+        format!("{want:.6} at the same bounds"),
+        format!("{v:?} {:?}", back.as_ref().map(|m| m.bounds)),
+        v.is_some_and(|v| (v - want).abs() <= vol_tol(want))
+            && back.is_some_and(|m| {
+                (m.bounds.min[0] - 0.6).abs() < 1e-9 && (m.bounds.max[1] + 0.6).abs() < 1e-9
+            }),
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("svg_plate.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+}

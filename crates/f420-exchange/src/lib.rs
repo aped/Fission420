@@ -4,6 +4,8 @@
 //! * [`mesh`]: topology/geometry diagnostics of an indexed triangle mesh.
 //! * [`dxf`]: ASCII DXF import to an unconstrained [`f420_sketch::Sketch`] and export of a
 //!   sketch's lines, arcs and circles.
+//! * [`svg`]: SVG planar paths (lines, rects, circles, circular arcs) to an unconstrained
+//!   sketch with explicit units/transforms, and sketch export.
 //! * [`threemf`]: 3MF core-subset multi-object mesh import (units, item/component
 //!   transforms, object colours) and export, over a bounded ZIP reader/writer.
 //!
@@ -16,6 +18,7 @@
 pub mod dxf;
 pub mod mesh;
 pub mod stl;
+pub mod svg;
 pub mod threemf;
 mod zip;
 

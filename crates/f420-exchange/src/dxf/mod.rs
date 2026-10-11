@@ -451,13 +451,26 @@ fn classify(e: &RawEntity, vertices: &[RawEntity]) -> Result<Classified> {
 }
 
 /// Grid hash merging points within `tol` (first occurrence wins).
-struct PointMerger {
+pub(crate) struct PointMerger {
     tol: f64,
     cells: HashMap<(i64, i64), Vec<PointId>>,
     merged: usize,
 }
 
 impl PointMerger {
+    pub(crate) fn new(tol: f64) -> Self {
+        Self {
+            tol,
+            cells: HashMap::new(),
+            merged: 0,
+        }
+    }
+
+    /// Points that were merged into an existing one.
+    pub(crate) fn merged(&self) -> usize {
+        self.merged
+    }
+
     fn cell(&self, p: [f64; 2]) -> Result<(i64, i64)> {
         let cx = (p[0] / self.tol).floor();
         let cy = (p[1] / self.tol).floor();
@@ -471,7 +484,7 @@ impl PointMerger {
         Ok((cx as i64, cy as i64))
     }
 
-    fn point(&mut self, s: &mut Sketch, p: [f64; 2]) -> Result<PointId> {
+    pub(crate) fn point(&mut self, s: &mut Sketch, p: [f64; 2]) -> Result<PointId> {
         if self.tol > 0.0 {
             let (cx, cy) = self.cell(p)?;
             let mut best: Option<(f64, PointId)> = None;
@@ -503,7 +516,7 @@ impl PointMerger {
 }
 
 /// O(1) point insertion (ids are dense and allocated here).
-fn push_point(s: &mut Sketch, p: [f64; 2]) -> PointId {
+pub(crate) fn push_point(s: &mut Sketch, p: [f64; 2]) -> PointId {
     let id = PointId(s.points.len() as u32);
     s.points.push(SketchPoint {
         id,
@@ -898,7 +911,7 @@ pub fn import(bytes: &[u8], opts: &DxfImportOptions) -> Result<DxfImport> {
 }
 
 /// Line/arc endpoints used by exactly one curve.
-fn open_endpoints(s: &Sketch) -> usize {
+pub(crate) fn open_endpoints(s: &Sketch) -> usize {
     let mut deg: HashMap<PointId, usize> = HashMap::new();
     for e in &s.entities {
         match e {
@@ -916,7 +929,7 @@ fn open_endpoints(s: &Sketch) -> usize {
     deg.values().filter(|&&d| d == 1).count()
 }
 
-trait FastIds {
+pub(crate) trait FastIds {
     fn next_entity_id_fast(&self) -> f420_sketch::EntityId;
 }
 
