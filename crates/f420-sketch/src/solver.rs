@@ -50,6 +50,16 @@ enum Eq {
     /// the sketch scale (mm, fixed when the system is built). The residual is
     /// `k sin θ` / `k cos θ` in mm and every Jacobian entry is `k / length`,
     /// dimensionless.
+    /// Fixed signed angle: `k · wrap(atan2(u_a × u_b, u_a · u_b) − θ0)` (rad
+    /// times the sketch scale `k`, so mm), wrap to (−π, π].
+    FixedAngle {
+        a0: usize,
+        a1: usize,
+        b0: usize,
+        b1: usize,
+        k: f64,
+        theta: f64,
+    },
     LineAngle {
         a0: usize,
         a1: usize,
@@ -132,6 +142,20 @@ impl Eq {
                 let (ux, uy, _) = unit(x, a, b);
                 ux * (x[p + 1] - x[a + 1]) - uy * (x[p] - x[a])
             }
+            Eq::FixedAngle {
+                a0,
+                a1,
+                b0,
+                b1,
+                k,
+                theta,
+            } => {
+                let (ax, ay, _) = unit(x, a0, a1);
+                let (bx, by, _) = unit(x, b0, b1);
+                let t = (ax * by - ay * bx).atan2(ax * bx + ay * by) - theta;
+                k * (t + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+                    - k * std::f64::consts::PI
+            }
         }
     }
 
@@ -213,6 +237,20 @@ impl Eq {
                 } else {
                     ((k * by, -k * bx), (-k * ay, k * ax))
                 };
+                add_unit_grad(x, j, row, a0, a1, ga);
+                add_unit_grad(x, j, row, b0, b1, gb);
+            }
+            Eq::FixedAngle {
+                a0, a1, b0, b1, k, ..
+            } => {
+                // θ = atan2(cr, dt) of unit vectors (cr² + dt² = 1):
+                // dθ = dt·d(cr) − cr·d(dt); d(cr)/du_a = (by, −bx),
+                // d(dt)/du_a = (bx, by); d(cr)/du_b = (−ay, ax), d(dt)/du_b = (ax, ay).
+                let (ax, ay, _) = unit(x, a0, a1);
+                let (bx, by, _) = unit(x, b0, b1);
+                let (cr, dt) = (ax * by - ay * bx, ax * bx + ay * by);
+                let ga = (k * (dt * by - cr * bx), k * (-dt * bx - cr * by));
+                let gb = (k * (-dt * ay - cr * ax), k * (dt * ax - cr * ay));
                 add_unit_grad(x, j, row, a0, a1, ga);
                 add_unit_grad(x, j, row, b0, b1, gb);
             }
@@ -414,6 +452,18 @@ impl System {
                             b1,
                             k: angle_scale,
                             perp: matches!(c, Constraint::Perpendicular { .. }),
+                        });
+                    }
+                }
+                Constraint::Angle { a, b, dim } => {
+                    if let (Some(&(a0, a1)), Some(&(b0, b1))) = (lines.get(a), lines.get(b)) {
+                        push(Eq::FixedAngle {
+                            a0,
+                            a1,
+                            b0,
+                            b1,
+                            k: angle_scale,
+                            theta: dim.value.to_radians(),
                         });
                     }
                 }
