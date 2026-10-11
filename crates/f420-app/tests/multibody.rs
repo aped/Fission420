@@ -10,7 +10,7 @@ use eframe::egui::{self, Key, Modifiers, PointerButton, Pos2};
 use egui_kittest::{Harness, kittest::Queryable as _};
 use f420_app::{ExecMode, F420App};
 use f420_commands::{Command, SketchTemplate, end_cap_of};
-use f420_document::{BodyId, SketchPlane};
+use f420_document::{BodyId, FaceRole, SketchPlane};
 use f420_kernel::VolumeResult;
 
 const VOL_TOL: f64 = 0.005;
@@ -349,4 +349,41 @@ fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
     );
     assert_close(body_volume(&h, a), 12000.0);
     let _ = SketchPlane::WorldXY;
+}
+
+/// Chamfer through the UI: pick the top face, "Chamfer edge…", choose the front
+/// face, 2 mm: removes 0.5 * 2 * 2 * 40.
+#[test]
+fn chamfer_edge_from_a_picked_face() {
+    let mut h = harness();
+    click(&mut h, "New");
+    rect_xy(&mut h, "40", "30", "20", "15");
+    let sk = h.state().summary().features.last().unwrap().id;
+    h.state_mut().request(Command::extrude(None, sk, 10.0));
+    settle(&mut h);
+    let ext = h.state().summary().features.last().unwrap().clone();
+    let b = h.state().summary().bodies[0].id;
+    let top = h.state().world_to_screen([20.0, 15.0, 10.0]).unwrap();
+    pointer_click(&mut h, top);
+    settle(&mut h);
+    click(&mut h, "Chamfer edge…");
+    let front = ext
+        .faces
+        .iter()
+        .find(|f| (f.frame.z[1] + 1.0).abs() < 1e-9)
+        .unwrap()
+        .reference;
+    let FaceRole::ExtrudeSide { entity } = front.role else {
+        panic!()
+    };
+    let label = format!("{} side face (sketch entity {entity})", ext.name);
+    h.get_by_label("Second face").click();
+    let _ = h.try_run();
+    h.get_by_label(&label).click();
+    let _ = h.try_run();
+    type_into(&mut h, "Chamfer distance (mm)", "2");
+    click(&mut h, "OK");
+    let last = h.state().summary().features.last().unwrap().clone();
+    assert_eq!(last.kind, "chamfer", "{:?}", h.state().diagnostics().last());
+    assert_close(body_volume(&h, b), 12000.0 - 80.0);
 }

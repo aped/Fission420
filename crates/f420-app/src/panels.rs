@@ -676,6 +676,18 @@ impl F420App {
                             plane: SketchPlane::Face(r),
                         });
                     }
+                    if ui
+                        .button("Chamfer edge…")
+                        .probe("Chamfer edge…")
+                        .on_hover_text("Chamfer the straight edge where this face meets another planar face of the same body")
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::Chamfer {
+                            a: r,
+                            b: None,
+                            distance: "1".into(),
+                        });
+                    }
                 }
                 (None, Some(why)) => {
                     ui.add_enabled(false, egui::Button::new("Create Sketch on this face"))
@@ -1373,6 +1385,58 @@ impl F420App {
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
                         );
                         ui.small("Exports the last committed model revision (queued after pending edits).");
+                    }
+                    Dialog::Chamfer { a, b, distance } => {
+                        let faces: Vec<f420_commands::FaceSummary> = self
+                            .summary
+                            .features
+                            .iter()
+                            .flat_map(|f| f.faces.iter().cloned())
+                            .collect();
+                        let first = faces.iter().find(|f| f.reference == *a).cloned();
+                        let label = |f: &f420_commands::FaceSummary| {
+                            format!(
+                                "{} {}",
+                                self.feature_name(f.reference.feature),
+                                crate::face_role_label(&f.reference.role)
+                            )
+                        };
+                        match &first {
+                            Some(fa) => {
+                                ui.label(format!("First face: {}", label(fa)));
+                                let cross = |p: [f64; 3], q: [f64; 3]| {
+                                    let c = [
+                                        p[1] * q[2] - p[2] * q[1],
+                                        p[2] * q[0] - p[0] * q[2],
+                                        p[0] * q[1] - p[1] * q[0],
+                                    ];
+                                    (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt()
+                                };
+                                let others: Vec<_> = faces
+                                    .iter()
+                                    .filter(|f| {
+                                        f.body == fa.body
+                                            && f.reference != *a
+                                            && cross(f.frame.z, fa.frame.z) > 1e-6
+                                    })
+                                    .collect();
+                                let current = b
+                                    .and_then(|r| others.iter().find(|f| f.reference == r))
+                                    .map_or("choose…".to_string(), |f| label(f));
+                                egui::ComboBox::from_label("Second face")
+                                    .selected_text(current)
+                                    .show_ui(ui, |ui| {
+                                        for f in &others {
+                                            ui.selectable_value(b, Some(f.reference), label(f));
+                                        }
+                                    });
+                            }
+                            None => {
+                                ui.label("The selected face is no longer available.");
+                            }
+                        }
+                        num_field(ui, "Chamfer distance (mm)", distance);
+                        ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
                     }
                     Dialog::Pattern {
                         feature,

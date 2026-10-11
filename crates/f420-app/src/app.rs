@@ -115,9 +115,15 @@ pub(crate) enum Dialog {
         /// Mirror: world plane through the origin.
         mirror: SketchPlane,
     },
+    /// Chamfer the straight edge between face `a` and a chosen second face.
+    Chamfer {
+        a: f420_document::FaceRef,
+        b: Option<f420_document::FaceRef>,
+        distance: String,
+    },
 }
 
-/// What the pattern dialog creates.
+/// The pattern dialog's mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatternKind {
     Linear,
@@ -143,6 +149,7 @@ impl Dialog {
             Dialog::Export3mf { .. } => "Export 3MF",
             Dialog::Import(_) => "Import",
             Dialog::Pattern { .. } => "Pattern / mirror",
+            Dialog::Chamfer { .. } => "Chamfer edge",
         }
     }
 }
@@ -1858,6 +1865,12 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             angle_deg: parse_num("angle", angle)?,
         },
         Dialog::Extrude(form) => form.command()?,
+        Dialog::Chamfer { a, b, distance } => Command::Chamfer {
+            name: None,
+            a: *a,
+            b: b.ok_or_else(|| "choose the second face of the edge".to_string())?,
+            distance: parse_num("distance", distance)?,
+        },
         Dialog::CircleOnFace {
             extrude,
             diameter,
