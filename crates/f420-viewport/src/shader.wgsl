@@ -14,6 +14,17 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 const FLAG_SELECTED: u32 = 1u;
+// Flag bits 8..11: body tint index (0 = u.base_color). Linear RGB.
+const TINTS = array<vec3<f32>, 8>(
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.40, 0.62, 0.45),
+    vec3<f32>(0.66, 0.50, 0.62),
+    vec3<f32>(0.62, 0.58, 0.40),
+    vec3<f32>(0.40, 0.62, 0.66),
+    vec3<f32>(0.66, 0.46, 0.42),
+    vec3<f32>(0.62, 0.60, 0.56),
+);
 // Lines are pulled toward the eye by this fraction of their eye distance
 // (3 µm at 300 mm). The main defence against coplanar z-fighting is the
 // mesh pipeline's depth bias (ULP-relative constant + slope), which WebGPU
@@ -62,6 +73,11 @@ fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
     // Small fill light from the view direction so back-lit faces are not flat.
     let fill = max(dot(n, v), 0.0);
     var base = u.base_color.rgb;
+    let tint = (i.flags >> 8u) & 7u;
+    if tint != 0u {
+        var tints = TINTS;
+        base = tints[tint];
+    }
     if (i.flags & FLAG_SELECTED) != 0u {
         base = u.selection_color.rgb;
     }

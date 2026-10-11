@@ -637,17 +637,32 @@ fn selection_sync_and_contextual_commands() {
     click(&mut h, "Extrude…");
     click(&mut h, "OK");
     let ext = h.state().summary().features[1].clone();
-    // A side face: selected, attributed to the extrusion, cannot host a sketch.
+    // A planar side face: selected, attributed to the extrusion, with a
+    // semantic side-face reference (sketch line entity), so it can host a sketch.
     let side = h.state().world_to_screen([40.0, 0.0, 5.0]).unwrap();
     pointer_click(&mut h, side);
     let f = h.state().selected_face().cloned().expect("side face");
     assert_eq!(f.owner, Some(ext.id));
-    assert!(f.reference.is_none() && f.sketch_blocker().is_some());
+    assert_eq!(f.body, h.state().summary().bodies.first().map(|b| b.id));
     assert!(
-        h.get_by_label("Create Sketch")
+        matches!(f.reference, Some(r) if r.feature == ext.id
+            && matches!(r.role, FaceRole::ExtrudeSide { .. })),
+        "{f:?}"
+    );
+    assert!(f.sketch_blocker().is_none());
+    assert!(
+        !h.get_by_label("Create Sketch")
             .accesskit_node()
             .is_disabled()
     );
+    // Create Sketch on it opens a session on that side face, whose frame normal
+    // is the face's outward normal (+X for the x = 40 wall).
+    click(&mut h, "Create Sketch");
+    let ses = h.state().sketch_session().expect("sketch on side face");
+    assert!(matches!(ses.target, f420_app::SketchTarget::New {
+        plane: SketchPlane::Face(r) } if Some(r) == f.reference));
+    assert!((ses.frame.z[0] - 1.0).abs() < 1e-9, "{:?}", ses.frame.z);
+    click(&mut h, "Cancel Sketch");
     // Tree click → feature selection highlights every face of the extrusion.
     let sketch_name = h.state().summary().features[0].name.clone();
     click(&mut h, &ext.name);

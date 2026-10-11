@@ -16,11 +16,11 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use f420_commands::{Command, DocSummary, FeatureSummary, SketchTemplate, end_cap_of};
-use f420_document::{DocError, FaceRole, FeatureId, SketchPlane};
+use f420_document::{BodyId, DocError, FaceRole, FeatureId, SketchPlane};
 use f420_kernel::{Measurements, MeshCheck, VolumeResult};
-use f420_viewport::{Camera, RenderMesh, Viewport};
+use f420_viewport::{Camera, Viewport};
 
-use crate::engine::{Engine, ExecMode, MeshUpdate, Reply};
+use crate::engine::{DisplayScene, Engine, ExecMode, MeshUpdate, Reply};
 use crate::place::{self, Phase, Placement, PlaneFrame, Proposal, Tool};
 use crate::sketch_edit::SketchEditor;
 use crate::view3d::FaceInfo;
@@ -228,8 +228,10 @@ pub struct F420App {
     pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
     pub(crate) mesh_triangles: usize,
-    /// Last display mesh (face analysis for selection; display only).
-    pub(crate) display_mesh: RenderMesh,
+    /// Last display scene: all visible bodies (face analysis, picking; display only).
+    pub(crate) scene: DisplayScene,
+    /// Body selected in the browser (or owning the picked face).
+    pub(crate) selected_body: Option<BodyId>,
     pub(crate) faces: Vec<FaceInfo>,
     pub(crate) fitted: bool,
     demo: VecDeque<DemoStep>,
@@ -247,6 +249,8 @@ pub struct F420App {
     pub(crate) after_save: Option<Guarded>,
     pub(crate) exit_confirmed: bool,
     pub(crate) rename: Option<(FeatureId, String)>,
+    /// Inline rename of a body row in the browser.
+    pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -292,7 +296,8 @@ impl F420App {
             last_export: None,
             viewport: None,
             mesh_triangles: 0,
-            display_mesh: RenderMesh::default(),
+            scene: DisplayScene::default(),
+            selected_body: None,
             faces: vec![],
             fitted: false,
             demo: VecDeque::new(),
@@ -310,6 +315,7 @@ impl F420App {
             after_save: None,
             exit_confirmed: false,
             rename: None,
+            body_rename: None,
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -741,8 +747,10 @@ impl F420App {
             self.fitted = false;
             self.selected = None;
             self.selected_face = None;
+            self.selected_body = None;
             self.doc_dim_edit = None;
             self.rename = None;
+            self.body_rename = None;
         }
         // A sketch session belongs to one document; a different document
         // (Open/New/Close completed) ends it without committing.
@@ -842,12 +850,14 @@ impl F420App {
         match mesh {
             MeshUpdate::Unchanged => {}
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
-            MeshUpdate::Replace(m) => {
+            MeshUpdate::Replace(scene) => {
+                let m = &scene.mesh;
                 self.mesh_triangles = m.triangle_count();
                 self.selected_face = None;
                 if let Some(vp) = self.viewport.as_mut() {
-                    match vp.set_mesh(&m) {
+                    match vp.set_mesh(m) {
                         Ok(()) => {
+                            vp.set_group_tints(&scene.tints());
                             if !self.fitted && m.triangle_count() > 0 && self.sketch.is_none() {
                                 vp.fit();
                                 self.fitted = true;
@@ -859,10 +869,16 @@ impl F420App {
                         }
                     }
                 }
-                self.display_mesh = m;
+                self.scene = scene;
             }
         }
-        self.faces = crate::view3d::analyse_faces(&self.display_mesh, &self.summary.features);
+        if let Some(b) = self.selected_body
+            && !self.summary.bodies.iter().any(|x| x.id == b)
+        {
+            self.selected_body = None;
+        }
+        self.faces =
+            crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
         self.sync_viewport_selection();
     }
 
@@ -906,9 +922,10 @@ impl F420App {
     }
 
     pub(crate) fn select(&mut self, id: Option<FeatureId>) {
-        if self.selected != id || self.selected_face.is_some() {
+        if self.selected != id || self.selected_face.is_some() || self.selected_body.is_some() {
             self.selected = id;
             self.selected_face = None;
+            self.selected_body = None;
             self.doc_dim_edit = None;
             self.reset_inspector();
             self.sync_viewport_selection();
@@ -922,29 +939,64 @@ impl F420App {
             Some(info) => {
                 self.selected = info.owner;
                 self.selected_face = Some(info.group);
+                self.selected_body = info.body;
                 self.reset_inspector();
             }
             None => {
                 self.selected = None;
                 self.selected_face = None;
+                self.selected_body = None;
                 self.inspector = None;
             }
         }
         self.sync_viewport_selection();
     }
 
-    /// Groups highlighted for the current selection: the picked face, or every
-    /// face whose provenance is reliably the selected feature.
+    /// Select a body (browser): highlights all of its faces; the feature
+    /// selection is cleared (the inspector shows the body).
+    pub fn select_body(&mut self, body: Option<BodyId>) {
+        self.selected = None;
+        self.selected_face = None;
+        self.selected_body = body;
+        self.doc_dim_edit = None;
+        self.inspector = None;
+        self.sync_viewport_selection();
+    }
+
+    /// Selected body (browser selection or the body of the picked face).
+    pub fn selected_body(&self) -> Option<BodyId> {
+        self.selected_body
+    }
+
+    /// Display scene (all visible bodies) as last reported by the engine.
+    pub fn scene(&self) -> &DisplayScene {
+        &self.scene
+    }
+
+    /// Groups highlighted for the current selection: the picked face, every
+    /// face whose provenance is reliably the selected feature, or every face of
+    /// the selected body.
     pub fn highlighted_faces(&self) -> Vec<u32> {
         match (self.selected_face, self.selected) {
             (Some(g), _) => vec![g],
+            (None, None) => match self
+                .selected_body
+                .and_then(|b| self.scene.bodies.iter().find(|d| d.id == b))
+            {
+                Some(d) => self
+                    .faces
+                    .iter()
+                    .filter(|f| d.groups.contains(&f.group))
+                    .map(|f| f.group)
+                    .collect(),
+                None => vec![],
+            },
             (None, Some(id)) => self
                 .faces
                 .iter()
                 .filter(|f| f.owner == Some(id))
                 .map(|f| f.group)
                 .collect(),
-            _ => vec![],
         }
     }
 
@@ -1213,11 +1265,9 @@ impl F420App {
         self.consumer_of(id).is_some()
     }
 
+    /// The document has an exact (B-rep) body to join to or cut.
     pub(crate) fn has_body(&self) -> bool {
-        self.summary
-            .features
-            .iter()
-            .any(|f| f.kind == "extrude" || f.kind == "revolve")
+        self.summary.bodies.iter().any(|b| b.kind == "brep")
     }
 
     pub(crate) fn feature_name(&self, id: FeatureId) -> String {
@@ -1249,22 +1299,21 @@ impl F420App {
         }
     }
 
-    /// Features that use `id` (deleting `id` is refused while any exist).
+    /// Features that use `id` (deleting `id` is refused while any exist):
+    /// explicit references, and features that modify a body `id` creates.
     pub(crate) fn dependents_of(&self, id: FeatureId) -> Vec<String> {
-        // A base body is used by every cut/pocket even without an explicit
-        // reference (the regenerator cuts the current body).
-        let base = self
+        let creates: Vec<BodyId> = self
             .summary
             .features
             .iter()
-            .any(|f| f.id == id && (f.kind == "extrude" || f.kind == "revolve"));
+            .find(|f| f.id == id)
+            .map(|f| f.creates.clone())
+            .unwrap_or_default();
         self.summary
             .features
             .iter()
-            .filter(|f| {
-                f.depends_on.contains(&id)
-                    || (base && (f.kind == "cut_through_all" || f.kind == "pocket"))
-            })
+            .filter(|f| f.id != id)
+            .filter(|f| f.depends_on.contains(&id) || f.body.is_some_and(|b| creates.contains(&b)))
             .map(|f| f.name.clone())
             .collect()
     }
@@ -1290,12 +1339,6 @@ impl F420App {
 
     /// Why Extrude is unavailable for `sketch`, or None if it can run.
     pub(crate) fn extrude_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
-        if self.has_body() {
-            return Some(
-                "Only one base body per document is supported (product limit); use Cut Through All for holes"
-                    .into(),
-            );
-        }
         if let Some(e) = &sketch.profile_error {
             return Some(format!("Profile is not usable: {e}"));
         }
@@ -1520,7 +1563,11 @@ impl F420App {
     /// never triggers modelling commands.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
-        if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.rename.is_some() {
+        if ctx.egui_wants_keyboard_input()
+            || self.confirm.is_some()
+            || self.rename.is_some()
+            || self.body_rename.is_some()
+        {
             return;
         }
         let sc = |m: Modifiers, k: Key| {

@@ -3,22 +3,27 @@
 //! editing.
 //!
 //! Face selection maps a picked display-mesh face (a tessellation group, which
-//! is never persisted) to semantic provenance:
-//! * planar faces lying on an extrusion cap frame reported by the document →
-//!   that `FaceRef` (the only faces that can host a sketch);
-//! * cylindrical faces whose vertices all lie on a through-all cut's circle
-//!   (axis and radius from the cut's sketch) → that cut;
-//! * every other face → the base body feature (extrude or revolve). This is
-//!   reliable under the current product limits (one base body; the only other
-//!   solid features are circular through-all cuts), and is labelled as such.
+//! is never persisted) to its body (group ranges of the [`DisplayScene`]) and to
+//! semantic provenance:
+//! * planar faces matching a referenceable face reported by the document (same
+//!   body, coplanar, same outward normal: extrusion caps and line side faces,
+//!   cut floors, imported planar faces) → that `FaceRef` (the faces that can
+//!   host a sketch). The document only reports faces that resolve uniquely on
+//!   the final geometry, so a planar face without a match (split or merged by a
+//!   later operation) gets a stated reason instead of a guessed reference;
+//! * cylindrical faces whose vertices all lie on a circular cut's circle (axis
+//!   and radius from the cut's sketch) → that cut;
+//! * every other face → the feature that created its body, labelled as such.
 //!
 //! The analysis is display-side only; commands always carry semantic references
 //! that the regenerator re-validates against the exact B-rep.
 
 use eframe::egui::{self, Color32, Pos2, Response, Stroke};
-use f420_commands::{Command, FeatureSummary};
-use f420_document::{FaceRef, FeatureId};
-use f420_viewport::{Camera, GridPlane, Ray, RenderMesh, ViewPreset};
+use f420_commands::{BodySummary, Command, FeatureSummary};
+use f420_document::{BodyId, FaceRef, FeatureId};
+use f420_viewport::{Camera, GridPlane, Ray, ViewPreset};
+
+use crate::engine::DisplayScene;
 
 use crate::app::{DocDimEdit, F420App, SketchTarget};
 use crate::place::{Phase, PlaneFrame};
@@ -44,6 +49,10 @@ pub const VIEW_KEYS: &[(egui::Key, ViewPreset)] = &[
 pub struct FaceInfo {
     pub group: u32,
     pub planar: bool,
+    /// Body the face belongs to.
+    pub body: Option<BodyId>,
+    /// The body is a triangle mesh (STL import): no exact faces.
+    pub mesh_body: bool,
     /// Semantic reference when the face is a supported sketch host.
     pub reference: Option<FaceRef>,
     /// Feature this face reliably comes from (see module docs).
@@ -56,9 +65,11 @@ impl FaceInfo {
     pub fn sketch_blocker(&self) -> Option<&'static str> {
         if self.reference.is_some() {
             None
+        } else if self.mesh_body {
+            Some("Mesh (STL) bodies have no exact faces; sketch on a B-rep face or a world plane")
         } else if self.planar {
             Some(
-                "Only extrusion end/start caps carry a semantic reference; side faces cannot host a sketch yet",
+                "This planar face has no unique semantic reference (it was split, merged or is not tracked); sketch on another face or a world plane",
             )
         } else {
             Some("Curved faces cannot host a sketch")
@@ -83,9 +94,14 @@ fn norm(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
 }
 
-/// Classify the faces of a display mesh against the document's semantic faces.
-pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<FaceInfo> {
+/// Classify the faces of the display scene against the document's semantic faces.
+pub fn analyse_faces(
+    scene: &DisplayScene,
+    features: &[FeatureSummary],
+    bodies: &[BodySummary],
+) -> Vec<FaceInfo> {
     use std::collections::BTreeMap;
+    let mesh = &scene.mesh;
     // group -> (unit triangle normals, vertices)
     type Samples = (Vec<[f64; 3]>, Vec<[f64; 3]>);
     let mut groups: BTreeMap<u32, Samples> = BTreeMap::new();
@@ -113,12 +129,14 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
     // Cylinder walls are chordal approximations: vertices lie on the exact
     // surface, so only f32 error matters, but allow the display chord too.
     let cyl_tol = crate::engine::DISPLAY_CHORD + plane_tol;
-    let base = features
-        .iter()
-        .find(|f| f.kind == "extrude" || f.kind == "revolve");
+    let is_cut = |f: &FeatureSummary| {
+        f.kind == "cut_through_all"
+            || f.kind == "pocket"
+            || matches!(f.operation, Some(f420_document::Operation::Cut { .. }))
+    };
     let holes: Vec<(FeatureId, [f64; 3], [f64; 3], f64)> = features
         .iter()
-        .filter(|f| f.kind == "cut_through_all" || f.kind == "pocket")
+        .filter(|f| is_cut(f))
         .filter_map(|c| {
             let s = features
                 .iter()
@@ -132,23 +150,37 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
             }
         })
         .collect();
+    let name = |id: FeatureId| {
+        features
+            .iter()
+            .find(|f| f.id == id)
+            .map_or_else(|| id.to_string(), |f| f.name.clone())
+    };
     groups
         .into_iter()
         .map(|(group, (normals, pts))| {
+            let db = scene.body_of(group);
+            let body = db.map(|b| b.id);
+            let mesh_body = db.is_some_and(|b| b.mesh_body);
+            let bs = body.and_then(|id| bodies.iter().find(|b| b.id == id));
             let n0 = normals.first().copied().unwrap_or([0.0, 0.0, 1.0]);
             let p0 = pts.first().copied().unwrap_or([0.0; 3]);
-            let planar = normals.iter().all(|n| dot(*n, n0) > 1.0 - 1e-4)
+            let planar = !mesh_body
+                && normals.iter().all(|n| dot(*n, n0) > 1.0 - 1e-4)
                 && pts.iter().all(|p| dot(sub(*p, p0), n0).abs() <= plane_tol);
+            // Same body, coplanar, same outward normal.
             let reference = planar
                 .then(|| {
                     features.iter().flat_map(|f| f.faces.iter()).find(|fs| {
-                        dot(n0, fs.frame.z) > 1.0 - 1e-4
+                        Some(fs.body) == body
+                            && dot(n0, fs.frame.z) > 1.0 - 1e-4
                             && dot(sub(p0, fs.frame.origin), fs.frame.z).abs() <= plane_tol
                     })
                 })
                 .flatten()
                 .map(|fs| fs.reference);
-            let floor = planar
+            // Legacy blind pockets: the floor has no semantic reference.
+            let floor = (planar && reference.is_none())
                 .then(|| {
                     features.iter().filter(|f| f.kind == "pocket").find(|pk| {
                         let depth = pk
@@ -168,7 +200,7 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
                 })
                 .flatten()
                 .map(|pk| pk.id);
-            let hole = (!planar)
+            let hole = (!planar && !mesh_body)
                 .then(|| {
                     holes.iter().find(|(_, c, axis, r)| {
                         pts.iter().all(|p| {
@@ -178,42 +210,48 @@ pub fn analyse_faces(mesh: &RenderMesh, features: &[FeatureSummary]) -> Vec<Face
                     })
                 })
                 .flatten();
-            let name = |id: FeatureId| {
-                features
-                    .iter()
-                    .find(|f| f.id == id)
-                    .map_or_else(|| id.to_string(), |f| f.name.clone())
-            };
+            let body_name = bs.map_or_else(|| "body".to_string(), |b| b.name.clone());
             let (owner, description) = if let Some(r) = reference {
                 let role = crate::face_role_label(&r.role);
                 (
                     Some(r.feature),
                     format!(
-                        "{} {role} (semantic {} {:?})",
+                        "{body_name}: {} {role} (semantic {} {:?})",
                         name(r.feature),
                         r.feature,
                         r.role
                     ),
                 )
             } else if let Some(id) = floor {
-                (Some(id), format!("Floor of {}", name(id)))
+                (Some(id), format!("{body_name}: floor of {}", name(id)))
             } else if let Some((id, ..)) = hole {
-                (Some(*id), format!("Hole wall of {}", name(*id)))
-            } else if let Some(b) = base {
                 (
-                    Some(b.id),
-                    format!(
-                        "{} face of {}",
-                        if planar { "Planar side" } else { "Curved" },
-                        b.name
-                    ),
+                    Some(*id),
+                    format!("{body_name}: hole wall of {}", name(*id)),
+                )
+            } else if mesh_body {
+                (
+                    bs.map(|b| b.created_by),
+                    format!("{body_name}: mesh body (STL triangles)"),
                 )
             } else {
-                (None, "Body face".into())
+                (
+                    bs.map(|b| b.created_by),
+                    format!(
+                        "{body_name}: {} face{}",
+                        if planar { "planar" } else { "curved" },
+                        bs.map_or(String::new(), |b| format!(
+                            " (body from {})",
+                            name(b.created_by)
+                        ))
+                    ),
+                )
             };
             FaceInfo {
                 group,
                 planar,
+                body,
+                mesh_body,
                 reference,
                 owner,
                 description,
@@ -282,7 +320,7 @@ impl F420App {
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
         let ray = self.ray_at(rect, p)?;
-        self.display_mesh.pick(&ray).map(|(_, _, g)| g)
+        self.scene.mesh.pick(&ray).map(|(_, _, g)| g)
     }
 
     pub(crate) fn view_ui(&mut self, ui: &mut egui::Ui) {

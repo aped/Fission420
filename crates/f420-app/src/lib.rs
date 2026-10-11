@@ -5,6 +5,7 @@
 //! renders the last reported document summary and sends [`f420_commands::Command`]s.
 
 pub mod app;
+pub mod bodies;
 pub mod engine;
 pub mod panels;
 pub mod place;

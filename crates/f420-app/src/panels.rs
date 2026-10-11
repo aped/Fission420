@@ -230,8 +230,6 @@ impl F420App {
         let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
         let extrude_block = if !has_sketch {
             Some("Create a sketch with a closed profile first".to_string())
-        } else if self.has_body() {
-            Some("Only one base body per document is supported (product limit)".to_string())
         } else {
             sketch_sel.as_ref().and_then(|s| self.extrude_blocker(s))
         };
@@ -265,8 +263,6 @@ impl F420App {
         }
         let revolve_block = if !has_sketch {
             Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
-        } else if self.has_body() {
-            Some("Only one base body per document is supported (product limit)".to_string())
         } else {
             sketch_sel
                 .as_ref()
@@ -492,6 +488,10 @@ impl F420App {
             ui.weak("No document open. Use New or Open….");
             return;
         }
+        self.bodies_browser(ui);
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new("History").strong());
         if self.summary.features.is_empty() {
             ui.weak("Empty document. Use Create Sketch to start.");
         }
@@ -607,6 +607,12 @@ impl F420App {
                 _ => {}
             }
             ui.separator();
+        }
+        if self.selected.is_none()
+            && let Some(b) = self.selected_body
+        {
+            self.body_inspector(ui, b);
+            return;
         }
         let Some(id) = self.selected else {
             ui.weak("Select a feature in the browser, or a face in the view.");
