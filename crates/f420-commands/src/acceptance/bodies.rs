@@ -634,6 +634,15 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         floor.is_some_and(|f| (f.frame.origin[0] - 55.0).abs() < 1e-9),
     );
 
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("side_pocket.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
+    );
+
     r.step = "3B.4 removing the support is an explicit reference error".into();
     // Upstream topology edit in the editor's terms: delete the profile line that
     // generates the x=70 face and close the outline through a new apex point
@@ -955,6 +964,14 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
         "delete the seed while patterned",
         Command::DeleteFeature { feature: hole },
         "is used by",
+    );
+    let x = r.exec(Command::ExportStep {
+        path: r.out_dir.join("pattern.step"),
+        bodies: None,
+    });
+    r.ok(
+        "export STEP (external check: tools/check_run3_steps.sh)",
+        &x,
     );
     let path = r.out_dir.join("pattern.f420.json");
     let x = r.exec(Command::Save { path: path.clone() });
