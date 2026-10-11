@@ -50,6 +50,8 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `import_step` | `path`, `units_to_mm?` | exact solids (subset: docs/formats/step.md) → one body per solid, named from the file; source bytes embedded (no path dependency); one undo step; `units_to_mm` only used when the file declares no length unit (else refused with "units required") |
 | `import_stl` | `path`, `units_to_mm` (required: STL is unitless) | ASCII/binary → one mesh body (display, hide/show, save, STL export; exact operations and STEP export refused); diagnostics in `summary.bodies[].mesh`; bytes embedded |
 | `import_dxf` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?`, `layers?` | 2D subset (docs/formats/dxf.md) → a new unconstrained sketch on `plane`; unitless files need `units_to_mm`; unsupported entities refuse the import unless `allow_partial` (then listed in the message) |
+| `import_3mf` | `path` | every build item of a 3MF package (subset: docs/formats/threemf.md) → one mesh body each (units from the file, transforms applied); bytes embedded; colours/extensions reported, not kept |
+| `export_3mf` | `path`, `chord?`, `bodies?`, `unit?` (`millimeter` default, `micron`…`meter`) | one object per body (default all visible): B-rep tessellated and checked watertight, mesh bodies as imported; never fused |
 | `export_dxf` | `path`, `sketch` | the solved sketch's lines/arcs/circles in its local 2D coordinates, mm, R12 ASCII |
 | `delete_feature` | `feature` | removes a feature nothing depends on, explicitly or as a join/cut target of a body it creates (one undo step); refused naming the dependents otherwise; bodies and embedded files no longer created/used are dropped |
 | `undo` / `redo` | | document-level snapshots |

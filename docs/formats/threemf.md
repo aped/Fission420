@@ -1,7 +1,9 @@
 # 3MF support (`f420_exchange::threemf`)
 
-Status: run 3, adapter only. **Not wired into commands, the document model or the UI**:
-no `ImportThreeMf`/`Export3mf` command exists yet (see "Command integration" below).
+Status: run 3. Wired into commands (`import_3mf`, `export_3mf`; document base feature
+`Import3mf`, mesh bodies) by the coordinator; no UI dialog yet. The section "Command
+integration" below records the original proposal, implemented as written (no colours: the
+document has no body colour yet).
 
 Clean-room implementation from the public 3MF Core Specification 1.3 (3MF Consortium) and
 ECMA-376 Part 2 (Open Packaging Conventions). Container: `crates/f420-exchange/src/zip.rs`

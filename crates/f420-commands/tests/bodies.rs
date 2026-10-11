@@ -271,3 +271,54 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
     );
     assert_eq!(s.model().unwrap().revision, rev);
 }
+
+#[test]
+fn threemf_import_and_multi_body_export_round_trip() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    // Independent fixture (FreeCAD): two 10 mm cubes, millimetres.
+    ok(
+        &mut s,
+        Command::Import3mf {
+            path: fixture("crates/f420-exchange/tests/fixtures/threemf/freecad_two_boxes.3mf"),
+        },
+    );
+    let bodies = s.summary().bodies;
+    assert_eq!(bodies.len(), 2);
+    for b in &bodies {
+        assert_eq!(b.kind, "mesh");
+        let d = b.mesh.as_ref().unwrap();
+        assert!(d.closed && (d.signed_volume.unwrap() - 1000.0).abs() < 1e-9);
+    }
+    // Add a B-rep body and export all three as 3MF (inch), then re-import.
+    let sk = rect(&mut s, SketchPlane::WorldXY, 40.0, 20.0, [100.0, 0.0]);
+    ok(&mut s, Command::extrude(None, sk, 5.0));
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("all.3mf");
+    let r = ok(
+        &mut s,
+        Command::Export3mf {
+            path: out.clone(),
+            chord: None,
+            bodies: None,
+            unit: Some(f420_exchange::threemf::ThreeMfUnit::Inch),
+        },
+    );
+    assert!(r.message.unwrap().contains("3 objects"));
+    let mut t = Session::new();
+    ok(&mut t, Command::NewDocument);
+    ok(&mut t, Command::Import3mf { path: out });
+    let back = t.summary().bodies;
+    assert_eq!(back.len(), 3);
+    let vols: Vec<f64> = back
+        .iter()
+        .map(|b| b.mesh.as_ref().unwrap().signed_volume.unwrap())
+        .collect();
+    // Planar faces only: tessellation is exact, units round trip through inch.
+    assert!(
+        (vols[0] - 1000.0).abs() < 1e-6 && (vols[1] - 1000.0).abs() < 1e-6,
+        "{vols:?}"
+    );
+    assert!((vols[2] - 4000.0).abs() < 1e-6, "{vols:?}");
+    assert_eq!(back[2].name, s.summary().bodies[2].name);
+}

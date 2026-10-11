@@ -602,6 +602,32 @@ pub fn regenerate_cached_opts(
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
+            FeatureKind::Import3mf { blob, bodies } => {
+                let b = doc.blob(*blob)?;
+                let bytes = b.bytes()?;
+                let (objects, notes) = import::threemf(&bytes)?;
+                if objects.len() != bodies.len() {
+                    return Err(DocError::Validation(format!(
+                        "{id}: {} contains {} build items but the feature records {} bodies",
+                        b.file_name,
+                        objects.len(),
+                        bodies.len()
+                    )));
+                }
+                r.notes = notes;
+                for (o, body) in objects.into_iter().zip(bodies) {
+                    create_body(
+                        &mut st,
+                        id,
+                        *body,
+                        BodyGeometry::Mesh(Arc::new(o.mesh)),
+                        BodySource::ImportedMesh {
+                            file_name: b.file_name.clone(),
+                        },
+                    )?;
+                }
+                r.body = bodies.last().copied();
+            }
             FeatureKind::ImportMesh { blob, to_mm, body } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;

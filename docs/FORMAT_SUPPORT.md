@@ -17,7 +17,7 @@ ADR 0004 (format adapters).
 | STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step` |
 | STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required | `import_stl`, `export_stl` |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf` |
-| 3MF `.3mf` | **adapter only**: core-subset reader (not reachable from commands/UI) | **adapter only**: multi-object mesh writer | triangle meshes, one per build item | declared unit honoured (default mm); writer takes a unit | `f420_exchange::threemf` (Rust API, no command) |
+| 3MF `.3mf` | **yes** (command/CLI; no UI dialog yet), core subset → one mesh body per build item | **yes** (command/CLI), one object per body (B-rep tessellated, watertight-checked; meshes as imported) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf` |
 | SVG `.svg` | no (later backlog) | no | | | |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
@@ -134,11 +134,14 @@ imported STEP face cuts the imported body (`imports.rs`).
 **Known losses**: splines/ellipses/text/dimensions/hatches/blocks, widths, thickness,
 linetype and colour; design intent (constraints); sketch placement on export.
 
-## 3MF (adapter only)
+## 3MF
 
-`f420_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)).
-**Not reachable from the command API, the CLI or the UI yet**, so a user cannot import or
-export 3MF in this build; the proposed commands are in that page.
+`f420_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)), wired by
+the coordinator as `import_3mf` (base feature `Import3mf`, source embedded, one mesh body per
+build item, display/export only) and `export_3mf` (`bodies` default all visible, `unit`,
+`chord`). Command-level evidence: `crates/f420-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
+(FreeCAD two-box fixture imported; three-body export in inch re-imported with exact
+volumes). No UI dialog in this build.
 Read: ZIP stored/deflate, `_rels/.rels` start part, units micron..meter converted to mm, one
 mesh per build item with item and nested component transforms (mirrors reverse winding),
 object-level base-material colours; per-triangle colours, colour groups, textures and other

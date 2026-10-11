@@ -240,6 +240,12 @@ pub enum FeatureKind {
         to_mm: f64,
         body: BodyId,
     },
+    /// Base feature: mesh bodies from an embedded 3MF package, one per build item
+    /// in file order (units declared by the file).
+    Import3mf {
+        blob: BlobId,
+        bodies: Vec<BodyId>,
+    },
     /// Repeat the tool of `seed` (an Extrude Cut) `count - 1` more times, each
     /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
     /// normalized), on the seed's target body. The seed is instance 0.
@@ -311,7 +317,9 @@ impl Feature {
                 }
                 v
             }
-            FeatureKind::ImportStep { .. } | FeatureKind::ImportMesh { .. } => vec![],
+            FeatureKind::ImportStep { .. }
+            | FeatureKind::ImportMesh { .. }
+            | FeatureKind::Import3mf { .. } => vec![],
         }
     }
 
@@ -324,7 +332,9 @@ impl Feature {
             }
             | FeatureKind::Revolve { body, .. }
             | FeatureKind::ImportMesh { body, .. } => vec![*body],
-            FeatureKind::ImportStep { bodies, .. } => bodies.clone(),
+            FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
+                bodies.clone()
+            }
             _ => vec![],
         }
     }
@@ -345,9 +355,9 @@ impl Feature {
     /// Embedded blob this feature reads, if any.
     pub fn blob(&self) -> Option<BlobId> {
         match &self.kind {
-            FeatureKind::ImportStep { blob, .. } | FeatureKind::ImportMesh { blob, .. } => {
-                Some(*blob)
-            }
+            FeatureKind::ImportStep { blob, .. }
+            | FeatureKind::ImportMesh { blob, .. }
+            | FeatureKind::Import3mf { blob, .. } => Some(*blob),
             _ => None,
         }
     }
@@ -375,7 +385,7 @@ impl Feature {
             | FeatureKind::Mirror { .. } => {
                 vec![]
             }
-            FeatureKind::ImportMesh { .. } => vec![],
+            FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::LinearPattern { count, spacing, .. } => vec![
