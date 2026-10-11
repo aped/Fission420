@@ -359,3 +359,40 @@ fn every_command_serializes_under_its_documented_name() {
         assert_eq!(back, c);
     }
 }
+
+#[test]
+fn dxf_import_notes_persist_on_the_sketch_feature() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let id = ok(
+        &mut s,
+        Command::ImportDxf {
+            path: fixture("crates/f420-exchange/tests/fixtures/dxf/slot_freecad_r14.dxf"),
+            plane: SketchPlane::WorldXY,
+            name: None,
+            units_to_mm: Some(1.0),
+            allow_partial: false,
+            layers: None,
+        },
+    )
+    .feature
+    .unwrap();
+    let notes = |s: &Session| {
+        s.summary()
+            .features
+            .into_iter()
+            .find(|f| f.id == id)
+            .unwrap()
+            .notes
+    };
+    assert!(
+        notes(&s).iter().any(|n| n.starts_with("units:")),
+        "{:?}",
+        notes(&s)
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("d.f420.json");
+    ok(&mut s, Command::Save { path: p.clone() });
+    ok(&mut s, Command::Open { path: p });
+    assert!(notes(&s).iter().any(|n| n.starts_with("units:")));
+}

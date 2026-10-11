@@ -973,7 +973,6 @@ fn build(
         }
     }
     for ((t, why), n) in degenerate {
-        warnings.push(format!("{n} degenerate {t} element(s) skipped: {why}"));
         skipped.push(UnsupportedEntities {
             entity_type: t,
             count: n,

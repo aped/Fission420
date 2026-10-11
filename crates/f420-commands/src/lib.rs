@@ -1076,14 +1076,23 @@ impl Session {
                         sk.entity_type, sk.count, sk.reason
                     ));
                 }
-                notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
+                // Degenerate entities are listed in both `skipped` and `warnings`.
+                notes.extend(
+                    imp.warnings
+                        .iter()
+                        .filter(|w| !w.contains(": dropped "))
+                        .map(|w| format!("warning: {w}")),
+                );
                 let (plane, name, sketch) = (*plane, name.clone(), imp.sketch);
                 let stem = file_stem(path);
+                let kept = notes.clone();
                 let id = self
                     .model_mut()?
                     .transact(&format!("Import {stem}.dxf"), |d| {
                         let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
-                        Ok(d.push(n, FeatureKind::Sketch { plane, sketch }))
+                        let id = d.push(n, FeatureKind::Sketch { plane, sketch });
+                        d.feature_mut(id)?.notes = kept;
+                        Ok(id)
                     })?;
                 r.feature = Some(id);
                 r.message = Some(notes.join("; "));
@@ -1127,14 +1136,23 @@ impl Session {
                         sk.entity_type, sk.count, sk.reason
                     ));
                 }
-                notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
+                // Degenerate entities are listed in both `skipped` and `warnings`.
+                notes.extend(
+                    imp.warnings
+                        .iter()
+                        .filter(|w| !w.contains(": dropped "))
+                        .map(|w| format!("warning: {w}")),
+                );
                 let (plane, name, sketch) = (*plane, name.clone(), imp.sketch);
                 let stem = file_stem(path);
+                let kept = notes.clone();
                 let id = self
                     .model_mut()?
                     .transact(&format!("Import {stem}.svg"), |d| {
                         let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
-                        Ok(d.push(n, FeatureKind::Sketch { plane, sketch }))
+                        let id = d.push(n, FeatureKind::Sketch { plane, sketch });
+                        d.feature_mut(id)?.notes = kept;
+                        Ok(id)
                     })?;
                 r.feature = Some(id);
                 r.message = Some(notes.join("; "));
@@ -1505,7 +1523,12 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 reverse,
                 body: res.and_then(|r| r.body),
                 creates: f.created_bodies(),
-                notes: res.map(|r| r.notes.clone()).unwrap_or_default(),
+                notes: f
+                    .notes
+                    .iter()
+                    .cloned()
+                    .chain(res.map(|r| r.notes.clone()).unwrap_or_default())
+                    .collect(),
             }
         })
         .collect()

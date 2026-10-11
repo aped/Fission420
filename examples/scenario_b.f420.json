@@ -1,6 +1,6 @@
 {
   "format": "fission420",
-  "version": 2,
+  "version": 3,
   "document": {
     "features": [
       {
@@ -164,11 +164,28 @@
         "kind": {
           "type": "Extrude",
           "sketch": 1,
-          "distance": 5.0
+          "distance": 5.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
         }
       }
     ],
-    "next_id": 3
+    "next_id": 3,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
   },
   "cache": {
     "volume": 11834.168760481678,

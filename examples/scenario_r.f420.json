@@ -1,6 +1,6 @@
 {
   "format": "fission420",
-  "version": 2,
+  "version": 3,
   "document": {
     "features": [
       {
@@ -280,7 +280,14 @@
         "kind": {
           "type": "Extrude",
           "sketch": 1,
-          "distance": 10.0
+          "distance": 10.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
         }
       },
       {
@@ -339,11 +346,22 @@
         "kind": {
           "type": "Cut",
           "sketch": 3,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       }
     ],
-    "next_id": 5
+    "next_id": 5,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
   },
   "cache": {
     "volume": 37978.49525777125,

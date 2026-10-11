@@ -1,6 +1,6 @@
 {
   "format": "fission420",
-  "version": 2,
+  "version": 3,
   "document": {
     "features": [
       {
@@ -132,7 +132,14 @@
         "kind": {
           "type": "Extrude",
           "sketch": 1,
-          "distance": 6.0
+          "distance": 6.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
         }
       },
       {
@@ -201,7 +208,8 @@
         "kind": {
           "type": "Cut",
           "sketch": 3,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       },
       {
@@ -270,7 +278,8 @@
         "kind": {
           "type": "Cut",
           "sketch": 5,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       },
       {
@@ -339,7 +348,8 @@
         "kind": {
           "type": "Cut",
           "sketch": 7,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       },
       {
@@ -408,7 +418,8 @@
         "kind": {
           "type": "Cut",
           "sketch": 9,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       },
       {
@@ -477,11 +488,22 @@
         "kind": {
           "type": "Cut",
           "sketch": 11,
-          "extent": "ThroughAll"
+          "extent": "ThroughAll",
+          "target": 1
         }
       }
     ],
-    "next_id": 13
+    "next_id": 13,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
   },
   "cache": {
     "volume": 40518.650670161274,

@@ -108,7 +108,12 @@
             ],
             "origin": 0
           }
-        }
+        },
+        "notes": [
+          "units: user override (1 mm per unit, chosen at import)",
+          "imported ARC x1, LINE x5",
+          "warning: 6 endpoints joined to an existing point within 1e-6 mm"
+        ]
       },
       {
         "id": 2,

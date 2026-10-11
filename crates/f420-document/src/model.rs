@@ -299,6 +299,10 @@ pub struct Feature {
     pub id: FeatureId,
     pub name: String,
     pub kind: FeatureKind,
+    /// Provenance notes kept with the definition (e.g. DXF/SVG import units,
+    /// counts and skipped content). Informational; never affects geometry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 impl Feature {
@@ -774,6 +778,7 @@ impl Document {
             id,
             name: name.into(),
             kind,
+            notes: vec![],
         });
         id
     }
