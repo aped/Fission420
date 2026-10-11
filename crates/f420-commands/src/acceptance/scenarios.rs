@@ -564,3 +564,207 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         r.ok("undo sketch", &x);
     }
 }
+
+impl Run<'_> {
+    /// Blind pocket of diameter `dia`, `depth` deep from the top (z = t) of a
+    /// centred w x h x t plate: box minus a cylinder of height `depth`; one
+    /// inner loop (on the top face only) centred on the axis; a floor face at
+    /// z = t - depth facing up.
+    fn check_pocket(&mut self, w: f64, h: f64, t: f64, dia: f64, depth: f64) {
+        let exp = w * h * t - PI * (dia / 2.0).powi(2) * depth;
+        self.check_solid(exp, [-w / 2.0, -h / 2.0, 0.0], [w / 2.0, h / 2.0, t], None);
+        let body = self.s.model().and_then(|m| m.evaluation().body.clone());
+        let Some(body) = body else {
+            return self.check("pocket body", "present", "missing", false);
+        };
+        match f420_kernel::z_face_inner_loops(&body) {
+            Ok(loops) => {
+                let zs: Vec<f64> = loops.iter().map(|l| l.z).collect();
+                let one_top = loops.len() == 1 && (zs[0] - t).abs() <= BOUNDS_TOL;
+                self.check(
+                    "blind: one inner loop, on the top face only",
+                    format!("[{t}]"),
+                    format!("{zs:?}"),
+                    one_top,
+                );
+                if one_top {
+                    let l = &loops[0];
+                    let axis = l.centroid_xy[0].abs().max(l.centroid_xy[1].abs());
+                    let derr = (l.equivalent_diameter - dia).abs();
+                    self.check(
+                        "pocket axis at X=0,Y=0 and diameter",
+                        format!("|xy| <= {BOUNDS_TOL:e}, Ø{dia} ± {BOUNDS_TOL:e}"),
+                        format!("axis {axis:.2e}, Ø err {derr:.2e}"),
+                        axis <= BOUNDS_TOL && derr <= BOUNDS_TOL,
+                    );
+                }
+            }
+            Err(e) => self.check("inner loops", "measurable", e, false),
+        }
+        let floor = f420_kernel::planar_faces_on(&body, &f420_kernel::Frame::XY.offset(t - depth));
+        self.check(
+            "pocket floor: one upward planar face at z = t - depth",
+            format!("1 at z={}", t - depth),
+            floor,
+            floor == 1,
+        );
+    }
+}
+
+/// Stretch: blind circular pocket on the extrusion end cap (editor sketches).
+pub(super) fn scenario_pocket(r: &mut Run<'_>) {
+    r.s = Session::new();
+    r.step = "P.1 (stretch) Ø10 blind pocket 4 deep in an 80x50x10 plate".into();
+    let x = r.exec(Command::NewDocument);
+    r.ok("new_document", &x);
+    let (base, hole) = match (sc::base_rectangle(80.0, 50.0), sc::hole_circle(10.0)) {
+        (Ok((b, _)), Ok(h)) => (b, h),
+        _ => return r.check("build sketches", "ok", "error", false),
+    };
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Base sketch".into()),
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: base },
+    });
+    let Some(s1) = r.ok("create base sketch", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Extrude {
+        name: Some("Plate".into()),
+        sketch: s1,
+        distance: 10.0,
+    });
+    let Some(e1) = r.ok("extrude 10", &x) else {
+        return;
+    };
+    let x = r.exec(Command::CreateSketch {
+        name: Some("Pocket sketch".into()),
+        plane: end_cap_of(e1),
+        template: SketchTemplate::Custom {
+            sketch: hole.clone(),
+        },
+    });
+    let Some(s2) = r.ok("create sketch on end cap", &x) else {
+        return;
+    };
+    let x = r.exec(Command::Pocket {
+        name: Some("Pocket".into()),
+        sketch: s2,
+        depth: 4.0,
+    });
+    let Some(p1) = r.ok("pocket depth 4", &x) else {
+        return;
+    };
+    r.check_pocket(80.0, 50.0, 10.0, 10.0, 4.0);
+
+    r.step = "P.2 upstream edits: thickness 12 (pocket follows the cap), depth 6".into();
+    let x = r.exec(Command::SetParameter {
+        feature: e1,
+        name: "distance".into(),
+        value: 12.0,
+    });
+    r.ok("thickness 12", &x);
+    r.check_pocket(80.0, 50.0, 12.0, 10.0, 4.0);
+    let x = r.exec(Command::SetParameter {
+        feature: p1,
+        name: "depth".into(),
+        value: 6.0,
+    });
+    r.ok("depth 6", &x);
+    r.check_pocket(80.0, 50.0, 12.0, 10.0, 6.0);
+
+    r.step = "P.3 invalid depths and placements rejected, document preserved".into();
+    let before = r.doc_and_rev();
+    for (v, why) in [(12.0, "= thickness"), (13.0, "> thickness")] {
+        let x = r.exec(Command::SetParameter {
+            feature: p1,
+            name: "depth".into(),
+            value: v,
+        });
+        r.check(
+            &format!("depth {v} ({why}) rejected (product limit: no through via blind)"),
+            "ProductLimit",
+            format!("{:?}", x.error),
+            !x.ok && matches!(x.error, Some(DocError::ProductLimit(_))),
+        );
+    }
+    for v in [0.0, -2.0] {
+        let x = r.exec(Command::SetParameter {
+            feature: p1,
+            name: "depth".into(),
+            value: v,
+        });
+        r.check(
+            &format!("depth {v} rejected"),
+            "Validation",
+            format!("{:?}", x.error),
+            !x.ok && matches!(x.error, Some(DocError::Validation(_))),
+        );
+    }
+    // Thinning the plate below the pocket depth is refused too.
+    let x = r.exec(Command::SetParameter {
+        feature: e1,
+        name: "distance".into(),
+        value: 5.0,
+    });
+    r.check(
+        "thickness 5 < pocket depth 6 rejected",
+        "ProductLimit",
+        format!("{:?}", x.error),
+        !x.ok && matches!(x.error, Some(DocError::ProductLimit(_))),
+    );
+    r.check_unchanged("after rejected edits", &before);
+    // A pocket sketched on a datum plane (not a cap) is outside the product limit.
+    let x = r.exec(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: hole },
+    });
+    if let Some(s3) = r.ok("datum-plane circle sketch", &x) {
+        let before = r.doc_and_rev();
+        let x = r.exec(Command::Pocket {
+            name: None,
+            sketch: s3,
+            depth: 2.0,
+        });
+        r.check(
+            "pocket from a datum-plane sketch rejected",
+            "ProductLimit",
+            format!("{:?}", x.error),
+            !x.ok && matches!(x.error, Some(DocError::ProductLimit(_))),
+        );
+        r.check_unchanged("after rejected pocket", &before);
+        let x = r.exec(Command::Undo);
+        r.ok("undo datum sketch", &x);
+    }
+    r.check_pocket(80.0, 50.0, 12.0, 10.0, 6.0);
+
+    r.step = "P.4 undo/redo, save/reopen, exports".into();
+    let x = r.exec(Command::Undo);
+    r.ok("undo depth 6", &x);
+    r.check_pocket(80.0, 50.0, 12.0, 10.0, 4.0);
+    let x = r.exec(Command::Redo);
+    r.ok("redo depth 6", &x);
+    let path = r.out_dir.join("pocket.f420.json");
+    let before = r.s.model().map(|m| m.document().clone());
+    let x = r.exec(Command::Save { path: path.clone() });
+    r.ok("save", &x);
+    let x = r.exec(Command::Close);
+    r.ok("close", &x);
+    let x = r.exec(Command::Open { path });
+    r.ok("open", &x);
+    let after = r.s.model().map(|m| m.document().clone());
+    r.check(
+        "document identical after save/close/reopen",
+        "equal",
+        if before == after {
+            "equal"
+        } else {
+            "DIFFERENT"
+        },
+        before.is_some() && before == after,
+    );
+    r.check_pocket(80.0, 50.0, 12.0, 10.0, 6.0);
+    // 80 * 50 * 12 - pi * 5^2 * 6
+    r.check_exports("pocket", 48000.0 - 150.0 * PI);
+}

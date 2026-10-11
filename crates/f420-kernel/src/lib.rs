@@ -10,7 +10,7 @@ mod measure;
 mod mesh;
 mod step;
 
-pub use build::{cut_through_all, extrude, revolve};
+pub use build::{cut_blind, cut_through_all, extrude, revolve};
 pub use measure::{
     Bounds, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count, measure,
     planar_faces_on, z_face_inner_loops,

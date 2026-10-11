@@ -10,7 +10,8 @@ use std::io::Write;
 use std::path::Path;
 
 pub const FORMAT_NAME: &str = "fission420";
-/// v2 (run 2): sketches may carry `origin` and `Distance` constraints. v1 files
+/// v2 (run 2): sketches may carry `origin` and `Distance` constraints, and the
+/// history may contain `Pocket` features. v1 files
 /// are a strict subset and load unchanged (identity migration); saves write v2.
 pub const FORMAT_VERSION: u32 = 2;
 /// Oldest version this build reads.

@@ -70,4 +70,6 @@ fi
 [ -f "$DIR/scenario_a.stl" ] && check_stem scenario_a "60000 - 300*math.pi"
 [ -f "$DIR/scenario_b_initial.stl" ] && check_stem scenario_b_initial "5*(60*40 - 0.5*10*10)"
 [ -f "$DIR/scenario_b.stl" ] && check_stem scenario_b "5*(2400 - 5*math.sqrt(44))"
+# Stretch: 80 x 50 x 12 plate with a centred Ø10 blind pocket 6 deep.
+[ -f "$DIR/pocket.stl" ] && check_stem pocket "80*50*12 - math.pi*25*6"
 exit $status

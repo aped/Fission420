@@ -215,6 +215,7 @@ pub fn run(out_dir: &Path) -> Report {
     workflow(&mut r);
     scenarios::scenario_a(&mut r);
     scenarios::scenario_b(&mut r);
+    scenarios::scenario_pocket(&mut r);
     let passed = r.checks.iter().filter(|c| c.pass).count();
     let failed = r.checks.len() - passed;
     Report {

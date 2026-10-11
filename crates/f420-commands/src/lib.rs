@@ -71,6 +71,14 @@ pub enum Command {
         name: Option<String>,
         sketch: FeatureId,
     },
+    /// Blind circular pocket from the extrusion cap the sketch is on, `depth` mm
+    /// into the material (0 < depth < thickness; parameter "depth").
+    Pocket {
+        #[serde(default)]
+        name: Option<String>,
+        sketch: FeatureId,
+        depth: f64,
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -116,6 +124,7 @@ impl Command {
             Command::CreateSketch { .. } => "create_sketch",
             Command::Extrude { .. } => "extrude",
             Command::CutThroughAll { .. } => "cut_through_all",
+            Command::Pocket { .. } => "pocket",
             Command::Revolve { .. } => "revolve",
             Command::SetParameter { .. } => "set_parameter",
             Command::EditSketch { .. } => "edit_sketch",
@@ -377,6 +386,23 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Pocket {
+                name,
+                sketch,
+                depth,
+            } => {
+                let (name, sketch, depth) = (name.clone(), *sketch, *depth);
+                if !depth.is_finite() || depth <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "pocket depth must be > 0 mm, got {depth}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Pocket", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Pocket"));
+                    Ok(d.push(n, FeatureKind::Pocket { sketch, depth }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetParameter {
                 feature,
                 name,
@@ -541,6 +567,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Extrude { .. } => ("extrude", None),
                 FeatureKind::Revolve { .. } => ("revolve", None),
                 FeatureKind::Cut { .. } => ("cut_through_all", None),
+                FeatureKind::Pocket { .. } => ("pocket", None),
             };
             FeatureSummary {
                 id: f.id,

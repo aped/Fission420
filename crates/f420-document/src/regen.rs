@@ -361,6 +361,62 @@ pub fn regenerate_cached(doc: &Document, mut cache: Option<&mut RegenCache>) -> 
                 last_solid = Some(results.len());
                 body = Some(b);
             }
+            FeatureKind::Pocket { sketch, depth } => {
+                let s = sketches.get(sketch).ok_or(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("{sketch} is not a sketch"),
+                })?;
+                let target = body.as_ref().ok_or(DocError::BrokenReference {
+                    from: id,
+                    detail: "pocket has no body to cut".into(),
+                })?;
+                // Product limit: the sketch must sit on a cap of an evaluated extrusion;
+                // the pocket goes from that cap into the material.
+                let host_id = match &doc.feature(*sketch)?.kind {
+                    FeatureKind::Sketch {
+                        plane: SketchPlane::Face(fr),
+                        ..
+                    } => fr.feature,
+                    _ => {
+                        return Err(DocError::ProductLimit(format!(
+                            "{id}: a pocket must be sketched on an extrusion end or start cap \
+                             (sketch {sketch} is on a datum plane); use Cut Through All"
+                        )));
+                    }
+                };
+                let host = extrudes.get(&host_id).ok_or(DocError::ProductLimit(
+                    "pockets are only supported on an extruded base body".into(),
+                ))?;
+                if !depth.is_finite() || *depth <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.depth: pocket depth must be > 0 mm, got {depth}"
+                    )));
+                }
+                if *depth >= host.distance - k::tol::MIN_LENGTH {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}.depth: a blind pocket must be shallower than the {} mm thickness \
+                         (got {depth} mm); use Cut Through All for a through hole",
+                        host.distance
+                    )));
+                }
+                let cut_profile = s.usable(id, *sketch)?;
+                let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
+                check_hole_inside(&hole, &host.profile)?;
+                let b = k::cut_blind(target, &to_kernel(cut_profile), &s.frame, *depth).map_err(
+                    |e| DocError::Kernel {
+                        feature: id,
+                        detail: e.to_string(),
+                    },
+                )?;
+                if k::face_count(&b) <= k::face_count(target) {
+                    return Err(DocError::Kernel {
+                        feature: id,
+                        detail: "pocket removed no material".into(),
+                    });
+                }
+                last_solid = Some(results.len());
+                body = Some(b);
+            }
         }
         results.push(r);
         if let Some(c) = cache.as_deref_mut() {

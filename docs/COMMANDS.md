@@ -18,7 +18,8 @@ tools/external_validation.sh artifacts/acceptance               # python STL + F
 `run` exit codes: 0 all steps behaved as expected; 1 some step's `ok` differed from its
 `expect_ok` (default `true`); 2 unreadable/invalid script; 64 usage. Scripts run from the
 repository root (paths are relative to the working directory).
-`acceptance` exits 1 if any check fails and writes `acceptance_report.json`; steps of the
+`acceptance` exits 1 if any check fails and writes `acceptance_report.json`; the blind-pocket
+stretch steps are prefixed `P.`; steps of the
 SESSION_2 scenarios are prefixed `A.` / `B.`.
 
 The scenario workflows are generated from `f420_commands::scenarios` (the sketches are built
@@ -35,7 +36,8 @@ variable the same test fails when the committed JSON is stale, and it replays bo
 | `extrude` | `name?`, `sketch`, `distance` | new body; distance > 0 mm; one base extrusion per document (product limit); the sketch must be a usable profile (else `Validation`) |
 | `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
 | `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside it (product limit); not on revolved bodies |
-| `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
+| `pocket` | `name?`, `sketch`, `depth` | blind cut from the extrusion cap the sketch is on, `depth` mm into the material (against the cap's outward normal). Product limits: circular profile sketched on an end/start cap of the base extrusion, strictly inside it, 0 < depth < thickness (`ProductLimit` otherwise; a through hole is `cut_through_all`). Parameter `depth`; follows the cap when the thickness changes |
+| `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
 | `undo` / `redo` | | document-level snapshots |
@@ -96,7 +98,7 @@ extrusions the referenceable `faces` with their current frames.
 ## Native format
 
 `{"format": "fission420", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
-optional sketch `origin` and the `Distance` constraint. **Migration:** version-1 files are a
+optional sketch `origin`, the `Distance` constraint and the `Pocket` feature. **Migration:** version-1 files are a
 strict subset and load unchanged (identity migration); saving writes version 2. Files claiming
 a newer version than the build supports are refused with a `File` error. Stored coordinates
 are written with shortest round-trip float formatting and reload bit-exactly.
