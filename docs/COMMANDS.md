@@ -34,20 +34,27 @@ variable the same test fails when the committed JSON is stale, and it replays th
 |---|---|---|
 | `new_document` | | replaces any open document (no prompt; headless) |
 | `create_sketch` | `name?`, `plane`, `template` + template fields | see below |
-| `extrude` | `name?`, `sketch`, `distance` | new body; distance > 0 mm; one base extrusion per document (product limit); the sketch must be a usable profile (else `Validation`) |
+| `extrude` | `name?`, `sketch`, `distance`, `op?` (`new_body` default, `join`, `cut`), `target?` (body id), `through_all?`, `reverse?`, `body_name?` | ADR 0003. `new_body` allocates a body (default name `BodyN`). `join`/`cut` need a target: given, else the body owning the face the sketch is on, else the only B-rep body; ambiguous → `Validation` "choose a target body". Direction: along the sketch normal, except a cut sketched on a face of its target goes into the material; `reverse` flips the default. `through_all` (cut only; `distance` ignored): both sides of the sketch plane through the target's extent + margin. Refused: tool missing the target, join from a face whose profile crosses the face boundary (`ProductLimit`), disconnected join result, cut removing nothing, mesh targets (`ProductLimit`). The document keeps the last valid model |
 | `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
 | `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside its profile (product limit; for a line/arc host: centre inside the loop and clearance > `MIN_LENGTH` to every line segment and arc); not on revolved bodies |
 | `pocket` | `name?`, `sketch`, `depth` | blind cut from the extrusion cap the sketch is on, `depth` mm into the material (against the cap's outward normal). Product limits: circular profile sketched on an end/start cap of the base extrusion, strictly inside it, 0 < depth < thickness (`ProductLimit` otherwise; a through hole is `cut_through_all`). Parameter `depth`; follows the cap when the thickness changes |
 | `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
-| `delete_feature` | `feature` | removes a feature nothing depends on (one undo step); refused naming the dependents otherwise |
+| `rename_body` | `body`, `name` | 1-128 printable characters, unique among bodies; undoable |
+| `set_body_visible` | `body`, `visible` | undoable; hidden bodies stay evaluated and measurable; default exports skip them |
+| `set_sketch_plane` | `feature`, `plane` | re-attach a sketch (repair of a broken/ambiguous face reference); local sketch geometry kept; one undo step |
+| `import_step` | `path`, `units_to_mm?` | exact solids (subset: docs/formats/step.md) → one body per solid, named from the file; source bytes embedded (no path dependency); one undo step; `units_to_mm` only used when the file declares no length unit (else refused with "units required") |
+| `import_stl` | `path`, `units_to_mm` (required: STL is unitless) | ASCII/binary → one mesh body (display, hide/show, save, STL export; exact operations and STEP export refused); diagnostics in `summary.bodies[].mesh`; bytes embedded |
+| `import_dxf` | `path`, `plane`, `name?`, `units_to_mm?`, `allow_partial?`, `layers?` | 2D subset (docs/formats/dxf.md) → a new unconstrained sketch on `plane`; unitless files need `units_to_mm`; unsupported entities refuse the import unless `allow_partial` (then listed in the message) |
+| `export_dxf` | `path`, `sketch` | the solved sketch's lines/arcs/circles in its local 2D coordinates, mm, R12 ASCII |
+| `delete_feature` | `feature` | removes a feature nothing depends on, explicitly or as a join/cut target of a body it creates (one undo step); refused naming the dependents otherwise; bodies and embedded files no longer created/used are dropped |
 | `undo` / `redo` | | document-level snapshots |
 | `save` | `path` | atomic (temp file + fsync + rename); always writes the current format version |
 | `open` | `path` | validates format/version/references, regenerates, compares with saved cache |
 | `close` | | |
-| `export_stl` | `path`, `chord?` (mm, default 0.01) | binary STL; refused if the tessellation is not watertight; message names the committed revision |
-| `export_step` | `path` | AP214 via truck-stepio with exact NURBS edge rebuild; refused when an edge can't be written exactly; message names the committed revision |
+| `export_stl` | `path`, `chord?` (mm, default 0.01), `bodies?` | binary STL of `bodies` (default: all visible bodies), each B-rep tessellated and checked watertight, mesh bodies written as imported; bodies are separate shells in one file, never fused; message names the committed revision |
+| `export_step` | `path`, `bodies?` | AP214 via truck-stepio with exact NURBS edge rebuild, one solid per body (default: all visible bodies); mesh bodies refused; refused when an edge can't be written exactly |
 | `measure` / `inspect` | | measurements / full `summary` |
 
 ### Sketch templates (`create_sketch`)
