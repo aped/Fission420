@@ -1401,13 +1401,265 @@ impl SketchEditor {
         }
     }
 
+    /// Polar angles (about `c`) where other curves cross the circle (c, r).
+    fn circle_cuts(&self, round: EntityId, c: [f64; 2], r: f64) -> Vec<f64> {
+        let tol = f420_sketch::solve_tolerance(self.sketch.scale());
+        let ang = |x: [f64; 2]| (x[1] - c[1]).atan2(x[0] - c[0]);
+        let mut out = Vec::new();
+        let on_arc = |g: &f420_sketch::ArcGeometry, x: [f64; 2]| {
+            let rel = ((x[1] - g.center[1]).atan2(x[0] - g.center[0]) - g.start_angle)
+                .rem_euclid(std::f64::consts::TAU);
+            rel <= g.sweep + 1e-9
+        };
+        let circle_circle = |c2: [f64; 2], r2: f64| -> Vec<[f64; 2]> {
+            let dx = [c2[0] - c[0], c2[1] - c[1]];
+            let dd = dx[0].hypot(dx[1]);
+            if dd <= tol || dd > r + r2 + tol || dd < (r - r2).abs() - tol {
+                return vec![];
+            }
+            let u = [dx[0] / dd, dx[1] / dd];
+            let a = (r * r - r2 * r2 + dd * dd) / (2.0 * dd);
+            let h = (r * r - a * a).max(0.0).sqrt();
+            let m = [c[0] + a * u[0], c[1] + a * u[1]];
+            vec![
+                [m[0] - h * u[1], m[1] + h * u[0]],
+                [m[0] + h * u[1], m[1] - h * u[0]],
+            ]
+        };
+        for e in &self.sketch.entities {
+            if e.id() == round {
+                continue;
+            }
+            match e {
+                Entity::Line { a, b, .. } => {
+                    let (Some(p), Some(q)) = (self.sketch.point_xy(*a), self.sketch.point_xy(*b))
+                    else {
+                        continue;
+                    };
+                    let d = [q[0] - p[0], q[1] - p[1]];
+                    let f = [p[0] - c[0], p[1] - c[1]];
+                    let (aa, bb, cc) = (
+                        d[0] * d[0] + d[1] * d[1],
+                        2.0 * (f[0] * d[0] + f[1] * d[1]),
+                        f[0] * f[0] + f[1] * f[1] - r * r,
+                    );
+                    let disc = bb * bb - 4.0 * aa * cc;
+                    if disc < 0.0 || aa == 0.0 {
+                        continue;
+                    }
+                    for t in [
+                        (-bb - disc.sqrt()) / (2.0 * aa),
+                        (-bb + disc.sqrt()) / (2.0 * aa),
+                    ] {
+                        if (-1e-9..=1.0 + 1e-9).contains(&t) {
+                            out.push(ang([p[0] + t * d[0], p[1] + t * d[1]]));
+                        }
+                    }
+                }
+                Entity::Circle { center, radius, .. } => {
+                    if let Some(c2) = self.sketch.point_xy(*center) {
+                        out.extend(circle_circle(c2, *radius).into_iter().map(ang));
+                    }
+                }
+                Entity::Arc { id, .. } => {
+                    if let Some(g) = self.sketch.arc_geometry(*id) {
+                        out.extend(
+                            circle_circle(g.center, g.radius)
+                                .into_iter()
+                                .filter(|x| on_arc(&g, *x))
+                                .map(ang),
+                        );
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Trim a circle (to an arc) or an arc at the nearest crossings around the click.
+    fn trim_round(&mut self, e: EntityId, pos: [f64; 2]) {
+        use std::f64::consts::TAU;
+        let ent = self.sketch.entity(e).cloned();
+        let (c, r, start, sweep, center_pt) = match &ent {
+            Some(Entity::Circle { center, radius, .. }) => {
+                let Some(c) = self.sketch.point_xy(*center) else {
+                    return;
+                };
+                (c, *radius, 0.0, TAU, *center)
+            }
+            Some(Entity::Arc { id, center, .. }) => {
+                let Some(g) = self.sketch.arc_geometry(*id) else {
+                    return;
+                };
+                (g.center, g.radius, g.start_angle, g.sweep, *center)
+            }
+            _ => return,
+        };
+        let is_circle = matches!(ent, Some(Entity::Circle { .. }));
+        let rel = |a: f64| (a - start).rem_euclid(TAU);
+        let eps = f420_sketch::solve_tolerance(self.sketch.scale()) / r;
+        let mut cuts: Vec<f64> = self
+            .circle_cuts(e, c, r)
+            .into_iter()
+            .map(rel)
+            .filter(|t| {
+                if is_circle {
+                    true
+                } else {
+                    *t > eps && *t < sweep - eps
+                }
+            })
+            .collect();
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup_by(|x, y| (*x - *y).abs() <= eps);
+        let tc = rel((pos[1] - c[1]).atan2(pos[0] - c[0]));
+        let on = |t: f64| [c[0] + r * (start + t).cos(), c[1] + r * (start + t).sin()];
+        let origin = self.sketch.origin;
+        let mut dropped = 0usize;
+        let ok = if is_circle {
+            if cuts.len() < 2 {
+                if cuts.is_empty() {
+                    self.try_change(false, |sk| {
+                        sk.remove_entity(e);
+                        Ok(())
+                    })
+                } else {
+                    self.fail("A circle needs two crossings to trim.".into());
+                    return;
+                }
+            } else {
+                // Removed interval (lo, hi) around the click, cyclically.
+                let hi = cuts
+                    .iter()
+                    .copied()
+                    .find(|t| *t > tc)
+                    .unwrap_or(cuts[0] + TAU);
+                let lo = cuts
+                    .iter()
+                    .copied()
+                    .rev()
+                    .find(|t| *t < tc)
+                    .unwrap_or(cuts[cuts.len() - 1] - TAU);
+                self.try_change(false, |sk| {
+                    // Keep the arc CCW from hi to lo (+ 2π).
+                    let (ps, pe) = (on(hi), on(lo));
+                    let s_id = sk.add_point(ps[0], ps[1]);
+                    let e_id = sk.add_point(pe[0], pe[1]);
+                    let new = sk.next_entity_id();
+                    sk.entities.retain(|x| x.id() != e);
+                    sk.construction.remove(&e);
+                    sk.retired_entity_ids = sk.retired_entity_ids.max(e.0 + 1);
+                    sk.entities.push(Entity::Arc {
+                        id: new,
+                        center: center_pt,
+                        start: s_id,
+                        end: e_id,
+                    });
+                    let before = sk.constraints.len();
+                    let mut keep = Vec::new();
+                    for k in std::mem::take(&mut sk.constraints) {
+                        match k {
+                            Constraint::Diameter { circle, mut dim } if circle == e => {
+                                dim.value /= 2.0;
+                                keep.push(Constraint::Radius { entity: new, dim });
+                            }
+                            Constraint::Radius { entity, dim } if entity == e => {
+                                keep.push(Constraint::Radius { entity: new, dim })
+                            }
+                            Constraint::EqualRadius { a, b } if a == e || b == e => {
+                                let (a, b) =
+                                    (if a == e { new } else { a }, if b == e { new } else { b });
+                                keep.push(Constraint::EqualRadius { a, b });
+                            }
+                            k if k.entities().contains(&e) => {}
+                            k => keep.push(k),
+                        }
+                    }
+                    sk.constraints = keep;
+                    dropped += before.saturating_sub(sk.constraints.len());
+                    Ok(())
+                })
+            }
+        } else {
+            let lo = cuts.iter().copied().filter(|t| *t < tc).fold(0.0, f64::max);
+            let hi = cuts
+                .iter()
+                .copied()
+                .filter(|t| *t > tc)
+                .fold(sweep, f64::min);
+            let Some(Entity::Arc {
+                start: sp, end: ep, ..
+            }) = ent
+            else {
+                return;
+            };
+            self.try_change(false, |sk| {
+                if lo <= 0.0 && hi >= sweep {
+                    sk.remove_entity(e);
+                    return Ok(());
+                }
+                let before = sk.constraints.len();
+                sk.constraints
+                    .retain(|k| !matches!(k, Constraint::Tangent { arc, .. } if *arc == e));
+                let set = |sk: &mut Sketch, s: PointId, t: PointId| {
+                    if let Some(Entity::Arc { start, end, .. }) =
+                        sk.entities.iter_mut().find(|x| x.id() == e)
+                    {
+                        (*start, *end) = (s, t);
+                    }
+                };
+                let mut freed = Vec::new();
+                if lo <= 0.0 {
+                    let p = on(hi);
+                    let n = sk.add_point(p[0], p[1]);
+                    set(sk, n, ep);
+                    freed.push(sp);
+                } else if hi >= sweep {
+                    let p = on(lo);
+                    let n = sk.add_point(p[0], p[1]);
+                    set(sk, sp, n);
+                    freed.push(ep);
+                } else {
+                    let (p0, p1) = (on(lo), on(hi));
+                    let n0 = sk.add_point(p0[0], p0[1]);
+                    let n1 = sk.add_point(p1[0], p1[1]);
+                    set(sk, sp, n0);
+                    let id = sk.next_entity_id();
+                    sk.entities.push(Entity::Arc {
+                        id,
+                        center: center_pt,
+                        start: n1,
+                        end: ep,
+                    });
+                    sk.constraints.push(Constraint::EqualRadius { a: e, b: id });
+                }
+                for pt in freed {
+                    if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
+                        sk.constraints.retain(|k| !constraint_mentions(k, pt));
+                        sk.points.retain(|x| x.id != pt);
+                    }
+                }
+                dropped += before.saturating_sub(sk.constraints.len());
+                Ok(())
+            })
+        };
+        if ok {
+            self.selection.clear();
+            self.info(if dropped > 0 {
+                format!("Trimmed; {dropped} constraint(s) that no longer applied were removed. New endpoints are unconstrained.")
+            } else {
+                "Trimmed. New endpoints are unconstrained.".into()
+            });
+        }
+    }
+
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
         let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
             self.fail("Click the part of a line to remove (away from its endpoints).".into());
             return;
         };
         let Some(Entity::Line { a, b, .. }) = self.sketch.entity(e).cloned() else {
-            self.fail("Trim works on lines only in this build (arcs and circles: not yet).".into());
+            self.trim_round(e, pos);
             return;
         };
         let (Some(p), Some(q)) = (self.sketch.point_xy(a), self.sketch.point_xy(b)) else {
@@ -2577,6 +2829,70 @@ mod tests {
         click(&mut ed, near);
         assert_eq!(ed.sketch, before);
         assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+    }
+
+    #[test]
+    fn trim_circle_to_arc_then_trim_the_arc() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::Circle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [10.0, 0.0]);
+        ed.set_tool(SketchTool::Line);
+        click(&mut ed, [-20.0, 0.5]);
+        click(&mut ed, [20.0, 0.5]);
+        ed.escape();
+        click(&mut ed, [0.5, -20.0]);
+        click(&mut ed, [0.5, 20.0]);
+        ed.escape();
+        ed.set_tool(SketchTool::Trim);
+        // Click the top-right quarter: removed between the crossings either side.
+        click(&mut ed, [7.0, 7.0]);
+        let arc = ed
+            .sketch
+            .entities
+            .iter()
+            .find_map(|e| match e {
+                Entity::Arc { id, .. } => Some(*id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("circle became an arc: {:?}", ed.feedback));
+        assert!(
+            !ed.sketch
+                .entities
+                .iter()
+                .any(|e| matches!(e, Entity::Circle { .. }))
+        );
+        let g = ed.sketch.arc_geometry(arc).unwrap();
+        // Remaining arc: three quarters (minus the small offsets of the lines).
+        assert!((g.radius - 10.0).abs() < 1e-9);
+        assert!(
+            g.sweep > 1.4 * std::f64::consts::PI && g.sweep < 1.6 * std::f64::consts::PI,
+            "{}",
+            g.sweep
+        );
+        // Trim the bottom-left quarter of the arc: it splits into two arcs.
+        click(&mut ed, [-7.0, -7.0]);
+        let arcs: Vec<_> = ed
+            .sketch
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Arc { id, .. } => ed.sketch.arc_geometry(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(arcs.len(), 2, "{:?}", ed.feedback);
+        let total: f64 = arcs.iter().map(|g| g.sweep).sum();
+        assert!(
+            total > 0.9 * std::f64::consts::PI && total < 1.1 * std::f64::consts::PI,
+            "{total}"
+        );
+        assert!(
+            ed.sketch
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::EqualRadius { .. }))
+        );
     }
 
     #[test]

@@ -194,6 +194,11 @@ pub enum Constraint {
 }
 
 impl Constraint {
+    /// Entities this constraint references directly.
+    pub fn entities(&self) -> Vec<EntityId> {
+        edit::constraint_entities(self)
+    }
+
     pub fn dimension(&self) -> Option<&Dimension> {
         match self {
             Constraint::HorizontalDistance { dim, .. }
