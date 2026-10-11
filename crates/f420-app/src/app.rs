@@ -59,10 +59,7 @@ pub(crate) enum Dialog {
         cx: String,
         cy: String,
     },
-    Extrude {
-        sketch: Option<FeatureId>,
-        distance: String,
-    },
+    Extrude(crate::extrude::ExtrudeForm),
     CircleOnFace {
         extrude: Option<FeatureId>,
         diameter: String,
@@ -94,7 +91,7 @@ impl Dialog {
     pub(crate) fn title(&self) -> &'static str {
         match self {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
-            Dialog::Extrude { .. } => "New extrusion",
+            Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
             Dialog::Revolve { .. } => "New revolve (about world Z)",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
@@ -1000,9 +997,12 @@ impl F420App {
         }
     }
 
-    /// Push the selection highlight to the GPU view.
+    /// Push the selection highlight to the GPU view (the Extrude dialog's
+    /// target body while it is open).
     pub(crate) fn sync_viewport_selection(&mut self) {
-        let groups = self.highlighted_faces();
+        let groups = self
+            .extrude_target_groups()
+            .unwrap_or_else(|| self.highlighted_faces());
         if let Some(vp) = self.viewport.as_mut() {
             vp.set_selection(&groups);
         }
@@ -1546,6 +1546,7 @@ impl F420App {
         ) {
             self.held_preview = None;
         }
+        self.sync_viewport_selection();
         self.confirm_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
@@ -1760,11 +1761,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
         },
-        Dialog::Extrude { sketch, distance } => Command::extrude(
-            None,
-            need(sketch, "profile sketch")?,
-            parse_num("distance", distance)?,
-        ),
+        Dialog::Extrude(form) => form.command()?,
         Dialog::CircleOnFace {
             extrude,
             diameter,

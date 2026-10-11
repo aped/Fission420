@@ -374,6 +374,7 @@ impl F420App {
             self.paint_document_sketches(&painter, rect);
             self.doc_dim_input(ui);
             self.paint_placement(&painter, rect);
+            self.paint_extrude_preview(&painter, rect);
             if (!self.summary.open || self.summary.features.is_empty())
                 && self.placement.is_none()
                 && self.dialog.is_none()

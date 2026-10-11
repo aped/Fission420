@@ -204,7 +204,10 @@ impl F420App {
                     .strong()
                     .size(16.0),
             );
-            if ui.small_button("Rename…").probe("Rename body…").clicked() {
+            if labelled(ui.small_button("Rename…"), "Rename body…".into())
+                .probe("Rename body…")
+                .clicked()
+            {
                 self.body_rename = Some(BodyRename {
                     body: b.id,
                     buffer: b.name.clone(),

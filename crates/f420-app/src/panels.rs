@@ -238,10 +238,9 @@ impl F420App {
                 .as_ref()
                 .map(|s| s.id)
                 .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Extrude {
-                sketch,
-                distance: "10".into(),
-            });
+            self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
+                self, sketch,
+            )));
         }
         let cut_block = if !has_sketch {
             Some("Create a circle sketch on a cap face first".to_string())
@@ -664,10 +663,10 @@ impl F420App {
                     }
                     let eb = self.extrude_blocker(&f);
                     if action(ui, "Extrude this sketch…", eb.as_deref()) {
-                        self.dialog = Some(Dialog::Extrude {
-                            sketch: Some(f.id),
-                            distance: "10".into(),
-                        });
+                        self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
+                            self,
+                            Some(f.id),
+                        )));
                     }
                     let cb = self.cut_blocker(&f);
                     if action(ui, "Cut with this sketch…", cb.as_deref()) {
@@ -1125,16 +1124,7 @@ impl F420App {
                         num_field(ui, "Rectangle center Y (mm)", cy);
                         ui.small("Centre in world XY coordinates.");
                     }
-                    Dialog::Extrude { sketch, distance } => {
-                        feature_combo(ui, "Profile sketch", sketch, &sketches);
-                        num_field(ui, "Extrude distance (mm)", distance);
-                        if let Some(e) = sketch
-                            .and_then(|id| sketches.iter().find(|s| s.id == id))
-                            .and_then(|s| s.profile_error.clone())
-                        {
-                            ui.colored_label(BAD_COLOR, format!("This sketch's profile is not usable: {e}"));
-                        }
-                    }
+                    Dialog::Extrude(form) => self.extrude_form_ui(ui, form),
                     Dialog::RectangleXz {
                         width,
                         height,

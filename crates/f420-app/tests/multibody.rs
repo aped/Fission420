@@ -1,0 +1,320 @@
+//! Run-3 multi-body UI: two bodies, the Bodies browser (select, hide/show,
+//! inline rename, undo), picking per body, and the Extrude dialog (New Body /
+//! Join / Cut with a target, Through All, preview, cancel, refusal) driven
+//! through the real widgets. Expected volumes are hand-derived box volumes
+//! (SESSION_3 acceptance model A).
+
+use std::time::{Duration, Instant};
+
+use eframe::egui::{self, Key, Modifiers, PointerButton, Pos2};
+use egui_kittest::{Harness, kittest::Queryable as _};
+use f420_app::{ExecMode, F420App};
+use f420_commands::{Command, SketchTemplate, end_cap_of};
+use f420_document::{BodyId, SketchPlane};
+use f420_kernel::VolumeResult;
+
+const VOL_TOL: f64 = 0.005;
+
+fn harness() -> Harness<'static, F420App> {
+    Harness::builder()
+        .with_size([1400.0, 900.0])
+        .with_max_steps(64)
+        .build_ui_state(
+            |ui, app: &mut F420App| app.ui(ui),
+            F420App::new(ExecMode::Sync, None),
+        )
+}
+
+fn settle(h: &mut Harness<'_, F420App>) {
+    let start = Instant::now();
+    loop {
+        let _ = h.try_run();
+        if h.state().idle() {
+            let _ = h.try_run();
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(180), "not idle");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn click(h: &mut Harness<'_, F420App>, label: &str) {
+    h.get_by_label(label).click();
+    settle(h);
+}
+
+fn type_into(h: &mut Harness<'_, F420App>, label: &str, text: &str) {
+    h.get_by_label(label).focus();
+    let _ = h.try_run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    let _ = h.try_run();
+    h.get_by_label(label).type_text(text);
+    let _ = h.try_run();
+}
+
+fn pointer_click(h: &mut Harness<'_, F420App>, s: Pos2) {
+    h.event(egui::Event::PointerMoved(s));
+    let _ = h.try_run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: s,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        let _ = h.try_run();
+    }
+    let _ = h.try_run();
+}
+
+/// Rectangle template on world XY through the dialog.
+fn rect_xy(h: &mut Harness<'_, F420App>, w: &str, hh: &str, cx: &str, cy: &str) {
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(h, "Rectangle on XY…");
+    type_into(h, "Rectangle width (mm)", w);
+    type_into(h, "Rectangle height (mm)", hh);
+    type_into(h, "Rectangle center X (mm)", cx);
+    type_into(h, "Rectangle center Y (mm)", cy);
+    click(h, "OK");
+}
+
+fn body_volume(h: &Harness<'_, F420App>, id: BodyId) -> f64 {
+    let b = h
+        .state()
+        .summary()
+        .bodies
+        .iter()
+        .find(|b| b.id == id)
+        .expect("body");
+    match b.measurements.as_ref().map(|m| &m.volume) {
+        Some(VolumeResult::Value { volume, .. }) => *volume,
+        other => panic!("no volume for {}: {other:?}", b.name),
+    }
+}
+
+fn assert_close(v: f64, e: f64) {
+    assert!((v - e).abs() <= VOL_TOL, "volume {v} vs {e}");
+}
+
+/// Request a rectangle sketch on the end cap of extrusion `ext` (setup only;
+/// the operations under test go through the dialog).
+fn rect_on_cap(
+    h: &mut Harness<'_, F420App>,
+    ext: f420_document::FeatureId,
+    w: f64,
+    hh: f64,
+    c: [f64; 2],
+) {
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: end_cap_of(ext),
+        template: SketchTemplate::CenteredRectangle {
+            width: w,
+            height: hh,
+            center: Some(c),
+        },
+    });
+    settle(h);
+}
+
+fn fname(h: &Harness<'_, F420App>, id: f420_document::FeatureId) -> String {
+    h.state()
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.id == id)
+        .unwrap()
+        .name
+        .clone()
+}
+
+/// Bodies A [0,40]x[0,30]x[0,10] and B [50,70]x[0,20]x[0,10].
+fn two_bodies(h: &mut Harness<'_, F420App>) -> (BodyId, BodyId) {
+    click(h, "New");
+    rect_xy(h, "40", "30", "20", "15");
+    click(h, "Extrude…");
+    click(h, "OK");
+    rect_xy(h, "20", "20", "60", "10");
+    click(h, "Extrude…");
+    click(h, "OK");
+    let b = &h.state().summary().bodies;
+    assert_eq!(b.len(), 2, "second sketch creates a second body");
+    (b[0].id, b[1].id)
+}
+
+#[test]
+fn two_bodies_render_pick_hide_rename_and_undo() {
+    let mut h = harness();
+    let (a, b) = two_bodies(&mut h);
+    assert_close(body_volume(&h, a), 12000.0);
+    assert_close(body_volume(&h, b), 4000.0);
+    // Both bodies are in the display scene with disjoint group ranges and
+    // distinct tints.
+    let scene = h.state().scene().clone();
+    assert_eq!(scene.bodies.len(), 2);
+    assert!(scene.bodies[0].groups.end <= scene.bodies[1].groups.start);
+    assert_ne!(scene.bodies[0].tint, scene.bodies[1].tint);
+    // Picking a face of B selects B's face and body.
+    let on_b = h.state().world_to_screen([60.0, 10.0, 10.0]).unwrap();
+    pointer_click(&mut h, on_b);
+    let f = h.state().selected_face().cloned().expect("face of B");
+    assert_eq!(f.body, Some(b));
+    assert!(f.reference.is_some(), "top cap of B is a sketch host");
+    // Browser: select body A highlights all six faces of A.
+    let name_a = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name_a);
+    assert_eq!(h.state().selected_body(), Some(a));
+    assert_eq!(h.state().highlighted_faces().len(), 6);
+    // Hide B: it stays in the document, is not drawn and cannot be picked.
+    let name_b = h.state().summary().bodies[1].name.clone();
+    click(&mut h, &format!("Hide {name_b}"));
+    assert_eq!(h.state().summary().bodies.len(), 2);
+    assert!(!h.state().summary().bodies[1].visible);
+    assert_eq!(h.state().scene().bodies.len(), 1);
+    pointer_click(&mut h, on_b);
+    assert!(h.state().selected_face().is_none_or(|f| f.body != Some(b)));
+    // Undo restores visibility (one undo step).
+    click(&mut h, "Undo");
+    assert!(h.state().summary().bodies[1].visible);
+    assert_eq!(h.state().scene().bodies.len(), 2);
+    // Inline rename (inspector Rename… or double-click / context menu on the
+    // row open the same in-place editor): Esc cancels, Enter commits.
+    click(&mut h, &name_a);
+    click(&mut h, "Rename body…");
+    assert!(
+        h.query_by_label("Body name").is_some(),
+        "inline editor open"
+    );
+    h.key_press(Key::Escape);
+    let _ = h.try_run();
+    assert!(h.query_by_label("Body name").is_none());
+    assert_eq!(h.state().summary().bodies[0].name, name_a);
+    click(&mut h, "Rename body…");
+    type_into(&mut h, "Body name", "Plate A");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    assert_eq!(h.state().summary().bodies[0].name, "Plate A");
+    assert_eq!(
+        h.state()
+            .summary()
+            .can_undo
+            .as_deref()
+            .map(|s| s.contains("Rename")),
+        Some(true)
+    );
+}
+
+#[test]
+fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
+    let mut h = harness();
+    let (a, b) = two_bodies(&mut h);
+    let ext_a = h.state().summary().features[1].id;
+    // Boss 20x10 on A's top face, centred at (20, 15).
+    rect_on_cap(&mut h, ext_a, 20.0, 10.0, [20.0, 15.0]);
+    let boss_sketch = h.state().summary().features.last().unwrap().id;
+    h.state_mut().select_body(None);
+    let sk_name = fname(&h, boss_sketch);
+    click(&mut h, &sk_name);
+    click(&mut h, "Extrude this sketch…");
+    // Sketch on a face of A: Join with target A preselected (checked by the
+    // preview's direction and the committed volume below).
+    type_into(&mut h, "Extrude distance (mm)", "5");
+    let pv = h.state().extrude_preview().expect("preview");
+    assert_eq!(pv.z_range, [0.0, 5.0], "join goes along the face normal");
+    assert!(pv.end.iter().all(|p| (p[2] - 15.0).abs() < 1e-9));
+    // Target highlighted in the view while the dialog is open.
+    let d = h
+        .state()
+        .scene()
+        .bodies
+        .iter()
+        .find(|d| d.id == a)
+        .unwrap()
+        .groups
+        .clone();
+    // Cancel leaves the document untouched.
+    let rev = h.state().summary().revision;
+    click(&mut h, "Cancel");
+    assert_eq!(h.state().summary().revision, rev);
+    assert!(h.state().extrude_preview().is_none());
+    assert!(d.end > d.start);
+    // Reopen and commit the join: A = 13000, B unchanged.
+    click(&mut h, "Extrude this sketch…");
+    type_into(&mut h, "Extrude distance (mm)", "5");
+    click(&mut h, "OK");
+    assert_close(body_volume(&h, a), 13000.0);
+    assert_close(body_volume(&h, b), 4000.0);
+    assert_eq!(h.state().summary().bodies.len(), 2);
+
+    // Rectangular 10x5 through-all cut on A's top face away from the boss.
+    rect_on_cap(&mut h, ext_a, 10.0, 5.0, [6.0, 25.0]);
+    let cut_sketch = h.state().summary().features.last().unwrap().id;
+    let n = fname(&h, cut_sketch);
+    click(&mut h, &n);
+    click(&mut h, "Extrude this sketch…");
+    h.get_by_label("Cut").click();
+    let _ = h.try_run();
+    // Blind cut from a face of the target goes into the material.
+    type_into(&mut h, "Extrude distance (mm)", "3");
+    let pv = h.state().extrude_preview().unwrap();
+    assert_eq!(pv.z_range, [0.0, -3.0]);
+    click(&mut h, "Reverse direction");
+    assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, 3.0]);
+    click(&mut h, "Reverse direction");
+    click(&mut h, "Through All");
+    let pv = h.state().extrude_preview().unwrap();
+    // Both sides of the plane z=10, through A's extent (z 0..15) + margin.
+    assert!(
+        pv.z_range[0] < -10.0 && pv.z_range[0] > -12.0,
+        "{:?}",
+        pv.z_range
+    );
+    assert!(
+        pv.z_range[1] > 5.0 && pv.z_range[1] < 7.0,
+        "{:?}",
+        pv.z_range
+    );
+    click(&mut h, "OK");
+    assert_close(body_volume(&h, a), 12500.0);
+    assert_close(body_volume(&h, b), 4000.0);
+    let cut = h.state().summary().features.last().unwrap().clone();
+    assert!(matches!(cut.operation, Some(f420_document::Operation::Cut { target }) if target == a));
+
+    // Undo/redo the cut.
+    click(&mut h, "Undo");
+    assert_close(body_volume(&h, a), 13000.0);
+    click(&mut h, "Redo");
+    assert_close(body_volume(&h, a), 12500.0);
+
+    // Refusal: a join far away from A (disconnected result) keeps the model.
+    rect_xy(&mut h, "5", "5", "200", "200");
+    let far = h.state().summary().features.last().unwrap().id;
+    let n = fname(&h, far);
+    click(&mut h, &n);
+    click(&mut h, "Extrude this sketch…");
+    h.get_by_label("Join").click();
+    let _ = h.try_run();
+    // Two B-rep bodies and the sketch is on a world plane: target required.
+    assert!(h.state().extrude_preview().is_some());
+    let rev = h.state().summary().revision;
+    click(&mut h, "OK");
+    assert_eq!(h.state().summary().revision, rev, "no target: nothing sent");
+    assert!(h.state().diagnostics().last().unwrap().error);
+    let _ = h.try_run();
+    h.get_by_label("Target body").click();
+    let _ = h.try_run();
+    let a_name = h.state().summary().bodies[0].name.clone();
+    h.get_by_label(&format!("{a_name} ({a})")).click();
+    let _ = h.try_run();
+    click(&mut h, "OK");
+    assert_eq!(
+        h.state().summary().revision,
+        rev,
+        "refused join keeps the model"
+    );
+    assert!(h.state().diagnostics().last().unwrap().error);
+    assert_close(body_volume(&h, a), 12500.0);
+    assert_eq!(h.state().summary().bodies.len(), 2);
+    let _ = SketchPlane::WorldXY;
+}

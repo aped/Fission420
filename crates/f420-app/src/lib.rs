@@ -7,6 +7,7 @@
 pub mod app;
 pub mod bodies;
 pub mod engine;
+pub mod extrude;
 pub mod panels;
 pub mod place;
 pub mod probe;
