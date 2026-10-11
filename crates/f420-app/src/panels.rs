@@ -564,6 +564,8 @@ impl F420App {
             ui.weak("No document open. Use New or Open….");
             return;
         }
+        self.parameters_panel(ui);
+        ui.separator();
         self.bodies_browser(ui);
         ui.add_space(4.0);
         ui.separator();
@@ -874,23 +876,58 @@ impl F420App {
             ui.weak("No editable parameters.");
             return;
         }
+        let feature = ins.feature;
+        let fsum = self
+            .summary
+            .features
+            .iter()
+            .find(|f| f.id == feature)
+            .cloned();
+        let bound: Vec<String> = fsum
+            .as_ref()
+            .map(|f| f.expressions.keys().cloned().collect())
+            .unwrap_or_default();
+        let unit_of = |pname: &str| -> &'static str {
+            let angle_dim = fsum
+                .as_ref()
+                .and_then(|f| f.sketch.as_ref())
+                .is_some_and(|sk| {
+                    sk.constraints.iter().any(|c| {
+                    matches!(c, f420_sketch::Constraint::Angle { dim, .. } if dim.name == pname)
+                })
+                });
+            if angle_dim || pname.ends_with("_deg") {
+                "deg"
+            } else if pname == "count" {
+                "count"
+            } else {
+                "mm"
+            }
+        };
         egui::Grid::new("inspector_grid")
-            .num_columns(2)
+            .num_columns(3)
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
-                for (pname, _, buf) in &mut ins.fields {
-                    let unit = if pname.ends_with("_deg") { "deg" } else { "mm" };
+                for (pname, v, _, buf) in &mut ins.fields {
+                    let unit = unit_of(pname);
                     let l = ui.label(format!("{pname} ({unit})"));
-                    ui.add(egui::TextEdit::singleline(buf).desired_width(90.0))
+                    ui.add(egui::TextEdit::singleline(buf).desired_width(120.0))
                         .labelled_by(l.id)
-                        .probe(&format!("{pname} ({unit})"));
+                        .probe(&format!("{pname} ({unit})"))
+                        .on_hover_text("A number, or an expression of named parameters (e.g. outer_length - 2 * wall). A plain number removes a binding.");
+                    if bound.contains(pname) {
+                        ui.label(
+                            RichText::new(format!("= {}", crate::params_ui::fmt_value(*v)))
+                                .weak(),
+                        )
+                        .named(&format!("{pname} value"));
+                    } else {
+                        ui.label("");
+                    }
                     ui.end_row();
                 }
             });
-        let modified = ins
-            .fields
-            .iter()
-            .any(|(_, v, b)| b.trim().parse::<f64>().ok() != Some(*v));
+        let modified = ins.fields.iter().any(|(_, _, t, b)| b.trim() != t.trim());
         let mut apply = false;
         let mut cancel = false;
         ui.horizontal(|ui| {
@@ -912,15 +949,30 @@ impl F420App {
             let ins = ins.clone();
             let mut cmds = vec![];
             let mut bad = vec![];
-            for (pname, v, b) in &ins.fields {
-                match b.trim().parse::<f64>() {
-                    Ok(x) if x != *v => cmds.push(Command::SetParameter {
+            for (pname, v, t, b) in &ins.fields {
+                if b.trim() == t.trim() {
+                    continue;
+                }
+                let plain = f420_document::params::plain_number(b.trim());
+                match plain {
+                    // Unbound numeric edits keep the coalescing SetParameter path.
+                    Some(x) if !bound.contains(pname) => {
+                        if x != *v {
+                            cmds.push(Command::SetParameter {
+                                feature: ins.feature,
+                                name: pname.clone(),
+                                value: x,
+                            })
+                        }
+                    }
+                    _ if b.trim().is_empty() => {
+                        bad.push(format!("{pname}: empty; type a number or an expression"))
+                    }
+                    _ => cmds.push(Command::SetExpression {
                         feature: ins.feature,
                         name: pname.clone(),
-                        value: x,
+                        expression: b.trim().to_string(),
                     }),
-                    Ok(_) => {}
-                    Err(_) => bad.push(format!("{pname}: '{b}' is not a number")),
                 }
             }
             if !bad.is_empty() {

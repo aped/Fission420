@@ -158,7 +158,9 @@ impl Dialog {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Inspector {
     pub feature: FeatureId,
-    pub fields: Vec<(String, f64, String)>, // (name, document value, edit buffer)
+    /// (name, document value, document text: the bound expression or the
+    /// value, edit buffer)
+    pub fields: Vec<(String, f64, String, String)>,
 }
 
 /// Where a sketch edit session will be committed.
@@ -313,6 +315,8 @@ pub struct F420App {
     pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
     /// Open "Re-attach sketch" window.
     pub(crate) reattach: Option<crate::reattach::Reattach>,
+    /// Parameters panel edit buffers.
+    pub(crate) params: crate::params_ui::ParamsPanel,
     /// Sketch named by the last BrokenReference refusal (offered for repair).
     pub(crate) broken_sketch: Option<FeatureId>,
     /// Scripted screenshot scene (see [`crate::scenes`]).
@@ -386,6 +390,7 @@ impl F420App {
             show_help: false,
             import_summary: None,
             reattach: None,
+            params: Default::default(),
             broken_sketch: None,
             scene_steps: VecDeque::new(),
             scene_fitted: true,
@@ -860,6 +865,7 @@ impl F420App {
             self.body_rename = None;
             self.reattach = None;
             self.broken_sketch = None;
+            self.params = Default::default();
             // Dialogs hold ids of the old document (ids restart per document);
             // a pending import is the exception: its reply is this one.
             if !matches!(&self.dialog, Some(Dialog::Import(f)) if f.pending.is_some()) {
@@ -885,7 +891,8 @@ impl F420App {
             }
         }
         let edited_param = match &command {
-            Command::SetParameter { feature, name, .. } => Some((*feature, name.clone())),
+            Command::SetParameter { feature, name, .. }
+            | Command::SetExpression { feature, name, .. } => Some((*feature, name.clone())),
             _ => None,
         };
         self.summary = summary;
@@ -1017,6 +1024,11 @@ impl F420App {
         self.faces =
             crate::view3d::analyse_faces(&self.scene, &self.summary.features, &self.summary.bodies);
         self.import_reply(&command, &response, self.replies_seen);
+        self.params_reply(
+            &command,
+            response.ok,
+            response.error.as_ref().map(|e| e.to_string()),
+        );
         if response.ok && matches!(command, Command::Undo | Command::Redo) {
             self.close_dialog_after_undo(&command);
         }
@@ -1130,15 +1142,14 @@ impl F420App {
             .parameters
             .iter()
             .map(|(n, v)| {
+                let text = f.expressions.get(n).cloned().unwrap_or_else(|| fmt_num(*v));
                 let keep = old.as_ref().and_then(|o| {
-                    o.fields.iter().find(|(on, ov, ob)| {
-                        on == n
-                            && ob.trim().parse::<f64>().ok() != Some(*ov)
-                            && edited != Some(&(id, n.clone()))
+                    o.fields.iter().find(|(on, _, ot, ob)| {
+                        on == n && ob.trim() != ot.trim() && edited != Some(&(id, n.clone()))
                     })
                 });
-                let buf = keep.map_or_else(|| fmt_num(*v), |(_, _, b)| b.clone());
-                (n.clone(), *v, buf)
+                let buf = keep.map_or_else(|| text.clone(), |(_, _, _, b)| b.clone());
+                (n.clone(), *v, text, buf)
             })
             .collect();
         self.inspector = Some(Inspector {

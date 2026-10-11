@@ -43,11 +43,19 @@ pub fn rects() -> Vec<(String, egui::Rect)> {
 /// `response.probe("Finish Sketch")` notes the widget's rectangle.
 pub trait Probe {
     fn probe(self, key: &str) -> Self;
+    /// [`Probe::probe`], and also make `key` the widget's accessible name
+    /// (screen readers, egui_kittest queries) where its visible text differs.
+    fn named(self, key: &str) -> Self;
 }
 
 impl Probe for egui::Response {
     fn probe(self, key: &str) -> Self {
         note(key, self.rect);
         self
+    }
+    fn named(self, key: &str) -> Self {
+        self.ctx
+            .accesskit_node_builder(self.id, |n| n.set_label(key.to_string()));
+        self.probe(key)
     }
 }
