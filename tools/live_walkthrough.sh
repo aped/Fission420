@@ -43,5 +43,8 @@ for script in "$ROOT"/tools/live/*.txt; do
   # under tools/heavy.sh, kept the build lock); stop it by its private socket.
   sock=$(cat "$dir/wayland" 2>/dev/null)
   [ -n "$sock" ] && pkill -f -- "--wayland-display $sock"
+  # Stop the session's scope: kills whatever is left in its cgroup.
+  unit=$(cat "$dir/unit" 2>/dev/null)
+  [ -n "$unit" ] && systemctl --user stop "$unit" 2>/dev/null
 done
 exit $rc
