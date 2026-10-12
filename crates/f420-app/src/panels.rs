@@ -829,6 +829,20 @@ impl F420App {
                 }
             }
             "extrude" => {
+                // Scoped shell of a New Body extrusion (dialog: extrude.rs).
+                if matches!(f.operation, Some(f420_document::Operation::NewBody { .. }))
+                    && ui
+                        .button("Shell…")
+                        .probe("Shell…")
+                        .on_hover_text("Hollow this extrusion: walls and floor of one thickness, open at one cap (scoped shell, not a general shell)")
+                        .clicked()
+                {
+                    self.dialog = Some(Dialog::Shell {
+                        extrude: f.id,
+                        open_end: true,
+                        thickness: "2".into(),
+                    });
+                }
                 if matches!(
                     f.operation,
                     Some(
@@ -1551,6 +1565,13 @@ impl F420App {
                             num_field(ui, "Counterbore depth (mm)", cb_depth);
                         }
                         ui.small("Built as exact cuts into the material, each checked against the nominal shape; countersinks are not supported. Sizes can be bound to parameters afterwards in the inspector.");
+                    }
+                    Dialog::Shell {
+                        extrude,
+                        open_end,
+                        thickness,
+                    } => {
+                        self.shell_form_ui(ui, *extrude, open_end, thickness);
                     }
                     Dialog::Chamfer { a, b, distance } => {
                         let faces: Vec<f420_commands::FaceSummary> = self

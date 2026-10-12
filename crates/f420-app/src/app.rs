@@ -127,6 +127,13 @@ pub(crate) enum Dialog {
         b: Option<f420_document::FaceRef>,
         distance: String,
     },
+    /// Scoped shell of a New Body extrusion (docs/SHELL.md).
+    Shell {
+        extrude: FeatureId,
+        /// Open at the end cap (else the start cap).
+        open_end: bool,
+        thickness: String,
+    },
 }
 
 /// The pattern dialog's mode.
@@ -157,6 +164,7 @@ impl Dialog {
             Dialog::Pattern { .. } => "Pattern / mirror",
             Dialog::Chamfer { .. } => "Chamfer edge",
             Dialog::Hole { .. } => "Hole",
+            Dialog::Shell { .. } => "Shell (scoped)",
         }
     }
 }
@@ -1185,6 +1193,7 @@ impl F420App {
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
             Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
+            Dialog::Shell { extrude, .. } => (vec![*extrude], vec![]),
             Dialog::Chamfer { a, b, .. } => (
                 std::iter::once(a.feature)
                     .chain(b.map(|b| b.feature))
@@ -2198,6 +2207,20 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                 None
             },
             target: None,
+        },
+        Dialog::Shell {
+            extrude,
+            open_end,
+            thickness,
+        } => Command::Shell {
+            name: None,
+            extrude: *extrude,
+            open: if *open_end {
+                f420_document::FaceRole::ExtrudeEndCap
+            } else {
+                f420_document::FaceRole::ExtrudeStartCap
+            },
+            thickness: parse_num("thickness", thickness)?,
         },
         Dialog::Chamfer { a, b, distance } => Command::Chamfer {
             name: None,
