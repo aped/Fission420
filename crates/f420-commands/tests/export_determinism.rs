@@ -42,6 +42,13 @@ fn outputs(s: &mut Session, dir: &Path, tag: &str) -> Vec<(String, Vec<u8>)> {
             },
         ),
         (
+            "step",
+            Command::ExportStep {
+                path: dir.join(format!("{tag}.step")),
+                bodies: None,
+            },
+        ),
+        (
             "f420",
             Command::Save {
                 path: dir.join(format!("{tag}.f420.json")),
@@ -55,7 +62,19 @@ fn outputs(s: &mut Session, dir: &Path, tag: &str) -> Vec<(String, Vec<u8>)> {
             e => e,
         };
         let p: PathBuf = dir.join(format!("{tag}.{ext}"));
-        out.push((name.to_string(), std::fs::read(&p).unwrap()));
+        let mut bytes = std::fs::read(&p).unwrap();
+        if name == "step" {
+            // The header time stamp is the export time unless SOURCE_DATE_EPOCH
+            // is set (f420_kernel::export_step); everything else must match.
+            let text = String::from_utf8(bytes).unwrap();
+            bytes = text
+                .lines()
+                .filter(|l| !l.starts_with("FILE_NAME("))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .into_bytes();
+        }
+        out.push((name.to_string(), bytes));
     }
     out
 }
