@@ -386,6 +386,7 @@ impl F420App {
             self.paint_sketch_session(&painter, rect);
             self.sketch_dim_input(ui);
             self.sketch_offset_input(ui);
+            self.sketch_fillet_input(ui);
         } else {
             self.model_input(ui, &resp);
             self.paint_document_sketches(&painter, rect);
@@ -916,6 +917,40 @@ impl F420App {
         }
         sketch_view::paint_preview(painter, &pr, ed);
         s.editor.set_screen_targets(targets);
+    }
+
+    /// Inline radius entry of the Fillet tool (next to the picked corner).
+    fn sketch_fillet_input(&mut self, ui: &egui::Ui) {
+        let rect = self.view_rect;
+        let Some(s) = self.sketch.as_mut() else {
+            return;
+        };
+        let Some(ed) = s.editor.fillet_edit.clone() else {
+            return;
+        };
+        let at = s
+            .editor
+            .screen_target(Item::Point(ed.point))
+            .map(|r| r.right_bottom() + egui::vec2(6.0, 4.0))
+            .or_else(|| rect.map(|r| r.center_top() + egui::vec2(-80.0, 40.0)));
+        let Some(at) = at else { return };
+        let mut buf = ed.buffer.clone();
+        let (apply, cancel) = inline_number_editor(
+            ui.ctx(),
+            "sketch_fillet_edit",
+            at,
+            "Fillet radius (mm)",
+            &mut buf,
+            false,
+        );
+        if let Some(f) = &mut s.editor.fillet_edit {
+            f.buffer = buf;
+        }
+        if cancel {
+            s.editor.fillet_edit = None;
+        } else if apply {
+            s.editor.apply_fillet();
+        }
     }
 
     /// Inline distance entry of the Offset tool (next to the picked curve).

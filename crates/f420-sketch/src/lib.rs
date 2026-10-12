@@ -18,6 +18,7 @@
 
 mod arc;
 mod edit;
+pub mod fillet;
 pub mod offset;
 mod profile;
 mod region;
@@ -29,6 +30,7 @@ pub use edit::{DragOutcome, DragResult, fmt_mm};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub use fillet::FilletResult;
 pub use offset::{OffsetPair, OffsetResult, offset_profile};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
@@ -880,6 +882,8 @@ mod tests_arc;
 
 #[cfg(test)]
 mod tests_angle;
+#[cfg(test)]
+mod tests_fillet;
 #[cfg(test)]
 mod tests_lines;
 #[cfg(test)]
