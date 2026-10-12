@@ -302,6 +302,19 @@ pub enum FeatureKind {
         counterbore: Option<Counterbore>,
         target: BodyId,
     },
+    /// Scoped shell (run 4; docs/SHELL.md): hollows the body of `extrude` (a New
+    /// Body extrusion of a single closed loop of lines/arcs or a circle, no
+    /// holes, no picked region) leaving walls and a floor `thickness` mm thick,
+    /// open at the `open` cap (`ExtrudeEndCap` or `ExtrudeStartCap`). Built as a
+    /// blind cut of the profile offset inward by `thickness`, from the open cap
+    /// to `distance − thickness` deep, checked like an Extrude Cut (ADR 0005).
+    /// Not a general shell: other faces and later features are not offset.
+    /// Parameter "thickness".
+    Shell {
+        extrude: FeatureId,
+        open: FaceRole,
+        thickness: f64,
+    },
 }
 
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
@@ -374,6 +387,7 @@ impl Feature {
                 ..
             } => vec![r.feature],
             FeatureKind::Hole { .. } => vec![],
+            FeatureKind::Shell { extrude, .. } => vec![*extrude],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -446,6 +460,7 @@ impl Feature {
             FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
             FeatureKind::Hole {
                 center,
                 diameter,
@@ -562,6 +577,15 @@ impl Feature {
                     )));
                 }
                 *angle = value.to_radians();
+                Ok(())
+            }
+            FeatureKind::Shell { thickness, .. } if name == "thickness" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.thickness: shell wall thickness must be > 0 mm, got {value}"
+                    )));
+                }
+                *thickness = value;
                 Ok(())
             }
             FeatureKind::LinearPattern { spacing, .. } if name == "spacing" => {
@@ -812,6 +836,10 @@ impl Document {
                 self.feature(*seed).ok().and_then(Feature::target_body)
             }
             FeatureKind::Chamfer { a, .. } => self.face_body(a),
+            FeatureKind::Shell { extrude, .. } => self
+                .feature(*extrude)
+                .ok()
+                .and_then(|e| e.created_bodies().first().copied()),
             _ => None,
         }
     }

@@ -544,3 +544,61 @@ pub(crate) fn shared_point(s: &Sketch, a: EntityId, b: EntityId) -> Option<Point
     let shared: Vec<PointId> = x.iter().copied().filter(|p| y.contains(p)).collect();
     (shared.len() == 1).then(|| shared[0])
 }
+
+/// Offset a closed profile (polygon, line/arc loop or circle) by `distance` mm
+/// (+ outward, − inward) with the same geometry and refusals as
+/// [`Sketch::offset_loop`]; the result is a new counter-clockwise profile. Used
+/// by features (e.g. a scoped shell) that need the offset geometry only.
+pub fn offset_profile(
+    profile: &crate::Profile,
+    distance: f64,
+) -> Result<crate::Profile, SketchError> {
+    use crate::{LoopSegment, Profile};
+    let mut s = Sketch::default();
+    let first = match profile {
+        Profile::Circle { center, radius } => {
+            let c = s.add_point(center[0], center[1]);
+            s.add_circle(c, *radius)
+        }
+        Profile::Polygon(v) => {
+            let p: Vec<PointId> = v.iter().map(|q| s.add_point(q[0], q[1])).collect();
+            let n = p.len();
+            let ids: Vec<EntityId> = (0..n).map(|i| s.add_line(p[i], p[(i + 1) % n])).collect();
+            ids[0]
+        }
+        Profile::Loop(segs) => {
+            let p: Vec<PointId> = segs
+                .iter()
+                .map(|g| {
+                    let q = g.start();
+                    s.add_point(q[0], q[1])
+                })
+                .collect();
+            let n = p.len();
+            let mut ids = Vec::with_capacity(n);
+            for (i, g) in segs.iter().enumerate() {
+                let (a, b) = (p[i], p[(i + 1) % n]);
+                ids.push(match g {
+                    LoopSegment::Line { .. } => s.add_line(a, b),
+                    LoopSegment::Arc { center, ccw, .. } => {
+                        let c = s.add_point(center[0], center[1]);
+                        let id = s.next_entity_id();
+                        let (start, end) = if *ccw { (a, b) } else { (b, a) };
+                        s.entities.push(Entity::Arc {
+                            id,
+                            center: c,
+                            start,
+                            end,
+                        });
+                        id
+                    }
+                });
+            }
+            ids[0]
+        }
+    };
+    let source: Vec<EntityId> = s.entities.iter().map(Entity::id).collect();
+    s.offset_loop(first, distance, None)?;
+    s.construction = source.into_iter().collect();
+    s.profile()
+}

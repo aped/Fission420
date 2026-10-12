@@ -753,6 +753,18 @@ pub fn regenerate_cached_opts(
                 st.holes.insert(id, tools);
                 r.body = Some(*target);
             }
+            FeatureKind::Shell {
+                extrude,
+                open,
+                thickness,
+            } => {
+                let (body, tool) = shell_tool(doc, &st, id, *extrude, *open, *thickness)?;
+                let target = brep_target(&st, id, body)?;
+                r.frame = Some(tool.start);
+                let out = apply_tool(&target, &tool, &tool.start, Some("shell"), id, None)?.0;
+                replace_body(&mut st, id, body, out);
+                r.body = Some(body);
+            }
             FeatureKind::Import3mf { blob, bodies } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;
@@ -1411,6 +1423,120 @@ fn apply_tool(
     let out = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(err)?;
     check(&out, k::PrismOp::Join, (a, b), span)?;
     Ok((out, span))
+}
+
+/// The cut of a scoped shell (docs/SHELL.md): the extrusion's profile offset
+/// inward by `t`, from the open cap into the material, `distance − t` deep.
+/// Returns the body and the tool. Every unsupported case is a `ProductLimit`
+/// naming the reason; an open cap that no longer resolves is a
+/// `BrokenReference`.
+fn shell_tool(
+    doc: &Document,
+    st: &Snapshot,
+    id: FeatureId,
+    extrude: FeatureId,
+    open: FaceRole,
+    t: f64,
+) -> Result<(BodyId, ExtrudeOut)> {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: shell: {m}"));
+    if !t.is_finite() || t <= 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}.thickness: shell wall thickness must be > 0 mm, got {t}"
+        )));
+    }
+    let picked = matches!(
+        &doc.feature(extrude)?.kind,
+        FeatureKind::Extrude {
+            region: Some(_),
+            ..
+        }
+    );
+    let e = st
+        .extrudes
+        .get(&extrude)
+        .filter(|e| !e.removes && !e.joined && e.extent == Extent::Distance)
+        .ok_or_else(|| {
+            limit(format!(
+                "{extrude} is not a New Body extrusion; the scoped shell hollows a body made by \
+                 one New Body extrusion"
+            ))
+        })?
+        .clone();
+    if picked || !e.holes.is_empty() {
+        return Err(limit(format!(
+            "the profile of {extrude} has inner loops or a picked region; the scoped shell needs \
+             a single closed loop (lines/arcs) or a circle"
+        )));
+    }
+    if !matches!(open, FaceRole::ExtrudeEndCap | FaceRole::ExtrudeStartCap) {
+        return Err(limit(
+            "the open face must be the extrusion's end cap or start cap".into(),
+        ));
+    }
+    if t >= e.distance {
+        return Err(limit(format!(
+            "thickness {t} mm must be less than the extrusion distance {} mm (no floor would \
+             remain)",
+            e.distance
+        )));
+    }
+    let fr = FaceRef {
+        feature: extrude,
+        role: open,
+    };
+    let cap = extrude_face_frame(&e, &fr, id)?;
+    let body = brep_target(st, id, e.body)?;
+    if k::planar_faces_on(&body, &cap) != 1 {
+        return Err(DocError::BrokenReference {
+            from: id,
+            detail: format!(
+                "the open face ({open:?} of {extrude}) no longer resolves to one planar face of \
+                 {}; a feature before the shell changed it",
+                e.body
+            ),
+        });
+    }
+    let inner = f420_sketch::offset_profile(&e.profile, -t).map_err(|x| {
+        limit(format!(
+            "thickness {t} mm does not fit the profile of {extrude}: the inward offset {x}"
+        ))
+    })?;
+    // The tool frame: the sketch frame moved to the open cap's plane (same x/y,
+    // so the profile coordinates carry over).
+    let along = if open == FaceRole::ExtrudeEndCap {
+        e.dir * e.distance
+    } else {
+        0.0
+    };
+    let start = e.start.offset(along);
+    let side = k::coplanar_face_side(&body, &start)
+        .map_err(kernel(id))?
+        .ok_or_else(|| limit("the open cap is not a face of the body".into()))?;
+    let dir = -side;
+    let depth = e.distance - t;
+    let span = if dir > 0.0 {
+        (0.0, depth)
+    } else {
+        (-depth, 0.0)
+    };
+    Ok((
+        e.body,
+        ExtrudeOut {
+            start,
+            distance: depth,
+            dir,
+            extent: Extent::Distance,
+            profile: inner,
+            entities: vec![],
+            holes: vec![],
+            span,
+            nominal: span,
+            side: Some(side),
+            removes: true,
+            joined: false,
+            body: e.body,
+        },
+    ))
 }
 
 /// Tools of a Hole, in application order (`[counterbore, hole]` or `[hole]`),

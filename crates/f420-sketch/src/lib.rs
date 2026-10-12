@@ -29,7 +29,7 @@ pub use edit::{DragOutcome, DragResult, fmt_mm};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-pub use offset::{OffsetPair, OffsetResult};
+pub use offset::{OffsetPair, OffsetResult, offset_profile};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
 

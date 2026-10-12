@@ -682,6 +682,33 @@ impl F420App {
     }
 }
 
+impl F420App {
+    /// Body of the Shell (scoped) dialog: open face and wall thickness.
+    pub(crate) fn shell_form_ui(
+        &self,
+        ui: &mut egui::Ui,
+        extrude: FeatureId,
+        open_end: &mut bool,
+        thickness: &mut String,
+    ) {
+        ui.label(format!("Hollow {}", self.feature_name(extrude)));
+        ui.horizontal(|ui| {
+            ui.label("Open face");
+            ui.radio_value(open_end, true, "End cap").probe("End cap");
+            ui.radio_value(open_end, false, "Start cap")
+                .probe("Start cap");
+        });
+        crate::panels::num_field(ui, "Wall thickness (mm)", thickness);
+        ui.small(
+            "Scoped shell: the profile is offset inward by the thickness and cut from the open \
+             face down to one thickness above the other cap (walls and floor = thickness). Only \
+             for a New Body extrusion of one closed loop or circle; refused if the thickness does \
+             not fit the profile. Not a general shell: faces added by later features are not \
+             offset. The thickness stays an editable parameter.",
+        );
+    }
+}
+
 /// Frame of the open Extrude dialog's sketch.
 fn form_sketch_frame(app: &F420App) -> Option<PlaneFrame> {
     let Some(crate::app::Dialog::Extrude(form)) = &app.dialog else {

@@ -157,6 +157,17 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<BodyId>,
     },
+    /// Scoped shell (docs/SHELL.md): hollow the body of the New Body extrusion
+    /// `extrude` (single closed loop or circle) to walls and floor `thickness`
+    /// mm thick, open at `open` (`ExtrudeEndCap` default, or `ExtrudeStartCap`).
+    Shell {
+        #[serde(default)]
+        name: Option<String>,
+        extrude: FeatureId,
+        #[serde(default = "default_shell_open")]
+        open: FaceRole,
+        thickness: f64,
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -377,6 +388,7 @@ impl Command {
             Command::Chamfer { .. } => "chamfer",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
+            Command::Shell { .. } => "shell",
             Command::SetUserParameter { .. } => "set_user_parameter",
             Command::SetUserParameters { .. } => "set_user_parameters",
             Command::RenameUserParameter { .. } => "rename_user_parameter",
@@ -1084,6 +1096,31 @@ impl Session {
                             depth,
                             counterbore,
                             target,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::Shell {
+                name,
+                extrude,
+                open,
+                thickness,
+            } => {
+                let (name, extrude, open, thickness) = (name.clone(), *extrude, *open, *thickness);
+                if !thickness.is_finite() || thickness <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "shell thickness must be > 0 mm, got {thickness}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Shell", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Shell"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Shell {
+                            extrude,
+                            open,
+                            thickness,
                         },
                     ))
                 })?;
@@ -1936,6 +1973,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
+                FeatureKind::Shell { .. } => ("shell", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {
@@ -2049,6 +2087,10 @@ fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
                 .join(", ")
         ))),
     }
+}
+
+fn default_shell_open() -> FaceRole {
+    FaceRole::ExtrudeEndCap
 }
 
 /// Bodies to export: the given ids (must exist), else every visible body.
