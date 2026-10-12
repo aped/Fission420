@@ -490,6 +490,7 @@ impl F420App {
                     SketchTool::Dimension,
                     SketchTool::Trim,
                     SketchTool::Extend,
+                    SketchTool::Offset,
                 ] {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
