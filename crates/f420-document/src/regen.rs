@@ -1289,9 +1289,10 @@ fn apply_tool(
                     .trim_start_matches("result is not a valid solid: "),
                 match op {
                     k::PrismOp::Cut => {
-                        "Known Truck 0.6 case: a cut that fully contains an existing hole or \
-                         pocket. Enlarge the existing feature by editing its dimension instead, \
-                         or change the profile so it crosses the existing feature"
+                        "Known Truck 0.6 causes: a cut that fully contains an existing hole or \
+                         pocket (enlarge that feature by editing its dimension instead), or a cut \
+                         whose walls meet existing ones only along an edge or at a point \
+                         (non-manifold; move it slightly)"
                     }
                     k::PrismOp::Join => "Change the profile or the support face",
                 }
