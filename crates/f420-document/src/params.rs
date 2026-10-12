@@ -699,9 +699,15 @@ pub fn apply_expressions(doc: &mut Document) -> Result<()> {
             if current.is_some_and(|c| c == v) {
                 continue;
             }
-            doc.feature_mut(id)?
-                .set_parameter(&slot, v)
-                .map_err(|e| expr_error(&label, format!("'{src}' = {v}: {e}")))?;
+            doc.feature_mut(id)?.set_parameter(&slot, v).map_err(|e| {
+                // User-facing: the slot is already named by `label`.
+                let m = match e {
+                    DocError::Validation(m) => m,
+                    other => other.to_string(),
+                };
+                let m = m.replace(&format!("{id}.{slot}: "), "");
+                expr_error(&label, format!("'{src}' = {v}: {m}"))
+            })?;
         }
     }
     Ok(())

@@ -347,11 +347,14 @@ impl F420App {
             ExtrudeOp::Join => "Join",
             ExtrudeOp::Cut => "Cut",
         };
+        // Fixed spot at the bottom of the view, right of the axis gizmo and
+        // clear of the dialog (the run-3 label next to the prism collided with
+        // the dialog at 1280x800).
         crate::view3d::chip(
             painter,
-            b[0] + egui::vec2(8.0, -24.0),
+            egui::pos2(rect.min.x + 150.0, rect.max.y - 58.0),
             format!(
-                "Preview: {label} {:.3} … {:.3} mm along the sketch normal",
+                "Preview (display only; the exact solid is built and checked on OK)\n{label}: {:.3} … {:.3} mm along the sketch normal",
                 pv.z_range[0], pv.z_range[1]
             ),
             line,

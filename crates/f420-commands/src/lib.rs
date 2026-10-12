@@ -997,26 +997,35 @@ impl Session {
                 let (expression, unit, comment) =
                     (expression.trim().to_string(), *unit, comment.clone());
                 let label = format!("Set parameter {name} = {expression}");
-                self.model_mut()?.transact(&label, |d| {
-                    match d.parameters.iter_mut().find(|p| p.name == name) {
-                        Some(p) => {
-                            p.expression = expression.clone();
-                            if let Some(u) = unit {
-                                p.unit = u;
+                let cause = |e: DocError| match e {
+                    DocError::Expression { name: n, detail } if n != name => DocError::Expression {
+                        name: n,
+                        detail: format!("{detail} (caused by setting {name} = {expression})"),
+                    },
+                    other => other,
+                };
+                self.model_mut()?
+                    .transact(&label, |d| {
+                        match d.parameters.iter_mut().find(|p| p.name == name) {
+                            Some(p) => {
+                                p.expression = expression.clone();
+                                if let Some(u) = unit {
+                                    p.unit = u;
+                                }
+                                if let Some(c) = comment {
+                                    p.comment = c;
+                                }
                             }
-                            if let Some(c) = comment {
-                                p.comment = c;
-                            }
+                            None => d.parameters.push(f420_document::Parameter {
+                                name: name.clone(),
+                                expression: expression.clone(),
+                                unit: unit.unwrap_or_default(),
+                                comment: comment.unwrap_or_default(),
+                            }),
                         }
-                        None => d.parameters.push(f420_document::Parameter {
-                            name: name.clone(),
-                            expression: expression.clone(),
-                            unit: unit.unwrap_or_default(),
-                            comment: comment.unwrap_or_default(),
-                        }),
-                    }
-                    Ok(())
-                })?;
+                        Ok(())
+                    })
+                    .map_err(cause)?;
                 let v = self
                     .model
                     .as_ref()

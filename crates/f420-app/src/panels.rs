@@ -960,29 +960,22 @@ impl F420App {
                 "mm"
             }
         };
-        egui::Grid::new("inspector_grid")
-            .num_columns(3)
-            .spacing([8.0, 4.0])
-            .show(ui, |ui| {
-                for (pname, v, _, buf) in &mut ins.fields {
-                    let unit = unit_of(pname);
-                    let l = ui.label(format!("{pname} ({unit})"));
-                    ui.add(egui::TextEdit::singleline(buf).desired_width(120.0))
-                        .labelled_by(l.id)
-                        .probe(&format!("{pname} ({unit})"))
-                        .on_hover_text("A number, or an expression of named parameters (e.g. outer_length - 2 * wall). A plain number removes a binding.");
-                    if bound.contains(pname) {
-                        ui.label(
-                            RichText::new(format!("= {}", crate::params_ui::fmt_value(*v)))
-                                .weak(),
-                        )
-                        .named(&format!("{pname} value"));
-                    } else {
-                        ui.label("");
-                    }
-                    ui.end_row();
+        for (pname, v, _, buf) in &mut ins.fields {
+            let unit = unit_of(pname);
+            let l = ui.horizontal(|ui| {
+                let l = ui.label(format!("{pname} ({unit})"));
+                if bound.contains(pname) {
+                    ui.label(
+                        RichText::new(format!("= {}", crate::params_ui::fmt_value(*v))).weak(),
+                    );
                 }
+                l
             });
+            ui.add(egui::TextEdit::singleline(buf).desired_width(ui.available_width()))
+                .labelled_by(l.inner.id)
+                .probe(&format!("{pname} ({unit})"))
+                .on_hover_text("A number, or an expression of named parameters (e.g. outer_length - 2 * wall). A plain number removes a binding.");
+        }
         let modified = ins.fields.iter().any(|(_, _, t, b)| b.trim() != t.trim());
         let mut apply = false;
         let mut cancel = false;

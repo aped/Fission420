@@ -66,6 +66,24 @@ fn import(app: &mut F420App, path: PathBuf, unit: usize, partial: bool) {
     }
 }
 
+/// The committed parametric enclosure example.
+fn enclosure() -> SceneStep {
+    SceneStep::Cmd(Command::Open {
+        path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.f420.json"),
+    })
+}
+
+/// Display group of the planar face of `body` with outward normal `n` through
+/// the plane `n . x = d`.
+fn face_group(a: &F420App, body: u32, n: [f64; 3], d: f64) -> Option<u32> {
+    a.faces.iter().find_map(|f| {
+        let p = f.plane?;
+        let dn = (0..3).map(|i| (p.normal[i] - n[i]).abs()).sum::<f64>();
+        let off = (0..3).map(|i| p.normal[i] * p.point[i]).sum::<f64>();
+        (f.body == Some(BodyId(body)) && dn < 1e-9 && (off - d).abs() < 1e-9).then_some(f.group)
+    })
+}
+
 fn two_bodies() -> Vec<SceneStep> {
     use SceneStep::*;
     vec![
@@ -230,6 +248,63 @@ impl F420App {
                         path: "parts.step".into(),
                         scope: ExportScope::Selected(b.into_iter().collect()),
                     });
+                }),
+            ],
+            // Run 4: parameters panel and expression-bound dimensions.
+            "params" => vec![
+                enclosure(),
+                Ui(|a| {
+                    let s = a.feature_by_name("Lip outline").map(|f| f.id);
+                    a.select(s);
+                    a.set_view(f420_viewport::ViewPreset::Iso);
+                }),
+            ],
+            // Run 4: exact two-face measurement (lip clearance across bodies).
+            "measure" => vec![
+                enclosure(),
+                Ui(|a| {
+                    a.set_view(f420_viewport::ViewPreset::Iso);
+                    if let Some(g) = face_group(a, 1, [1.0, 0.0, 0.0], 2.0) {
+                        a.select_face(Some(g));
+                        a.measure_from = a.selected_face().cloned();
+                    }
+                    if let Some(g) = face_group(a, 2, [-1.0, 0.0, 0.0], -2.25) {
+                        a.select_face(Some(g));
+                    }
+                }),
+            ],
+            // Run 4: an illegal parameter edit, refused with the model unchanged.
+            "param_error" => vec![
+                enclosure(),
+                Cmd(Command::SetUserParameter {
+                    name: "wall".into(),
+                    expression: "45".into(),
+                    unit: None,
+                    comment: None,
+                }),
+                Ui(|a| a.set_view(f420_viewport::ViewPreset::Iso)),
+            ],
+            // Run 4: print export dialog (lid face down, layout, P1S bed).
+            "print_export" => vec![
+                enclosure(),
+                Ui(|a| {
+                    a.set_view(f420_viewport::ViewPreset::Iso);
+                    // Lid plate top face (z = 2, +Z): goes on the bed, lip up.
+                    if let Some(g) = face_group(a, 2, [0.0, 0.0, 1.0], 2.0) {
+                        a.select_face(Some(g));
+                    }
+                    let mut form = crate::exchange::PrintForm::new(
+                        false,
+                        "enclosure.3mf".into(),
+                        ExportScope::AllVisible,
+                    );
+                    form.place = true;
+                    form.layout = true;
+                    form.bed = crate::exchange::BedChoice::P1s;
+                    if let Some(r) = a.selected_face().and_then(|f| f.reference) {
+                        form.set_orientation(BodyId(2), f420_commands::print::Orient::FaceDown(r));
+                    }
+                    a.dialog = Some(Dialog::Export3mf(form));
                 }),
             ],
             _ => return false,
