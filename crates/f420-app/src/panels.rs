@@ -693,6 +693,25 @@ impl F420App {
                         });
                     }
                     if ui
+                        .button("Hole…")
+                        .probe("Hole…")
+                        .on_hover_text("Drill a round hole (through or blind, optional counterbore) into this face's body")
+                        .clicked()
+                    {
+                        let [cx, cy] = self.face_centre_local(&info, &r).unwrap_or([0.0, 0.0]);
+                        self.dialog = Some(Dialog::Hole {
+                            face: r,
+                            cx: crate::params_ui::fmt_value(cx),
+                            cy: crate::params_ui::fmt_value(cy),
+                            diameter: "5.5".into(),
+                            through: true,
+                            depth: "8".into(),
+                            counterbore: false,
+                            cb_diameter: "10".into(),
+                            cb_depth: "5".into(),
+                        });
+                    }
+                    if ui
                         .button("Chamfer edge…")
                         .probe("Chamfer edge…")
                         .on_hover_text("Chamfer the straight edge where this face meets another planar face of the same body")
@@ -1435,7 +1454,10 @@ impl F420App {
                         num_field(ui, "Rectangle center Y (mm)", cy);
                         ui.small("Centre in world XY coordinates.");
                     }
-                    Dialog::Extrude(form) => self.extrude_form_ui(ui, form),
+                    Dialog::Extrude(form) => {
+                        self.extrude_form_ui(ui, form);
+                        ok_allowed &= !self.extrude_needs_region(form);
+                    }
                     Dialog::RectangleXz {
                         width,
                         height,
@@ -1497,6 +1519,37 @@ impl F420App {
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
                         );
                         ui.small("Exports the last committed model revision (queued after pending edits).");
+                    }
+                    Dialog::Hole {
+                        face,
+                        cx,
+                        cy,
+                        diameter,
+                        through,
+                        depth,
+                        counterbore,
+                        cb_diameter,
+                        cb_depth,
+                    } => {
+                        ui.label(format!(
+                            "On {} {}",
+                            self.feature_name(face.feature),
+                            crate::face_role_label(&face.role)
+                        ));
+                        num_field(ui, "Hole centre X (face mm)", cx);
+                        num_field(ui, "Hole centre Y (face mm)", cy);
+                        ui.small("Face coordinates: origin and axes of the face's frame (for a face of an XY-sketched extrusion: world X/Y).");
+                        num_field(ui, "Hole diameter (mm)", diameter);
+                        ui.checkbox(through, "Through all").probe("Hole through all");
+                        if !*through {
+                            num_field(ui, "Hole depth (mm)", depth);
+                        }
+                        ui.checkbox(counterbore, "Counterbore").probe("Counterbore");
+                        if *counterbore {
+                            num_field(ui, "Counterbore diameter (mm)", cb_diameter);
+                            num_field(ui, "Counterbore depth (mm)", cb_depth);
+                        }
+                        ui.small("Built as exact cuts into the material, each checked against the nominal shape; countersinks are not supported. Sizes can be bound to parameters afterwards in the inspector.");
                     }
                     Dialog::Chamfer { a, b, distance } => {
                         let faces: Vec<f420_commands::FaceSummary> = self

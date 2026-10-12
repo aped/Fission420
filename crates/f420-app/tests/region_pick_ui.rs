@@ -9,7 +9,10 @@ use std::f64::consts::PI;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Modifiers, PointerButton, Pos2};
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use f420_app::{ExecMode, F420App};
 use f420_commands::{Command, SketchTemplate};
 use f420_document::SketchPlane;
@@ -111,6 +114,8 @@ fn click_a_region_in_the_view_and_extrude_only_it() {
         h.query_by_label_contains("pick the region to extrude")
             .is_some()
     );
+    // Run 4: OK stays disabled until a region is picked (it could only be refused).
+    assert!(h.get_by_label("OK").accesskit_node().is_disabled());
     // Click inside the island first, then inside the ring: the last pick wins.
     view_click(&mut h, [1.0, 1.0, 0.0]);
     let pv = h.state().extrude_preview().expect("preview of the island");

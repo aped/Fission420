@@ -74,6 +74,20 @@ pub fn profile_outline(sketch: &f420_sketch::Sketch) -> Option<Vec<[f64; 2]>> {
     loop_outline(&sketch.profile().ok()?)
 }
 
+impl F420App {
+    /// The form's sketch has several loops, its whole profile is not usable,
+    /// and no region is picked: OK would only be refused.
+    pub(crate) fn extrude_needs_region(&self, form: &ExtrudeForm) -> bool {
+        let Some(s) = form
+            .sketch
+            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
+        else {
+            return false;
+        };
+        form.region.is_none() && s.profile_error.is_some() && sketch_regions(s).len() > 1
+    }
+}
+
 /// Bounded regions of a summary sketch (empty when it has no closed loops).
 pub fn sketch_regions(s: &FeatureSummary) -> Vec<SketchRegion> {
     s.sketch

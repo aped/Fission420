@@ -108,6 +108,19 @@ pub(crate) enum Dialog {
         /// Mirror: world plane through the origin.
         mirror: SketchPlane,
     },
+    /// Round hole (with optional counterbore) into the body of face `face`.
+    Hole {
+        face: f420_document::FaceRef,
+        /// Centre in the face's frame (mm).
+        cx: String,
+        cy: String,
+        diameter: String,
+        through: bool,
+        depth: String,
+        counterbore: bool,
+        cb_diameter: String,
+        cb_depth: String,
+    },
     /// Chamfer the straight edge between face `a` and a chosen second face.
     Chamfer {
         a: f420_document::FaceRef,
@@ -143,6 +156,7 @@ impl Dialog {
             Dialog::Import(_) => "Import",
             Dialog::Pattern { .. } => "Pattern / mirror",
             Dialog::Chamfer { .. } => "Chamfer edge",
+            Dialog::Hole { .. } => "Hole",
         }
     }
 }
@@ -1100,6 +1114,58 @@ impl F420App {
         self.sync_viewport_selection();
     }
 
+    /// Centroid of a display face's triangles, in the frame of semantic face
+    /// `r` (hole dialog default centre).
+    pub(crate) fn face_centre_local(
+        &self,
+        info: &crate::view3d::FaceInfo,
+        r: &f420_document::FaceRef,
+    ) -> Option<[f64; 2]> {
+        let frame = self
+            .summary
+            .features
+            .iter()
+            .flat_map(|f| f.faces.iter())
+            .find(|f| f.reference == *r)?
+            .frame;
+        let m = &self.scene.mesh;
+        let (mut sum, mut area) = ([0.0f64; 3], 0.0f64);
+        for (t, idx) in m.indices.as_chunks::<3>().0.iter().enumerate() {
+            if m.tri_group.get(t) != Some(&info.group) {
+                continue;
+            }
+            let p: Vec<[f64; 3]> = idx
+                .iter()
+                .filter_map(|&i| m.positions.get(i as usize).map(|v| v.map(f64::from)))
+                .collect();
+            if p.len() != 3 {
+                continue;
+            }
+            let u = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+            let v = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+            let c = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let a = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt() / 2.0;
+            for k in 0..3 {
+                sum[k] += a * (p[0][k] + p[1][k] + p[2][k]) / 3.0;
+            }
+            area += a;
+        }
+        if area <= 0.0 {
+            return None;
+        }
+        let d = [
+            sum[0] / area - frame.origin[0],
+            sum[1] / area - frame.origin[1],
+            sum[2] / area - frame.origin[2],
+        ];
+        let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        Some([dot(frame.x), dot(frame.y)])
+    }
+
     /// Feature and body ids an open dialog acts on.
     fn dialog_refs(d: &Dialog) -> (Vec<FeatureId>, Vec<f420_document::BodyId>) {
         use crate::exchange::ExportScope;
@@ -1118,6 +1184,7 @@ impl F420App {
             Dialog::CircleOnFace { extrude, .. } => (extrude.iter().copied().collect(), vec![]),
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
+            Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
             Dialog::Chamfer { a, b, .. } => (
                 std::iter::once(a.feature)
                     .chain(b.map(|b| b.feature))
@@ -2100,6 +2167,36 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             angle_deg: parse_num("angle", angle)?,
         },
         Dialog::Extrude(form) => form.command()?,
+        Dialog::Hole {
+            face,
+            cx,
+            cy,
+            diameter,
+            through,
+            depth,
+            counterbore,
+            cb_diameter,
+            cb_depth,
+        } => Command::Hole {
+            name: None,
+            plane: SketchPlane::Face(*face),
+            center: [parse_num("centre X", cx)?, parse_num("centre Y", cy)?],
+            diameter: parse_num("hole diameter", diameter)?,
+            depth: if *through {
+                None
+            } else {
+                Some(parse_num("hole depth", depth)?)
+            },
+            counterbore: if *counterbore {
+                Some([
+                    parse_num("counterbore diameter", cb_diameter)?,
+                    parse_num("counterbore depth", cb_depth)?,
+                ])
+            } else {
+                None
+            },
+            target: None,
+        },
         Dialog::Chamfer { a, b, distance } => Command::Chamfer {
             name: None,
             a: *a,
