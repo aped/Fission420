@@ -175,6 +175,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         comment: Option<String>,
     },
+    /// Set several user parameters in ONE transaction (one undo step): no
+    /// intermediate combination has to be valid, only the final one.
+    SetUserParameters {
+        parameters: Vec<ParameterDef>,
+    },
     /// Rename a user parameter, rewriting every expression that uses it.
     RenameUserParameter {
         name: String,
@@ -373,6 +378,7 @@ impl Command {
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
             Command::SetUserParameter { .. } => "set_user_parameter",
+            Command::SetUserParameters { .. } => "set_user_parameters",
             Command::RenameUserParameter { .. } => "rename_user_parameter",
             Command::DeleteUserParameter { .. } => "delete_user_parameter",
             Command::SetExpression { .. } => "set_expression",
@@ -403,6 +409,17 @@ impl Command {
             Command::Inspect => "inspect",
         }
     }
+}
+
+/// One entry of [`Command::SetUserParameters`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterDef {
+    pub name: String,
+    pub expression: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<f420_document::ParamUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 /// What an extrusion does with its tool body.
@@ -1129,6 +1146,56 @@ impl Session {
                     Some(v) => format!("{name} = {expression} = {v}"),
                     None => format!("{name} = {expression}"),
                 });
+            }
+            Command::SetUserParameters { parameters } => {
+                use f420_document::params;
+                if parameters.is_empty() {
+                    return Err(DocError::Validation("no parameters given".into()));
+                }
+                for p in parameters {
+                    params::valid_name(p.name.trim()).map_err(|e| DocError::Expression {
+                        name: p.name.clone(),
+                        detail: e,
+                    })?;
+                    params::check_syntax(&p.expression).map_err(|e| DocError::Expression {
+                        name: p.name.clone(),
+                        detail: format!("'{}': {e}", p.expression),
+                    })?;
+                }
+                let defs = parameters.clone();
+                let label = format!(
+                    "Set {}",
+                    defs.iter()
+                        .map(|p| format!("{} = {}", p.name.trim(), p.expression.trim()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let label: String = label.chars().take(200).collect();
+                self.model_mut()?.transact(&label, |d| {
+                    for p in &defs {
+                        let name = p.name.trim().to_string();
+                        let expression = p.expression.trim().to_string();
+                        match d.parameters.iter_mut().find(|x| x.name == name) {
+                            Some(x) => {
+                                x.expression = expression;
+                                if let Some(u) = p.unit {
+                                    x.unit = u;
+                                }
+                                if let Some(c) = &p.comment {
+                                    x.comment = c.clone();
+                                }
+                            }
+                            None => d.parameters.push(f420_document::Parameter {
+                                name,
+                                expression,
+                                unit: p.unit.unwrap_or_default(),
+                                comment: p.comment.clone().unwrap_or_default(),
+                            }),
+                        }
+                    }
+                    Ok(())
+                })?;
+                r.message = Some(format!("set {} parameter(s) in one step", defs.len()));
             }
             Command::RenameUserParameter { name, new_name } => {
                 use f420_document::params;

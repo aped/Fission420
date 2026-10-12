@@ -167,6 +167,27 @@ impl Enclosure {
         self.outer_length * self.outer_width * self.lid_thickness
             + (ol * ow - il * iw) * self.lip_depth
     }
+    /// One command that sets every user parameter at once (one transaction).
+    pub fn set_parameters_batch(&self) -> Command {
+        Command::SetUserParameters {
+            parameters: self
+                .set_parameters()
+                .into_iter()
+                .filter_map(|c| match c {
+                    Command::SetUserParameter {
+                        name, expression, ..
+                    } => Some(crate::ParameterDef {
+                        name,
+                        expression,
+                        unit: None,
+                        comment: None,
+                    }),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
     /// Commands that set every user parameter to these values.
     pub fn set_parameters(&self) -> Vec<Command> {
         [

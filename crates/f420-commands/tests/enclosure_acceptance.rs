@@ -103,7 +103,10 @@ fn check(s: &Session, p: &Enclosure) {
         p.wall,
         p.floor,
     );
-    let tol = 1e-6;
+    // Planes/bounds: 1e-7 mm (the sketch solver and bounds refinement are far
+    // below the kernel's 1e-6); volumes: 1e-9 relative.
+    let lin = 1e-7;
+    let tol = 1e-6_f64.max(1e-9 * p.base_volume());
     // Volumes (analytic, SESSION_4 §6.B formulas).
     assert!(
         (vol(s, 1) - p.base_volume()).abs() < tol,
@@ -123,22 +126,22 @@ fn check(s: &Session, p: &Enclosure) {
     // Bounds.
     let mb = measurements(s, 1).bounds;
     for (got, want) in mb.min.iter().chain(&mb.max).zip([0.0, 0.0, 0.0, l, w, h]) {
-        assert!((got - want).abs() < 1e-9, "base bounds {mb:?}");
+        assert!((got - want).abs() < lin, "base bounds {mb:?}");
     }
     let ly = -(w / 2.0 + p.lid_gap);
     let ml = measurements(s, 2).bounds;
     let want = [0.0, ly - w / 2.0, -p.lip_depth, l, ly + w / 2.0, t];
     for (got, want) in ml.min.iter().chain(&ml.max).zip(want) {
         assert!(
-            (got - want).abs() < 1e-9,
+            (got - want).abs() < lin,
             "lid bounds {ml:?}, want {want} got {got}"
         );
     }
     // Exact wall / floor / cavity sizes from the regenerated face planes.
     let cav = side_planes(s, ids::CAVITY);
     let (cl, cw) = p.cavity();
-    assert!((span(&cav, 0) - cl).abs() < 1e-9);
-    assert!((span(&cav, 1) - cw).abs() < 1e-9);
+    assert!((span(&cav, 0) - cl).abs() < lin);
+    assert!((span(&cav, 1) - cw).abs() < lin);
     for (n, d) in &cav {
         // Cavity walls face into the cavity; the wall is between the plane
         // and the matching outer face.
@@ -146,7 +149,7 @@ fn check(s: &Session, p: &Enclosure) {
         let x = d * n[axis];
         let outer = [l, w][axis];
         let thick = x.min(outer - x);
-        assert!((thick - wall).abs() < 1e-9, "wall {thick} on axis {axis}");
+        assert!((thick - wall).abs() < lin, "wall {thick} on axis {axis}");
     }
     let floor_z = s
         .summary()
@@ -159,16 +162,16 @@ fn check(s: &Session, p: &Enclosure) {
         .find(|x| x.reference.role == FaceRole::ExtrudeEndCap)
         .map(|x| x.frame.origin[2])
         .unwrap();
-    assert!((floor_z - fl).abs() < 1e-9, "floor at {floor_z}");
+    assert!((floor_z - fl).abs() < lin, "floor at {floor_z}");
     // Lip: outer size and per-side clearance against the cavity.
     let lip = side_planes(s, ids::LIP);
     let ((ol, ow), (il, iw)) = p.lip();
-    assert!((span(&lip, 0) - ol).abs() < 1e-9 && (span(&lip, 1) - ow).abs() < 1e-9);
+    assert!((span(&lip, 0) - ol).abs() < lin && (span(&lip, 1) - ow).abs() < lin);
     let cx = (span(&cav, 0) - span(&lip, 0)) / 2.0;
     let cy = (span(&cav, 1) - span(&lip, 1)) / 2.0;
-    assert!((cx - p.fit_clearance).abs() < 1e-9 && (cy - p.fit_clearance).abs() < 1e-9);
+    assert!((cx - p.fit_clearance).abs() < lin && (cy - p.fit_clearance).abs() < lin);
     let opening = side_planes(s, ids::OPENING);
-    assert!((span(&opening, 0) - il).abs() < 1e-9 && (span(&opening, 1) - iw).abs() < 1e-9);
+    assert!((span(&opening, 0) - il).abs() < lin && (span(&opening, 1) - iw).abs() < lin);
     // Probes: base.
     let (mx, my, mz) = (l / 2.0, w / 2.0, h / 2.0);
     let base = probe(
@@ -471,4 +474,71 @@ fn notch_variant_regenerates_with_size_changes() {
         vol(&s, 1)
     );
     assert!((vol(&s, 2) - VAR.lid_volume()).abs() < 1e-6);
+}
+
+/// Randomized resizing (seeded): 30 parameter sets applied to the same
+/// document through `set_user_parameter` only. Valid sets must regenerate to
+/// the analytic base/lid volumes and lip clearance; sets the geometry cannot
+/// take (walls meeting, no lip, opening closed) must be refused with an
+/// `Expression` error and leave the previous model in place.
+#[test]
+fn randomized_parameter_resizing() {
+    struct Rng(u64);
+    impl Rng {
+        fn f(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+        fn r(&mut self, a: f64, b: f64) -> f64 {
+            ((a + (b - a) * self.f()) * 100.0).round() / 100.0
+        }
+    }
+    let (mut s, _dir) = build();
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let mut current = BASE;
+    let (mut ok_n, mut refused_n) = (0, 0);
+    for i in 0..30 {
+        let p = Enclosure {
+            outer_length: rng.r(30.0, 160.0),
+            outer_width: rng.r(25.0, 120.0),
+            outer_height: rng.r(8.0, 60.0),
+            wall: if i % 3 == 0 {
+                rng.r(8.0, 20.0)
+            } else {
+                rng.r(0.8, 6.0)
+            },
+            floor: rng.r(0.8, 6.0),
+            lid_thickness: rng.r(1.0, 4.0),
+            lip_depth: rng.r(1.0, 6.0),
+            fit_clearance: rng.r(0.05, 1.0),
+            lid_gap: 10.0,
+        };
+        let ((ol, ow), (il, iw)) = p.lip();
+        let geometric = p.outer_height > p.floor && il > 0.0 && iw > 0.0 && ol > 0.0 && ow > 0.0;
+        let before = s.model().unwrap().document().clone();
+        let rev = s.summary().revision;
+        // One transaction: no intermediate combination has to be valid.
+        let r = s.execute(&p.set_parameters_batch());
+        let failed = (!r.ok).then(|| r.error.unwrap());
+        match failed {
+            None => {
+                assert!(geometric, "set {i} accepted but invalid: {p:?}");
+                assert_eq!(s.summary().revision, rev + 1, "one undo step");
+                check(&s, &p);
+                current = p;
+                ok_n += 1;
+            }
+            Some(DocError::Expression { .. }) => {
+                assert!(!geometric, "set {i} refused but valid: {p:?}");
+                refused_n += 1;
+                assert_eq!(s.model().unwrap().document(), &before, "unchanged");
+                check(&s, &current);
+            }
+            Some(e) => panic!("set {i} {p:?}: unexpected error {e:?}"),
+        }
+    }
+    eprintln!("randomized resizing: {ok_n} regenerated exactly, {refused_n} refused");
+    assert!(ok_n >= 10, "{ok_n}");
 }

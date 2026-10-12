@@ -74,6 +74,7 @@ same way.
 | cmd | fields | behaviour |
 |---|---|---|
 | `set_user_parameter` | `name`, `expression`, `unit?`, `comment?` | create or redefine; one undo step |
+| `set_user_parameters` | `parameters`: `[{name, expression, unit?, comment?}, …]` | several parameters in **one** transaction / undo step: only the final combination must be valid (changing several sizes one by one can pass through an invalid intermediate state, which a single `set_user_parameter` refuses) |
 | `rename_user_parameter` | `name`, `new_name` | rewrites every expression that uses it (whole-word, not inside `2mm`), one undo step |
 | `delete_user_parameter` | `name` | refused while any parameter or feature slot uses it; the users are named |
 | `set_expression` | `feature`, `name`, `expression` | bind a feature slot; a plain number sets the value and removes the binding; an empty expression removes the binding and keeps the value |
