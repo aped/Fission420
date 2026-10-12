@@ -283,6 +283,17 @@ pub enum Command {
     Open {
         path: PathBuf,
     },
+    /// Write the document to `path` (atomic) without changing the session's
+    /// path or dirty state: autosave / recovery copies. Deferred measurements
+    /// are not forced (the cache may omit them).
+    SaveCopy {
+        path: PathBuf,
+    },
+    /// Open `path` as a new, unsaved, untitled document (a recovery copy:
+    /// Save asks for a path instead of overwriting the copy).
+    OpenCopy {
+        path: PathBuf,
+    },
     Close,
     /// Binary STL of `bodies` (default: all visible bodies). B-rep bodies are
     /// tessellated (watertightness checked); mesh bodies are written as imported.
@@ -360,6 +371,8 @@ impl Command {
             Command::Save { .. } => "save",
             Command::Open { .. } => "open",
             Command::Close => "close",
+            Command::SaveCopy { .. } => "save_copy",
+            Command::OpenCopy { .. } => "open_copy",
             Command::ExportStl { .. } => "export_stl",
             Command::ExportStep { .. } => "export_step",
             Command::Measure => "measure",
@@ -1529,6 +1542,28 @@ impl Session {
                 m.dirty = false;
                 self.path = Some(path.clone());
                 r.message = Some(format!("saved {}", path.display()));
+            }
+            Command::SaveCopy { path } => {
+                let m = self.model_mut()?;
+                save_file(path, m.document(), Some(m.evaluation()))?;
+                r.message = Some(format!(
+                    "wrote a copy of revision {} to {}",
+                    m.revision,
+                    path.display()
+                ));
+            }
+            Command::OpenCopy { path } => {
+                let nf = load_file(path)?;
+                let mut model = Model::from_document(nf.document)?;
+                model.dirty = true;
+                self.model = Some(model);
+                self.path = None;
+                self.doc_id += 1;
+                self.fresh_model_settings();
+                r.message = Some(format!(
+                    "opened a copy of {} as an unsaved document",
+                    path.display()
+                ));
             }
             Command::Open { path } => {
                 let nf = load_file(path)?;

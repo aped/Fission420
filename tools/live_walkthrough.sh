@@ -21,7 +21,7 @@ for script in "$ROOT"/tools/live/*.txt; do
   case "$dir" in "$OUT"/?*) ;; *) echo "refusing to clear $dir"; exit 2 ;; esac
   if [ -d "${dir:?}" ]; then rm -rf -- "${dir:?}"; fi
   mkdir -p "$dir/shots"
-  F420_TRACE_INPUT=1 F420_PROBE="$dir/probe.json" \
+  F420_TRACE_INPUT=1 F420_PROBE="$dir/probe.json" F420_RECOVERY_DIR="$dir/recovery" \
     "$ROOT/tools/headless_session.sh" "$dir" 1280x800 "$APP" --maximized --shot-dir "$dir/shots" \
     > "$dir/session.log" 2>&1 &
   session=$!

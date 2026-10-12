@@ -390,6 +390,11 @@ fn main() -> ExitCode {
                 f420_app::probe::enable();
             }
             app.viewport = Viewport::new(cc);
+            // Autosave/recovery for interactive use; scripted runs never touch
+            // the recovery directory.
+            if args.scene.is_none() && !args.demo && args.demo_place.is_none() {
+                app.enable_autosave();
+            }
             if args.demo {
                 app.start_demo(std::env::temp_dir().join("fission420-demo"));
             } else if let Some(stop) = args.demo_place {

@@ -1666,7 +1666,7 @@ impl F420App {
             Guarded::New | Guarded::NewAndSketch | Guarded::NewTemplate(_) => {
                 "creating a new document"
             }
-            Guarded::Open(_) => "opening another document",
+            Guarded::Open(_) | Guarded::OpenCopy(_) => "opening another document",
             Guarded::Close => "closing",
             Guarded::Exit => "quitting",
         };

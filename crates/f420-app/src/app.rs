@@ -194,6 +194,8 @@ pub enum Guarded {
     NewAndSketch,
     /// New document built from a parametric printable template (run 4).
     NewTemplate(PrintTemplate),
+    /// Open a recovery copy as an unsaved document (run 4).
+    OpenCopy(PathBuf),
     Open(PathBuf),
     Close,
     Exit,
@@ -348,6 +350,8 @@ pub struct F420App {
     pub(crate) reattach: Option<crate::reattach::Reattach>,
     /// Parameters panel edit buffers.
     pub(crate) params: crate::params_ui::ParamsPanel,
+    /// Autosave / recovery state.
+    pub(crate) autosave: crate::recovery::Autosave,
     /// First face of a two-face measurement (cleared on any document change).
     pub(crate) measure_from: Option<crate::view3d::FaceInfo>,
     /// Name and outcome of the last command reply (live-test probe).
@@ -427,6 +431,7 @@ impl F420App {
             reattach: None,
             params: Default::default(),
             measure_from: None,
+            autosave: Default::default(),
             last_reply: None,
             broken_sketch: None,
             scene_steps: VecDeque::new(),
@@ -892,6 +897,16 @@ impl F420App {
                 format!("{} rejected: {msg}{hint}", response.command),
             );
         }
+        if response.ok && matches!(command, Command::Save { .. }) {
+            self.drop_autosave();
+        }
+        if response.ok
+            && let Command::SaveCopy { path } = &command
+            && let Some(p) = self.autosave.replaced.take()
+            && p != *path
+        {
+            let _ = std::fs::remove_file(p);
+        }
         if response.ok && matches!(command, Command::SetSketchPlane { .. }) {
             self.broken_sketch = None;
         }
@@ -909,6 +924,8 @@ impl F420App {
             self.reattach = None;
             self.broken_sketch = None;
             self.params = Default::default();
+            // The previous document was saved or deliberately left.
+            self.drop_autosave();
             // Dialogs hold ids of the old document (ids restart per document);
             // a pending import is the exception: its reply is this one.
             if !matches!(&self.dialog, Some(Dialog::Import(f)) if f.pending.is_some()) {
@@ -1327,8 +1344,15 @@ impl F420App {
                 }
             }
             Guarded::Open(path) => self.request(Command::Open { path }),
+            Guarded::OpenCopy(path) => {
+                self.autosave.replaced = Some(path.clone());
+                self.request(Command::OpenCopy { path })
+            }
             Guarded::Close => self.request(Command::Close),
-            Guarded::Exit => self.exit_confirmed = true,
+            Guarded::Exit => {
+                self.drop_autosave();
+                self.exit_confirmed = true
+            }
         }
     }
 
@@ -1783,6 +1807,7 @@ impl F420App {
         }
         self.advance_demo();
         self.advance_scene();
+        self.autosave_tick();
         if !self.scene_steps.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
@@ -1850,6 +1875,7 @@ impl F420App {
         }
         self.sync_viewport_selection();
         self.confirm_ui(&ctx);
+        self.recovery_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
         self.import_summary_ui(&ctx);

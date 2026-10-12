@@ -14,6 +14,7 @@ pub mod params_ui;
 pub mod place;
 pub mod probe;
 pub mod reattach;
+pub mod recovery;
 pub mod scenes;
 pub mod sketch_edit;
 pub mod sketch_view;

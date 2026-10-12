@@ -27,3 +27,33 @@ Curated copies are in `docs/screenshots/12-17`. The full set is written to
 
 Cancelling the Import dialog while an import is running only closes the dialog. The import cannot
 be interrupted and still completes, and Undo removes it in one step.
+
+## Run 4 additions
+
+* **Browser → Parameters (N)**: named parameters with expression, value and unit; click a
+  name to edit, rename or delete (disabled with the reason while used); bottom row adds one.
+  Refusals are shown under the list with the model unchanged. docs/PARAMETERS.md.
+* **Inspector parameter fields** take a number or an expression; a bound field shows its
+  expression with `= value` beside the label; a plain number unbinds it.
+* **Measure**: select a planar face → *Measure from this face* → select another planar
+  face: exact distance between parallel faces (wall, floor, cavity, lip clearance) or the
+  angle between their normals, from the B-rep planes (not the display mesh). The body
+  inspector shows *Overall size (bounding box)*, labelled as such (it is not a wall
+  thickness), and a *tessellation estimate* marker when the volume is an estimate.
+* **Extrude preview**: resolves the direction from every planar face of the target (also
+  faces made by patterns, mirrors, chamfers, or split faces) like regeneration; Through
+  All uses exact body bounds (hidden targets too). The label "Preview (display only; the
+  exact solid is built and checked on OK)" sits at the bottom of the view, clear of the
+  dialog.
+* **Templates → Printable parts**: *Parametric enclosure + lid*, *Clearance test coupon*,
+  *Mounting bracket* start a new document with editable parameters.
+* **Export STL… / Export 3MF…**: body table, tessellation, export-only placement (selected
+  face down), layout, bed fit, per-body report (docs/PRINT_EXPORT.md).
+* **Autosave / recovery** (`crates/f420-app/src/recovery.rs`): while a document has
+  unsaved changes, a copy is written every 60 s (`F420_AUTOSAVE_SECS`) to
+  `~/.local/state/fission420/recovery` (`F420_RECOVERY_DIR`); Save or deliberately leaving
+  the document removes it; after a crash the next start offers *Open copy* (opens as an
+  unsaved, untitled document) or *Discard*. Scripted scenes, demos and tests never write
+  recovery files.
+* Dialogs holding feature/body ids close on Undo/Redo (ids may be reused afterwards) and
+  when their ids disappear; import replies resolve only the form that submitted them.
