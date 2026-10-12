@@ -2012,6 +2012,8 @@ impl F420App {
             ed.set_tool(T::Trim);
         } else if sc(Modifiers::NONE, Key::E) {
             ed.set_tool(T::Extend);
+        } else if sc(Modifiers::NONE, Key::O) {
+            ed.set_tool(T::Offset);
         } else if sc(Modifiers::NONE, Key::S) {
             ed.set_tool(T::Select);
         } else if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {

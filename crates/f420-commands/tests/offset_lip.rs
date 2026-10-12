@@ -47,7 +47,11 @@ fn lip_sketch(w: f64, h: f64, cx: f64, cy: f64, wall: f64) -> (Sketch, Vec<Entit
     .collect();
     let l: Vec<EntityId> = (0..4).map(|i| s.add_line(p[i], p[(i + 1) % 4])).collect();
     s.constraints.extend([
-        Constraint::FixedPoint { p: o, x: 0.0, y: 0.0 },
+        Constraint::FixedPoint {
+            p: o,
+            x: 0.0,
+            y: 0.0,
+        },
         Constraint::Horizontal { line: l[0] },
         Constraint::Horizontal { line: l[2] },
         Constraint::Vertical { line: l[1] },

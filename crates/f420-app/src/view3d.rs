@@ -385,6 +385,7 @@ impl F420App {
             self.sketch_input(ui, &resp);
             self.paint_sketch_session(&painter, rect);
             self.sketch_dim_input(ui);
+            self.sketch_offset_input(ui);
         } else {
             self.model_input(ui, &resp);
             self.paint_document_sketches(&painter, rect);
@@ -915,6 +916,40 @@ impl F420App {
         }
         sketch_view::paint_preview(painter, &pr, ed);
         s.editor.set_screen_targets(targets);
+    }
+
+    /// Inline distance entry of the Offset tool (next to the picked curve).
+    fn sketch_offset_input(&mut self, ui: &egui::Ui) {
+        let rect = self.view_rect;
+        let Some(s) = self.sketch.as_mut() else {
+            return;
+        };
+        let Some(ed) = s.editor.offset_edit.clone() else {
+            return;
+        };
+        let at = s
+            .editor
+            .screen_target(Item::Entity(ed.entity))
+            .map(|r| r.right_bottom() + egui::vec2(6.0, 4.0))
+            .or_else(|| rect.map(|r| r.center_top() + egui::vec2(-80.0, 40.0)));
+        let Some(at) = at else { return };
+        let mut buf = ed.buffer.clone();
+        let (apply, cancel) = inline_number_editor(
+            ui.ctx(),
+            "sketch_offset_edit",
+            at,
+            "Offset distance (mm, + out / − in)",
+            &mut buf,
+            false,
+        );
+        if let Some(o) = &mut s.editor.offset_edit {
+            o.buffer = buf;
+        }
+        if cancel {
+            s.editor.offset_edit = None;
+        } else if apply {
+            s.editor.apply_offset();
+        }
     }
 
     /// Inline numeric editor for a dimension inside the sketch editor.

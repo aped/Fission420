@@ -115,7 +115,10 @@ than one loop, lines/arcs mixed with circles) is still created; its
 `VerticalDistance`, `Distance` (aligned length, nonlinear), `SymmetricAboutPoint`, `Diameter`,
 `Coincident`, `Radius` (`{entity, dim}`, arc or circle), `Tangent` (`{line, arc}`, sharing one
 endpoint id), `EqualRadius` (`{a, b}`, arcs/circles), `Parallel` / `Perpendicular` /
-`EqualLength` (`{a, b}`, two different lines; parallel includes anti-parallel), `PointOnLine`
+`EqualLength` (`{a, b}`, two different lines; parallel includes anti-parallel), `Offset`
+(`{pairs: [{source, copy, sign, tangent_next?}], dim}`, run 4: a loop copy kept at `dim.value`
+mm from its source; created with `Sketch::offset_loop` / the editor's Offset tool,
+docs/behavior/sketching.md "Offset"), `PointOnCircle` (`{point, circle}`, run 4), `PointOnLine`
 (`{point, line}`, the point lies on the infinite line through the line's endpoints and may not be
 one of them); dimensions carry `{"name", "value"}`, names unique per sketch), optional `origin`
 (the point fixed at (0, 0)), optional `construction` (array of entity ids: construction geometry,

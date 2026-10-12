@@ -47,6 +47,8 @@ pub enum SketchTool {
     Trim,
     /// Extend a line's free end to the nearest curve along its direction.
     Extend,
+    /// Offset a closed loop by an editable distance (docs/behavior/sketching.md).
+    Offset,
 }
 
 impl SketchTool {
@@ -61,6 +63,7 @@ impl SketchTool {
             SketchTool::Dimension => "Dimension",
             SketchTool::Trim => "Trim",
             SketchTool::Extend => "Extend",
+            SketchTool::Offset => "Offset",
         }
     }
 
@@ -75,6 +78,7 @@ impl SketchTool {
             SketchTool::Dimension => "D",
             SketchTool::Trim => "T",
             SketchTool::Extend => "E",
+            SketchTool::Offset => "O",
         }
     }
 
@@ -105,6 +109,10 @@ impl SketchTool {
             }
             SketchTool::Extend => {
                 "Click a line near its free end: the end moves along the line to the nearest curve it would cross · lines only"
+            }
+            SketchTool::Offset => {
+                "Click a curve of a closed loop, type the distance (+ outward, − inward), Enter: adds the \
+                 offset copy with one editable dimension · Esc cancels"
             }
         }
     }
@@ -189,8 +197,16 @@ enum Gesture {
     DimFirst(PointId),
 }
 
-/// Inline numeric editor for a dimension.
+/// Open offset entry: the loop (through `entity`) and the typed distance.
 #[derive(Clone, Debug, PartialEq)]
+pub struct OffsetEdit {
+    pub entity: EntityId,
+    /// Signed distance in mm (+ outward, − inward).
+    pub buffer: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// Inline numeric editor for a dimension.
 pub struct DimEdit {
     pub constraint: usize,
     pub buffer: String,
@@ -222,6 +238,8 @@ pub struct SketchEditor {
     /// Snapped cursor in plane coordinates (for previews).
     pub cursor: Option<Snap>,
     pub dim_edit: Option<DimEdit>,
+    /// Offset tool: loop picked, distance being typed.
+    pub offset_edit: Option<OffsetEdit>,
     pub feedback: Option<Feedback>,
     undo: Vec<Sketch>,
     redo: Vec<Sketch>,
@@ -477,6 +495,7 @@ impl SketchEditor {
             hover: None,
             cursor: None,
             dim_edit: None,
+            offset_edit: None,
             feedback: None,
             undo: vec![],
             redo: vec![],
@@ -511,6 +530,7 @@ impl SketchEditor {
 
     pub fn set_tool(&mut self, tool: SketchTool) {
         self.cancel_gesture();
+        self.offset_edit = None;
         self.tool = tool;
         self.feedback = None;
         self.epoch += 1;
@@ -877,6 +897,9 @@ impl SketchEditor {
     /// Escape cascade: inline edit → active gesture → tool. Returns true if
     /// something was cancelled (false = nothing left to cancel in the editor).
     pub fn escape(&mut self) -> bool {
+        if self.offset_edit.take().is_some() {
+            return true;
+        }
         if self.dim_edit.is_some() {
             self.cancel_dim_edit();
             return true;
@@ -950,7 +973,11 @@ impl SketchEditor {
         self.cursor = Some(s);
         self.hover = if matches!(
             self.tool,
-            SketchTool::Select | SketchTool::Dimension | SketchTool::Trim | SketchTool::Extend
+            SketchTool::Select
+                | SketchTool::Dimension
+                | SketchTool::Trim
+                | SketchTool::Extend
+                | SketchTool::Offset
         ) {
             self.pick(pos, screen, view)
         } else {
@@ -1079,7 +1106,81 @@ impl SketchEditor {
             SketchTool::Dimension => self.dimension_click(pos, screen, view),
             SketchTool::Trim => self.trim_click(pos, screen, view),
             SketchTool::Extend => self.extend_click(pos, screen, view),
+            SketchTool::Offset => self.offset_click(pos, screen, view),
         }
+    }
+
+    fn offset_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        match self.pick(pos, screen, view) {
+            Some(Item::Entity(e)) => {
+                let buffer = self
+                    .offset_edit
+                    .as_ref()
+                    .map_or_else(|| "2".to_string(), |o| o.buffer.clone());
+                self.offset_edit = Some(OffsetEdit { entity: e, buffer });
+                self.info("Type the offset distance (+ outward, − inward) and press Enter.".into());
+            }
+            _ => self.fail("Click a line, arc or circle of a closed loop to offset it.".into()),
+        }
+    }
+
+    /// Parsed distance of the open offset entry.
+    fn offset_distance(&self) -> Option<Result<(EntityId, f64), String>> {
+        let o = self.offset_edit.as_ref()?;
+        let t = o
+            .buffer
+            .trim()
+            .trim_end_matches("mm")
+            .trim()
+            .replace('−', "-");
+        Some(match t.parse::<f64>() {
+            Ok(d) if d.is_finite() && d != 0.0 => Ok((o.entity, d)),
+            _ => Err(format!("'{}' is not a non-zero distance in mm", o.buffer)),
+        })
+    }
+
+    /// Preview of the open offset entry: the sketch with the copy, and the
+    /// copy's entities; or why it is refused.
+    pub fn offset_preview(&self) -> Option<Result<(Sketch, Vec<EntityId>), String>> {
+        Some(self.offset_distance()?.and_then(|(e, d)| {
+            let mut s = self.sketch.clone();
+            s.offset_loop(e, d, None)
+                .map(|r| (s, r.entities))
+                .map_err(|x| x.to_string())
+        }))
+    }
+
+    /// Enter on the offset entry: add the copy (one undo step). On a refusal
+    /// the entry stays open with the reason and the sketch is unchanged.
+    pub fn apply_offset(&mut self) -> bool {
+        let Some(parsed) = self.offset_distance() else {
+            return false;
+        };
+        let (e, d) = match parsed {
+            Ok(v) => v,
+            Err(m) => {
+                self.fail(m);
+                return false;
+            }
+        };
+        let mut name = String::new();
+        let ok = self.try_change(false, |sk| {
+            let r = sk
+                .offset_loop(e, d, None)
+                .map_err(|x| format!("Offset refused: {x}"))?;
+            name = r.dimension;
+            Ok(())
+        });
+        if ok {
+            self.offset_edit = None;
+            self.info(format!(
+                "Offset by {} mm {}: dimension '{name}' keeps the distance (edit it, or bind it \
+                 to a parameter).",
+                d.abs(),
+                if d > 0.0 { "outward" } else { "inward" }
+            ));
+        }
+        ok
     }
 
     /// Start and end of the arc being placed (for the preview).
@@ -3619,5 +3720,41 @@ mod tests {
         );
         // Trimming one end (no split) keeps a dimension between the kept points.
         assert!(ed.sketch.solve().is_success());
+    }
+
+    /// Offset tool: a refused distance keeps the entry open with the reason
+    /// and the sketch unchanged; a valid one adds the copy as one undo step.
+    #[test]
+    fn offset_tool_refuses_collapse_and_applies_as_one_undo_step() {
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [40.0, 20.0]);
+        let before = ed.sketch.clone();
+        ed.set_tool(SketchTool::Offset);
+        click(&mut ed, [20.0, 0.0]);
+        assert!(ed.offset_edit.is_some(), "{:?}", ed.feedback);
+        ed.offset_edit.as_mut().unwrap().buffer = "-10".into();
+        assert!(matches!(ed.offset_preview(), Some(Err(_))));
+        assert!(!ed.apply_offset());
+        assert!(ed.feedback.as_ref().is_some_and(|f| f.error));
+        assert!(ed.offset_edit.is_some(), "entry stays open");
+        assert_eq!(ed.sketch, before);
+        ed.offset_edit.as_mut().unwrap().buffer = "abc".into();
+        assert!(!ed.apply_offset());
+        ed.offset_edit.as_mut().unwrap().buffer = "1.5".into();
+        assert!(ed.apply_offset());
+        assert!(ed.offset_edit.is_none());
+        assert_eq!(ed.sketch.entities.len(), 8);
+        let text = ed.feedback.clone().unwrap().text;
+        assert!(
+            text.contains("outward") && text.contains("'offset'"),
+            "{text}"
+        );
+        assert!(ed.undo());
+        assert_eq!(ed.sketch.entities.len(), 4);
+        // Escape closes an open entry.
+        click(&mut ed, [20.0, 0.0]);
+        assert!(ed.escape() && ed.offset_edit.is_none());
     }
 }
