@@ -216,6 +216,11 @@ stroke only), design intent (constraints); sketch placement on export.
 
 ## Native format
 
+**v4 (run 4)** = v3 plus named user parameters and feature expression bindings
+(docs/PARAMETERS.md); v3 files load unchanged (frozen copies of the run-3 documents in
+`crates/f420-commands/tests/fixtures/native_v3/`, `native_formats.rs::v3_run3_examples`), saves
+write v4, and an older build refuses a v4 file instead of dropping expressions.
+
 v3 stores features, bodies (id, name, visibility, source) and the bytes of every imported
 file as base64 blobs, so a document reopens after the source file is moved or deleted
 (scenario C.3, D.6, D.11 delete the sources before reopening and compare the whole document

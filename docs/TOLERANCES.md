@@ -9,7 +9,11 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::FACE_MATCH` | 1e-7 mm | geometric | matching a semantic face reference to a B-rep plane |
 | `tol::MIN_LENGTH` | 1e-3 mm | validation | smallest accepted length/radius/distance |
 | `tol::THROUGH_ALL_MARGIN_*` | 5 % of bbox diagonal, >= 1 mm | construction | cutter overshoot (avoid coplanar boolean faces) |
-| join overlap `JOIN_OVERLAP` (f420-document `regen.rs`) | min(0.5 mm, distance / 2) | construction | a Join sketched on a face of its target starts this far inside the material (Truck 0.6 booleans fail on coplanar contact, ADR 0003); exact only because the profile must lie inside the face (`profile_within_face`) |
+| join overlap `JOIN_OVERLAP` (f420-document `regen.rs`) | min(0.5 mm, distance / 2, clear / 2) | construction | a Join sketched on a face of its target starts this far inside the material (Truck 0.6 booleans fail on coplanar contact, ADR 0003); `clear` = depth under the profile free of other surfaces (`validate.rs::clear_depth`, run 4, ADR 0005); refused below 2 × `MIN_LENGTH` |
+| result-check validation chord (`validate.rs::check_chord`) | clamp(1e-4 × size, 1e-3, 0.02) mm | mesh | tessellation of target and result for the independent boolean check (ADR 0005) |
+| result-check probe offsets | planar: max(20 × `KERNEL_LINEAR`, 1e-6 × size); curved: 3 × validation chord | geometric | distance of the inside/outside probe points from a result face; winding numbers within 0.1 of 0/1 classify, others are skipped |
+| result-check tool neighbourhood | max(1 mm, 2 % × size) around the tool actually used | geometric | faces outside are untouched target faces and are not probed |
+| clear-depth boundary slack | planar: max(10 × `KERNEL_LINEAR`, 1e-7 × size); curved: 2 × validation chord | geometric | surfaces this close to the profile boundary do not count as crossing the overlap slab (a wall that shares the boundary) |
 | face-region containment slack (`ops.rs` `profile_within_face`) | max(10 × `KERNEL_LINEAR`, 1e-6 × extent) | geometric | sampled profile points may lie this far outside the support face region (chord error of curved face boundaries, 64 chords per edge) |
 | blind-cut floor on a face | `THROUGH_ALL_MARGIN_*` | construction | a blind cut whose floor lands exactly on a face whose material is on the tool's side is extended past it by the margin (same material removed, no coplanar faces) |
 | tool/target miss test (join, cut) | `KERNEL_LINEAR` on axis-aligned bounds | validation | "does not touch / does not intersect the target" |

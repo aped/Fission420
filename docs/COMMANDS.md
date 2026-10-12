@@ -12,6 +12,9 @@ target/release/f420-cli run examples/bracket_workflow.json     # 120x60 bracket,
 target/release/f420-cli run examples/scenario_a_workflow.json  # SESSION_2 A: editor sketches, plate + hole
 target/release/f420-cli run examples/scenario_b_workflow.json  # SESSION_2 B: chamfered line loop
 target/release/f420-cli run examples/scenario_r_workflow.json  # stretch: rounded rectangle + slot (3-point arcs)
+target/release/f420-cli run examples/enclosure_workflow.json       # run 4: parametric enclosure base + lid (docs/PARAMETERS.md)
+target/release/f420-cli run examples/clearance_coupon_workflow.json # run 4: peg/hole fit test, 0.15-0.45 mm per side
+target/release/f420-cli run examples/mounting_bracket_workflow.json # run 4: L bracket, patterned holes, chamfer
 target/release/f420-cli acceptance --out artifacts/acceptance  # GOAL.md workflow + scenarios A/B, analytic checks
 tools/external_validation.sh artifacts/acceptance               # python STL + FreeCAD STL/STEP checks
 ```
@@ -34,7 +37,7 @@ variable the same test fails when the committed JSON is stale, and it replays th
 |---|---|---|
 | `new_document` | | replaces any open document (no prompt; headless) |
 | `create_sketch` | `name?`, `plane`, `template` + template fields | see below |
-| `extrude` | `name?`, `sketch`, `distance`, `op?` (`new_body` default, `join`, `cut`), `target?` (body id), `through_all?`, `reverse?`, `body_name?` | ADR 0003. `new_body` allocates a body (default name `BodyN`). `join`/`cut` need a target: given, else the body owning the face the sketch is on, else the only B-rep body; ambiguous → `Validation` "choose a target body". Direction: along the sketch normal, except when the sketch plane holds a face of the target: then a cut goes into the material and a join away from it; `reverse` flips the default (a reversed blind cut from a face is refused; a join from a face ignores `reverse`, so older files that set it to point away still load). `through_all` (cut only; `distance` ignored): both sides of the sketch plane through the target's extent + margin. Refused: tool missing the target, join from a face whose profile crosses the face boundary (`ProductLimit`), disconnected join result, cut removing nothing, mesh targets (`ProductLimit`). The document keeps the last valid model |
+| `extrude` | `name?`, `sketch`, `distance`, `op?` (`new_body` default, `join`, `cut`), `target?` (body id), `through_all?`, `reverse?`, `body_name?` | ADR 0003. `new_body` allocates a body (default name `BodyN`). `join`/`cut` need a target: given, else the body owning the face the sketch is on, else the only B-rep body; ambiguous → `Validation` "choose a target body". Direction: along the sketch normal, except when the sketch plane holds a face of the target: then a cut goes into the material and a join away from it; `reverse` flips the default (a reversed blind cut from a face is refused; a join from a face ignores `reverse`, so older files that set it to point away still load). `through_all` (cut only; `distance` ignored): both sides of the sketch plane through the target's extent + margin. Refused: tool missing the target, join from a face whose profile crosses the face boundary (`ProductLimit`), disconnected join result, cut removing nothing, mesh targets (`ProductLimit`). The document keeps the last valid model. Run 4 (ADR 0005): every Join/Cut result (also pattern/mirror copies, Cut Through All and Pocket) is checked against the nominal operation; a wrong kernel result is refused as `GeometryCheck` (known case: a cut that engulfs an existing hole). A Join from a face overlaps into the support by min(0.5, distance/2, half the clear material depth under the profile); less than 0.002 mm of clear material is a `ProductLimit` |
 | `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
 | `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside its profile (product limit; for a line/arc host: centre inside the loop and clearance > `MIN_LENGTH` to every line segment and arc); not on revolved bodies |
 | `pocket` | `name?`, `sketch`, `depth` | blind cut from the extrusion cap the sketch is on, `depth` mm into the material (against the cap's outward normal). Product limits: circular profile sketched on an end/start cap of the base extrusion, strictly inside it, 0 < depth < thickness (`ProductLimit` otherwise; a through hole is `cut_through_all`). Parameter `depth`; follows the cap when the thickness changes |
@@ -43,6 +46,10 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `mirror` | `name?`, `feature`, `plane` | adds the reflection of an Extrude Join/Cut's tool across `plane` (world XY/XZ/YZ through the origin, or a planar face reference) to the seed's target; same refusals as patterns; the mirrored copy's faces are not referenceable |
 | `chamfer` | `name?`, `a`, `b` (face references), `distance` | equal-distance chamfer of the straight convex edge where planar faces `a` and `b` of one body meet (edge named by its faces, never by index). Refused: parallel faces, faces not meeting in an edge, concave edge, distance past either face, or when the cut would remove anything but the exact edge wedge (oblique edge ends, other features within reach) — verified by removed volume. Parameter `distance`. UI: select a face → **Chamfer edge…** |
 | `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); linear pattern: `count`, `spacing` (mm); chamfer: `distance` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
+| `set_user_parameter` | `name`, `expression`, `unit?` (`mm` default, `unitless`, `deg`), `comment?` | create or redefine a named parameter; every bound value is re-derived and the model regenerated in one undo step; errors (`Expression`) name the parameter or bound slot and leave the document unchanged (docs/PARAMETERS.md) |
+| `rename_user_parameter` | `name`, `new_name` | rewrites every dependent expression in the same step |
+| `delete_user_parameter` | `name` | refused while used (users named) |
+| `set_expression` | `feature`, `name`, `expression` | bind a feature parameter to an expression; a plain number sets it and unbinds; `""` unbinds keeping the value. A bound slot refuses `set_parameter` |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
 | `rename_body` | `body`, `name` | 1-128 printable characters, unique among bodies; undoable |
@@ -135,7 +142,12 @@ Helpers in `f420_commands::sketches`: `rounded_rectangle(w, h, r)` (dimensions `
  "summary": {...}}
 ```
 
-Failures: `"ok": false, "error": {"kind": "Validation"|"ProductLimit"|"BrokenReference"|"Cycle"|"SketchSolve"|"Kernel"|"UnknownFeature"|"UnknownParameter"|"NothingTo"|"File", "detail": ...}`.
+Failures: `"ok": false, "error": {"kind": "Validation"|"ProductLimit"|"BrokenReference"|"Cycle"|"SketchSolve"|"Kernel"|"GeometryCheck"|"Expression"|"UnknownFeature"|"UnknownParameter"|"NothingTo"|"File", "detail": ...}`.
+`GeometryCheck {feature, detail}` (run 4): the kernel's result failed the independent check
+(ADR 0005). `Expression {name, detail}` (run 4): a parameter or bound expression is invalid.
+`Cycle` is also returned when an edit (e.g. re-attaching a sketch to a face of a later feature
+of the same body) would reorder that body's modifiers (run 4: modifiers of one body keep
+history order).
 A failed command never changes the document (transaction rollback).
 
 Optional fields set only by a queueing front end (the app engine), never by `Session`, and
@@ -147,9 +159,18 @@ edit of the same parameter was queued right behind it; `ok` is true and nothing 
 `revision` (bumped by every commit, undo and redo), undo/redo labels, and per-feature
 `FeatureSummary`: parameters, dependencies, plane/frame, solve status/DOF/residual,
 `solve_conflicts` (constraint labels), `sketch` (solved geometry), `profile_error`, and for
-extrusions the referenceable `faces` with their current frames.
+extrusions the referenceable `faces` with their current frames, and (run 4) `expressions`.
+`BodySummary` (run 4) adds `planes` (every planar face's plane with its outward normal, used
+by the extrude preview), `bounds` (exact, also while measurement is deferred) and
+`measure_error` (a stable per-body measurement failure, not retried until the body's
+geometry changes). `DocSummary.parameters` (run 4) lists user parameters with value,
+`depends_on` and `used_by`.
 
 ## Native format
+
+Current: **version 4** (run 4) = v3 (ADR 0003: bodies, blobs, operations) + `parameters` and
+`features[].expressions` (docs/PARAMETERS.md). v1–v3 load; saves write v4. History of
+earlier versions:
 
 `{"format": "fission420", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
 optional sketch `origin`, the `Distance` constraint and the `Pocket` feature; later run-2
