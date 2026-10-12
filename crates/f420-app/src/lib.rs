@@ -19,7 +19,9 @@ pub mod sketch_edit;
 pub mod sketch_view;
 pub mod view3d;
 
-pub use app::{ConfirmAnswer, Diagnostic, F420App, Guarded, SketchSession, SketchTarget};
+pub use app::{
+    ConfirmAnswer, Diagnostic, F420App, Guarded, PrintTemplate, SketchSession, SketchTarget,
+};
 pub use engine::{ExecMode, Reply};
 
 /// Human-readable name of a semantic face role.

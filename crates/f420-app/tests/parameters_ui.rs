@@ -223,3 +223,30 @@ fn measure_wall_and_lip_clearance_between_faces() {
     let _ = h.try_run();
     h.get_by_label_contains("Distance between parallel faces: 0.25 mm");
 }
+
+/// SESSION_4 §7.7: Templates > Parametric enclosure + lid builds the editable
+/// enclosure in a new document (same parameters and volumes as the example).
+#[test]
+fn enclosure_template_from_the_menu() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Parametric enclosure + lid");
+    let s = h.state().summary().clone();
+    assert_eq!(s.parameters.len(), 15);
+    assert_eq!(s.bodies.len(), 2);
+    let v: Vec<f64> = s
+        .bodies
+        .iter()
+        .map(|b| match b.measurements.clone().unwrap().volume {
+            f420_kernel::VolumeResult::Value { volume, .. } => volume,
+            v => panic!("{v:?}"),
+        })
+        .collect();
+    assert!(
+        (v[0] - 19592.0).abs() < 1e-6 && (v[1] - 9404.0).abs() < 1e-6,
+        "{v:?}"
+    );
+    assert!(s.path.is_none(), "a new, unsaved document");
+}

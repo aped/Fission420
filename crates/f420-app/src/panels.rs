@@ -342,6 +342,25 @@ impl F420App {
         }
         let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
         let templates = ui.menu_button("Templates", |ui| {
+            ui.weak("Printable parts (new document with editable parameters)");
+            for t in [
+                crate::app::PrintTemplate::Enclosure,
+                crate::app::PrintTemplate::Coupon,
+                crate::app::PrintTemplate::Bracket,
+            ] {
+                if ui
+                    .button(t.label())
+                    .probe(t.label())
+                    .on_hover_text(
+                        "Starts a new document; change its sizes in the Parameters panel",
+                    )
+                    .clicked()
+                {
+                    self.guarded(Guarded::NewTemplate(t));
+                    ui.close();
+                }
+            }
+            ui.separator();
             ui.weak("Dimensioned sketch templates (dialogs)");
             if ui
                 .add_enabled(open, egui::Button::new("Rectangle on XY…"))
@@ -1644,7 +1663,9 @@ impl F420App {
             return;
         };
         let what = match g {
-            Guarded::New | Guarded::NewAndSketch => "creating a new document",
+            Guarded::New | Guarded::NewAndSketch | Guarded::NewTemplate(_) => {
+                "creating a new document"
+            }
             Guarded::Open(_) => "opening another document",
             Guarded::Close => "closing",
             Guarded::Exit => "quitting",

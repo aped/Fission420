@@ -375,3 +375,65 @@ fn sketch_edit_removing_a_bound_dimension_drops_the_binding() {
         },
     );
 }
+
+/// Parameters on a document with an embedded STEP import: bind the imported
+/// box's hole diameter, change it, save, reopen without the source file.
+/// Box 40 x 30 x 10 (12000) with a through hole: 12000 - pi r^2 10.
+#[test]
+fn parameters_drive_a_cut_in_an_imported_step_body_and_survive_reopen() {
+    use std::f64::consts::PI;
+    let dir = tempfile::tempdir().unwrap();
+    let src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/imported_step_hole.f420.json");
+    let mut s = Session::new();
+    ok(&mut s, Command::Open { path: src });
+    let hole = s.summary().features[1].id;
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "hole_d".into(),
+            expression: "6".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    ok(
+        &mut s,
+        Command::SetExpression {
+            feature: hole,
+            name: "diameter".into(),
+            expression: "hole_d".into(),
+        },
+    );
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "hole_d".into(),
+            expression: "8".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    let want = 12000.0 - PI * 16.0 * 10.0;
+    assert!(
+        (vol(&s, BodyId(1)) - want).abs() < 1e-3,
+        "{}",
+        vol(&s, BodyId(1))
+    );
+    let out = dir.path().join("imported_param.f420.json");
+    ok(&mut s, Command::Save { path: out.clone() });
+    let mut t = Session::new();
+    ok(&mut t, Command::Open { path: out });
+    assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
+    assert!((vol(&t, BodyId(1)) - want).abs() < 1e-3);
+    ok(
+        &mut t,
+        Command::SetUserParameter {
+            name: "hole_d".into(),
+            expression: "5".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    assert!((vol(&t, BodyId(1)) - (12000.0 - PI * 6.25 * 10.0)).abs() < 1e-3);
+}

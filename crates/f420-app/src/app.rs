@@ -192,9 +192,47 @@ pub enum Guarded {
     New,
     /// New document followed by a sketch on XY (empty-state "Create Sketch").
     NewAndSketch,
+    /// New document built from a parametric printable template (run 4).
+    NewTemplate(PrintTemplate),
     Open(PathBuf),
     Close,
     Exit,
+}
+
+/// Parametric printable templates (SESSION_4 §7.7): a new document with the
+/// same named parameters and bindings as the committed examples, edited by
+/// changing parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintTemplate {
+    Enclosure,
+    Coupon,
+    Bracket,
+}
+
+impl PrintTemplate {
+    pub fn label(self) -> &'static str {
+        match self {
+            PrintTemplate::Enclosure => "Parametric enclosure + lid",
+            PrintTemplate::Coupon => "Clearance test coupon",
+            PrintTemplate::Bracket => "Mounting bracket",
+        }
+    }
+
+    /// Commands that build the template in a new document.
+    pub fn commands(self) -> Vec<Command> {
+        use f420_commands::printables as p;
+        let unused = std::path::Path::new("unused.f420.json");
+        let steps = match self {
+            PrintTemplate::Enclosure => p::enclosure_workflow(unused),
+            PrintTemplate::Coupon => p::coupon_workflow(unused),
+            PrintTemplate::Bracket => p::bracket_workflow(unused),
+        };
+        steps
+            .into_iter()
+            .map(|s| s.cmd)
+            .filter(|c| !matches!(c, Command::Save { .. } | Command::Inspect))
+            .collect()
+    }
 }
 
 /// Inline editor for a dimension of a finished sketch shown in the 3D view.
@@ -1280,6 +1318,13 @@ impl F420App {
             Guarded::NewAndSketch => {
                 self.pending_new_sketch = true;
                 self.request(Command::NewDocument);
+            }
+            Guarded::NewTemplate(t) => {
+                // The workflow's own commands (it starts with NewDocument);
+                // Save/Inspect are the example's, not the template's.
+                for c in t.commands() {
+                    self.request(c);
+                }
             }
             Guarded::Open(path) => self.request(Command::Open { path }),
             Guarded::Close => self.request(Command::Close),
