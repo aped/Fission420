@@ -51,6 +51,7 @@ fn extrude(sketch: FeatureId, d: f64, op: ExtrudeOp, through_all: bool) -> Comma
         through_all,
         reverse: false,
         body_name: None,
+        region: None,
     }
 }
 

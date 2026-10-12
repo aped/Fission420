@@ -102,6 +102,7 @@ fn two_bodies() -> Vec<SceneStep> {
             through_all: false,
             reverse: false,
             body_name: None,
+            region: None,
         }),
     ]
 }
@@ -192,6 +193,7 @@ impl F420App {
                     through_all: false,
                     reverse: false,
                     body_name: None,
+                    region: None,
                 }),
                 Ui(|a| {
                     let s = a.feature_by_name("Side slot").map(|f| f.id);

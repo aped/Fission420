@@ -433,6 +433,7 @@ fn notch_variant_regenerates_with_size_changes() {
             through_all: false,
             reverse: false,
             body_name: None,
+            region: None,
         },
     )
     .feature

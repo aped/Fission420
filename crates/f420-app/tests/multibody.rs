@@ -412,6 +412,7 @@ fn preview_direction_matches_regeneration_on_coplanar_world_plane() {
         through_all: false,
         reverse: true,
         body_name: None,
+        region: None,
     });
     settle(&mut h);
     let b = h.state().summary().bodies[0].id;

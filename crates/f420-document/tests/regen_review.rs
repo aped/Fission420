@@ -377,6 +377,7 @@ fn join_on_a_face_ignores_reverse_so_old_files_still_load() {
                 operation: Operation::Join { target: BodyId(1) },
                 extent: Extent::Distance,
                 reverse,
+                region: None,
             },
         );
         let e = regenerate(&d).unwrap_or_else(|e| panic!("reverse={reverse}: {e}"));

@@ -52,6 +52,7 @@ fn extrude(
         through_all,
         reverse,
         body_name: None,
+        region: None,
     }
 }
 
@@ -265,6 +266,7 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
         through_all: false,
         reverse: false,
         body_name: None,
+        region: None,
     });
     assert!(
         matches!(r.error, Some(DocError::ProductLimit(ref m)) if m.contains("inner loop")),

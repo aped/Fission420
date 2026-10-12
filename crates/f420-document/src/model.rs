@@ -205,6 +205,12 @@ pub enum FeatureKind {
         extent: Extent,
         #[serde(default)]
         reverse: bool,
+        /// Extrude only this bounded region of the sketch (run 4, additive:
+        /// absent = the whole profile, exactly as before). Resolved by identity
+        /// at every regeneration; a region that no longer exists is a
+        /// `BrokenReference`, never another region.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<f420_sketch::RegionRef>,
     },
     /// Legacy (v1/v2) circular through-all cut; see [`FeatureKind::Extrude`] with
     /// [`Operation::Cut`] for general cuts.
@@ -290,6 +296,7 @@ impl FeatureKind {
             operation,
             extent: Extent::Distance,
             reverse: false,
+            region: None,
         }
     }
 }

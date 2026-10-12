@@ -107,6 +107,7 @@ fn queue_slow_edits(h: &mut Harness<'_, F420App>) {
         through_all: true,
         reverse: false,
         body_name: None,
+        region: None,
     });
     app.request(Command::LinearPattern {
         name: None,

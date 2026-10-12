@@ -43,6 +43,7 @@ fn op(sketch: FeatureId, d: f64, op: ExtrudeOp, target: BodyId) -> Command {
         through_all: false,
         reverse: false,
         body_name: None,
+        region: None,
     }
 }
 

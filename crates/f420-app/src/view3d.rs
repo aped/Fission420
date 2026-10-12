@@ -447,6 +447,10 @@ impl F420App {
     /// the selected sketch → inline edit; otherwise select the face under the
     /// cursor (or clear the selection on empty space).
     pub fn view_click(&mut self, p: Pos2) {
+        // Extrude dialog open: a click inside a sketch region picks it.
+        if self.extrude_region_click(p) {
+            return;
+        }
         if let Some((i, _)) = self
             .doc_dim_targets
             .iter()

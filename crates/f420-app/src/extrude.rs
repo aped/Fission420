@@ -8,10 +8,18 @@
 //! the face's outward normal); Reverse flips either default. Through All covers
 //! both sides of the sketch plane through the target's extent along the normal
 //! (taken here from the target's display mesh, plus a small margin).
+//!
+//! Region picking (docs/behavior/sketching.md): when the sketch has several
+//! bounded regions (nested loops, islands, separate outer loops) the dialog
+//! offers them in a "Region" list, and a click inside a region on the sketch
+//! plane in the 3D view picks it. The picked region is shaded on the sketch
+//! plane and the preview prism uses its loops; the command carries the region's
+//! persistent identity (`RegionRef`), never a list index.
 
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke};
 use f420_commands::{BodySummary, Command, ExtrudeOp, FeatureSummary};
 use f420_document::{BodyId, FeatureId, SketchPlane};
+use f420_sketch::{RegionRef, SketchRegion};
 
 use crate::app::{F420App, parse_num};
 use crate::place::PlaneFrame;
@@ -28,7 +36,14 @@ pub struct ExtrudeForm {
     /// Cut only.
     pub through_all: bool,
     pub reverse: bool,
+    /// Picked sketch region (None: the whole profile, the default).
+    pub region: Option<RegionRef>,
 }
+
+/// A closed loop at the near and far end of the preview tool (world).
+pub type LoopEnds = (Vec<[f64; 3]>, Vec<[f64; 3]>);
+/// Outer outline and hole outlines of a region (sketch coordinates).
+pub type RegionOutlines = (Vec<[f64; 2]>, Vec<Vec<[f64; 2]>>);
 
 /// Preview prism in world coordinates.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +51,13 @@ pub struct ExtrudePreview {
     /// Profile outline at the near and far end of the tool (same vertex order).
     pub start: Vec<[f64; 3]>,
     pub end: Vec<[f64; 3]>,
+    /// Inner loops (holes) of the extruded region, near and far end.
+    pub holes: Vec<LoopEnds>,
+    /// The extruded region's loops in sketch coordinates (outer first), for
+    /// shading the region on the sketch plane.
+    pub loops_2d: Vec<Vec<[f64; 2]>>,
+    /// A region was picked (shaded on the sketch plane).
+    pub picked: bool,
     /// Signed offsets (mm) of the two ends along the sketch normal.
     pub z_range: [f64; 2],
     pub op: ExtrudeOp,
@@ -49,6 +71,37 @@ const THROUGH_MARGIN_REL: f64 = 0.01;
 
 /// Closed outline of a solved sketch's profile in sketch coordinates.
 pub fn profile_outline(sketch: &f420_sketch::Sketch) -> Option<Vec<[f64; 2]>> {
+    loop_outline(&sketch.profile().ok()?)
+}
+
+/// Bounded regions of a summary sketch (empty when it has no closed loops).
+pub fn sketch_regions(s: &FeatureSummary) -> Vec<SketchRegion> {
+    s.sketch
+        .as_ref()
+        .and_then(|k| k.regions().ok())
+        .unwrap_or_default()
+}
+
+/// Outer and hole outlines (sketch coordinates) of the region an extrusion of
+/// `sketch` uses: the picked region, else the default profile region.
+pub fn region_outlines(
+    sketch: &f420_sketch::Sketch,
+    pick: Option<&RegionRef>,
+) -> Option<RegionOutlines> {
+    let r = match pick {
+        Some(p) => sketch.region_by_ref(p).ok()??,
+        None => sketch.profile_region().ok()?,
+    };
+    let holes = r
+        .holes
+        .iter()
+        .map(|(p, _)| loop_outline(p))
+        .collect::<Option<Vec<_>>>()?;
+    Some((loop_outline(&r.outer)?, holes))
+}
+
+/// Closed outline of one profile loop in sketch coordinates.
+pub fn loop_outline(profile: &f420_sketch::Profile) -> Option<Vec<[f64; 2]>> {
     use f420_sketch::{LoopSegment, Profile};
     let arc = |out: &mut Vec<[f64; 2]>, s: [f64; 2], e: [f64; 2], c: [f64; 2], ccw: bool| {
         let r = (s[0] - c[0]).hypot(s[1] - c[1]);
@@ -71,7 +124,7 @@ pub fn profile_outline(sketch: &f420_sketch::Sketch) -> Option<Vec<[f64; 2]>> {
             out.push([c[0] + r * a.cos(), c[1] + r * a.sin()]);
         }
     };
-    let pts = match sketch.profile().ok()? {
+    let pts = match profile.clone() {
         Profile::Polygon(v) => v,
         Profile::Circle { center, radius } => (0..60)
             .map(|k| {
@@ -165,6 +218,7 @@ impl ExtrudeForm {
             target: default_target(fs, &app.summary.bodies, s),
             through_all: false,
             reverse: false,
+            region: None,
         }
     }
 
@@ -189,6 +243,7 @@ impl ExtrudeForm {
             through_all,
             reverse: self.reverse,
             body_name: None,
+            region: self.region.clone(),
         })
     }
 
@@ -223,7 +278,7 @@ impl F420App {
         let fs = &self.summary.features;
         let s = fs.iter().find(|f| Some(f.id) == form.sketch)?;
         let frame = PlaneFrame::from_kernel(&s.frame?);
-        let outline = profile_outline(s.sketch.as_ref()?)?;
+        let (outline, holes) = region_outlines(s.sketch.as_ref()?, form.region.as_ref())?;
         let z_range = if form.through_all && form.op == ExtrudeOp::Cut {
             // Exact bounds from the summary (also for a hidden target).
             let b = self
@@ -264,12 +319,60 @@ impl F420App {
                 w[2] + frame.z[2] * h,
             ]
         };
+        let ends = |l: &[[f64; 2]]| {
+            (
+                l.iter().map(|p| at(*p, z_range[0])).collect::<Vec<_>>(),
+                l.iter().map(|p| at(*p, z_range[1])).collect::<Vec<_>>(),
+            )
+        };
+        let (start, end) = ends(&outline);
+        let mut loops_2d = vec![outline];
+        loops_2d.extend(holes.iter().cloned());
         Some(ExtrudePreview {
-            start: outline.iter().map(|p| at(*p, z_range[0])).collect(),
-            end: outline.iter().map(|p| at(*p, z_range[1])).collect(),
+            start,
+            end,
+            holes: holes.iter().map(|h| ends(h)).collect(),
+            loops_2d,
+            picked: form.region.is_some(),
             z_range,
             op: form.op,
         })
+    }
+
+    /// A primary click in the 3D view while the Extrude dialog is open: pick
+    /// the sketch region under the cursor (sketch plane). Returns true when a
+    /// region was picked (the click is consumed).
+    pub fn extrude_region_click(&mut self, p: Pos2) -> bool {
+        let Some(crate::app::Dialog::Extrude(form)) = &self.dialog else {
+            return false;
+        };
+        let Some(s) = form
+            .sketch
+            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
+        else {
+            return false;
+        };
+        let (Some(k), Some(f), Some(rect)) = (s.sketch.as_ref(), s.frame, self.view_rect) else {
+            return false;
+        };
+        if sketch_regions(s).len() < 2 {
+            return false;
+        }
+        let (cam, [w, h]) = self.view_camera();
+        let l = p - rect.min;
+        let Some(ray) = cam.ray(l.x, l.y, w, h) else {
+            return false;
+        };
+        let Some(local) = PlaneFrame::from_kernel(&f).intersect(&ray) else {
+            return false;
+        };
+        let Ok(Some(r)) = k.region_at(local) else {
+            return false;
+        };
+        if let Some(crate::app::Dialog::Extrude(form)) = &mut self.dialog {
+            form.region = Some(r);
+        }
+        true
     }
 
     /// Display groups of the open Extrude dialog's target (highlighted).
@@ -334,10 +437,58 @@ impl F420App {
                 mesh.add_triangle(base, base + 1, base + 2);
             }
         }
+        if !pv.holes.is_empty() {
+            // Caps of a region with holes: even-odd scanline fill instead of
+            // the outer-only ear clipping.
+            mesh = egui::Mesh::default();
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let base = mesh.vertices.len() as u32;
+                for p in [a[i], a[j], b[j], b[i]] {
+                    mesh.colored_vertex(p, fill);
+                }
+                mesh.add_triangle(base, base + 1, base + 2);
+                mesh.add_triangle(base, base + 2, base + 3);
+            }
+        }
         painter.add(egui::Shape::mesh(mesh));
+        let s = form_sketch_frame(self);
+        if let Some(frame) = s {
+            if !pv.holes.is_empty() {
+                for h in pv.z_range {
+                    shade_region(
+                        painter,
+                        &pv.loops_2d,
+                        &frame.offset(h),
+                        &proj_fn(self, rect),
+                        fill,
+                    );
+                }
+            }
+            if pv.picked {
+                // The picked region, shaded on the sketch plane.
+                shade_region(
+                    painter,
+                    &pv.loops_2d,
+                    &frame,
+                    &proj_fn(self, rect),
+                    Color32::from_rgba_unmultiplied(255, 200, 60, 90),
+                );
+            }
+        }
         let stroke = Stroke::new(1.5, line);
         painter.add(egui::Shape::closed_line(a.clone(), stroke));
         painter.add(egui::Shape::closed_line(b.clone(), stroke));
+        for (hs, he) in &pv.holes {
+            let (Some(x), Some(y)) = (
+                hs.iter().map(proj).collect::<Option<Vec<Pos2>>>(),
+                he.iter().map(proj).collect::<Option<Vec<Pos2>>>(),
+            ) else {
+                continue;
+            };
+            painter.add(egui::Shape::closed_line(x, stroke));
+            painter.add(egui::Shape::closed_line(y, stroke));
+        }
         let step = (n / 8).max(1);
         for i in (0..n).step_by(step) {
             painter.line_segment([a[i], b[i]], stroke);
@@ -378,7 +529,51 @@ impl F420App {
         let s = form
             .sketch
             .and_then(|id| features.iter().find(|f| f.id == id));
-        if let Some(e) = s.and_then(|s| s.profile_error.clone()) {
+        let regions = s.map(sketch_regions).unwrap_or_default();
+        if regions.len() > 1 {
+            let label = |r: &SketchRegion, i: usize| {
+                format!(
+                    "Region {}: {} ({} mm²{})",
+                    i + 1,
+                    r.id.label(),
+                    f420_sketch::fmt_mm(r.area),
+                    if r.depth > 0 {
+                        format!(", nested {}", r.depth)
+                    } else {
+                        String::new()
+                    }
+                )
+            };
+            let whole_ok = s.is_some_and(|s| s.profile_error.is_none());
+            let current = match &form.region {
+                None => "Whole profile".to_string(),
+                Some(p) => regions
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| r.id == *p)
+                    .map_or("(region no longer exists)".to_string(), |(i, r)| {
+                        label(r, i)
+                    }),
+            };
+            egui::ComboBox::from_label("Region")
+                .selected_text(current.clone())
+                .show_ui(ui, |ui| {
+                    if whole_ok {
+                        ui.selectable_value(&mut form.region, None, "Whole profile");
+                    }
+                    for (i, r) in regions.iter().enumerate() {
+                        ui.selectable_value(&mut form.region, Some(r.id.clone()), label(r, i));
+                    }
+                });
+            ui.label(format!("Extrudes: {current}"));
+            ui.small("Or click inside a region on the sketch plane in the 3D view. The picked region is shaded; it is stored by its bounding entities and survives dimension edits.");
+            if form.region.is_none() && !whole_ok {
+                ui.colored_label(
+                    Color32::from_rgb(255, 200, 120),
+                    "This sketch has several separate or nested loops: pick the region to extrude.",
+                );
+            }
+        } else if let Some(e) = s.and_then(|s| s.profile_error.clone()) {
             ui.colored_label(
                 Color32::from_rgb(255, 110, 110),
                 format!("This sketch's profile is not usable: {e}"),
@@ -471,6 +666,83 @@ impl F420App {
                 .weak(),
         );
     }
+}
+
+/// Frame of the open Extrude dialog's sketch.
+fn form_sketch_frame(app: &F420App) -> Option<PlaneFrame> {
+    let Some(crate::app::Dialog::Extrude(form)) = &app.dialog else {
+        return None;
+    };
+    let s = app
+        .summary
+        .features
+        .iter()
+        .find(|f| Some(f.id) == form.sketch)?;
+    Some(PlaneFrame::from_kernel(&s.frame?))
+}
+
+/// World -> screen projection over the 3D view rect.
+fn proj_fn(app: &F420App, rect: egui::Rect) -> impl Fn([f64; 3]) -> Option<Pos2> + '_ {
+    let (cam, [w, h]) = app.view_camera();
+    move |p: [f64; 3]| {
+        cam.project(p.map(|v| v as f32), w, h)
+            .map(|[x, y]| rect.min + egui::vec2(x, y))
+    }
+}
+
+/// Number of horizontal strips used to shade a region.
+const SHADE_STRIPS: usize = 160;
+
+/// Shade a region (outer loop + holes, sketch coordinates) on `frame` with an
+/// even-odd scanline fill: thin quads between successive crossings of each
+/// strip's centre line with the loop edges.
+fn shade_region(
+    painter: &egui::Painter,
+    loops: &[Vec<[f64; 2]>],
+    frame: &PlaneFrame,
+    proj: &dyn Fn([f64; 3]) -> Option<Pos2>,
+    color: Color32,
+) {
+    let ys = loops.iter().flatten().map(|p| p[1]);
+    let (lo, hi) = ys.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), y| {
+        (a.min(y), b.max(y))
+    });
+    if hi.partial_cmp(&lo) != Some(std::cmp::Ordering::Greater) {
+        return;
+    }
+    let dy = (hi - lo) / SHADE_STRIPS as f64;
+    let mut mesh = egui::Mesh::default();
+    for k in 0..SHADE_STRIPS {
+        let (y0, y1) = (lo + k as f64 * dy, lo + (k + 1) as f64 * dy);
+        let y = 0.5 * (y0 + y1);
+        let mut xs = Vec::new();
+        for l in loops {
+            for i in 0..l.len() {
+                let (p, q) = (l[i], l[(i + 1) % l.len()]);
+                if (p[1] > y) != (q[1] > y) {
+                    xs.push(p[0] + (y - p[1]) / (q[1] - p[1]) * (q[0] - p[0]));
+                }
+            }
+        }
+        xs.sort_by(f64::total_cmp);
+        for pair in xs.as_chunks::<2>().0 {
+            let quad = [[pair[0], y0], [pair[1], y0], [pair[1], y1], [pair[0], y1]];
+            let Some(s) = quad
+                .iter()
+                .map(|p| proj(frame.to_world(*p)))
+                .collect::<Option<Vec<Pos2>>>()
+            else {
+                continue;
+            };
+            let base = mesh.vertices.len() as u32;
+            for p in s {
+                mesh.colored_vertex(p, color);
+            }
+            mesh.add_triangle(base, base + 1, base + 2);
+            mesh.add_triangle(base, base + 2, base + 3);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Triangulate a simple polygon (screen space) by ear clipping. Returns
