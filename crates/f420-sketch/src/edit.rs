@@ -135,7 +135,7 @@ impl Sketch {
 
     /// Remove an entity and everything that only existed for it:
     /// * constraints on the entity itself (Horizontal/Vertical/Diameter/Radius/Tangent/EqualRadius/
-    ///   Parallel/Perpendicular/EqualLength/PointOnLine) and its construction flag;
+    ///   Parallel/Perpendicular/EqualLength/PointOnLine/PointOnCircle) and its construction flag;
     /// * its endpoints/centre (an arc's centre included) that no other entity uses, with every constraint
     ///   that references them;
     /// * construction points (points used by no entity, such as a rectangle
@@ -292,6 +292,13 @@ impl Sketch {
                 )
             }
             Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
+            Constraint::PointOnCircle { point, circle } => {
+                let kind = match self.entity(*circle) {
+                    Some(Entity::Circle { .. }) => "C",
+                    _ => "A",
+                };
+                format!("{} on {kind}{}", p(point), circle.0)
+            }
         }
     }
 
@@ -449,7 +456,9 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => vec![*a, *b],
         Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
-        Constraint::PointOnLine { point, .. } => vec![*point],
+        Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
+            vec![*point]
+        }
         Constraint::Horizontal { .. }
         | Constraint::Vertical { .. }
         | Constraint::Diameter { .. }
@@ -476,6 +485,7 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         | Constraint::EqualLength { a, b }
         | Constraint::Angle { a, b, .. } => vec![*a, *b],
         Constraint::PointOnLine { line, .. } => vec![*line],
+        Constraint::PointOnCircle { circle, .. } => vec![*circle],
         _ => vec![],
     }
 }

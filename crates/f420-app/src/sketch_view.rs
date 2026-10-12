@@ -448,7 +448,7 @@ pub fn paint_sketch(
                     }
                 }
             }
-            Constraint::PointOnLine { point, .. } => {
+            Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
                 if let Some(sp) = s.point_xy(*point).and_then(|p| pr.screen(p)) {
                     targets.push((item, glyph("On", sp + egui::vec2(14.0, -12.0))));
                 }

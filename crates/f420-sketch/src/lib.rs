@@ -181,6 +181,12 @@ pub enum Constraint {
     /// equation, the signed distance `u × (p − a) = 0` (mm). The point may not
     /// be one of the line's own endpoints.
     PointOnLine { point: PointId, line: EntityId },
+    /// `point` lies on the full circle of `circle` (a circle, or an arc's
+    /// supporting circle; the arc's angular range is not enforced). 1 equation
+    /// (mm): circle `|p − c| − r`, arc `|p − c| − |start − c|`. The point may not
+    /// be the centre, nor an arc's own start/end (they lie on it by definition).
+    /// Added in run 4 (serde-additive: older sketches never contain it).
+    PointOnCircle { point: PointId, circle: EntityId },
     /// Signed counter-clockwise angle from line `a`'s direction (its first to
     /// its second point) to line `b`'s, `dim.value` degrees in (0, 180). 1
     /// equation, `S · wrap(θ − θ0)` with θ = atan2(u_a × u_b, u_a · u_b) and
@@ -650,6 +656,22 @@ impl Sketch {
                         });
                     }
                 }
+                Constraint::PointOnCircle { point, circle } => {
+                    need_point(point)?;
+                    let own = match need_entity(i, circle, "arc or circle")? {
+                        Entity::Circle { center, .. } => vec![*center],
+                        Entity::Arc {
+                            center, start, end, ..
+                        } => vec![*center, *start, *end],
+                        Entity::Line { .. } => vec![],
+                    };
+                    if own.contains(point) {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: point {point:?} is the centre or an end of \
+                             {circle:?} (point-on-circle needs a separate point)"
+                        )));
+                    }
+                }
                 Constraint::PointOnLine { point, line } => {
                     need_point(point)?;
                     if let Entity::Line { a, b, .. } = need_entity(i, line, "line")?
@@ -763,5 +785,7 @@ mod tests_arc;
 mod tests_angle;
 #[cfg(test)]
 mod tests_lines;
+#[cfg(test)]
+mod tests_on_circle;
 #[cfg(test)]
 mod tests_region;
