@@ -162,3 +162,63 @@ fn clear_depth_cases() {
     let d = clear_depth(&cyl, &Frame::XY.offset(5.0), &disc, 0.5).unwrap();
     assert_eq!(d, 0.5);
 }
+
+/// Feasibility spike (run 4): a 90° countersink as a revolved annular cone cut
+/// from a plate with a Ø5.5 hole, and from a plain plate. Observed with Truck
+/// 0.6: `and` returns None at every tolerance (holed plate) and panics (plain
+/// plate), so the Hole feature offers no countersink. Prints, asserts nothing.
+#[test]
+#[ignore = "feasibility spike: countersink via a revolved cone tool"]
+fn spike_countersink_cone() {
+    use std::f64::consts::PI;
+    let p = plate();
+    let start = down(12.0);
+    let r_hole = 2.75;
+    let holed = cut_prism(
+        &p,
+        &Profile::Circle {
+            center: [20.0, 25.0],
+            radius: r_hole,
+        },
+        &start,
+        14.0,
+    )
+    .unwrap();
+    // Revolve frame: origin at the hole centre on the top face (z = 10), y = +Z (axis).
+    let f = Frame {
+        origin: [20.0, 25.0, 10.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [0.0, -1.0, 0.0],
+    };
+    let (big_r, m, r_in) = (5.5, 1.0, 1.0);
+    // 90° countersink: radius shrinks 1 per unit depth.
+    let tri = Profile::Polygon(vec![
+        [r_in, m],
+        [r_in, -(big_r - r_in)],
+        [big_r + m, m],
+    ]);
+    let tri = match crate::revolve(&tri, &f, 2.0 * PI) {
+        Ok(_) => tri,
+        Err(e) => {
+            eprintln!("revolve (ccw?) failed: {e}");
+            Profile::Polygon(vec![[r_in, m], [big_r + m, m], [r_in, -(big_r - r_in)]])
+        }
+    };
+    let cone = crate::revolve(&tri, &f, 2.0 * PI).unwrap();
+    eprintln!("cone volume {:?}", measure(&cone).map(|m| m.volume));
+    let plain = crate::build::subtract_solid_for_test(&p, &cone);
+    eprintln!("plain plate cone cut: {:?}", plain.as_ref().map(|b| volume(&p) - volume(b)).map_err(|e| e.to_string()));
+    let out = crate::build::subtract_solid_for_test(&holed, &cone);
+    match out {
+        Ok(b) => {
+            let removed = volume(&holed) - volume(&b);
+            let h = big_r - r_hole;
+            // Frustum between radii r_hole and big_r, height h, minus the hole cylinder part.
+            let frustum = PI * h / 3.0 * (big_r * big_r + big_r * r_hole + r_hole * r_hole);
+            let want = frustum - PI * r_hole * r_hole * h;
+            eprintln!("removed {removed} want {want} closed {:?}", measure(&b).map(|m| (m.shell_count, m.all_shells_closed)));
+        }
+        Err(e) => eprintln!("cut failed: {e}"),
+    }
+}

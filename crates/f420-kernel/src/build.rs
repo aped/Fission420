@@ -439,3 +439,35 @@ pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
 
 #[cfg(test)]
 mod tests;
+
+/// Subtract an arbitrary solid `tool` from `target` (tolerances retried), the
+/// result checked to be one closed shell. Test-only: the countersink spike
+/// (`validate::tests::spike_countersink_cone`) shows Truck 0.6 cannot cut a
+/// revolved cone, so no product path uses it.
+#[cfg(test)]
+pub(crate) fn subtract_solid(target: &Body, tool: &Body, what: &str) -> Result<Body> {
+    let mut failures = Vec::new();
+    for &btol in &BOOLEAN_TOLS {
+        let r = guarded(what, || {
+            let mut t = tool.solid.clone();
+            t.not();
+            truck_shapeops::and(&target.solid, &t, btol)
+        })?;
+        match r {
+            Some(solid) => {
+                let body = Body { solid };
+                match check_single_closed(&body, what) {
+                    Ok(()) => return Ok(with_exact_edges(body)),
+                    Err(e) => failures.push(format!("tol {btol}: {e}")),
+                }
+            }
+            None => failures.push(format!("tol {btol}: truck_shapeops::and returned None")),
+        }
+    }
+    Err(KernelError::BooleanFailed(failures.join("; ")))
+}
+
+#[cfg(test)]
+pub(crate) fn subtract_solid_for_test(target: &Body, tool: &Body) -> Result<Body> {
+    subtract_solid(target, tool, "test")
+}
