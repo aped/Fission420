@@ -23,6 +23,18 @@ target/release/f420-app            # F1 = help
 
 Navigation: middle-drag orbit, right-drag pan, wheel zoom, **F** fit, **7/1/3/0** views.
 
+### Printable parts (run 4)
+
+* **Templates → Printable parts → Parametric enclosure + lid** (also *Clearance test coupon*,
+  *Mounting bracket*): a new document driven by named parameters. Change sizes in
+  **Browser → Parameters** (click a name, type a value or an expression such as
+  `outer_length - 2 * wall`, **Apply parameter**); every change is one Undo step and an
+  impossible value is refused with the model unchanged.
+* Measure: select a planar face → **Measure from this face** → select another face.
+* **Export → Export 3MF… / Export STL…**: pick bodies, *Place on bed* (select a face first to put
+  it face down), *Lay out side by side*, *Bambu Lab P1S* bed check. STL is written in mm.
+* Validated example exports: `examples/print/` (sliced in Bambu Studio; not physically printed).
+
 ## Headless
 
 ```bash
@@ -34,7 +46,7 @@ target/release/f420-cli acceptance --out artifacts/acceptance     # analytic acc
 ## Checks
 
 ```bash
-cargo xtask check                              # fmt, clippy, tests, acceptance, example replays (~40 s)
+cargo xtask check                              # fmt, clippy, tests, acceptance, example replays (~2 min)
 tools/external_validation.sh artifacts/acceptance   # independent STL/STEP checks (Python, FreeCAD)
 tools/live_walkthrough.sh                      # real-input UI walkthroughs in a private headless compositor
 ```
@@ -43,20 +55,23 @@ tools/live_walkthrough.sh                      # real-input UI walkthroughs in a
 
 | file | contents |
 |---|---|
-| `runs/run-2/MORNING_REPORT_RUN_2.md` | latest run: what works, evidence, limitations, walkthrough |
+| `runs/run-4/MORNING_REPORT_RUN_4.md` | latest run: what works, evidence, limitations, print walkthrough |
+| `docs/PARAMETERS.md` | named parameters and expressions |
+| `docs/PRINT_EXPORT.md` | STL/3MF print export, placement, validation, slicing |
 | `runs/` | run specs, status log and reports for every run (see `runs/README.md`) |
 | `docs/behavior/sketching.md` | sketch editor behaviour (tools, snapping, drags, undo) |
 | `docs/COMMANDS.md` | command API and native format |
 | `docs/TOLERANCES.md` | every tolerance and why |
 | `docs/behavior/timings.md` | measured timings and the kernel bottleneck analysis |
-| `docs/adr/` | architecture decisions (kernel choice, exact boolean edges) |
+| `docs/adr/` | architecture decisions (kernel, exact boolean edges, bodies/face references, formats, boolean result gate) |
 | `docs/DEPENDENCIES.md` | dependency licences |
 | `runs/STATUS.md` | task log and current state |
 
 ## Limits (prototype)
 
-One base body per document; cuts and pockets are circular; sketches attach to the world planes
-or to extrusion caps; no fillets, assemblies or drawings. See the latest run report for the full,
-current list.
+Multi-body documents with Join/Cut/holes/patterns, but no solid fillets, countersinks, assemblies
+or drawings; some coplanar/coincident boolean cases are refused (Truck 0.6). Every Join/Cut
+result is independently checked before it is committed (ADR 0005). See the latest run report
+for the full, current list.
 
 Licence: MIT OR Apache-2.0.
