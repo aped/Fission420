@@ -79,7 +79,7 @@ pub fn find_copies(dir: &Path) -> Vec<PathBuf> {
             (t, p)
         })
         .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|x| std::cmp::Reverse(x.0));
     v.into_iter().map(|(_, p)| p).collect()
 }
 
