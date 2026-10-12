@@ -49,6 +49,8 @@ pub enum SketchTool {
     Extend,
     /// Offset a closed loop by an editable distance (docs/behavior/sketching.md).
     Offset,
+    /// SKETCH corner fillet: round the corner where two lines meet.
+    Fillet,
 }
 
 impl SketchTool {
@@ -64,6 +66,7 @@ impl SketchTool {
             SketchTool::Trim => "Trim",
             SketchTool::Extend => "Extend",
             SketchTool::Offset => "Offset",
+            SketchTool::Fillet => "Fillet",
         }
     }
 
@@ -79,6 +82,7 @@ impl SketchTool {
             SketchTool::Trim => "T",
             SketchTool::Extend => "E",
             SketchTool::Offset => "O",
+            SketchTool::Fillet => "toolbar",
         }
     }
 
@@ -109,6 +113,11 @@ impl SketchTool {
             }
             SketchTool::Extend => {
                 "Click a line near its free end: the end moves along the line to the nearest curve it would cross · lines only"
+            }
+            SketchTool::Fillet => {
+                "Sketch corner fillet: click the corner point where two lines meet, type the \
+                 radius, Enter: both lines are trimmed and a tangent arc with an editable radius \
+                 dimension is added (2D sketch only; solid edges cannot be filleted) · Esc cancels"
             }
             SketchTool::Offset => {
                 "Click a curve of a closed loop, type the distance (+ outward, − inward), Enter: adds the \
@@ -197,6 +206,14 @@ enum Gesture {
     DimFirst(PointId),
 }
 
+/// Open fillet entry: the corner point and the typed radius.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilletEdit {
+    pub point: PointId,
+    /// Radius in mm.
+    pub buffer: String,
+}
+
 /// Open offset entry: the loop (through `entity`) and the typed distance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OffsetEdit {
@@ -240,6 +257,8 @@ pub struct SketchEditor {
     pub dim_edit: Option<DimEdit>,
     /// Offset tool: loop picked, distance being typed.
     pub offset_edit: Option<OffsetEdit>,
+    /// Fillet tool: corner picked, radius being typed.
+    pub fillet_edit: Option<FilletEdit>,
     pub feedback: Option<Feedback>,
     undo: Vec<Sketch>,
     redo: Vec<Sketch>,
@@ -496,6 +515,7 @@ impl SketchEditor {
             cursor: None,
             dim_edit: None,
             offset_edit: None,
+            fillet_edit: None,
             feedback: None,
             undo: vec![],
             redo: vec![],
@@ -531,6 +551,7 @@ impl SketchEditor {
     pub fn set_tool(&mut self, tool: SketchTool) {
         self.cancel_gesture();
         self.offset_edit = None;
+        self.fillet_edit = None;
         self.tool = tool;
         self.feedback = None;
         self.epoch += 1;
@@ -897,7 +918,7 @@ impl SketchEditor {
     /// Escape cascade: inline edit → active gesture → tool. Returns true if
     /// something was cancelled (false = nothing left to cancel in the editor).
     pub fn escape(&mut self) -> bool {
-        if self.offset_edit.take().is_some() {
+        if self.offset_edit.take().is_some() || self.fillet_edit.take().is_some() {
             return true;
         }
         if self.dim_edit.is_some() {
@@ -978,6 +999,7 @@ impl SketchEditor {
                 | SketchTool::Trim
                 | SketchTool::Extend
                 | SketchTool::Offset
+                | SketchTool::Fillet
         ) {
             self.pick(pos, screen, view)
         } else {
@@ -1107,7 +1129,73 @@ impl SketchEditor {
             SketchTool::Trim => self.trim_click(pos, screen, view),
             SketchTool::Extend => self.extend_click(pos, screen, view),
             SketchTool::Offset => self.offset_click(pos, screen, view),
+            SketchTool::Fillet => self.fillet_click(pos, screen, view),
         }
+    }
+
+    fn fillet_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        match self.pick(pos, screen, view) {
+            Some(Item::Point(p)) => {
+                let buffer = self
+                    .fillet_edit
+                    .as_ref()
+                    .map_or_else(|| "3".to_string(), |f| f.buffer.clone());
+                self.fillet_edit = Some(FilletEdit { point: p, buffer });
+                self.info("Type the fillet radius and press Enter.".into());
+            }
+            _ => self.fail("Click the corner point where two lines meet.".into()),
+        }
+    }
+
+    fn fillet_radius(&self) -> Option<Result<(PointId, f64), String>> {
+        let f = self.fillet_edit.as_ref()?;
+        let t = f.buffer.trim().trim_end_matches("mm").trim();
+        Some(match t.parse::<f64>() {
+            Ok(r) if r.is_finite() && r > 0.0 => Ok((f.point, r)),
+            _ => Err(format!("'{}' is not a radius > 0 mm", f.buffer)),
+        })
+    }
+
+    /// Preview of the open fillet entry: the sketch with the fillet and the
+    /// new arc; or why it is refused.
+    pub fn fillet_preview(&self) -> Option<Result<(Sketch, EntityId), String>> {
+        Some(self.fillet_radius()?.and_then(|(p, r)| {
+            let mut s = self.sketch.clone();
+            s.fillet_corner(p, r, None)
+                .map(|x| (s, x.arc))
+                .map_err(|e| e.to_string())
+        }))
+    }
+
+    /// Enter on the fillet entry (one undo step). A refusal keeps the entry
+    /// open with the reason; the sketch is unchanged.
+    pub fn apply_fillet(&mut self) -> bool {
+        let Some(parsed) = self.fillet_radius() else {
+            return false;
+        };
+        let (p, r) = match parsed {
+            Ok(v) => v,
+            Err(m) => {
+                self.fail(m);
+                return false;
+            }
+        };
+        let mut name = String::new();
+        let ok = self.try_change(false, |sk| {
+            let res = sk
+                .fillet_corner(p, r, None)
+                .map_err(|x| format!("Fillet refused: {x}"))?;
+            name = res.dimension;
+            Ok(())
+        });
+        if ok {
+            self.fillet_edit = None;
+            self.info(format!(
+                "Sketch corner rounded (R {r} mm, dimension '{name}'); the original corner stays \
+                 as a construction point so its dimensions keep their meaning."
+            ));
+        }
+        ok
     }
 
     fn offset_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {

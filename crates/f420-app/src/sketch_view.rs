@@ -684,9 +684,38 @@ fn paint_offset_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEdit
     }
 }
 
+/// Dashed preview of the open fillet entry's arc.
+fn paint_fillet_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
+    let Some(Ok((s, arc))) = ed.fillet_preview() else {
+        return;
+    };
+    let Some(g) = s.arc_geometry(arc) else {
+        return;
+    };
+    let n = 24;
+    let pts: Vec<Pos2> = (0..=n)
+        .filter_map(|k| {
+            let a = g.start_angle + g.sweep * k as f64 / n as f64;
+            pr.screen([
+                g.center[0] + g.radius * a.cos(),
+                g.center[1] + g.radius * a.sin(),
+            ])
+        })
+        .collect();
+    if pts.len() >= 2 {
+        painter.extend(egui::Shape::dashed_line(
+            &pts,
+            Stroke::new(1.8, PALETTE.preview),
+            6.0,
+            4.0,
+        ));
+    }
+}
+
 /// Rubber-band preview and snap cue for the active tool.
 pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
     paint_offset_preview(painter, pr, ed);
+    paint_fillet_preview(painter, pr, ed);
     let Some(cur) = ed.cursor else {
         return;
     };
@@ -819,7 +848,11 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
                 },
             },
             SketchTool::Dimension => dashed(vec![sf, sc]),
-            SketchTool::Select | SketchTool::Trim | SketchTool::Extend | SketchTool::Offset => {}
+            SketchTool::Select
+            | SketchTool::Trim
+            | SketchTool::Extend
+            | SketchTool::Offset
+            | SketchTool::Fillet => {}
         }
     }
 }

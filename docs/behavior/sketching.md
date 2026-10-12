@@ -173,6 +173,30 @@ Enter. One undo step.
   (enclosure lip opening = lip outline offset by −`lip_wall`; lid volume = `lid_volume()` for the
   baseline and the variant), `crates/f420-app/tests/sketch_offset_ui.rs`.
 
+## Sketch corner fillet (Fillet tool) — run 4
+
+A **sketch** corner fillet: it rounds a 2D corner of a sketch. It is not a solid-edge fillet
+(Truck 0.6 has no fillet operation; solid fillets remain unavailable). Fillet tool (toolbar),
+click the corner point where two lines meet, type the radius in the inline entry (dashed preview
+of the arc, or the refusal reason), Enter. One undo step.
+
+* Construction for interior angle θ: tangent distance t = r / tan(θ/2) along both lines; both lines
+  are shortened to the tangent points; a tangent arc is added with `Tangent` constraints to both
+  lines and a named `Radius` dimension (`fillet`, `fillet2`, …; editable, bindable to a
+  parameter).
+* The original corner point stays as a **construction point held on both lines** (`PointOnLine`),
+  so dimensions and constraints on the corner (e.g. a width between corners, a fixed origin
+  corner) keep their meaning: they measure the virtual sharp corner. A fully constrained sketch
+  stays fully constrained.
+* Refused (sketch unchanged): a point that is not the shared end of exactly two lines (arcs,
+  circles, free points, three curves), collinear lines, radius ≤ 0, and a radius that does not fit
+  (t must be shorter than both lines, measured to their other ends — two fillets on one side
+  share its length).
+* Tests: `crates/f420-sketch/src/tests_fillet.rs` (areas: right corners r²(1 − π/4) each, an
+  oblique corner t·r − (π − θ)r²/2; full constraint kept; width and radius edits; refusals),
+  `crates/f420-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
+  regenerated after width/radius edits), `crates/f420-app/tests/sketch_fillet_ui.rs`.
+
 ## Undo model
 
 * Inside a sketch: **Undo step / Redo step** (Ctrl+Z / Ctrl+Shift+Z) walk a local snapshot
