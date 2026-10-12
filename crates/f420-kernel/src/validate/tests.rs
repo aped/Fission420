@@ -193,11 +193,7 @@ fn spike_countersink_cone() {
     };
     let (big_r, m, r_in) = (5.5, 1.0, 1.0);
     // 90° countersink: radius shrinks 1 per unit depth.
-    let tri = Profile::Polygon(vec![
-        [r_in, m],
-        [r_in, -(big_r - r_in)],
-        [big_r + m, m],
-    ]);
+    let tri = Profile::Polygon(vec![[r_in, m], [r_in, -(big_r - r_in)], [big_r + m, m]]);
     let tri = match crate::revolve(&tri, &f, 2.0 * PI) {
         Ok(_) => tri,
         Err(e) => {
@@ -208,7 +204,13 @@ fn spike_countersink_cone() {
     let cone = crate::revolve(&tri, &f, 2.0 * PI).unwrap();
     eprintln!("cone volume {:?}", measure(&cone).map(|m| m.volume));
     let plain = crate::build::subtract_solid_for_test(&p, &cone);
-    eprintln!("plain plate cone cut: {:?}", plain.as_ref().map(|b| volume(&p) - volume(b)).map_err(|e| e.to_string()));
+    eprintln!(
+        "plain plate cone cut: {:?}",
+        plain
+            .as_ref()
+            .map(|b| volume(&p) - volume(b))
+            .map_err(|e| e.to_string())
+    );
     let out = crate::build::subtract_solid_for_test(&holed, &cone);
     match out {
         Ok(b) => {
@@ -217,7 +219,10 @@ fn spike_countersink_cone() {
             // Frustum between radii r_hole and big_r, height h, minus the hole cylinder part.
             let frustum = PI * h / 3.0 * (big_r * big_r + big_r * r_hole + r_hole * r_hole);
             let want = frustum - PI * r_hole * r_hole * h;
-            eprintln!("removed {removed} want {want} closed {:?}", measure(&b).map(|m| (m.shell_count, m.all_shells_closed)));
+            eprintln!(
+                "removed {removed} want {want} closed {:?}",
+                measure(&b).map(|m| (m.shell_count, m.all_shells_closed))
+            );
         }
         Err(e) => eprintln!("cut failed: {e}"),
     }

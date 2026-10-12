@@ -747,7 +747,7 @@ pub fn regenerate_cached_opts(
                     &["hole"]
                 };
                 for (what, tool) in labels.iter().zip(&tools) {
-                    body = apply_tool(&body, tool, &frame, Some(what), id)?.0;
+                    body = apply_tool(&body, tool, &frame, Some(what), id, None)?.0;
                 }
                 replace_body(&mut st, id, *target, body);
                 st.holes.insert(id, tools);
@@ -1104,7 +1104,7 @@ fn extrude_feature(
                     });
                 }
             }
-            let (joined, used) = apply_tool(&t, &out, &frame, None, id)?;
+            let (joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
             replace_body(st, id, target, joined);
             out.body = target;
@@ -1120,7 +1120,7 @@ fn extrude_feature(
                 )));
             }
             out.nominal = (a, b);
-            let (cut, used) = apply_tool(&t, &out, &frame, None, id)?;
+            let (cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
             replace_body(st, id, target, cut);
             out.body = target;
@@ -1239,6 +1239,68 @@ fn coplanar_cut_error(id: FeatureId, end: Option<CoplanarEnd>, e: k::KernelError
     ))
 }
 
+/// One tool application, recorded for the independent result check.
+struct Applied {
+    frame: Frame,
+    profile: k::Profile,
+    /// The user's span along `frame.z`.
+    nominal: (f64, f64),
+    /// The span handed to the kernel.
+    used: (f64, f64),
+    op: k::PrismOp,
+}
+
+/// Independent check that `result` is `target` with all `applied` tools
+/// (ADR 0005); a failure is a `GeometryCheck` refusal.
+fn verify_applied(
+    id: FeatureId,
+    prefix: &str,
+    target: &Body,
+    result: &Body,
+    applied: &[Applied],
+) -> Result<()> {
+    let Some(op) = applied.first().map(|a| a.op) else {
+        return Ok(());
+    };
+    let starts: Vec<Frame> = applied
+        .iter()
+        .map(|a| a.frame.offset(a.nominal.0))
+        .collect();
+    let prisms: Vec<k::Prism> = applied
+        .iter()
+        .zip(&starts)
+        .map(|(a, start)| k::Prism {
+            profile: &a.profile,
+            start,
+            length: a.nominal.1 - a.nominal.0,
+        })
+        .collect();
+    let tools: Vec<(&k::Prism, (f64, f64))> = prisms
+        .iter()
+        .zip(applied)
+        .map(|(p, a)| (p, (a.used.0 - a.nominal.0, a.used.1 - a.nominal.0)))
+        .collect();
+    k::verify_prisms_boolean(target, result, op, &tools)
+        .map(|_| ())
+        .map_err(|x| DocError::GeometryCheck {
+            feature: id,
+            detail: format!(
+                "{prefix}{}; refused (the model is unchanged). {}",
+                x.to_string()
+                    .trim_start_matches("result is not a valid solid: "),
+                match op {
+                    k::PrismOp::Cut => {
+                        "Known Truck 0.6 causes: a cut that fully contains an existing hole or \
+                         pocket (enlarge that feature by editing its dimension instead), or a cut \
+                         whose walls meet existing ones only along an edge or at a point \
+                         (non-manifold; move it slightly)"
+                    }
+                    k::PrismOp::Join => "Change the profile or the support face",
+                }
+            ),
+        })
+}
+
 /// Apply extrusion `e`'s tool, placed on `frame` (its sketch frame for the
 /// seed, a transformed frame for a pattern/mirror copy), to `body`. This is the
 /// one path for seeds and copies (SESSION_4 §1): the workarounds for Truck's
@@ -1260,6 +1322,7 @@ fn apply_tool(
     frame: &Frame,
     what: Option<&str>,
     id: FeatureId,
+    defer: Option<&mut Vec<Applied>>,
 ) -> Result<(Body, (f64, f64))> {
     let kp = to_kernel(&e.profile);
     let prefix = what.map(|w| format!("{w}: ")).unwrap_or_default();
@@ -1267,37 +1330,24 @@ fn apply_tool(
         feature: id,
         detail: format!("{prefix}{x}"),
     };
-    let check = |result: &Body, op: k::PrismOp, nominal: (f64, f64), used: (f64, f64)| {
-        let start = frame.offset(nominal.0);
-        let prism = k::Prism {
-            profile: &kp,
-            start: &start,
-            length: nominal.1 - nominal.0,
-        };
-        k::verify_prism_boolean(
-            body,
-            result,
+    // Check now, or (patterns, mirrors) record the application and check the
+    // final body once against all of them (`verify_applied`).
+    let mut defer = defer;
+    let mut check = |result: &Body, op: k::PrismOp, nominal: (f64, f64), used: (f64, f64)| {
+        let a = Applied {
+            frame: *frame,
+            profile: kp.clone(),
+            nominal,
+            used,
             op,
-            &prism,
-            (used.0 - nominal.0, used.1 - nominal.0),
-        )
-        .map_err(|x| DocError::GeometryCheck {
-            feature: id,
-            detail: format!(
-                "{prefix}{}; refused (the model is unchanged). {}",
-                x.to_string()
-                    .trim_start_matches("result is not a valid solid: "),
-                match op {
-                    k::PrismOp::Cut => {
-                        "Known Truck 0.6 causes: a cut that fully contains an existing hole or \
-                         pocket (enlarge that feature by editing its dimension instead), or a cut \
-                         whose walls meet existing ones only along an edge or at a point \
-                         (non-manifold; move it slightly)"
-                    }
-                    k::PrismOp::Join => "Change the profile or the support face",
-                }
-            ),
-        })
+        };
+        match defer.as_deref_mut() {
+            Some(v) => {
+                v.push(a);
+                Ok(())
+            }
+            None => verify_applied(id, &prefix, body, result, std::slice::from_ref(&a)),
+        }
     };
     if e.removes {
         let margin = k::through_all_margin(body).map_err(err)?;
@@ -1502,7 +1552,9 @@ fn linear_pattern(
         f.x[1] * d[0] + f.y[1] * d[1],
         f.x[2] * d[0] + f.y[2] * d[1],
     ];
-    let mut body = brep_target(st, id, e.body)?;
+    let before = brep_target(st, id, e.body)?;
+    let mut body = before.clone();
+    let mut applied = Vec::new();
     for i in 1..count {
         let t = spacing * f64::from(i);
         let frame = Frame {
@@ -1520,10 +1572,13 @@ fn linear_pattern(
                 &frame,
                 Some(&format!("instance {} of {count}", i + 1)),
                 id,
+                Some(&mut applied),
             )?
             .0;
         }
     }
+    // One independent check of the whole pattern (ADR 0005).
+    verify_applied(id, "pattern: ", &before, &body, &applied)?;
     replace_body(st, id, e.body, body);
     Ok(e.body)
 }
@@ -1576,7 +1631,9 @@ fn circular_pattern(
             v[2] * co + kxv[2] * s + k[2] * kd * (1.0 - co),
         ]
     };
-    let mut body = brep_target(st, id, e.body)?;
+    let before = brep_target(st, id, e.body)?;
+    let mut body = before.clone();
+    let mut applied = Vec::new();
     for i in 1..count {
         let t = angle * f64::from(i);
         let o = rot(sub(f.origin, c), t);
@@ -1593,10 +1650,13 @@ fn circular_pattern(
                 &frame,
                 Some(&format!("instance {} of {count}", i + 1)),
                 id,
+                Some(&mut applied),
             )?
             .0;
         }
     }
+    // One independent check of the whole pattern (ADR 0005).
+    verify_applied(id, "pattern: ", &before, &body, &applied)?;
     replace_body(st, id, e.body, body);
     Ok(e.body)
 }
@@ -1623,7 +1683,9 @@ fn mirror_feature(
         [p[0] - d * n[0], p[1] - d * n[1], p[2] - d * n[2]]
     };
     let target = tools[0].body;
-    let mut body = brep_target(st, id, target)?;
+    let before = brep_target(st, id, target)?;
+    let mut body = before.clone();
+    let mut applied = Vec::new();
     for mut e in tools {
         let f = e.start;
         let (x, y) = (refl_v(f.x), refl_v(f.y));
@@ -1637,8 +1699,17 @@ fn mirror_feature(
         e.nominal = (-e.nominal.1, -e.nominal.0);
         e.dir = -e.dir;
         e.side = e.side.map(|s| -s);
-        body = apply_tool(&body, &e, &frame, Some("mirrored copy"), id)?.0;
+        body = apply_tool(
+            &body,
+            &e,
+            &frame,
+            Some("mirrored copy"),
+            id,
+            Some(&mut applied),
+        )?
+        .0;
     }
+    verify_applied(id, "mirror: ", &before, &body, &applied)?;
     replace_body(st, id, target, body);
     Ok(target)
 }

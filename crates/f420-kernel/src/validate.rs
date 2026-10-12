@@ -263,6 +263,21 @@ pub fn verify_prism_boolean(
     prism: &Prism,
     used: (f64, f64),
 ) -> Result<BooleanCheck> {
+    verify_prisms_boolean(target, result, op, &[(prism, used)])
+}
+
+/// [`verify_prism_boolean`] for several tools applied together (a pattern or
+/// mirror): `expected = target ∪ ⋃ prisms` (Join) or `target \ ⋃ prisms`
+/// (Cut). Faces near any tool actually used are probed.
+pub fn verify_prisms_boolean(
+    target: &Body,
+    result: &Body,
+    op: PrismOp,
+    tools: &[(&Prism, (f64, f64))],
+) -> Result<BooleanCheck> {
+    if tools.is_empty() {
+        return Err(KernelError::InvalidInput("result check: no tools".into()));
+    }
     let tb = crate::measure::raw_bounds(&target.solid)?;
     let rb = crate::measure::raw_bounds(&result.solid)?;
     let diag = diag_of(&tb).max(diag_of(&rb));
@@ -285,7 +300,7 @@ pub fn verify_prism_boolean(
         ));
     }
     guarded("result check", || {
-        check_faces(target, result, op, prism, used, &tmesh, &rmesh, chord, diag)
+        check_faces(target, result, op, tools, &tmesh, &rmesh, chord, diag)
     })?
 }
 
@@ -294,14 +309,13 @@ fn check_faces(
     _target: &Body,
     result: &Body,
     op: PrismOp,
-    prism: &Prism,
-    used: (f64, f64),
+    tools: &[(&Prism, (f64, f64))],
     tmesh: &crate::TriMesh,
     rmesh: &crate::TriMesh,
     chord: f64,
     diag: f64,
 ) -> Result<BooleanCheck> {
-    let tool = PrismTest::new(prism);
+    let tests: Vec<PrismTest> = tools.iter().map(|(p, _)| PrismTest::new(p)).collect();
     let wind = Winding::new(tmesh);
     let planar = planar_faces(result);
     // Probe offsets: exact faces need only clear float noise; curved faces must
@@ -309,25 +323,47 @@ fn check_faces(
     let h_plane = (1.0e-6 * diag).max(20.0 * tol::KERNEL_LINEAR);
     let h_curved = 3.0 * chord;
     let eps_tool = 0.5 * h_plane;
-    // Neighbourhood of the tool actually used: faces outside it are untouched
+    // Neighbourhood of the tools actually used: faces outside it are untouched
     // target faces.
-    let tool_box = {
-        let mut lo = [f64::INFINITY; 3];
-        let mut hi = [f64::NEG_INFINITY; 3];
-        for q in &tool.poly {
-            for w in [used.0.min(0.0), used.1.max(prism.length)] {
-                let p = prism.start.offset(w).to_world(*q);
-                for i in 0..3 {
-                    lo[i] = lo[i].min(p[i]);
-                    hi[i] = hi[i].max(p[i]);
+    let tool_boxes: Vec<([f64; 3], [f64; 3])> = tools
+        .iter()
+        .zip(&tests)
+        .map(|((prism, used), tool)| {
+            let mut lo = [f64::INFINITY; 3];
+            let mut hi = [f64::NEG_INFINITY; 3];
+            for q in &tool.poly {
+                for w in [used.0.min(0.0), used.1.max(prism.length)] {
+                    let p = prism.start.offset(w).to_world(*q);
+                    for i in 0..3 {
+                        lo[i] = lo[i].min(p[i]);
+                        hi[i] = hi[i].max(p[i]);
+                    }
                 }
             }
+            let m = (0.02 * diag).max(1.0);
+            (lo.map(|v| v - m), hi.map(|v| v + m))
+        })
+        .collect();
+    let near_tool = |c: [f64; 3]| {
+        tool_boxes
+            .iter()
+            .any(|(lo, hi)| (0..3).all(|i| c[i] >= lo[i] && c[i] <= hi[i]))
+    };
+    // Union of the tools: inside any → inside; ambiguous near one and not
+    // inside another → unclassified.
+    let in_tools = |p: [f64; 3]| -> Option<bool> {
+        let mut unknown = false;
+        for t in &tests {
+            match t.classify(p, eps_tool) {
+                Some(true) => return Some(true),
+                Some(false) => {}
+                None => unknown = true,
+            }
         }
-        let m = (0.02 * diag).max(1.0);
-        (lo.map(|v| v - m), hi.map(|v| v + m))
+        (!unknown).then_some(false)
     };
     let expected = |p: [f64; 3]| -> Option<bool> {
-        let in_tool = tool.classify(p, eps_tool)?;
+        let in_tool = in_tools(p)?;
         match (op, in_tool) {
             (PrismOp::Join, true) => Some(true),
             (PrismOp::Cut, true) => Some(false),
@@ -362,7 +398,7 @@ fn check_faces(
                 (a[1] + b[1] + c[1]) / 3.0,
                 (a[2] + b[2] + c[2]) / 3.0,
             ];
-            if (0..3).any(|i| centroid[i] < tool_box.0[i] || centroid[i] > tool_box.1[i]) {
+            if !near_tool(centroid) {
                 continue;
             }
             let n = cross(sub(b, a), sub(c, a));

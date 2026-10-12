@@ -36,7 +36,7 @@ pub use step_in::{
 };
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
-    verify_prism_boolean,
+    verify_prism_boolean, verify_prisms_boolean,
 };
 
 use serde::{Deserialize, Serialize};
