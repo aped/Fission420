@@ -683,6 +683,63 @@ impl F420App {
 }
 
 impl F420App {
+    /// Open "Sketch on offset plane…": the base defaults to the selected
+    /// sketchable face, else World XY.
+    pub(crate) fn open_offset_plane_dialog(&mut self) {
+        let face = self
+            .selected_face()
+            .and_then(|f| f.reference.map(|r| (r, f.description.clone())));
+        let base = face
+            .as_ref()
+            .map_or(f420_document::PlaneBase::WorldXY, |(r, _)| {
+                f420_document::PlaneBase::Face(*r)
+            });
+        self.dialog = Some(crate::app::Dialog::OffsetPlane {
+            base,
+            face,
+            distance: "10".into(),
+        });
+    }
+
+    /// Body of the offset-plane dialog: base plane and distance.
+    pub(crate) fn offset_plane_form_ui(
+        &self,
+        ui: &mut egui::Ui,
+        base: &mut f420_document::PlaneBase,
+        face: &Option<(f420_document::FaceRef, String)>,
+        distance: &mut String,
+    ) {
+        use f420_document::PlaneBase as B;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Base plane");
+            ui.radio_value(base, B::WorldXY, "World XY")
+                .probe("Base World XY");
+            ui.radio_value(base, B::WorldXZ, "World XZ")
+                .probe("Base World XZ");
+            ui.radio_value(base, B::WorldYZ, "World YZ")
+                .probe("Base World YZ");
+            match face {
+                Some((r, _)) => {
+                    ui.radio_value(base, B::Face(*r), "Selected face")
+                        .probe("Base selected face");
+                }
+                None => {
+                    ui.add_enabled(false, egui::RadioButton::new(false, "Selected face"))
+                        .on_disabled_hover_text("Select a planar face before opening this dialog");
+                }
+            }
+        });
+        if let (B::Face(_), Some((_, d))) = (*base, face) {
+            ui.small(format!("Face: {d}"));
+        }
+        crate::panels::num_field(ui, "Plane offset (mm)", distance);
+        ui.small(
+            "The sketch plane is the base moved along its normal (a face's outward normal; +Z, \
+             −Y, +X for the world planes); negative values go the other way. The offset stays an \
+             editable parameter (plane_offset) of the sketch, bindable to an expression.",
+        );
+    }
+
     /// Body of the Shell (scoped) dialog: open face and wall thickness.
     pub(crate) fn shell_form_ui(
         &self,

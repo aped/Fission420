@@ -197,6 +197,19 @@ of the arc, or the refusal reason), Enter. One undo step.
   `crates/f420-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/f420-app/tests/sketch_fillet_ui.rs`.
 
+## Offset construction planes — run 4
+
+"Sketch on offset plane…" (toolbar): choose the base (World XY / XZ / YZ, or the face selected
+when the dialog opened — the default when one is selected) and the distance; OK opens the sketch
+editor on the base moved along its normal by the distance (a face's outward normal; +Z, −Y, +X
+for the world planes; negative values go the other way). The distance is the sketch's
+`plane_offset` parameter: edit it in the inspector or bind it to an expression (e.g. a standoff
+`floor + 3` above a cavity floor). The plane follows the base face when the model changes; if the
+face no longer resolves, regeneration reports `BrokenReference` (never another face), and the
+face's feature cannot be deleted while the sketch uses it. Mirror and Hole accept the same plane
+form through the command API. Tests: `crates/f420-commands/tests/offset_plane.rs`,
+`crates/f420-app/tests/offset_plane_ui.rs`.
+
 ## Undo model
 
 * Inside a sketch: **Undo step / Redo step** (Ctrl+Z / Ctrl+Shift+Z) walk a local snapshot

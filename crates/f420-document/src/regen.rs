@@ -530,15 +530,7 @@ pub fn regenerate_cached_opts(
         };
         match &f.kind {
             FeatureKind::Sketch { plane, sketch } => {
-                let (frame, resolved) = match plane {
-                    SketchPlane::WorldXY => (Frame::XY, None),
-                    SketchPlane::WorldXZ => (Frame::XZ, None),
-                    SketchPlane::WorldYZ => (FRAME_YZ, None),
-                    SketchPlane::Face(fr) => {
-                        let rf = resolve_face(id, fr, &st)?;
-                        (rf.frame, Some(rf))
-                    }
-                };
+                let (frame, resolved) = plane_frame(id, plane, &st)?;
                 let mut s = sketch.clone();
                 let report = s.solve();
                 if !report.is_success() {
@@ -688,12 +680,7 @@ pub fn regenerate_cached_opts(
                 )?);
             }
             FeatureKind::Mirror { seed, plane } => {
-                let frame = match plane {
-                    SketchPlane::WorldXY => Frame::XY,
-                    SketchPlane::WorldXZ => Frame::XZ,
-                    SketchPlane::WorldYZ => FRAME_YZ,
-                    SketchPlane::Face(fr) => resolve_face(id, fr, &st)?.frame,
-                };
+                let frame = plane_frame(id, plane, &st)?.0;
                 r.frame = Some(frame);
                 r.body = Some(mirror_feature(&mut st, id, *seed, &frame)?);
             }
@@ -719,16 +706,8 @@ pub fn regenerate_cached_opts(
                 counterbore,
                 target,
             } => {
-                let frame = match plane {
-                    SketchPlane::WorldXY => Frame::XY,
-                    SketchPlane::WorldXZ => Frame::XZ,
-                    SketchPlane::WorldYZ => FRAME_YZ,
-                    SketchPlane::Face(fr) => {
-                        let rf = resolve_face(id, fr, &st)?;
-                        r.resolved_face = Some(rf.clone());
-                        rf.frame
-                    }
-                };
+                let (frame, rf) = plane_frame(id, plane, &st)?;
+                r.resolved_face = rf;
                 r.frame = Some(frame);
                 let tools = hole_tools(
                     &st,
@@ -1423,6 +1402,34 @@ fn apply_tool(
     let out = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(err)?;
     check(&out, k::PrismOp::Join, (a, b), span)?;
     Ok((out, span))
+}
+
+/// Frame of a sketch/mirror/hole plane: a world plane, a resolved face, or a
+/// construction plane offset from one of those along its normal (same in-plane
+/// axes). The resolved face (when the plane is on or offset from a face) is
+/// returned for reporting.
+fn plane_frame(
+    id: FeatureId,
+    plane: &SketchPlane,
+    st: &Snapshot,
+) -> Result<(Frame, Option<ResolvedFace>)> {
+    let (base, d) = plane.base_and_offset();
+    if !d.is_finite() {
+        return Err(DocError::Validation(format!(
+            "{id}.plane_offset: the plane offset must be finite, got {d}"
+        )));
+    }
+    let (frame, rf) = match base {
+        SketchPlane::WorldXY => (Frame::XY, None),
+        SketchPlane::WorldXZ => (Frame::XZ, None),
+        SketchPlane::WorldYZ => (FRAME_YZ, None),
+        SketchPlane::Face(fr) => {
+            let rf = resolve_face(id, &fr, st)?;
+            (rf.frame, Some(rf))
+        }
+        SketchPlane::Offset { .. } => unreachable!("base_and_offset returns a base plane"),
+    };
+    Ok((if d == 0.0 { frame } else { frame.offset(d) }, rf))
 }
 
 /// The cut of a scoped shell (docs/SHELL.md): the extrusion's profile offset

@@ -288,6 +288,13 @@ impl F420App {
         {
             self.begin_sketch(SketchTarget::New { plane });
         }
+        if action(
+            ui,
+            "Sketch on offset plane…",
+            (!open).then_some("Open or create a document first"),
+        ) {
+            self.open_offset_plane_dialog();
+        }
         let sketch_sel = self
             .selected
             .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
@@ -1567,6 +1574,13 @@ impl F420App {
                         }
                         ui.small("Built as exact cuts into the material, each checked against the nominal shape; countersinks are not supported. Sizes can be bound to parameters afterwards in the inspector.");
                     }
+                    Dialog::OffsetPlane {
+                        base,
+                        face,
+                        distance,
+                    } => {
+                        self.offset_plane_form_ui(ui, base, face, distance);
+                    }
                     Dialog::Shell {
                         extrude,
                         open_end,
@@ -1699,6 +1713,25 @@ impl F420App {
         if cancel {
             self.last_dialog = None;
             return; // dialog dropped; nothing created
+        }
+        if ok && let Dialog::OffsetPlane { base, distance, .. } = &dlg {
+            match crate::app::parse_num("plane offset", distance) {
+                Ok(d) => {
+                    self.last_dialog = None;
+                    self.begin_sketch(SketchTarget::New {
+                        plane: SketchPlane::Offset {
+                            base: *base,
+                            distance: d,
+                        },
+                    });
+                    return;
+                }
+                Err(e) => {
+                    self.diag(true, "Input", e);
+                    self.dialog = Some(dlg);
+                    return;
+                }
+            }
         }
         if ok {
             self.last_dialog = None;

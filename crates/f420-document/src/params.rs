@@ -623,6 +623,10 @@ pub fn evaluate_for_slot(
 /// Kind of feature parameter `name` of `kind` (None: not an editable slot).
 pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
     match kind {
+        FeatureKind::Sketch {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
+        } if name == "plane_offset" => Some(SlotKind::Length),
         FeatureKind::Sketch { sketch, .. } => {
             if name == "center_x" || name == "center_y" {
                 return Some(SlotKind::Length);
