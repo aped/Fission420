@@ -1,0 +1,4 @@
+{"files": {
+  "enclosure_wall24-Enclosure_base.stl": {"objects": 1, "volume": [21822.08, 0.01], "dims": [[80, 50, 25], 1e-4], "min_z": [0.0, 1e-4], "closed": true},
+  "enclosure_wall24-Enclosure_lid.stl": {"objects": 1, "volume": [9650.24, 0.01], "dims": [[80, 50, 5], 1e-4], "min_z": [0.0, 1e-4], "closed": true}
+}}

@@ -1,0 +1,34 @@
+# Run 4: create the parametric enclosure from Templates, change the wall in the
+# Parameters panel, and export placed separate STL files (base on its floor,
+# lid as modelled) -- real pointer/keyboard input.
+key ctrl+n
+wait_idle
+clickw Templates
+clickw Parametric enclosure + lid
+wait_idle
+expect features 10
+expect body_volume.B1 19592 0.01
+expect body_volume.B2 9404 0.01
+clickw param wall
+typew Parameter expression | 2.4
+clickw Apply parameter
+wait_idle
+expect params.cavity_length 75.2 0.000001
+# 80*50*25 - 75.2*45.2*23 ; lid 80*50*2 + (74.7*44.7 - 69.9*39.9)*3
+expect body_volume.B1 21822.08 0.01
+expect body_volume.B2 9650.24 0.01
+shot
+clickw Export
+clickw Export STL…
+typew STL path | @OUT@/enclosure_wall24.stl
+clickw All visible bodies
+clickw Place on bed (export only)
+clickw One STL file per body
+shot
+clickw OK
+wait_idle
+expect last_reply.command export_stl
+expect last_reply.ok true
+shot
+# Files: @OUT@/enclosure_wall24-Enclosure_base.stl, -Enclosure_lid.stl (checked with
+# tools/print/check_print_mesh.py afterwards)
