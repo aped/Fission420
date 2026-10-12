@@ -103,6 +103,37 @@ chains, extra curves, self-intersections, zero-length edges — are **kept** whe
 marked `open` in the browser, and are refused by Extrude / Cut / Revolve with the reason. Nothing
 is auto-closed.
 
+## Regions (several loops, islands) — run 4
+
+A sketch may hold several disjoint closed loops (loops may not touch or cross; each connected
+group of curves, and each circle, must close on its own). Every loop bounds one **region**: the
+loop minus the loops directly inside it. Loops nest to any depth and there may be several outer
+loops, e.g. two concentric rectangles with a circle inside the inner one give three regions: the
+ring (outer minus inner rectangle), the inner rectangle minus the circle, and the circle.
+
+* **Default (no region picked):** unchanged from run 3: one outer loop with one level of holes is
+  extruded whole; islands inside holes and several separate outer loops are refused with a
+  reason ("pick one region").
+* **Picked region:** Extrude can take one region. Its identity (`RegionRef`) is the sorted
+  entity ids of its outer loop and, for each direct hole, the sorted entity ids of that hole:
+  `{"outer":[1,2,3,4],"holes":[[5,6,7,8]]}`. It is never a list index or a click position.
+  Dimension edits keep entity ids, so the same region regenerates with the new sizes. The identity
+  changes when a bounding loop gains, loses or replaces an entity, or a hole directly inside the
+  region is added or removed; a reference to the old identity then fails with `BrokenReference`
+  "region … no longer exists" and the edit that caused it is refused (transaction). Another
+  region is never substituted. Removing an island only breaks the region that had it as a hole
+  (the region outside, whose direct hole is the loop around the island, is unchanged).
+* **Join / Cut** of a region with holes are refused (`ProductLimit`, Truck 0.6 booleans with
+  inner-loop tools); a single-loop region (e.g. an island) joins and cuts normally.
+* **UI:** the Extrude dialog shows a "Region" list (outer-loop entity ids − hole ids, area,
+  nesting depth) when the sketch has more than one region, plus "Extrudes: …". A click on the
+  sketch plane inside a region in the 3D view picks it; the picked region is shaded amber on the
+  sketch plane and the preview prism shows its holes. A sketch whose whole profile is refused
+  only because of extra loops can still be extruded (pick a region).
+* API: `Sketch::regions()` (each with `RegionRef`, depth, area), `Sketch::region_by_ref`,
+  `Sketch::region_at(point)`; tests `crates/f420-sketch/src/tests_regions_pick.rs`,
+  `crates/f420-commands/tests/regions.rs`, `crates/f420-app/tests/region_pick_ui.rs`.
+
 ## Undo model
 
 * Inside a sketch: **Undo step / Redo step** (Ctrl+Z / Ctrl+Shift+Z) walk a local snapshot

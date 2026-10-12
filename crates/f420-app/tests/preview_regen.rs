@@ -41,6 +41,7 @@ fn cut(sketch: f420_document::FeatureId, d: f64) -> Command {
         through_all: false,
         reverse: false,
         body_name: None,
+        region: None,
     }
 }
 
@@ -68,6 +69,7 @@ fn preview_direction_matches_regeneration_on_a_split_face() {
             through_all: false,
             reverse: true,
             body_name: None,
+            region: None,
         },
     );
     // A slot across the whole width splits the top face in two.
@@ -93,6 +95,7 @@ fn preview_direction_matches_regeneration_on_a_split_face() {
         target: Some(BodyId(1)),
         through_all: false,
         reverse: false,
+        region: None,
     };
     assert_eq!(form.side(&sum.features, &sum.bodies), Some(1.0));
     assert_eq!(form.direction(&sum.features, &sum.bodies), -1.0);

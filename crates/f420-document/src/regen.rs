@@ -219,9 +219,40 @@ struct SketchOut {
     frame: Frame,
     /// `Err(reason)` when the sketch is not a closed profile region.
     profile: std::result::Result<f420_sketch::Region, String>,
+    /// The solved sketch (region picking).
+    solved: Arc<f420_sketch::Sketch>,
 }
 
 impl SketchOut {
+    /// The region to extrude: `pick` resolved by identity among the sketch's
+    /// bounded regions, else the default whole profile. A picked region that no
+    /// longer exists (or a sketch whose regions cannot be enumerated any more)
+    /// is a `BrokenReference`; another region is never substituted.
+    fn region(
+        &self,
+        user: FeatureId,
+        sketch: FeatureId,
+        pick: Option<&f420_sketch::RegionRef>,
+    ) -> Result<f420_sketch::Region> {
+        let Some(pick) = pick else {
+            return self.usable(user, sketch).cloned();
+        };
+        let broken = |why: String| DocError::BrokenReference {
+            from: user,
+            detail: format!(
+                "region {} of sketch {sketch} no longer exists ({why}); pick a region again",
+                pick.label()
+            ),
+        };
+        match self.solved.region_by_ref(pick) {
+            Ok(Some(r)) => Ok(r),
+            Ok(None) => Err(broken(
+                "its bounding loops changed: an entity or hole was added or removed".into(),
+            )),
+            Err(e) => Err(broken(format!("the sketch has no valid regions: {e}"))),
+        }
+    }
+
     /// The profile, or a structured error naming the consuming feature.
     fn usable(&self, user: FeatureId, sketch: FeatureId) -> Result<&f420_sketch::Region> {
         self.profile.as_ref().map_err(|why| {
@@ -535,8 +566,16 @@ pub fn regenerate_cached_opts(
                 r.solve = Some(report);
                 r.frame = Some(frame);
                 r.resolved_face = resolved;
+                let solved = Arc::new(s.clone());
                 r.solved_sketch = Some(s);
-                st.sketches.insert(id, SketchOut { frame, profile });
+                st.sketches.insert(
+                    id,
+                    SketchOut {
+                        frame,
+                        profile,
+                        solved,
+                    },
+                );
             }
             FeatureKind::Revolve {
                 sketch,
@@ -565,9 +604,17 @@ pub fn regenerate_cached_opts(
                 operation,
                 extent,
                 reverse,
+                region,
             } => {
                 let out = extrude_feature(
-                    &mut st, id, *sketch, *distance, *operation, *extent, *reverse,
+                    &mut st,
+                    id,
+                    *sketch,
+                    *distance,
+                    *operation,
+                    *extent,
+                    *reverse,
+                    region.as_ref(),
                 )?;
                 r.body = Some(out.body);
                 st.extrudes.insert(id, out);
@@ -946,13 +993,14 @@ fn extrude_feature(
     operation: Operation,
     extent: Extent,
     reverse: bool,
+    pick: Option<&f420_sketch::RegionRef>,
 ) -> Result<ExtrudeOut> {
     let s = st
         .sketches
         .get(&sketch)
         .ok_or(not_a_sketch(id, sketch))?
         .clone();
-    let region = s.usable(id, sketch)?.clone();
+    let region = s.region(id, sketch, pick)?;
     let (profile, entities) = (region.outer, region.outer_entities);
     let holes = region.holes;
     let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();

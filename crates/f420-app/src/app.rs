@@ -1661,6 +1661,10 @@ impl F420App {
 
     /// Why Extrude is unavailable for `sketch`, or None if it can run.
     pub(crate) fn extrude_blocker(&self, sketch: &FeatureSummary) -> Option<String> {
+        // Several loops (islands, separate outers): extrude one picked region.
+        if sketch.profile_error.is_some() && crate::extrude::sketch_regions(sketch).len() > 1 {
+            return None;
+        }
         if let Some(e) = &sketch.profile_error {
             return Some(format!("Profile is not usable: {e}"));
         }

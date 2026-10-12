@@ -166,6 +166,7 @@ fn extrude(
         through_all,
         reverse,
         body_name: None,
+        region: None,
     })
 }
 

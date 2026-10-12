@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use profile::{LoopSegment, Profile};
-pub use region::Region;
+pub use region::{Region, RegionRef, SketchRegion};
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -770,6 +770,24 @@ impl Sketch {
     pub fn profile_region(&self) -> Result<Region, SketchError> {
         region::extract_region(self)
     }
+
+    /// Every bounded region of the sketch: each closed loop minus the loops
+    /// directly inside it (islands at any depth, several outer loops allowed),
+    /// with its persistent [`RegionRef`]. Ordered by (depth, identity).
+    pub fn regions(&self) -> Result<Vec<SketchRegion>, SketchError> {
+        region::regions(self)
+    }
+
+    /// The region with identity `id`, `None` if no region has it any more.
+    pub fn region_by_ref(&self, id: &RegionRef) -> Result<Option<Region>, SketchError> {
+        region::region_by_ref(self, id)
+    }
+
+    /// The region containing sketch point `p` (`None` outside every loop or on
+    /// a boundary).
+    pub fn region_at(&self, p: [f64; 2]) -> Result<Option<RegionRef>, SketchError> {
+        region::region_at(self, p)
+    }
 }
 
 #[cfg(test)]
@@ -789,3 +807,5 @@ mod tests_lines;
 mod tests_on_circle;
 #[cfg(test)]
 mod tests_region;
+#[cfg(test)]
+mod tests_regions_pick;

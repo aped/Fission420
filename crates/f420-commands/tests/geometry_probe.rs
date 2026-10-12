@@ -36,6 +36,7 @@ fn ext(sketch: FeatureId, d: f64, op: ExtrudeOp, through_all: bool) -> Command {
         through_all,
         reverse: false,
         body_name: None,
+        region: None,
     }
 }
 fn face(f: FeatureId, role: FaceRole) -> SketchPlane {

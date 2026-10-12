@@ -75,6 +75,11 @@ pub enum Command {
         /// New body: its name (default "BodyN").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
+        /// One bounded region of the sketch to extrude (identity from
+        /// `Sketch::regions`); default: the whole profile (outer loop with
+        /// its holes) as before. See docs/behavior/sketching.md.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<f420_sketch::RegionRef>,
     },
     /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
     Revolve {
@@ -349,6 +354,7 @@ impl Command {
             through_all: false,
             reverse: false,
             body_name: None,
+            region: None,
         }
     }
 
@@ -477,6 +483,9 @@ pub struct FeatureSummary {
     pub extent: Option<Extent>,
     #[serde(default)]
     pub reverse: bool,
+    /// Extrusions: the picked sketch region (None: the whole profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<f420_sketch::RegionRef>,
     /// Body created or modified by this feature.
     #[serde(default)]
     pub body: Option<BodyId>,
@@ -787,9 +796,11 @@ impl Session {
                 through_all,
                 reverse,
                 body_name,
+                region,
             } => {
                 let (name, sketch, distance, reverse) =
                     (name.clone(), *sketch, *distance, *reverse);
+                let region = region.clone();
                 let extent = if *through_all {
                     if *op != ExtrudeOp::Cut {
                         return Err(DocError::Validation(
@@ -846,6 +857,7 @@ impl Session {
                             operation,
                             extent,
                             reverse,
+                            region,
                         },
                     ))
                 })?;
@@ -1897,6 +1909,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 operation,
                 extent,
                 reverse,
+                region: match &f.kind {
+                    FeatureKind::Extrude { region, .. } => region.clone(),
+                    _ => None,
+                },
                 body: res.and_then(|r| r.body),
                 creates: f.created_bodies(),
                 notes: f
