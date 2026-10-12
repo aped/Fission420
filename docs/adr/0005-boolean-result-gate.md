@@ -40,8 +40,14 @@ and validating with the same boolean is not independent.
    * probe offsets: planar faces max(20 × `KERNEL_LINEAR`, 1e-6 × size); curved faces
      3 × the validation chord (chord = clamp(1e-4 × size, 1e-3, 0.02) mm), so both sides
      clear the chord error; points too close to a surface are skipped, not guessed.
+   * every nominal tool's interior is sampled (7 × 7 profile grid × 3 depths): points of
+     `tool ∩ target` must be outside the result (Cut), points of the tool inside it (Join),
+     by the result's own winding number — so a tool the kernel silently did not apply fails
+     (review finding, run 4);
+   * a check in which no probe could be classified is a refusal, not a pass.
    A failure is `DocError::GeometryCheck { feature, detail }`; the transaction is refused
-   and nothing is committed, saved or exported.
+   and nothing is committed, saved or exported. Patterns and mirrors are checked once, on
+   the final body, against the union of all their nominal tools (`verify_prisms_boolean`).
 4. **Exact Join overlap.** Instead of a fixed 0.5 mm, the overlap is
    `min(0.5, distance/2, clear/2)` where `clear` (`validate.rs::clear_depth`) is the depth
    under the face to which the prism of the profile is free of any other surface of the
@@ -67,7 +73,10 @@ and validating with the same boolean is not independent.
   offset on a curved face, or confined to a face region that no probe reaches, could pass.
   The check is a strong guard against wrong whole faces (the observed failure mode), not a
   proof of exactness. The kernel's own closed-shell test is kept.
-* Cost: two extra tessellations and O(probes × triangles) winding sums per boolean; the run-3
-  855-check acceptance suite runs in the same time (7.6 s before and after).
+* Cost: two extra tessellations and O(probes × triangles) winding sums per boolean (once per
+  pattern); the run-3 855-check acceptance suite runs in the same time (7.6 s before, 7.2 s
+  after); the 19-hole pattern benchmark 1908 ms (run 3) → 2116 ms.
+* Hole "through all" goes into the material only (through everything of the target in that
+  direction), so the nominal tool never includes material behind the face.
 * Pocket/flush cases that Truck cannot build (cutter walls coplanar with outer walls) remain
   refusals (`ProductLimit` / kernel error), never wrong geometry.
