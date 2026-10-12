@@ -266,17 +266,38 @@ fn write_probe(path: &std::path::Path, app: &F420App, last: &mut String) {
             ss.editor.sketch.dimensions().len()
         )
     });
+    // Run 4: per-body volumes, parameter values and the last reply.
+    let body_volume: Vec<String> = s
+        .bodies
+        .iter()
+        .filter_map(|b| match b.measurements.as_ref()?.volume {
+            f420_kernel::VolumeResult::Value { volume, .. } => {
+                Some(format!("\"{}\":{volume}", b.id))
+            }
+            _ => None,
+        })
+        .collect();
+    let params: Vec<String> = s
+        .parameters
+        .iter()
+        .filter_map(|p| Some(format!("\"{}\":{}", esc(&p.name), p.value?)))
+        .collect();
+    let last_reply = app.last_reply().map_or("null".to_string(), |(c, ok)| {
+        format!("{{\"command\":\"{}\",\"ok\":{ok}}}", esc(c))
+    });
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
-        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing}}}",
+        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply}}}",
         s.open,
         s.revision,
         s.features.len(),
         s.dirty,
         app.busy(),
         s.measuring,
-        app.pending_confirmation().is_some()
+        app.pending_confirmation().is_some(),
+        body_volume.join(","),
+        params.join(",")
     );
     let json = format!(
         "{{\"rect\":[{},{},{},{}],\"camera\":{{\"target\":[{},{},{}],\"distance\":{},\"yaw\":{},\"pitch\":{},\"fov_y\":{}}},\"sketch\":{sketch},\"doc\":{doc},\"widgets\":{{{}}}}}",

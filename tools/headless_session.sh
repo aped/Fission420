@@ -17,6 +17,7 @@ exec dbus-run-session -- bash -c '
   echo "'"$SOCK"'" > "'"$STATE"'/wayland"
   mutter --headless --wayland --no-x11 --virtual-monitor '"$SIZE"' --wayland-display '"$SOCK"' > "'"$STATE"'/mutter.log" 2>&1 &
   MP=$!
+  trap "kill $MP 2>/dev/null" EXIT INT TERM HUP
   for i in $(seq 1 100); do [ -S "$XDG_RUNTIME_DIR/'"$SOCK"'" ] && break; sleep 0.1; done
   WAYLAND_DISPLAY='"$SOCK"' DISPLAY= "$@" > "'"$STATE"'/app.log" 2>&1
   RC=$?

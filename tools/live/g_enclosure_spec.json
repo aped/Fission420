@@ -1,0 +1,8 @@
+{"files": {"enclosure_placed.3mf": {
+  "objects": 2, "unit": "millimeter", "names": ["Enclosure base", "Enclosure lid"],
+  "volume": [28991.2, 0.01], "min_z": [0.0, 1e-4], "closed": true,
+  "within_bed": [[0, 0], [256, 256], 250],
+  "per_object": {
+    "Enclosure base": {"volume": [19592.0, 0.01], "dims": [[80, 50, 25], 1e-6], "min_z": [0.0, 1e-6], "closed": true},
+    "Enclosure lid": {"volume": [9399.2, 0.01], "dims": [[80, 50, 5], 1e-6], "min_z": [0.0, 1e-6], "closed": true}
+  }}}}

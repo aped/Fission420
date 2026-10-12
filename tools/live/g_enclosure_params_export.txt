@@ -1,0 +1,48 @@
+# Run 4: open the parametric enclosure, change the fit clearance in the
+# Parameters panel (one undo step), select the lid's top face in the view, and
+# export a placed multi-object 3MF (lid face down so the lip points up, side by
+# side, P1S bed) -- all through real pointer/keyboard input.
+key ctrl+o
+typew File path | <repo>/examples/enclosure.f420.json
+clickw OK
+wait_idle
+expect features 10
+expect body_volume.B1 19592 0.01
+expect body_volume.B2 9404 0.01
+expect params.fit_clearance 0.25 0.000001
+clickw param fit_clearance
+typew Parameter expression | 0.35
+clickw Apply parameter
+wait_idle
+expect params.lip_length 75.3 0.000001
+# 80*50*2 + (75.3*45.3 - 71.3*41.3)*3
+expect body_volume.B2 9399.2 0.01
+expect body_volume.B1 19592 0.01
+shot
+key ctrl+z
+wait_idle
+expect body_volume.B2 9404 0.01
+expect params.fit_clearance 0.25 0.000001
+key ctrl+shift+z
+wait_idle
+expect body_volume.B2 9399.2 0.01
+key 0
+key f
+wait_idle
+wclick 40 -35 2
+clickw Export
+clickw Export 3MF…
+typew 3MF path | @OUT@/enclosure_placed.3mf
+clickw All visible bodies
+clickw Place on bed (export only)
+clickw Enclosure lid selected face down
+clickw Lay out side by side along X
+clickw Bambu Lab P1S
+shot
+clickw OK
+wait_idle
+expect last_reply.command export_3mf
+expect last_reply.ok true
+shot
+# The written file is checked independently afterwards:
+#   python3 -I tools/print/check_print_mesh.py @OUT@/enclosure_placed.3mf --spec tools/live/g_enclosure_spec.json

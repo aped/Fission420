@@ -312,6 +312,8 @@ pub struct F420App {
     pub(crate) params: crate::params_ui::ParamsPanel,
     /// First face of a two-face measurement (cleared on any document change).
     pub(crate) measure_from: Option<crate::view3d::FaceInfo>,
+    /// Name and outcome of the last command reply (live-test probe).
+    last_reply: Option<(String, bool)>,
     /// Sketch named by the last BrokenReference refusal (offered for repair).
     pub(crate) broken_sketch: Option<FeatureId>,
     /// Scripted screenshot scene (see [`crate::scenes`]).
@@ -387,6 +389,7 @@ impl F420App {
             reattach: None,
             params: Default::default(),
             measure_from: None,
+            last_reply: None,
             broken_sketch: None,
             scene_steps: VecDeque::new(),
             scene_fitted: true,
@@ -424,6 +427,11 @@ impl F420App {
     pub fn busy(&self) -> bool {
         self.engine.busy()
     }
+    /// Name and outcome (`ok`) of the last command reply.
+    pub fn last_reply(&self) -> Option<(&str, bool)> {
+        self.last_reply.as_ref().map(|(n, ok)| (n.as_str(), *ok))
+    }
+
     pub fn replies_seen(&self) -> u64 {
         self.replies_seen
     }
@@ -794,6 +802,7 @@ impl F420App {
             return;
         }
         self.replies_seen += 1;
+        self.last_reply = Some((r.response.command.clone(), r.response.ok));
         if let Some((name, t0)) = self.in_flight.pop_front() {
             self.latencies.push_back((name, t0.elapsed()));
             if self.latencies.len() > 20 {
