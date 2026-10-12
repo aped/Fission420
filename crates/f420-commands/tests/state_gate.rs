@@ -321,3 +321,57 @@ fn body_creation_undo_redo_each_step() {
         vec![BodyId(1), BodyId(2)]
     );
 }
+
+/// Editing a sketch so that a dimension bound to an expression disappears
+/// (e.g. Trim splitting a dimensioned line) drops that binding and says so,
+/// instead of leaving a binding that would refuse every later edit.
+#[test]
+fn sketch_edit_removing_a_bound_dimension_drops_the_binding() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "w".into(),
+            expression: "30".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    let sk = sketch(&mut s, SketchPlane::WorldXY, rect(20.0, 10.0, [0.0, 0.0]));
+    ok(
+        &mut s,
+        Command::SetExpression {
+            feature: sk,
+            name: "width".into(),
+            expression: "w".into(),
+        },
+    );
+    let mut edited = s.summary().features[0].sketch.clone().unwrap();
+    edited
+        .constraints
+        .retain(|c| c.dimension().is_none_or(|d| d.name != "width"));
+    let r = ok(
+        &mut s,
+        Command::EditSketch {
+            feature: sk,
+            sketch: edited,
+        },
+    );
+    assert!(
+        r.message.as_deref().unwrap_or("").contains("width = w"),
+        "{:?}",
+        r.message
+    );
+    assert!(s.summary().features[0].expressions.is_empty());
+    // Later parameter edits still work.
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "w".into(),
+            expression: "40".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+}

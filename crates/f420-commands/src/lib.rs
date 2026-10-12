@@ -1157,16 +1157,41 @@ impl Session {
                 let (feature, new) = (*feature, solved(sketch.clone())?);
                 let m = self.model_mut()?;
                 let name = m.document().feature(feature)?.name.clone();
-                m.transact(&format!("Edit sketch {name}"), |d| {
-                    match &mut d.feature_mut(feature)?.kind {
+                let dropped = m.transact(&format!("Edit sketch {name}"), |d| {
+                    let f = d.feature_mut(feature)?;
+                    match &mut f.kind {
                         FeatureKind::Sketch { sketch, .. } => {
                             *sketch = keep_entity_ids(sketch, new)?;
-                            Ok(())
                         }
-                        _ => Err(DocError::Validation(format!("{feature} is not a sketch"))),
+                        _ => {
+                            return Err(DocError::Validation(format!("{feature} is not a sketch")));
+                        }
                     }
+                    // A dimension removed by the edit takes its expression
+                    // binding with it (reported, never silently re-bound).
+                    let names: Vec<String> = f.parameters().into_iter().map(|(n, _)| n).collect();
+                    let gone: Vec<(String, String)> = f
+                        .expressions
+                        .iter()
+                        .filter(|(k, _)| !names.contains(k))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    for (k, _) in &gone {
+                        f.expressions.remove(k);
+                    }
+                    Ok(gone)
                 })?;
                 r.feature = Some(feature);
+                if !dropped.is_empty() {
+                    r.message = Some(format!(
+                        "removed the expression binding of deleted dimension(s): {}",
+                        dropped
+                            .iter()
+                            .map(|(k, v)| format!("{k} = {v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
             }
             Command::DeleteFeature { feature } => {
                 let feature = *feature;
