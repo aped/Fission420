@@ -18,6 +18,7 @@
 
 mod arc;
 mod edit;
+pub mod offset;
 mod profile;
 mod region;
 mod solver;
@@ -28,6 +29,7 @@ pub use edit::{DragOutcome, DragResult, fmt_mm};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub use offset::{OffsetPair, OffsetResult};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
 
@@ -187,6 +189,14 @@ pub enum Constraint {
     /// be the centre, nor an arc's own start/end (they lie on it by definition).
     /// Added in run 4 (serde-additive: older sketches never contain it).
     PointOnCircle { point: PointId, circle: EntityId },
+    /// The `copy` curves are the `source` loop offset by `dim.value` mm (see
+    /// [`offset`] and [`Sketch::offset_loop`]): two equations per copy vertex,
+    /// one for a copy circle. `pairs` are in loop order. Added in run 4
+    /// (serde-additive).
+    Offset {
+        pairs: Vec<OffsetPair>,
+        dim: Dimension,
+    },
     /// Signed counter-clockwise angle from line `a`'s direction (its first to
     /// its second point) to line `b`'s, `dim.value` degrees in (0, 180). 1
     /// equation, `S · wrap(θ − θ0)` with θ = atan2(u_a × u_b, u_a · u_b) and
@@ -212,7 +222,8 @@ impl Constraint {
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
-            | Constraint::Angle { dim, .. } => Some(dim),
+            | Constraint::Angle { dim, .. }
+            | Constraint::Offset { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -224,7 +235,8 @@ impl Constraint {
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
-            | Constraint::Angle { dim, .. } => Some(dim),
+            | Constraint::Angle { dim, .. }
+            | Constraint::Offset { dim, .. } => Some(dim),
             _ => None,
         }
     }
@@ -334,6 +346,68 @@ pub struct Sketch {
 
 fn is_zero(v: &u32) -> bool {
     *v == 0
+}
+
+/// Structure of an `Offset` constraint: matching kinds, shared centres, one
+/// circle pair or a loop whose consecutive sources and copies share points.
+fn offset_valid(s: &Sketch, pairs: &[OffsetPair]) -> Result<(), String> {
+    if pairs.is_empty() {
+        return Err("no curves".into());
+    }
+    let mut seen = HashSet::new();
+    for p in pairs {
+        let (a, b) = (
+            s.entity(p.source)
+                .ok_or(format!("missing entity {:?}", p.source))?,
+            s.entity(p.copy)
+                .ok_or(format!("missing entity {:?}", p.copy))?,
+        );
+        if p.source == p.copy || !seen.insert(p.copy) || !seen.insert(p.source) {
+            return Err("each curve may appear once".into());
+        }
+        if p.sign != 1 && p.sign != -1 {
+            return Err(format!("sign must be +1 or -1, got {}", p.sign));
+        }
+        match (a, b) {
+            (Entity::Line { .. }, Entity::Line { .. }) => {}
+            (Entity::Arc { center: c0, .. }, Entity::Arc { center: c1, .. })
+            | (Entity::Circle { center: c0, .. }, Entity::Circle { center: c1, .. })
+                if c0 == c1 => {}
+            _ => {
+                return Err(format!(
+                    "{:?} -> {:?}: copies must be of the same kind (arcs and circles \
+                     sharing the source centre point)",
+                    p.source, p.copy
+                ));
+            }
+        }
+    }
+    let circles = pairs
+        .iter()
+        .filter(|p| matches!(s.entity(p.source), Some(Entity::Circle { .. })))
+        .count();
+    if circles > 0 {
+        return if pairs.len() == 1 {
+            Ok(())
+        } else {
+            Err("a circle is offset on its own".into())
+        };
+    }
+    if pairs.len() < 2 {
+        return Err("a loop needs at least two curves".into());
+    }
+    for i in 0..pairs.len() {
+        let (p, q) = (&pairs[i], &pairs[(i + 1) % pairs.len()]);
+        if offset::shared_point(s, p.source, q.source).is_none()
+            || offset::shared_point(s, p.copy, q.copy).is_none()
+        {
+            return Err(format!(
+                "{:?} and {:?} (and their copies) must share exactly one end point",
+                p.source, q.source
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
@@ -656,6 +730,11 @@ impl Sketch {
                         });
                     }
                 }
+                Constraint::Offset { pairs, .. } => {
+                    offset_valid(self, pairs).map_err(|why| {
+                        SketchError::InvalidValue(format!("constraint {i}: offset: {why}"))
+                    })?;
+                }
                 Constraint::PointOnCircle { point, circle } => {
                     need_point(point)?;
                     let own = match need_entity(i, circle, "arc or circle")? {
@@ -803,6 +882,8 @@ mod tests_arc;
 mod tests_angle;
 #[cfg(test)]
 mod tests_lines;
+#[cfg(test)]
+mod tests_offset;
 #[cfg(test)]
 mod tests_on_circle;
 #[cfg(test)]

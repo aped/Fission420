@@ -647,8 +647,46 @@ pub fn paint_plane(painter: &egui::Painter, pr: &Projector, half_extent: f64) {
     axis([0.0, e], Color32::from_rgb(80, 200, 80));
 }
 
+/// Dashed preview of the open offset entry's copy (new curves only).
+fn paint_offset_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
+    let Some(Ok((s, ids))) = ed.offset_preview() else {
+        return;
+    };
+    let stroke = Stroke::new(1.8, PALETTE.preview);
+    let arc_pts = |c: [f64; 2], r: f64, a0: f64, sweep: f64| -> Vec<Pos2> {
+        let n = ((sweep.abs() / 0.1).ceil() as usize).clamp(4, 128);
+        (0..=n)
+            .filter_map(|k| {
+                let a = a0 + sweep * k as f64 / n as f64;
+                pr.screen([c[0] + r * a.cos(), c[1] + r * a.sin()])
+            })
+            .collect()
+    };
+    for id in ids {
+        let pts: Vec<Pos2> = match s.entity(id) {
+            Some(Entity::Line { a, b, .. }) => [*a, *b]
+                .iter()
+                .filter_map(|p| s.point_xy(*p).and_then(|q| pr.screen(q)))
+                .collect(),
+            Some(Entity::Circle { center, radius, .. }) => s
+                .point_xy(*center)
+                .map(|c| arc_pts(c, *radius, 0.0, std::f64::consts::TAU))
+                .unwrap_or_default(),
+            Some(Entity::Arc { .. }) => s
+                .arc_geometry(id)
+                .map(|g| arc_pts(g.center, g.radius, g.start_angle, g.sweep))
+                .unwrap_or_default(),
+            None => vec![],
+        };
+        if pts.len() >= 2 {
+            painter.extend(egui::Shape::dashed_line(&pts, stroke, 6.0, 4.0));
+        }
+    }
+}
+
 /// Rubber-band preview and snap cue for the active tool.
 pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
+    paint_offset_preview(painter, pr, ed);
     let Some(cur) = ed.cursor else {
         return;
     };
@@ -781,7 +819,7 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
                 },
             },
             SketchTool::Dimension => dashed(vec![sf, sc]),
-            SketchTool::Select | SketchTool::Trim | SketchTool::Extend => {}
+            SketchTool::Select | SketchTool::Trim | SketchTool::Extend | SketchTool::Offset => {}
         }
     }
 }

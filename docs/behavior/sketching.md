@@ -134,6 +134,45 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   `Sketch::region_at(point)`; tests `crates/f420-sketch/src/tests_regions_pick.rs`,
   `crates/f420-commands/tests/regions.rs`, `crates/f420-app/tests/region_pick_ui.rs`.
 
+## Offset (Offset tool, `O`) — run 4
+
+Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from
+the enclosed area; − inward). In the editor: Offset tool (`O`), click any curve of the loop, type
+the distance in the inline entry (a dashed preview shows the copy, or the reason it is refused),
+Enter. One undo step.
+
+* **Geometry (exact):** lines move parallel; arcs stay concentric (the copy **shares the source
+  centre point**) with radius ± distance; a circle becomes a concentric circle. Joints that are
+  tangent (G1) in the source are offset along the common normal and stay tangent. **Sharp joints
+  are mitred** (the two offset curves are extended or trimmed to their intersection): convex
+  corners of an outward offset become sharp corners (no rounding is added); concave corners are
+  trimmed. Rectangle ± d therefore gives (w ± 2d)(h ± 2d); a rounded rectangle keeps rounded
+  corners with radius r ± d.
+* **Refused (nothing added):** distance 0; an arc or circle whose radius would reach zero (e.g.
+  inward past a corner radius — corners are not sharpened automatically); an edge or arc that
+  would vanish or reverse (distance too large for a feature, e.g. inward by more than half an arm
+  width); sharp joints whose offset curves no longer meet; a copy that self-intersects or touches
+  another loop. A collapsed or self-intersecting profile is never emitted. Loops must join
+  through shared points (not `Coincident` pairs); construction curves are not offset.
+* **Editable distance — solver constraint, not a one-off copy:** one `Offset` constraint holds
+  the copy with a single named dimension (default `offset`, `offset2`, …), editable like any
+  dimension and bindable to a parameter (e.g. `lip_wall`). Every copy vertex gets exactly two
+  equations: at a tangent joint `p' = p + d·n` (n: the source line's normal or the arc's radial
+  direction), at a sharp joint one per incident curve (distance from the source line = d, or
+  distance from the arc centre = source radius ± d); the copy arcs' own equal-radius equations are
+  dropped because the vertex equations imply them. So the copy adds **no degrees of freedom and
+  no redundancy**, and it follows both distance edits and source edits (e.g. the source
+  rectangle's width bound to a parameter). Chosen over "copy + Distance/Radius dimensions per
+  edge" because that needs one dimension per edge (names must be unique, so a single parameter
+  could not drive them) and produces redundant equations at tangent joints.
+* With the copy the sketch has two loops: the default profile is the ring between them (outer
+  minus inner); pick the inner region to extrude or cut the opening (see Regions).
+* Tests: `crates/f420-sketch/src/tests_offset.rs` (analytic areas: rectangle ± d, L shape
+  concave/convex, slot, rounded rectangle, circle; edits; refusals), the finite-difference check
+  `solver.rs::offset_rows_match_finite_differences`, `crates/f420-commands/tests/offset_lip.rs`
+  (enclosure lip opening = lip outline offset by −`lip_wall`; lid volume = `lid_volume()` for the
+  baseline and the variant), `crates/f420-app/tests/sketch_offset_ui.rs`.
+
 ## Undo model
 
 * Inside a sketch: **Undo step / Redo step** (Ctrl+Z / Ctrl+Shift+Z) walk a local snapshot

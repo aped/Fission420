@@ -71,6 +71,39 @@ enum Eq {
     /// `u × (p - a)` with `u` the unit direction `a -> b`: signed distance (mm)
     /// of point `p` from the infinite line through `a`, `b`.
     PointLine { p: usize, a: usize, b: usize },
+    /// `PointLine − v` (offset copy vertex on the offset of a source line).
+    PointLineOff {
+        p: usize,
+        a: usize,
+        b: usize,
+        v: f64,
+    },
+    /// `|a − c| − |b − d| − v` (offset copy vertex on the offset of a source arc).
+    SameDistOff {
+        c: usize,
+        a: usize,
+        d: usize,
+        b: usize,
+        v: f64,
+    },
+    /// `x[p+k] − x[q+k] − v · n_k`, `n` the left unit normal of `a -> b`
+    /// (tangent-joint copy vertex `p` of source vertex `q`, axis `k`).
+    VertLine {
+        p: usize,
+        q: usize,
+        a: usize,
+        b: usize,
+        v: f64,
+        k: usize,
+    },
+    /// `x[p+k] − x[q+k] − v · w_k`, `w` the unit direction `c -> q`.
+    VertRadial {
+        p: usize,
+        q: usize,
+        c: usize,
+        v: f64,
+        k: usize,
+    },
 }
 
 /// Adds the partial derivatives of `f(u)` (with `u = (q - p)/|q - p|`, the
@@ -141,6 +174,18 @@ impl Eq {
             Eq::PointLine { p, a, b } => {
                 let (ux, uy, _) = unit(x, a, b);
                 ux * (x[p + 1] - x[a + 1]) - uy * (x[p] - x[a])
+            }
+            Eq::PointLineOff { p, a, b, v } => Eq::PointLine { p, a, b }.eval(x) - v,
+            Eq::SameDistOff { c, a, d, b, v } => Eq::SameDist { c, a, d, b }.eval(x) - v,
+            Eq::VertLine { p, q, a, b, v, k } => {
+                let (ux, uy, _) = unit(x, a, b);
+                let n = [-uy, ux];
+                x[p + k] - x[q + k] - v * n[k]
+            }
+            Eq::VertRadial { p, q, c, v, k } => {
+                let (wx, wy, _) = unit(x, c, q);
+                let w = [wx, wy];
+                x[p + k] - x[q + k] - v * w[k]
             }
             Eq::FixedAngle {
                 a0,
@@ -264,6 +309,22 @@ impl Eq {
                 j[(row, a)] += uy;
                 j[(row, a + 1)] -= ux;
                 add_unit_grad(x, j, row, a, b, (vy, -vx));
+            }
+            Eq::PointLineOff { p, a, b, .. } => Eq::PointLine { p, a, b }.jac(x, j, row),
+            Eq::SameDistOff { c, a, d, b, .. } => Eq::SameDist { c, a, d, b }.jac(x, j, row),
+            Eq::VertLine { p, q, a, b, v, k } => {
+                // f = x[p+k] − x[q+k] − v n_k with n = (−u_y, u_x):
+                // df/du = (0, −v)·… : k = 0 → (0, v); k = 1 → (−v, 0).
+                j[(row, p + k)] += 1.0;
+                j[(row, q + k)] -= 1.0;
+                let g = if k == 0 { (0.0, v) } else { (-v, 0.0) };
+                add_unit_grad(x, j, row, a, b, g);
+            }
+            Eq::VertRadial { p, q, c, v, k } => {
+                j[(row, p + k)] += 1.0;
+                j[(row, q + k)] -= 1.0;
+                let g = if k == 0 { (-v, 0.0) } else { (0.0, -v) };
+                add_unit_grad(x, j, row, c, q, g);
             }
         }
     }
@@ -482,6 +543,82 @@ impl System {
                         push(Eq::PointLine { p, a, b });
                     }
                 }
+                Constraint::Offset { pairs, dim } => {
+                    let v = dim.value;
+                    if let [one] = pairs.as_slice()
+                        && let (Some(&r0), Some(&r1)) =
+                            (circles.get(&one.source), circles.get(&one.copy))
+                    {
+                        push(Eq::Diff {
+                            a: r0,
+                            b: r1,
+                            v: f64::from(one.sign) * v,
+                        });
+                        continue;
+                    }
+                    let n = pairs.len();
+                    for i in 0..n {
+                        let (pp, qq) = (&pairs[i], &pairs[(i + 1) % n]);
+                        let (Some(src), Some(cp)) = (
+                            crate::offset::shared_point(s, pp.source, qq.source),
+                            crate::offset::shared_point(s, pp.copy, qq.copy),
+                        ) else {
+                            continue;
+                        };
+                        let (q, p) = (point_col[&src], point_col[&cp]);
+                        // Row of pair `x` holding copy vertex `p`.
+                        let row = |x: &crate::OffsetPair| -> Option<Eq> {
+                            let sv = f64::from(x.sign) * v;
+                            if let Some(&(a, b)) = lines.get(&x.source) {
+                                Some(Eq::PointLineOff { p, a, b, v: sv })
+                            } else {
+                                arcs.get(&x.source).map(|&(c, st, _)| Eq::SameDistOff {
+                                    c,
+                                    a: p,
+                                    d: c,
+                                    b: st,
+                                    v: sv,
+                                })
+                            }
+                        };
+                        if pp.tangent_next {
+                            let line = [pp, qq].into_iter().find_map(|x| {
+                                lines
+                                    .get(&x.source)
+                                    .map(|&(a, b)| (a, b, f64::from(x.sign) * v))
+                            });
+                            for k in 0..2 {
+                                match line {
+                                    Some((a, b, sv)) => push(Eq::VertLine {
+                                        p,
+                                        q,
+                                        a,
+                                        b,
+                                        v: sv,
+                                        k,
+                                    }),
+                                    None => {
+                                        if let Some(&(c, _, _)) = arcs.get(&pp.source) {
+                                            push(Eq::VertRadial {
+                                                p,
+                                                q,
+                                                c,
+                                                v: f64::from(pp.sign) * v,
+                                                k,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for x in [pp, qq] {
+                                if let Some(e) = row(x) {
+                                    push(e);
+                                }
+                            }
+                        }
+                    }
+                }
                 Constraint::PointOnCircle { point, circle } => {
                     let Some(&p) = point_col.get(point) else {
                         continue;
@@ -510,8 +647,19 @@ impl System {
         // Pseudo-owner for equations that are not user constraints (arc-implied
         // equal radius, drag pins): never removed or reported by diagnosis.
         let pin_owner = s.constraints.len();
+        // Offset copy arcs: both ends are fixed by the offset vertex rows, which
+        // imply the equal radius (from the source arc's own row).
+        let offset_arcs: std::collections::HashSet<crate::EntityId> = s
+            .constraints
+            .iter()
+            .flat_map(|c| match c {
+                Constraint::Offset { pairs, .. } => pairs.iter().map(|p| p.copy).collect(),
+                _ => vec![],
+            })
+            .collect();
         for e in &s.entities {
             if let Entity::Arc { id, .. } = e
+                && !offset_arcs.contains(id)
                 && let Some(&(c, a, b)) = arcs.get(id)
             {
                 eqs.push(Eq::SameDist { c, a, d: c, b });
@@ -1154,5 +1302,56 @@ mod tests {
         let j = sys.jacobian(&x0, &sys.all_rows());
         let rcol = sys.radius_col[0].1;
         assert_eq!(j[(0, rcol)], -1.0);
+    }
+
+    /// Offset rows (sharp line joints, tangent line/arc joints, a circle)
+    /// against central finite differences at a perturbed (unsolved)
+    /// configuration, and the square-system property: the copy adds exactly as
+    /// many rows as unknowns.
+    #[test]
+    fn offset_rows_match_finite_differences() {
+        // Rounded slot: lines + arcs with tangent joints, offset outward.
+        let mut s = Sketch::default();
+        let bl = s.add_point(-15.0, -5.0);
+        let br = s.add_point(15.0, -5.0);
+        let tr = s.add_point(15.0, 5.0);
+        let tl = s.add_point(-15.0, 5.0);
+        let c1 = s.add_point(-15.0, 0.0);
+        let c2 = s.add_point(15.0, 0.0);
+        let bottom = s.add_line(bl, br);
+        s.add_line(tr, tl);
+        for (c, a, b) in [(c2, br, tr), (c1, tl, bl)] {
+            let id = s.next_entity_id();
+            s.entities.push(Entity::Arc {
+                id,
+                center: c,
+                start: a,
+                end: b,
+            });
+        }
+        // A sharp-cornered triangle and a circle elsewhere.
+        let t0 = s.add_point(40.0, -5.0);
+        let t1 = s.add_point(60.0, -5.0);
+        let t2 = s.add_point(50.0, 12.0);
+        let tri = s.add_line(t0, t1);
+        s.add_line(t1, t2);
+        s.add_line(t2, t0);
+        let cc = s.add_point(-50.0, 0.0);
+        let circle = s.add_circle(cc, 4.0);
+        s.offset_loop(bottom, 1.5, Some("a")).unwrap();
+        s.offset_loop(tri, -1.0, Some("b")).unwrap();
+        s.offset_loop(circle, 2.0, Some("c")).unwrap();
+        let sys = System::build(&s);
+        // Rows: slot copy 4 vertices x 2 + triangle copy 3 x 2 + circle 1, plus
+        // the 2 source arcs' implied rows (copy arcs' are dropped).
+        assert_eq!(sys.eqs.len(), 8 + 6 + 1 + 2);
+        let mut x0 = sys.initial.clone();
+        for (i, v) in x0.iter_mut().enumerate() {
+            *v += 0.05 * ((i * 7 % 11) as f64 - 5.0) / 5.0;
+        }
+        let err = fd_error(&sys, &x0, 1e-6);
+        assert!(err < 1e-6, "Jacobian vs finite differences: {err:e}");
+        // At the constructed geometry every row is satisfied.
+        assert!(sys.max_residual(&sys.initial) < 1e-9);
     }
 }
