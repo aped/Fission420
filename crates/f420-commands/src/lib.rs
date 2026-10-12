@@ -1933,16 +1933,22 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, f420_sketch::Sket
 fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
     use f420_sketch::Entity;
     // An entity keeps its identity when its endpoints change (the editor can
-    // reconnect a line), but not when its kind changes.
+    // reconnect a line), but not when its kind changes, with one exception: a
+    // circle may become an arc of the SAME centre point (Trim cuts a circle to
+    // an arc; review run 3 #15). That arc is a piece of the same curve, so the
+    // id (a persistent face name) stays with it. Every other kind change
+    // (line <-> round, arc -> circle, circle -> arc about another centre) is
+    // refused.
     let shape = |e: &Entity| match e {
         Entity::Line { .. } => 0,
         Entity::Circle { .. } => 1,
         _ => 2,
     };
+    let trimmed_circle = |o: &Entity, e: &Entity| matches!((o, e), (Entity::Circle { center: c0, .. }, Entity::Arc { center: c1, .. }) if c0 == c1);
     for e in &new.entities {
         let id = e.id();
         let reused = match old.entity(id) {
-            Some(o) => shape(o) != shape(e),
+            Some(o) => shape(o) != shape(e) && !trimmed_circle(o, e),
             None => id.0 < old.retired_entity_ids,
         };
         if reused {

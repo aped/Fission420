@@ -258,7 +258,9 @@ pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => *a == p || *b == p,
         Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
-        Constraint::PointOnLine { point, .. } => *point == p,
+        Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
+            *point == p
+        }
         _ => false,
     }
 }
@@ -268,15 +270,19 @@ pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
 pub(crate) enum CutEnd {
     /// An existing point already lies there: its id is shared, so profiles close.
     Shared,
-    /// New point held on the cutting line with `PointOnLine`.
-    OnLine,
-    /// New point on a circle/arc (no point-on-curve constraint exists).
+    /// New point held on the cutting curve(s): `PointOnLine` for a line,
+    /// `PointOnCircle` for a circle or arc (both at a line/circle crossing).
+    Held,
+    /// New point on no other curve (nothing to hold it on).
     Free,
 }
 
 /// End point for a trim/extend cut at `x`. Reuses an existing point there (other
 /// than `own`, the edited curve's points), else adds one and keeps it on the
-/// cutting line (any line not in `skip` whose segment holds `x`).
+/// cutting curves (not in `skip`) through `x`: a line whose segment holds `x`
+/// (`PointOnLine`) and/or a circle or arc through `x` (`PointOnCircle`). When
+/// the cutting curve is later trimmed at the same place, the shared point makes
+/// the profile close (see `cut_point`'s reuse rule).
 pub(crate) fn cut_point(
     sk: &mut Sketch,
     x: [f64; 2],
@@ -307,19 +313,36 @@ pub(crate) fn cut_point(
         }
         _ => None,
     });
-    let n = sk.add_point(x[0], x[1]);
-    match line {
-        Some(line) => {
-            sk.constraints
-                .push(Constraint::PointOnLine { point: n, line });
-            (n, CutEnd::OnLine)
+    let round = sk.entities.iter().find_map(|e| match e {
+        Entity::Circle { id, center, radius } if !skip.contains(id) => {
+            let c = sk.point_xy(*center)?;
+            ((dist(x, c) - radius).abs() <= tol).then_some(*id)
         }
-        None => (n, CutEnd::Free),
+        Entity::Arc { id, .. } if !skip.contains(id) => {
+            let g = sk.arc_geometry(*id)?;
+            ((dist(x, g.center) - g.radius).abs() <= tol && arc_distance(&g, x) <= tol)
+                .then_some(*id)
+        }
+        _ => None,
+    });
+    let n = sk.add_point(x[0], x[1]);
+    if let Some(line) = line {
+        sk.constraints
+            .push(Constraint::PointOnLine { point: n, line });
+    }
+    if let Some(circle) = round {
+        sk.constraints
+            .push(Constraint::PointOnCircle { point: n, circle });
+    }
+    if line.is_some() || round.is_some() {
+        (n, CutEnd::Held)
+    } else {
+        (n, CutEnd::Free)
     }
 }
 
-/// Drop `PointOnLine` constraints whose point has become an end of that line
-/// (implied, and degenerate for the solver).
+/// Drop `PointOnLine` / `PointOnCircle` constraints whose point has become an
+/// end (or the centre) of that curve: implied, and refused by validation.
 fn drop_implied_on_line(sk: &mut Sketch) {
     let ends = |sk: &Sketch, l: EntityId| sk.entity(l).map(|x| x.points()).unwrap_or_default();
     let keep: Vec<bool> = sk
@@ -327,6 +350,7 @@ fn drop_implied_on_line(sk: &mut Sketch) {
         .iter()
         .map(|c| match c {
             Constraint::PointOnLine { point, line } => !ends(sk, *line).contains(point),
+            Constraint::PointOnCircle { point, circle } => !ends(sk, *circle).contains(point),
             _ => true,
         })
         .collect();
@@ -378,9 +402,7 @@ fn free_note(free: usize) -> String {
     if free == 0 {
         String::new()
     } else {
-        format!(
-            " {free} new end(s) on a circle/arc are not held on it (no point-on-arc constraint)."
-        )
+        format!(" {free} new end(s) lie on no other curve and are not held.")
     }
 }
 
@@ -1676,34 +1698,30 @@ impl SketchEditor {
                     let (s_id, h0) = cut_point(sk, ps, &[], &[e]);
                     let (e_id, h1) = cut_point(sk, pe, &[], &[e]);
                     free += usize::from(h0 == CutEnd::Free) + usize::from(h1 == CutEnd::Free);
-                    let new = sk.next_entity_id();
-                    sk.entities.retain(|x| x.id() != e);
-                    if sk.construction.remove(&e) {
-                        sk.construction.insert(new);
+                    // The arc keeps the circle's entity id (review run 3 #15:
+                    // the id names generated faces; same centre point, so the
+                    // command layer accepts Circle -> Arc for it) and its
+                    // construction flag, in place.
+                    if let Some(slot) = sk.entities.iter_mut().find(|x| x.id() == e) {
+                        *slot = Entity::Arc {
+                            id: e,
+                            center: center_pt,
+                            start: s_id,
+                            end: e_id,
+                        };
                     }
-                    sk.retired_entity_ids = sk.retired_entity_ids.max(e.0 + 1);
-                    sk.entities.push(Entity::Arc {
-                        id: new,
-                        center: center_pt,
-                        start: s_id,
-                        end: e_id,
-                    });
                     let before = sk.constraints.len();
                     let mut keep = Vec::new();
                     for k in std::mem::take(&mut sk.constraints) {
                         match k {
                             Constraint::Diameter { circle, mut dim } if circle == e => {
                                 dim.value /= 2.0;
-                                keep.push(Constraint::Radius { entity: new, dim });
+                                keep.push(Constraint::Radius { entity: e, dim });
                             }
-                            Constraint::Radius { entity, dim } if entity == e => {
-                                keep.push(Constraint::Radius { entity: new, dim })
-                            }
-                            Constraint::EqualRadius { a, b } if a == e || b == e => {
-                                let (a, b) =
-                                    (if a == e { new } else { a }, if b == e { new } else { b });
-                                keep.push(Constraint::EqualRadius { a, b });
-                            }
+                            // Valid for an arc with the same id as they were for the circle.
+                            k @ (Constraint::Radius { .. }
+                            | Constraint::EqualRadius { .. }
+                            | Constraint::PointOnCircle { .. }) => keep.push(k),
                             k if k.entities().contains(&e) => {}
                             k => keep.push(k),
                         }
@@ -1792,12 +1810,30 @@ impl SketchEditor {
     }
 
     fn trimmed_info(&mut self, dropped: usize, free: usize) {
+        self.trimmed_info_dims(dropped, free, &[]);
+    }
+
+    /// Status line after a trim; `split_dims` names length dimensions removed
+    /// because the line they measured was split.
+    fn trimmed_info_dims(&mut self, dropped: usize, free: usize, split_dims: &[String]) {
         let base = if dropped > 0 {
             format!("Trimmed; {dropped} constraint(s) that no longer applied were removed.")
         } else {
             "Trimmed.".into()
         };
-        self.info(format!("{base}{}", free_note(free)));
+        let dims = if split_dims.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " The split line's length dimension {} was removed (it spanned both pieces).",
+                split_dims
+                    .iter()
+                    .map(|n| format!("'{n}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        self.info(format!("{base}{dims}{}", free_note(free)));
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
@@ -1821,6 +1857,7 @@ impl SketchEditor {
         let at = |t: f64| [p[0] + t * d[0], p[1] + t * d[1]];
         let mut dropped = 0usize;
         let mut free = 0usize;
+        let mut split_dims: Vec<String> = Vec::new();
         let origin = self.sketch.origin;
         let ok = self.try_change(false, |sk| {
             if lo <= 0.0 && hi >= 1.0 {
@@ -1859,6 +1896,21 @@ impl SketchEditor {
                 let n0 = point(sk, lo);
                 let n1 = point(sk, hi);
                 set_ends(sk, a, n0);
+                // Review run 3 #11: a dimension between the original ends now
+                // spans two separate lines and no longer measures a length; no
+                // piece keeps both measured points, so it is removed (named in
+                // the status line).
+                sk.constraints.retain(|c| match c {
+                    Constraint::Distance { a: x, b: y, dim }
+                    | Constraint::HorizontalDistance { a: x, b: y, dim }
+                    | Constraint::VerticalDistance { a: x, b: y, dim }
+                        if (*x == a && *y == b) || (*x == b && *y == a) =>
+                    {
+                        split_dims.push(dim.name.clone());
+                        false
+                    }
+                    _ => true,
+                });
                 let l2 = sk.add_line(n1, b);
                 if sk.is_construction(e) {
                     sk.construction.insert(l2);
@@ -1894,7 +1946,7 @@ impl SketchEditor {
         });
         if ok {
             self.selection.clear();
-            self.trimmed_info(dropped, free);
+            self.trimmed_info_dims(dropped, free, &split_dims);
         }
     }
 
@@ -3412,5 +3464,160 @@ mod tests {
             .map(|e| e.id())
             .unwrap_or_else(|| panic!("{:?}", ed.feedback));
         assert!(ed.sketch.is_construction(arc));
+    }
+
+    /// Rectangle 40x20 (lines bottom, right, top, left) and a circle Ø12
+    /// centred on the right edge at (40, 10). Returns (editor, right edge, circle).
+    fn rect_with_circle_on_edge() -> (SketchEditor, EntityId, EntityId) {
+        let mut sk = Sketch::default();
+        let p: Vec<PointId> = [[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]]
+            .iter()
+            .map(|q| sk.add_point(q[0], q[1]))
+            .collect();
+        for i in 0..4 {
+            sk.add_line(p[i], p[(i + 1) % 4]);
+        }
+        let right = sk.entities[1].id();
+        let c = sk.add_point(40.0, 10.0);
+        let circle = sk.add_circle(c, 6.0);
+        (SketchEditor::new(sk), right, circle)
+    }
+
+    fn on_circle_count(ed: &SketchEditor) -> usize {
+        ed.sketch
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::PointOnCircle { .. }))
+            .count()
+    }
+
+    /// Review run 3 app #2 for circles/arcs: trimmed ends on a circle are held
+    /// on it (PointOnCircle), stay there after the circle changes, and when
+    /// the circle is trimmed at the same places the ends are shared, so the
+    /// line/arc profile closes; the arc keeps the circle's id (#15).
+    #[test]
+    fn trimmed_ends_on_a_circle_are_held_and_the_profile_closes() {
+        let (mut ed, right, circle) = rect_with_circle_on_edge();
+        ed.set_tool(SketchTool::Trim);
+        // Remove the right edge's part inside the circle (y 4..16).
+        click(&mut ed, [40.0, 13.0]);
+        assert_eq!(on_circle_count(&ed), 2, "{:?}", ed.feedback);
+        let fb = ed.feedback.clone().unwrap();
+        assert!(!fb.error && !fb.text.contains("not held"), "{fb:?}");
+        let (p, q) = line_ends(&ed, right);
+        assert!(
+            (q[1] - 4.0).abs() < 1e-9 && p[1].abs() < 1e-9,
+            "{p:?} {q:?}"
+        );
+        assert!(ed.sketch.solve().is_success());
+        // The held ends follow a radius change (solver), staying on the circle
+        // and on the edge's line.
+        let mut moved = ed.sketch.clone();
+        let r = moved.drag_radius(circle, 7.0);
+        assert!(r.report.is_success(), "{r:?}");
+        for c in &moved.constraints {
+            if let Constraint::PointOnCircle { point, .. } = c {
+                let x = moved.point_xy(*point).unwrap();
+                assert!(
+                    ((x[0] - 40.0).hypot(x[1] - 10.0) - 7.0).abs() < 1e-8,
+                    "{x:?}"
+                );
+            }
+        }
+        // Trim the circle's part inside the rectangle: the arc's ends are the
+        // edge pieces' ends (shared), the implied on-circle holds go.
+        click(&mut ed, [34.2, 10.0]);
+        let arc = ed.sketch.entity(circle).cloned();
+        assert!(
+            matches!(arc, Some(Entity::Arc { .. })),
+            "circle id kept by the arc: {arc:?} / {:?}",
+            ed.feedback
+        );
+        assert_eq!(on_circle_count(&ed), 0, "{:?}", ed.sketch.constraints);
+        assert!(ed.sketch.validate().is_ok());
+        let prof = ed.sketch.profile();
+        let Ok(f420_sketch::Profile::Loop(segs)) = &prof else {
+            panic!("{prof:?} / {:?}", ed.feedback);
+        };
+        let want = 800.0 + 18.0 * std::f64::consts::PI;
+        assert!((loop_area(segs) - want).abs() < 1e-6, "{}", loop_area(segs));
+        assert!(ed.sketch.solve().is_success());
+    }
+
+    /// Extend onto a circle: the new end is held on it and follows it.
+    #[test]
+    fn extended_end_on_a_circle_is_held() {
+        let mut sk = Sketch::default();
+        let a = sk.add_point(0.0, 0.0);
+        let b = sk.add_point(10.0, 0.0);
+        let line = sk.add_line(a, b);
+        let c = sk.add_point(30.0, 0.0);
+        let circle = sk.add_circle(c, 5.0);
+        let mut ed = SketchEditor::new(sk);
+        ed.set_tool(SketchTool::Extend);
+        click(&mut ed, [8.0, 0.0]);
+        let (_, q) = line_ends(&ed, line);
+        assert!((q[0] - 25.0).abs() < 1e-9, "{q:?} / {:?}", ed.feedback);
+        assert_eq!(on_circle_count(&ed), 1, "{:?}", ed.sketch.constraints);
+        let r = ed.sketch.drag_radius(circle, 8.0);
+        assert!(r.report.is_success(), "{r:?}");
+        // The (unfixed) centre may move too; the end stays on the new circle.
+        let (_, q) = line_ends(&ed, line);
+        let cc = ed.sketch.point_xy(c).unwrap();
+        let Some(Entity::Circle { radius, .. }) = ed.sketch.entity(circle) else {
+            panic!()
+        };
+        assert!((radius - 8.0).abs() < 1e-9, "{radius}");
+        assert!(
+            ((q[0] - cc[0]).hypot(q[1] - cc[1]) - 8.0).abs() < 1e-8,
+            "{q:?} {cc:?}"
+        );
+    }
+
+    /// Review run 3 #11: splitting a line removes its full-length dimension
+    /// (it would span two separate lines) and says so.
+    #[test]
+    fn split_line_drops_its_length_dimension_and_says_so() {
+        let mut sk = Sketch::default();
+        let a = sk.add_point(0.0, 0.0);
+        let b = sk.add_point(40.0, 0.0);
+        let l = sk.add_line(a, b);
+        for x in [15.0, 25.0] {
+            let p = sk.add_point(x, -5.0);
+            let q = sk.add_point(x, 5.0);
+            sk.add_line(p, q);
+        }
+        sk.constraints.push(Constraint::Distance {
+            a,
+            b,
+            dim: f420_sketch::Dimension::new("len", 40.0),
+        });
+        let mut ed = SketchEditor::new(sk);
+        ed.set_tool(SketchTool::Trim);
+        click(&mut ed, [20.0, 0.0]);
+        let lines = ed
+            .sketch
+            .entities
+            .iter()
+            .filter(|e| matches!(e, Entity::Line { .. }))
+            .count();
+        assert_eq!(lines, 4, "split into two pieces: {:?}", ed.feedback);
+        let (p, q) = line_ends(&ed, l);
+        assert!(p[0].abs() < 1e-9 && (q[0] - 15.0).abs() < 1e-9);
+        assert!(
+            !ed.sketch
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Distance { .. })),
+            "{:?}",
+            ed.sketch.constraints
+        );
+        let fb = ed.feedback.clone().unwrap();
+        assert!(
+            fb.text.contains("length dimension 'len' was removed"),
+            "{fb:?}"
+        );
+        // Trimming one end (no split) keeps a dimension between the kept points.
+        assert!(ed.sketch.solve().is_success());
     }
 }
