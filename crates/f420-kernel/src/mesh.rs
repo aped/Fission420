@@ -43,13 +43,29 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
         )));
     }
     guarded("tessellate", || {
-        let meshed = body.solid.triangulation(chord);
+        // Canonical wire starts: Truck's planar triangulation depends on where
+        // each boundary loop starts (a quad's diagonal follows it), and that
+        // start varies between runs like everything keyed by pointer ids.
+        let solid = canonical_wires(&body.solid);
+        let solid = solid.as_ref().unwrap_or(&body.solid);
+        let meshed = solid.triangulation(chord);
         let mut out = TriMesh {
             chord_tolerance: chord,
             ..Default::default()
         };
         let mut weld = Welder::new(WELD_TOLERANCE);
-        for (fi, face) in meshed.face_iter().enumerate() {
+        // Visit faces in a canonical geometric order, not Truck's (which follows
+        // pointer-derived ids and changes from run to run). Welding keeps the
+        // first face's sample of a shared boundary point, and neighbouring faces
+        // sample a shared edge ~1e-7 mm apart, so the visiting order decided the
+        // welded coordinates: the same document tessellated differently each run.
+        let order = canonical_face_order(solid);
+        let faces: Vec<_> = meshed.face_iter().collect();
+        for fi in order {
+            if fi >= faces.len() {
+                continue;
+            }
+            let face = &faces[fi];
             if !weld_across_faces {
                 weld = Welder::new(WELD_TOLERANCE);
             }
@@ -78,8 +94,204 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
                 }
             }
         }
+        let planar: Vec<bool> = solid
+            .face_iter()
+            .map(|f| matches!(f.surface(), truck_modeling::Surface::Plane(_)))
+            .collect();
+        canonical_planar_diagonals(&mut out, &planar);
         Ok(out)
     })?
+}
+
+/// A copy of `solid` whose face boundary loops start at a canonical edge (the
+/// one whose start vertex has the smallest position, rounded to 1e-6 mm) and
+/// whose inner loops are sorted the same way. Faces, their order, surfaces and
+/// orientation are unchanged. None if the copy cannot be rebuilt.
+fn canonical_wires(solid: &truck_modeling::Solid) -> Option<truck_modeling::Solid> {
+    use truck_modeling::*;
+    let q = |p: Point3| [p.x, p.y, p.z].map(|c| (c * 1.0e6).round() as i64);
+    let mut cs = solid.compress();
+    for shell in &mut cs.boundaries {
+        let verts = shell.vertices.clone();
+        let edges = shell.edges.clone();
+        let start = |e: &truck_topology::compress::CompressedEdgeIndex| {
+            let (a, b) = edges[e.index].vertices;
+            q(verts[if e.orientation { a } else { b }])
+        };
+        for f in &mut shell.faces {
+            for w in &mut f.boundaries {
+                if let Some(r) = (0..w.len()).min_by_key(|&i| start(&w[i])) {
+                    w.rotate_left(r);
+                }
+            }
+            if f.boundaries.len() > 2 {
+                f.boundaries[1..].sort_by_key(|w| w.iter().map(start).min());
+            }
+        }
+    }
+    Solid::extract(cs).ok()
+}
+
+/// Face indices of `solid` (in `face_iter` order) sorted by a geometric key:
+/// boundary vertex positions and edge midpoints rounded to 1e-6 mm (the edge
+/// midpoints tell apart faces with the same corners, e.g. the two halves of a
+/// split cylinder), then the surface kind. Ties keep `face_iter` order.
+fn canonical_face_order(solid: &truck_modeling::Solid) -> Vec<usize> {
+    use truck_modeling::*;
+    let q = |p: Point3| [p.x, p.y, p.z].map(|c| (c * 1.0e6).round() as i64);
+    let mut keyed: Vec<(Vec<[i64; 3]>, u8, usize)> = solid
+        .face_iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let mut pts: Vec<[i64; 3]> = Vec::new();
+            for w in f.absolute_boundaries() {
+                for e in w.edge_iter() {
+                    pts.push(q(e.front().point()));
+                    let c = e.curve();
+                    let (t0, t1) = c.range_tuple();
+                    let mid = match &c {
+                        Curve::IntersectionCurve(ic) => ic
+                            .search_triple(0.5 * (t0 + t1))
+                            .map(|x| x.0)
+                            .unwrap_or_else(|| e.front().point()),
+                        other => other.subs(0.5 * (t0 + t1)),
+                    };
+                    pts.push(q(mid));
+                }
+            }
+            pts.sort();
+            let kind = match f.surface() {
+                Surface::Plane(_) => 0,
+                _ => 1,
+            };
+            (pts, kind, i)
+        })
+        .collect();
+    keyed.sort();
+    keyed.into_iter().map(|(_, _, i)| i).collect()
+}
+
+/// Re-triangulate the interior of every planar face to its 3-D Delaunay
+/// triangulation (constrained by the face boundary) by edge flips, breaking
+/// exact ties symbolically by vertex position.
+///
+/// Truck triangulates a plane in its (not necessarily orthonormal) parameter
+/// space, and a rectangle's two diagonals are an exact Delaunay tie there, so
+/// ~1e-15 mm of noise in the B-rep vertices (which differs between runs) chose
+/// the diagonal. Any triangulation of a planar polygon is the same surface, so
+/// flipping is exact; the tie rule makes the choice depend on positions only.
+///
+/// Tie rule (simulation of simplicity): the vertex with the smallest position
+/// key (rounded to [`CANONICAL_GRID`]) is treated as lifted infinitesimally
+/// above the paraboloid, so of two cocircular diagonals the one avoiding it is
+/// Delaunay. That is a consistent perturbation of the whole point set, so flips
+/// converge to a unique result.
+fn canonical_planar_diagonals(m: &mut TriMesh, planar: &[bool]) {
+    let key = |p: [f64; 3]| p.map(|c| (c / CANONICAL_GRID).round() as i64);
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    // Directed edge (a, b) -> triangle containing it in that winding.
+    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::new();
+    for (t, tri) in m.triangles.iter().enumerate() {
+        if planar.get(m.tri_face[t] as usize) == Some(&true) {
+            for k in 0..3 {
+                by_edge.insert((tri[k], tri[(k + 1) % 3]), t);
+            }
+        }
+    }
+    // Is edge (a, b), shared by t1 = (a, b, c) and t2 = (b, a, d), to be
+    // flipped to (c, d)?
+    let wants_flip = |m: &TriMesh, a: u32, b: u32, c: u32, d: u32| -> bool {
+        let [pa, pb, pc, pd] = [a, b, c, d].map(|i| m.positions[i as usize]);
+        let n = cross(sub(pb, pa), sub(pc, pa));
+        let nl = dot(n, n).sqrt();
+        let l = [pb, pc, pd]
+            .iter()
+            .map(|p| dot(sub(*p, pa), sub(*p, pa)).sqrt())
+            .fold(0.0f64, f64::max);
+        if nl <= 1e-12 * l * l {
+            return false;
+        }
+        // In-plane 2-D frame (the face is planar, so d lies in it as well).
+        let ex = sub(pb, pa).map(|c| c / dot(sub(pb, pa), sub(pb, pa)).sqrt());
+        let ey = cross(n.map(|c| c / nl), ex);
+        let to2 = |p: [f64; 3]| [dot(sub(p, pa), ex), dot(sub(p, pa), ey)];
+        let [qa, qb, qc, qd] = [pa, pb, pc, pd].map(to2);
+        let orient = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+            (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+        };
+        // The quad a, d, b, c must be strictly convex for (c, d) to be valid.
+        let eps = 1e-12 * l * l;
+        if orient(qd, qc, qa) <= eps || orient(qc, qd, qb) <= eps {
+            return false;
+        }
+        // In-circle of d against (a, b, c) (counter-clockwise in this frame).
+        let row = |p: [f64; 2]| {
+            let (x, y) = (p[0] - qd[0], p[1] - qd[1]);
+            [x, y, x * x + y * y]
+        };
+        let [r0, r1, r2] = [qa, qb, qc].map(row);
+        let det = r0[0] * (r1[1] * r2[2] - r1[2] * r2[1]) - r0[1] * (r1[0] * r2[2] - r1[2] * r2[0])
+            + r0[2] * (r1[0] * r2[1] - r1[1] * r2[0]);
+        if det.abs() > 1e-9 * l.powi(4) {
+            return det > 0.0;
+        }
+        // Cocircular: the diagonal must avoid the smallest-key vertex.
+        let lowest = [a, b, c, d]
+            .into_iter()
+            .min_by_key(|&i| key(m.positions[i as usize]))
+            .unwrap();
+        lowest == a || lowest == b
+    };
+    let mut stack: Vec<(u32, u32)> = by_edge.keys().copied().filter(|(a, b)| a < b).collect();
+    stack.sort_unstable();
+    // Lawson flips terminate in O(n^2); the cap only guards against a tolerance
+    // inconsistency turning that into a cycle.
+    let mut budget = 4 * m.triangles.len() * m.triangles.len().max(16);
+    while let Some((a, b)) = stack.pop() {
+        if budget == 0 {
+            break;
+        }
+        budget -= 1;
+        let (Some(&t1), Some(&t2)) = (by_edge.get(&(a, b)), by_edge.get(&(b, a))) else {
+            continue;
+        };
+        if m.tri_face[t1] != m.tri_face[t2] {
+            continue;
+        }
+        let third =
+            |t: usize, x: u32, y: u32| *m.triangles[t].iter().find(|&&v| v != x && v != y).unwrap();
+        let (c, d) = (third(t1, a, b), third(t2, a, b));
+        if c == d || by_edge.contains_key(&(c, d)) || by_edge.contains_key(&(d, c)) {
+            continue;
+        }
+        if !wants_flip(m, a, b, c, d) {
+            continue;
+        }
+        for tri in [[a, b, c], [b, a, d]] {
+            for k in 0..3 {
+                by_edge.remove(&(tri[k], tri[(k + 1) % 3]));
+            }
+        }
+        // Quad a, d, b, c (counter-clockwise) split along c-d.
+        m.triangles[t1] = [a, d, c];
+        m.triangles[t2] = [d, b, c];
+        for (t, tri) in [(t1, [a, d, c]), (t2, [d, b, c])] {
+            for k in 0..3 {
+                by_edge.insert((tri[k], tri[(k + 1) % 3]), t);
+            }
+        }
+        for (x, y) in [(a, d), (d, b), (b, c), (c, a)] {
+            stack.push((x.min(y), x.max(y)));
+        }
+    }
 }
 
 /// Vertices of adjacent faces closer than this are merged. Each face samples its
@@ -589,7 +801,10 @@ pub fn write_stl_binary(m: &TriMesh, name: &str) -> Vec<u8> {
     out.extend_from_slice(&header);
     out.extend_from_slice(&(m.triangles.len() as u32).to_le_bytes());
     for t in &m.triangles {
-        let [p, q, r] = t.map(|i| m.positions[i as usize]);
+        // The facet normal is computed from the f32 positions actually
+        // written, so it follows from the file's own coordinates (and does not
+        // carry f64 noise below what the file can express).
+        let [p, q, r] = t.map(|i| m.positions[i as usize].map(|c| f64::from(c as f32)));
         let u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
         let v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
         let mut n = [
@@ -607,4 +822,134 @@ pub fn write_stl_binary(m: &TriMesh, name: &str) -> Vec<u8> {
         out.extend_from_slice(&0u16.to_le_bytes());
     }
     out
+}
+
+/// Grid (mm) of the ordering keys of [`canonical_mesh`]: far above the
+/// floating-point noise of recomputed geometry (~1e-14 mm), far below the
+/// distance between distinct welded vertices (>= 1e-5 mm).
+pub const CANONICAL_GRID: f64 = 1.0e-6;
+
+/// The same triangles in a canonical order, independent of the order in which
+/// the kernel happened to visit faces and edges (Truck keys its topology by
+/// pointer-derived ids, so that order changes from run to run): vertices sorted
+/// by position (keys rounded to [`CANONICAL_GRID`]; positions themselves are not
+/// changed), each triangle rotated to start at its lowest vertex index with its
+/// winding kept, triangles sorted. `tri_face` follows its triangle.
+pub fn canonical_mesh(m: &TriMesh) -> TriMesh {
+    let key = |p: [f64; 3]| p.map(|c| (c / CANONICAL_GRID).round() as i64);
+    let mut order: Vec<u32> = (0..m.positions.len() as u32).collect();
+    order.sort_by_key(|&i| (key(m.positions[i as usize]), i));
+    let mut new_index = vec![0u32; m.positions.len()];
+    for (n, &o) in order.iter().enumerate() {
+        new_index[o as usize] = n as u32;
+    }
+    let positions: Vec<[f64; 3]> = order.iter().map(|&o| m.positions[o as usize]).collect();
+    let normals: Vec<[f64; 3]> = order
+        .iter()
+        .map(|&o| {
+            let o = o as usize;
+            if o < m.normals.len() {
+                m.normals[o]
+            } else {
+                [0.0, 0.0, 1.0]
+            }
+        })
+        .collect();
+    let mut tris: Vec<([u32; 3], u32)> = m
+        .triangles
+        .iter()
+        .enumerate()
+        .map(|(ti, t)| {
+            let t = t.map(|i| new_index[i as usize]);
+            let r = (0..3).min_by_key(|&k| t[k]).unwrap_or(0);
+            (
+                [t[r], t[(r + 1) % 3], t[(r + 2) % 3]],
+                if ti < m.tri_face.len() {
+                    m.tri_face[ti]
+                } else {
+                    0
+                },
+            )
+        })
+        .collect();
+    tris.sort();
+    TriMesh {
+        positions,
+        normals,
+        triangles: tris.iter().map(|(t, _)| *t).collect(),
+        tri_face: tris.iter().map(|(_, f)| *f).collect(),
+        chord_tolerance: m.chord_tolerance,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad(tris: Vec<[u32; 3]>, pts: Vec<[f64; 3]>) -> TriMesh {
+        TriMesh {
+            tri_face: vec![0; tris.len()],
+            normals: vec![[0.0, 0.0, 1.0]; pts.len()],
+            positions: pts,
+            triangles: tris,
+            chord_tolerance: 0.1,
+        }
+    }
+
+    fn tri_set(m: &TriMesh) -> Vec<[[i64; 3]; 3]> {
+        let mut v: Vec<_> = m
+            .triangles
+            .iter()
+            .map(|t| {
+                let mut k = t.map(|i| m.positions[i as usize].map(|c| (c * 1e6).round() as i64));
+                let r = (0..3).min_by_key(|&i| k[i]).unwrap();
+                k.rotate_left(r);
+                k
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn cocircular_quad_diagonal_is_canonical() {
+        // A sloped 60 x 1.41 rectangle (the bracket chamfer) with ~1e-15 noise,
+        // triangulated along either diagonal: both must end up the same.
+        let pts = vec![
+            [-2.1e-13, -1.35e-13, 4.000_000_000_000_003_6],
+            [60.0, -1.5e-13, 4.0],
+            [60.0, 1.0, 5.0],
+            [-2.1e-13, 1.0, 5.0],
+        ];
+        let mut a = quad(vec![[0, 1, 2], [0, 2, 3]], pts.clone());
+        let mut b = quad(vec![[0, 1, 3], [1, 2, 3]], pts);
+        canonical_planar_diagonals(&mut a, &[true]);
+        canonical_planar_diagonals(&mut b, &[true]);
+        assert_eq!(tri_set(&a), tri_set(&b));
+        // The smallest-key vertex (index 0) is avoided by the diagonal.
+        assert!(a.triangles.iter().filter(|t| t.contains(&0)).count() == 1);
+        // Non-planar faces are left alone.
+        let mut c = quad(vec![[0, 1, 2], [0, 2, 3]], a.positions.clone());
+        canonical_planar_diagonals(&mut c, &[false]);
+        assert_eq!(c.triangles, vec![[0, 1, 2], [0, 2, 3]]);
+    }
+
+    #[test]
+    fn non_delaunay_diagonal_is_flipped_and_winding_kept() {
+        // Long thin rhombus split along its long diagonal -> flipped to the short one.
+        let pts = vec![
+            [0.0, 0.0, 0.0],
+            [10.0, -1.0, 0.0],
+            [20.0, 0.0, 0.0],
+            [10.0, 1.0, 0.0],
+        ];
+        let mut m = quad(vec![[0, 1, 2], [0, 2, 3]], pts);
+        canonical_planar_diagonals(&mut m, &[true]);
+        for t in &m.triangles {
+            assert!(t.contains(&1) && t.contains(&3), "{t:?}");
+            let [p, q, r] = t.map(|i| m.positions[i as usize]);
+            let z = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+            assert!(z > 0.0, "winding flipped: {t:?}");
+        }
+    }
 }

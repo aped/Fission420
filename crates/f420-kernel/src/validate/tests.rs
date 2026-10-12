@@ -258,3 +258,146 @@ fn unapplied_tool_is_detected() {
     let e = verify_prism_boolean(&p, &p, PrismOp::Join, &join, (-0.5, 5.0));
     assert!(matches!(e, Err(KernelError::InvalidResult(_))), "{e:?}");
 }
+
+#[test]
+#[ignore = "diagnostic: tessellation determinism"]
+fn zz_tess_determinism() {
+    let p = plate();
+    let hole = Profile::Circle {
+        center: [20.0, 25.0],
+        radius: 3.15,
+    };
+    let start = down(12.0);
+    let b = cut_prism(&p, &hole, &start, 14.0).unwrap();
+    let pos = |x: &Body| crate::tessellate(x, 0.01).unwrap().positions;
+    let a1 = pos(&b);
+    let a2 = pos(&b);
+    let c = b.deep_copy().unwrap();
+    let a3 = pos(&c);
+    let worst = |x: &Vec<[f64; 3]>, y: &Vec<[f64; 3]>| {
+        x.iter()
+            .map(|p| {
+                y.iter()
+                    .map(|q| {
+                        ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2))
+                            .sqrt()
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0, f64::max)
+    };
+    eprintln!(
+        "same body twice: identical {}  copy: identical {} worst {:e}",
+        a1 == a2,
+        a1 == a3,
+        worst(&a1, &a3)
+    );
+    let b2 = cut_prism(&p, &hole, &start, 14.0).unwrap();
+    let a4 = pos(&b2);
+    eprintln!(
+        "boolean redone: identical {} worst {:e} nverts {} vs {}",
+        a1 == a4,
+        worst(&a1, &a4),
+        a1.len(),
+        a4.len()
+    );
+}
+
+#[test]
+#[ignore = "diagnostic: B-rep vertex determinism"]
+fn zz_brep_vertex_determinism() {
+    let p = plate();
+    let hole = Profile::Circle {
+        center: [20.0, 25.0],
+        radius: 3.15,
+    };
+    let start = down(12.0);
+    let verts = |b: &Body| {
+        let mut v: Vec<[f64; 3]> = b
+            .solid
+            .compress()
+            .boundaries
+            .iter()
+            .flat_map(|s| s.vertices.iter().map(|p| [p.x, p.y, p.z]))
+            .collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    };
+    let curves = |b: &Body| {
+        let mut k: Vec<String> = b
+            .solid
+            .compress()
+            .boundaries
+            .iter()
+            .flat_map(|s| {
+                s.edges
+                    .iter()
+                    .map(|e| format!("{:?}", std::mem::discriminant(&e.curve)))
+            })
+            .collect();
+        k.sort();
+        k.dedup();
+        k
+    };
+    let (b1, b2) = (
+        cut_prism(&p, &hole, &start, 14.0).unwrap(),
+        cut_prism(&p, &hole, &start, 14.0).unwrap(),
+    );
+    let (v1, v2) = (verts(&b1), verts(&b2));
+    for (a, b) in v1.iter().zip(&v2) {
+        let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        eprintln!("{a:?} d={d:e}");
+    }
+    eprintln!("curve kinds {:?}", curves(&b1));
+}
+
+#[test]
+#[ignore = "diagnostic: B-rep edge determinism"]
+fn zz_brep_edge_determinism() {
+    let p = plate();
+    let hole = Profile::Circle {
+        center: [20.0, 25.0],
+        radius: 3.15,
+    };
+    let start = down(12.0);
+    let desc = |b: &Body| {
+        let cs = b.solid.compress();
+        let s = &cs.boundaries[0];
+        let mut edges: Vec<String> = s
+            .edges
+            .iter()
+            .map(|e| {
+                let (a, b) = (s.vertices[e.vertices.0], s.vertices[e.vertices.1]);
+                format!(
+                    "[{:.6},{:.6},{:.6}]->[{:.6},{:.6},{:.6}] {:?}",
+                    a.x, a.y, a.z, b.x, b.y, b.z, e.curve
+                )
+            })
+            .collect();
+        edges.sort();
+        let faces: Vec<String> = s
+            .faces
+            .iter()
+            .map(|f| {
+                format!(
+                    "{:?} {:?}",
+                    f.orientation,
+                    f.boundaries.iter().map(|w| w.len()).collect::<Vec<_>>()
+                )
+            })
+            .collect();
+        (edges, faces)
+    };
+    let (d1, d2) = (
+        desc(&cut_prism(&p, &hole, &start, 14.0).unwrap()),
+        desc(&cut_prism(&p, &hole, &start, 14.0).unwrap()),
+    );
+    eprintln!("edges equal {} faces equal {}", d1.0 == d2.0, d1.1 == d2.1);
+    for (a, b) in d1.0.iter().zip(&d2.0) {
+        if a != b {
+            eprintln!("A {}\nB {}", &a[..a.len().min(300)], &b[..b.len().min(300)]);
+            break;
+        }
+    }
+    eprintln!("faces A {:?}\nfaces B {:?}", d1.1, d2.1);
+}

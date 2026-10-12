@@ -220,6 +220,13 @@ fn weld(positions: &[[f64; 3]], triangles: &[[u32; 3]]) -> (Vec<[f64; 3]>, Vec<[
 /// A 3MF package with one object (and build item) per mesh. Positions are mm
 /// and are written in `unit`.
 pub fn write(objects: &[MeshObject], unit: ThreeMfUnit) -> Result<Vec<u8>> {
+    // Coordinates are written to a fixed 1e-9 mm resolution in the file's unit
+    // (9 decimals in mm, 11 in inch, 12 in m, 6 in micron): far below printing
+    // resolution and fine enough that unit round trips stay exact to ~1e-9 mm,
+    // while floating-point noise of recomputed geometry (~1e-14 mm) changes the
+    // text only for a coordinate within that noise of a rounding boundary
+    // (odds ~1e-5 per coordinate that differs at all between regenerations).
+    let decimals = (9.0 + unit.to_mm().log10()).ceil().clamp(0.0, 12.0) as usize;
     if objects.is_empty() {
         return Err(ExchangeError::InvalidOption(
             "3MF export needs at least one mesh".into(),
@@ -296,9 +303,9 @@ pub fn write(objects: &[MeshObject], unit: ThreeMfUnit) -> Result<Vec<u8>> {
             let _ = writeln!(
                 x,
                 r#"     <vertex x="{}" y="{}" z="{}"/>"#,
-                p[0] * scale,
-                p[1] * scale,
-                p[2] * scale
+                fixed(p[0] * scale, decimals),
+                fixed(p[1] * scale, decimals),
+                fixed(p[2] * scale, decimals)
             );
         }
         let _ = writeln!(x, "    </vertices>\n    <triangles>");
@@ -988,6 +995,18 @@ fn flatten(
         }
     }
     Ok(())
+}
+
+/// `v` with `decimals` decimals, trailing zeros (and a bare point) removed;
+/// never "-0".
+fn fixed(v: f64, decimals: usize) -> String {
+    let t = format!("{v:.decimals$}");
+    let t = if t.contains('.') {
+        t.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        t
+    };
+    if t == "-0" { "0".to_string() } else { t }
 }
 
 #[cfg(test)]

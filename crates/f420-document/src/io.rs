@@ -23,6 +23,10 @@ pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
 pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
+/// The saved [`GeometryCache`] values are rounded to 1/this (1e-9 mm for
+/// bounds, 1e-9 mm^3 for volume).
+pub const CACHE_STEPS_PER_UNIT: f64 = 1.0e9;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeometryCache {
     pub volume: Option<f64>,
@@ -41,14 +45,22 @@ pub struct NativeFile {
 
 impl NativeFile {
     pub fn new(doc: &Document, eval: Option<&Evaluation>) -> Self {
+        // Rounded to 1e-9 (mm, mm^3): Truck's B-rep vertices carry ~1e-15 mm of
+        // noise that differs between regenerations, which would otherwise make
+        // two saves of the same document differ in the last digits.
+        // Dividing by the exact integer 1e9 gives the nearest double to the decimal.
+        let r = |x: f64| (x * CACHE_STEPS_PER_UNIT).round() / CACHE_STEPS_PER_UNIT + 0.0;
         let cache = eval
             .and_then(|e| e.measurements.as_ref())
             .map(|m| GeometryCache {
                 volume: match m.volume {
-                    VolumeResult::Value { volume, .. } => Some(volume),
+                    VolumeResult::Value { volume, .. } => Some(r(volume)),
                     VolumeResult::Unavailable { .. } => None,
                 },
-                bounds: Some(m.bounds),
+                bounds: Some(Bounds {
+                    min: m.bounds.min.map(r),
+                    max: m.bounds.max.map(r),
+                }),
                 face_count: Some(m.face_count),
             });
         Self {

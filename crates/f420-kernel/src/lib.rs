@@ -22,8 +22,9 @@ pub use measure::{
     face_planes, measure, planar_faces_on, z_face_inner_loops,
 };
 pub use mesh::{
-    MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh, check_mesh,
-    max_facet_angle_deg, tessellate, tessellate_display, weld_exact, write_stl_binary,
+    CANONICAL_GRID, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh,
+    canonical_mesh, check_mesh, max_facet_angle_deg, tessellate, tessellate_display, weld_exact,
+    write_stl_binary,
 };
 pub use ops::{
     bounds, coplanar_face_side, cut_prism, cut_region, extent_along, join_prism, join_region,

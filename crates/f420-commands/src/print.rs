@@ -361,6 +361,8 @@ fn prepare(
         let (mesh, check, kind, used_chord, angle) = match &b.geometry {
             BodyGeometry::Brep(body) => {
                 let (mesh, c, a) = tessellate_body(body, &b.name, chord, opts.angle_deg)?;
+                // Same document, same bytes: canonical vertex/triangle order.
+                let mesh = k::canonical_mesh(&mesh);
                 let check = k::check_mesh(&mesh);
                 if !check.is_valid_solid() {
                     let detail = check.problems().join("; ");
