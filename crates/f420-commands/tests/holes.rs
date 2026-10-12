@@ -219,3 +219,132 @@ fn patterned_counterbored_holes_and_parameters() {
     assert_eq!(s.summary().revision, rev);
     let _ = ExtrudeOp::Cut;
 }
+
+/// Review run 4 #3: "through all" goes into the material only. A hole on the
+/// lower jaw of a C-channel must not drill the upper jaw above the face.
+#[test]
+fn through_hole_does_not_drill_material_behind_the_face() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    // C profile in XZ (x right, z up), extruded 30 along -Y.
+    let c = ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXZ,
+            template: SketchTemplate::Polygon {
+                vertices: vec![
+                    [0.0, 0.0],
+                    [40.0, 0.0],
+                    [40.0, 5.0],
+                    [5.0, 5.0],
+                    [5.0, 15.0],
+                    [40.0, 15.0],
+                    [40.0, 20.0],
+                    [0.0, 20.0],
+                ],
+            },
+        },
+    )
+    .feature
+    .unwrap();
+    let e = ok(&mut s, Command::extrude(None, c, 30.0)).feature.unwrap();
+    let v0 = vol(&s);
+    // The lower jaw's top face: outward +Z at z = 5.
+    let f = s
+        .summary()
+        .features
+        .into_iter()
+        .find(|f| f.id == e)
+        .unwrap()
+        .faces
+        .into_iter()
+        .find(|f| f.frame.z[2] > 0.99 && (f.frame.origin[2] - 5.0).abs() < 1e-9)
+        .expect("lower jaw top face");
+    // Hole centre at world (20, -15): local x along the face frame's x axis.
+    let d = [20.0 - f.frame.origin[0], -15.0 - f.frame.origin[1], 0.0];
+    let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+    ok(
+        &mut s,
+        Command::Hole {
+            name: None,
+            plane: SketchPlane::Face(f.reference),
+            center: [dot(f.frame.x), dot(f.frame.y)],
+            diameter: 6.0,
+            depth: None,
+            counterbore: None,
+            target: None,
+        },
+    );
+    assert!(
+        (v0 - vol(&s) - PI * 9.0 * 5.0).abs() < 1e-6,
+        "{}",
+        v0 - vol(&s)
+    );
+    let m = s.model().unwrap();
+    let b = m.evaluation().bodies[0].geometry.brep().unwrap();
+    let p = f420_kernel::point_membership(b, &[[20.0, -15.0, 17.5], [20.0, -15.0, 2.5]]).unwrap();
+    assert_eq!(
+        p,
+        vec![Some(true), Some(false)],
+        "upper jaw intact, lower drilled"
+    );
+}
+
+/// Review run 4 #4: a hole's depth and counterbore depth bound to one
+/// parameter change together; the final combination is what is validated.
+#[test]
+fn coupled_hole_depths_change_together() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let sk = ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: 40.0,
+                height: 30.0,
+                center: Some([20.0, 15.0]),
+            },
+        },
+    )
+    .feature
+    .unwrap();
+    let e = ok(&mut s, Command::extrude(None, sk, 40.0))
+        .feature
+        .unwrap();
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "h".into(),
+            expression: "9".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    let h = ok(&mut s, hole(e, [20.0, 15.0], Some(9.0), Some([10.0, 3.0])))
+        .feature
+        .unwrap();
+    for (slot, x) in [("depth", "h"), ("cbore_depth", "h / 3")] {
+        ok(
+            &mut s,
+            Command::SetExpression {
+                feature: h,
+                name: slot.into(),
+                expression: x.into(),
+            },
+        );
+    }
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "h".into(),
+            expression: "30".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    let want = 40.0 * 30.0 * 40.0 - PI * 2.75 * 2.75 * 30.0 - PI * (25.0 - 2.75 * 2.75) * 10.0;
+    assert!((vol(&s) - want).abs() < 1e-6, "{} vs {want}", vol(&s));
+}

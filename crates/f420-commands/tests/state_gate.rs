@@ -438,3 +438,41 @@ fn parameters_drive_a_cut_in_an_imported_step_body_and_survive_reopen() {
     );
     assert!((vol(&t, BodyId(1)) - (12000.0 - PI * 6.25 * 10.0)).abs() < 1e-3);
 }
+
+/// Review run 4 #16: editing a bound dimension in the sketch is refused with
+/// the expression named (it would otherwise be reverted silently).
+#[test]
+fn editing_a_bound_dimension_in_the_sketch_is_refused() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    ok(
+        &mut s,
+        Command::SetUserParameter {
+            name: "w".into(),
+            expression: "30".into(),
+            unit: None,
+            comment: None,
+        },
+    );
+    let sk = sketch(&mut s, SketchPlane::WorldXY, rect(20.0, 10.0, [0.0, 0.0]));
+    ok(
+        &mut s,
+        Command::SetExpression {
+            feature: sk,
+            name: "width".into(),
+            expression: "w".into(),
+        },
+    );
+    let mut edited = s.summary().features[0].sketch.clone().unwrap();
+    edited.set_dimension("width", 44.0).unwrap();
+    let rev = s.summary().revision;
+    let r = s.execute(&Command::EditSketch {
+        feature: sk,
+        sketch: edited,
+    });
+    match r.error {
+        Some(DocError::Validation(m)) => assert!(m.contains("bound to the expression 'w'"), "{m}"),
+        e => panic!("{e:?}"),
+    }
+    assert_eq!(s.summary().revision, rev);
+}

@@ -16,7 +16,8 @@
 //! tool: just inside a face must be expected material, just outside must not.
 //! A face with expected material on neither side (a stray wall left in a void,
 //! the floor of an overlap that leaked into a cavity) or on both sides fails.
-//! It also checks the volume bounds of the operation. [`clear_depth`] finds how
+//! Interior points of every nominal tool are also classified against the
+//! result's own winding number (a tool that was never applied fails). [`clear_depth`] finds how
 //! deep the material under a face is free of other surfaces, from the exact
 //! planar triangles (and the chord-bounded curved ones), so a Join overlap can
 //! be sized to stay inside the material instead of using a fixed depth.
@@ -109,6 +110,47 @@ fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
             out
         }
     }
+}
+
+/// Up to n×n grid points of the polygon's bounding box that lie inside it,
+/// away from its boundary (1 % of the box size).
+fn interior_samples(poly: &[[f64; 2]], n: usize) -> Vec<[f64; 2]> {
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for p in poly {
+        for i in 0..2 {
+            lo[i] = lo[i].min(p[i]);
+            hi[i] = hi[i].max(p[i]);
+        }
+    }
+    let size = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+    let mut out = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            let q = [
+                lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / n as f64,
+                lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / n as f64,
+            ];
+            if point_in_polygon(q, poly) && dist_to_polygon(q, poly) > 0.01 * size {
+                out.push(q);
+            }
+        }
+    }
+    out
+}
+
+/// The sample point farthest from the boundary (grid + fan centroids).
+fn deepest_point(poly: &[[f64; 2]]) -> Option<([f64; 2], f64)> {
+    let n = poly.len();
+    let fan = (1..n.saturating_sub(1)).map(|i| {
+        let (a, b, c) = (poly[0], poly[i], poly[i + 1]);
+        [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0]
+    });
+    interior_samples(poly, 15)
+        .into_iter()
+        .chain(fan)
+        .filter(|q| point_in_polygon(*q, poly))
+        .map(|q| (q, dist_to_polygon(q, poly)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
 }
 
 fn point_in_polygon(p: [f64; 2], poly: &[[f64; 2]]) -> bool {
@@ -444,6 +486,60 @@ fn check_faces(
             stats.faces_probed += 1;
         }
     }
+    // A check where no face probe could be decided proves nothing.
+    if stats.probes > 0 && stats.probes == stats.skipped {
+        return Err(KernelError::InvalidResult(
+            "result check: no probe point near the tool could be classified; cannot verify".into(),
+        ));
+    }
+    // Interior probes of every nominal tool against the result itself: a tool
+    // the kernel never applied leaves no faces to probe above (review run 4
+    // #1). Cut: points of tool ∩ target must be outside the result; Join:
+    // points of the tool must be inside it.
+    let rwind = Winding::new(rmesh);
+    for (k, ((prism, _), test)) in tools.iter().zip(&tests).enumerate() {
+        let mut decided = 0;
+        let mut considered = 0;
+        for q in interior_samples(&test.poly, 7) {
+            for frac in [0.2, 0.5, 0.8] {
+                let p = prism.start.offset(frac * prism.length).to_world(q);
+                if test.classify(p, eps_tool) != Some(true) {
+                    continue;
+                }
+                let in_target = match wind.classify(p) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                if op == PrismOp::Cut && !in_target {
+                    continue;
+                }
+                considered += 1;
+                let Some(in_result) = rwind.classify(p) else {
+                    continue;
+                };
+                let want = op == PrismOp::Join;
+                if in_result != want {
+                    return Err(KernelError::InvalidResult(format!(
+                        "result check: inside tool {} at {} the result has {} (the {} was not \
+                         applied there)",
+                        k + 1,
+                        fmt_pt(p),
+                        if in_result { "material" } else { "no material" },
+                        if want { "join" } else { "cut" },
+                    )));
+                }
+                decided += 1;
+                stats.probes += 1;
+            }
+        }
+        if considered > 0 && decided == 0 {
+            return Err(KernelError::InvalidResult(format!(
+                "result check: no interior point of tool {} could be classified in the result; \
+                 cannot verify",
+                k + 1
+            )));
+        }
+    }
     Ok(stats)
 }
 
@@ -467,6 +563,13 @@ pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Re
     let mesh = tessellate(body, chord)?;
     let planar = planar_faces(body);
     let poly = profile_polygon(profile);
+    let (mut fp_lo, mut fp_hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for p in &poly {
+        for i in 0..2 {
+            fp_lo[i] = fp_lo[i].min(p[i]);
+            fp_hi[i] = fp_hi[i].max(p[i]);
+        }
+    }
     guarded("clear depth", || {
         let w_min = (1.0e-7 * diag).max(10.0 * tol::KERNEL_LINEAR);
         let mut best = max;
@@ -487,6 +590,14 @@ pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Re
                 })
                 .collect();
             if pts.iter().all(|p| p[2] < w_min) || pts.iter().all(|p| p[2] >= best) {
+                continue;
+            }
+            // Footprint bounding-box reject (review run 4 #5).
+            if pts.iter().all(|p| p[0] < fp_lo[0] - slack)
+                || pts.iter().all(|p| p[0] > fp_hi[0] + slack)
+                || pts.iter().all(|p| p[1] < fp_lo[1] - slack)
+                || pts.iter().all(|p| p[1] > fp_hi[1] + slack)
+            {
                 continue;
             }
             let clipped = clip_below(&pts, w_min);
@@ -566,8 +677,15 @@ fn invasion_depth(p: &[[f64; 3]], poly: &[[f64; 2]], slack: f64) -> Option<f64> 
     }
     // (c) footprint vertices inside the polygon's projection (non-degenerate).
     if n >= 3 {
-        let (a, b, c) = (p[0], p[1], p[2]);
-        let nrm = cross(sub(b, a), sub(c, a));
+        let a = p[0];
+        // Newell normal: robust to repeated vertices from clipping (review #7).
+        let mut nrm = [0.0; 3];
+        for i in 0..n {
+            let (u, v) = (p[i], p[(i + 1) % n]);
+            nrm[0] += (u[1] - v[1]) * (u[2] + v[2]);
+            nrm[1] += (u[2] - v[2]) * (u[0] + v[0]);
+            nrm[2] += (u[0] - v[0]) * (u[1] + v[1]);
+        }
         if nrm[2].abs() > 1e-12 * norm(nrm).max(1e-300) {
             let proj: Vec<[f64; 2]> = p.iter().map(|v| [v[0], v[1]]).collect();
             for q in poly {
@@ -630,15 +748,16 @@ pub fn prism_is_empty(
         return Ok(false);
     }
     let poly = profile_polygon(profile);
-    let n = poly.len();
-    let inside = (1..n.saturating_sub(1)).find_map(|i| {
-        let (a, b, c) = (poly[0], poly[i], poly[i + 1]);
-        let q = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
-        (point_in_polygon(q, &poly) && dist_to_polygon(q, &poly) > 1e-6).then_some(q)
-    });
-    let Some(q) = inside else {
+    // The deepest interior point, farther from the boundary than the chord
+    // error of the membership test (review run 4 #6).
+    let b = crate::measure::raw_bounds(&body.solid)?;
+    let chord = check_chord(diag_of(&b));
+    let Some((q, d)) = deepest_point(&poly) else {
         return Ok(false);
     };
+    if d <= 3.0 * chord {
+        return Ok(false);
+    }
     let w = plane.offset(beyond * depth / 2.0).to_world(q);
     Ok(point_membership(body, &[w])?.first().copied().flatten() == Some(false))
 }

@@ -227,3 +227,34 @@ fn spike_countersink_cone() {
         Err(e) => eprintln!("cut failed: {e}"),
     }
 }
+
+/// Review run 4 #1: a tool the kernel never applied (result = target) left no
+/// faces near it to probe; the interior probes now refuse it.
+#[test]
+fn unapplied_tool_is_detected() {
+    let p = extrude(&rect(0.0, 0.0, 100.0, 60.0), &Frame::XY, 10.0).unwrap();
+    let small = Profile::Circle {
+        center: [50.0, 30.0],
+        radius: 2.0,
+    };
+    let start = Frame::XY.offset(-1.0);
+    let cut = Prism {
+        profile: &small,
+        start: &start,
+        length: 12.0,
+    };
+    let e = verify_prism_boolean(&p, &p, PrismOp::Cut, &cut, (0.0, 12.0));
+    assert!(
+        matches!(e, Err(KernelError::InvalidResult(ref m)) if m.contains("not")),
+        "{e:?}"
+    );
+    let top = Frame::XY.offset(10.0);
+    let boss = rect(40.0, 20.0, 44.0, 24.0);
+    let join = Prism {
+        profile: &boss,
+        start: &top,
+        length: 5.0,
+    };
+    let e = verify_prism_boolean(&p, &p, PrismOp::Join, &join, (-0.5, 5.0));
+    assert!(matches!(e, Err(KernelError::InvalidResult(_))), "{e:?}");
+}

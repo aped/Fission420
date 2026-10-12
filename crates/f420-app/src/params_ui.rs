@@ -139,6 +139,13 @@ impl F420App {
                             self.params.edit = None;
                         } else if apply {
                             let name = name.trim().to_string();
+                            if name != orig && params.iter().any(|x| x.name == name) {
+                                // Review run 4 #14: a refused rename must not fall through to
+                                // editing the other parameter.
+                                self.params.error =
+                                    Some(format!("another parameter is already named '{name}'"));
+                                continue;
+                            }
                             if name != orig {
                                 send.push(Command::RenameUserParameter {
                                     name: orig.clone(),

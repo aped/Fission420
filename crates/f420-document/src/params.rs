@@ -689,6 +689,11 @@ pub fn apply_expressions(doc: &mut Document) -> Result<()> {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        // Evaluate every bound slot of this feature first, then apply the
+        // changed ones together: coupled values (a hole's depth and its
+        // counterbore depth) are validated in their final combination (review
+        // run 4 #4), not one at a time against stale partners.
+        let mut changed: Vec<(String, String, f64)> = Vec::new();
         for (slot, src) in bound {
             let label = format!("{fname}.{slot}");
             let f = doc.feature(id)?;
@@ -714,16 +719,28 @@ pub fn apply_expressions(doc: &mut Document) -> Result<()> {
             if current.is_some_and(|c| c == v) {
                 continue;
             }
-            doc.feature_mut(id)?.set_parameter(&slot, v).map_err(|e| {
-                // User-facing: the slot is already named by `label`.
+            changed.push((slot, src, v));
+        }
+        if changed.is_empty() {
+            continue;
+        }
+        let values: Vec<(String, f64)> = changed.iter().map(|(n, _, v)| (n.clone(), *v)).collect();
+        doc.feature_mut(id)?
+            .set_parameters(&values)
+            .map_err(|(slot, e)| {
+                // User-facing: the slot is already named by the label.
                 let m = match e {
                     DocError::Validation(m) => m,
                     other => other.to_string(),
                 };
                 let m = m.replace(&format!("{id}.{slot}: "), "");
-                expr_error(&label, format!("'{src}' = {v}: {m}"))
+                let (src, v) = changed
+                    .iter()
+                    .find(|(n, _, _)| *n == slot)
+                    .map(|(_, s, v)| (s.clone(), *v))
+                    .unwrap_or_default();
+                expr_error(&format!("{fname}.{slot}"), format!("'{src}' = {v}: {m}"))
             })?;
-        }
     }
     Ok(())
 }

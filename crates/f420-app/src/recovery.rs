@@ -33,6 +33,8 @@ pub struct Autosave {
     /// A recovery copy opened with `open_copy`: removed once the reopened
     /// document's own first copy has been written.
     pub(crate) replaced: Option<PathBuf>,
+    /// Open Copy requested, not yet answered (becomes `replaced` on success).
+    pub(crate) opening: Option<PathBuf>,
 }
 
 impl Default for Autosave {
@@ -59,6 +61,7 @@ impl Default for Autosave {
             last_time: None,
             offered: vec![],
             replaced: None,
+            opening: None,
         }
     }
 }
@@ -109,21 +112,43 @@ impl F420App {
             .unwrap_or_default();
     }
 
-    /// Where the open document's recovery copy goes.
+    /// Where the open document's recovery copy goes: the file stem plus a
+    /// hash of its full path and this process id, so two documents with the
+    /// same name, two app instances, or a reopened document never overwrite
+    /// a copy left by a crashed session (review run 4 #12).
     fn autosave_path(&self) -> Option<PathBuf> {
         let dir = self.autosave.dir.as_ref()?;
-        let stem = match &self.summary.path {
-            Some(p) => p
-                .file_name()
-                .map(|n| {
-                    n.to_string_lossy()
-                        .trim_end_matches(".f420.json")
-                        .to_string()
-                })
-                .unwrap_or_else(|| "document".into()),
-            None => format!("untitled-{}", std::process::id()),
+        let (stem, full) = match &self.summary.path {
+            Some(p) => (
+                p.file_name()
+                    .map(|n| {
+                        n.to_string_lossy()
+                            .trim_end_matches(".f420.json")
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| "document".into()),
+                p.canonicalize()
+                    .unwrap_or_else(|_| p.clone())
+                    .display()
+                    .to_string(),
+            ),
+            None => ("untitled".to_string(), String::new()),
         };
-        Some(dir.join(format!("{}{SUFFIX}", sanitize(&stem))))
+        // FNV-1a 64 of the path (identity only, not security).
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in full.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        let name = format!(
+            "{}-{:08x}-{}{SUFFIX}",
+            sanitize(&stem),
+            h as u32,
+            std::process::id()
+        );
+        let p = dir.join(name);
+        // Never write over a copy that is still on offer.
+        (!self.autosave.offered.contains(&p)).then_some(p)
     }
 
     /// Once per frame: write a recovery copy when due.

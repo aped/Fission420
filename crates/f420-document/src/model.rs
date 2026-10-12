@@ -491,6 +491,58 @@ impl Feature {
         }
     }
 
+    /// Set several parameters at once; on error the feature is unchanged and
+    /// the failing slot is named. Hole sizes are validated in their final
+    /// combination (a depth and its counterbore depth may change together).
+    pub fn set_parameters(
+        &mut self,
+        values: &[(String, f64)],
+    ) -> std::result::Result<(), (String, DocError)> {
+        let mut trial = self.clone();
+        if let FeatureKind::Hole {
+            center,
+            diameter,
+            depth,
+            counterbore,
+            ..
+        } = &mut trial.kind
+        {
+            for (n, v) in values {
+                match (n.as_str(), counterbore.as_mut(), depth.as_mut()) {
+                    ("diameter", ..) => *diameter = *v,
+                    ("depth", _, Some(d)) => *d = *v,
+                    ("cbore_diameter", Some(c), _) => c.diameter = *v,
+                    ("cbore_depth", Some(c), _) => c.depth = *v,
+                    ("center_x", ..) => center[0] = *v,
+                    ("center_y", ..) => center[1] = *v,
+                    _ => {
+                        return Err((
+                            n.clone(),
+                            DocError::UnknownParameter {
+                                feature: self.id,
+                                name: n.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+            // Validate the final combination: re-setting each value checks it
+            // against its (final) partners.
+            for (n, v) in values {
+                trial
+                    .clone()
+                    .set_parameter(n, *v)
+                    .map_err(|e| (n.clone(), e))?;
+            }
+        } else {
+            for (n, v) in values {
+                trial.set_parameter(n, *v).map_err(|e| (n.clone(), e))?;
+            }
+        }
+        *self = trial;
+        Ok(())
+    }
+
     /// Set a parameter on the definition only (no regeneration).
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<()> {
         let id = self.id;

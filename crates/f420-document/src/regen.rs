@@ -1601,13 +1601,25 @@ fn hole_tools(
             body: target,
         }
     };
+    // "Through all" goes into the material only, through everything of the
+    // target in that direction (review run 4 #3: a two-sided span also drilled
+    // an overhang above the face).
+    let (lo, hi) = k::extent_along(&t, frame).map_err(kernel(id))?;
+    let through = if dir > 0.0 { hi } else { -lo };
+    if through <= k::tol::MIN_LENGTH {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: there is no material of {target} behind the hole's face"
+        )));
+    }
+    let depth_eff = depth.unwrap_or(through);
     let mut v = Vec::new();
     if let Some(c) = counterbore {
         finite(c.diameter, "cbore_diameter")?;
         finite(c.depth, "cbore_depth")?;
-        if c.diameter <= diameter || depth.is_some_and(|d| c.depth >= d) {
+        if c.diameter <= diameter || c.depth >= depth_eff {
             return Err(DocError::Validation(format!(
-                "{id}: the counterbore must be wider than the hole and shallower than its depth"
+                "{id}: the counterbore must be wider than the hole and shallower than its depth \
+                 ({depth_eff} mm here)"
             )));
         }
         v.push(tool(c.diameter, Some(c.depth)));
@@ -1615,7 +1627,7 @@ fn hole_tools(
     if let Some(d) = depth {
         finite(d, "depth")?;
     }
-    v.push(tool(diameter, depth));
+    v.push(tool(diameter, Some(depth_eff)));
     Ok(v)
 }
 

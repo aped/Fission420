@@ -1355,6 +1355,28 @@ impl Session {
                 let (feature, new) = (*feature, solved(sketch.clone())?);
                 let m = self.model_mut()?;
                 let name = m.document().feature(feature)?.name.clone();
+                // A dimension bound to an expression keeps its expression's
+                // value: an edit that changes it would be silently reverted, so
+                // it is refused with the expression named (review run 4 #16).
+                {
+                    let f = m.document().feature(feature)?;
+                    if let FeatureKind::Sketch { sketch: old, .. } = &f.kind {
+                        let old_dims = old.dimensions();
+                        for (n, v) in new.dimensions() {
+                            let changed = old_dims
+                                .iter()
+                                .find(|(o, _)| *o == n)
+                                .is_some_and(|(_, ov)| (ov - v).abs() > 1e-9 * ov.abs().max(1.0));
+                            if changed && let Some(e) = f.expressions.get(&n) {
+                                return Err(DocError::Validation(format!(
+                                    "dimension '{n}' of {name} is bound to the expression '{e}'; \
+                                     change the expression or its parameters, or unbind it in the \
+                                     inspector (type a number) before editing it in the sketch"
+                                )));
+                            }
+                        }
+                    }
+                }
                 let dropped = m.transact(&format!("Edit sketch {name}"), |d| {
                     let f = d.feature_mut(feature)?;
                     match &mut f.kind {
@@ -1729,6 +1751,12 @@ impl Session {
                 r.message = Some(format!("saved {}", path.display()));
             }
             Command::SaveCopy { path } => {
+                if self.path.as_deref() == Some(path.as_path()) {
+                    return Err(DocError::Validation(format!(
+                        "{} is the open document's own file; a copy must go elsewhere",
+                        path.display()
+                    )));
+                }
                 let m = self.model_mut()?;
                 save_file(path, m.document(), Some(m.evaluation()))?;
                 r.message = Some(format!(

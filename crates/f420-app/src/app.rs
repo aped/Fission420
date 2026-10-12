@@ -921,6 +921,19 @@ impl F420App {
         }
         if response.ok && matches!(command, Command::Save { .. }) {
             self.drop_autosave();
+            // A recovered copy is no longer needed once its work is saved.
+            if let Some(p) = self.autosave.replaced.take() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+        if let Command::OpenCopy { path } = &command {
+            // Only a successful Open Copy makes the copy replaceable (#13).
+            if self.autosave.opening.as_ref() == Some(path) {
+                self.autosave.opening = None;
+                if response.ok {
+                    self.autosave.replaced = Some(path.clone());
+                }
+            }
         }
         if response.ok
             && let Command::SaveCopy { path } = &command
@@ -1421,7 +1434,7 @@ impl F420App {
             }
             Guarded::Open(path) => self.request(Command::Open { path }),
             Guarded::OpenCopy(path) => {
-                self.autosave.replaced = Some(path.clone());
+                self.autosave.opening = Some(path.clone());
                 self.request(Command::OpenCopy { path })
             }
             Guarded::Close => self.request(Command::Close),
