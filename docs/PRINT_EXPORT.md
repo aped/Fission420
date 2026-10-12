@@ -136,6 +136,25 @@ file is written atomically (`write_atomic`: temp file, fsync, rename); if a late
 files newly created by this export are removed. A refused export writes nothing.
 `export.files` lists path, byte size and bodies of each file.
 
+## Deterministic output (2026-10-12)
+
+The same document exported (or saved) twice gives the same bytes, also across processes,
+although Truck orders topology by pointer-derived ids and carries ~1e-15 mm of noise that
+differs between regenerations. `crates/f420-commands/tests/export_determinism.rs` builds the
+three printables twice and compares STL, 3MF, STEP and `.f420.json` byte for byte.
+* Tessellation: faces visited in a canonical geometric order, loops started at a canonical
+  edge, planar faces re-triangulated to their constrained 3-D Delaunay triangulation by edge
+  flips, with exact ties (a rectangle's two diagonals) broken by vertex key
+  (`mesh.rs::canonical_planar_diagonals`).
+* Print exports: `canonical_mesh` (vertices and triangles sorted by 1e-6 mm keys); STL facet
+  normals from the written f32 positions; 3MF coordinates at a fixed 1e-9 mm resolution.
+* STEP: canonical entity order, planar faces as forward faces on a canonically placed plane,
+  REALs rounded to 1e-9. The header time stamp is `SOURCE_DATE_EPOCH` when set, otherwise the
+  export time (ISO 8601 UTC, seconds): it is the only line that can differ.
+* Native file: the informational `cache` (volume, bounds) is rounded to 1e-9.
+A value lying within ~1e-14 of a rounding boundary can still flip; the odds are about 1e-5
+per coordinate that differs between regenerations at all.
+
 ## Response (`Response.export`, `ExportReport`)
 
 `format`, `units`, `revision`, `chord`, `angle_deg`, `selection`, `placement`, `bodies[]`
@@ -207,9 +226,17 @@ values from the analytic formulas (never from the export report). Results
   enclosure 17 + 17 (3MF, STL) baseline and 15 variant, coupon 14, bracket 13, all pass
   (cavity empty, walls/floor/lip present, lip opening and clearance step empty, coupon holes
   and bracket holes empty). Finding: slicing the bracket intermittently logs
-  `[error] ZFiller: encounter idx from clip: 16/22` (4, 0, 0 lines on three runs of the same
-  3MF; G-code also differs slightly between runs) with exit 0, no repairs and passing probes;
-  the mesh is valid per our checker and FreeCAD. Not investigated further.
+  `[error] ZFiller: encounter idx from clip: 16/22` with exit 0, no repairs and passing probes.
+  Investigated 2026-10-12: the message is a log-only check in Bambu Studio's
+  `src/libslic3r/Fill/FillFloatingConcentric.cpp` (after clipping a concentric line against
+  the floating, unsupported area; the path is still used). The **same 3MF bytes** sliced six
+  times logged it once. Excluding `M73` progress lines: three runs are identical, one differs
+  only in its header filament totals, and two (the one that logged it and one that did not)
+  differ in toolpaths at a few layers, mostly "Floating vertical shell" and sparse infill. So
+  the slicer's output varies on identical input; the message is a symptom of that, not of the
+  input geometry.
+  `analyze_gcode.py` classifies exactly this message as benign; other `ZFiller` messages
+  remain findings. Evidence: `runs/run-4/ADDENDUM_2026-10-12.md`.
 
 This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
 says nothing about fit, strength or print quality.

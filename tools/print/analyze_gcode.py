@@ -312,6 +312,14 @@ LOG_BENIGN = [
     (re.compile(r"disable prime tower for only one filament"), "single filament"),
     (re.compile(r"error_message=Success"), "success record"),
     (re.compile(r"gcode path conflicts check takes"), "timing line of the (passed) conflict check"),
+    # BambuStudio src/libslic3r/Fill/FillFloatingConcentric.cpp: a log-only check after
+    # clipping a concentric line against the floating (unsupported) area; the path is still
+    # merged and used. 2026-10-12: the same bracket 3MF bytes sliced 6x logged it in 1 run;
+    # 2 of the 6 runs (that one and another) produced different toolpaths at a few layers
+    # (slicer-side nondeterminism, not input geometry); runs/run-4/ADDENDUM_2026-10-12.md.
+    # Only this exact variant is benign; the other ZFiller messages stay findings.
+    (re.compile(r"ZFiller: encounter idx from clip: \d+$"),
+     "Bambu-internal log-only check in floating concentric fill (nondeterministic on identical input)"),
 ]
 
 
