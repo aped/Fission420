@@ -296,6 +296,8 @@ struct BodyState {
 struct Snapshot {
     sketches: HashMap<FeatureId, SketchOut>,
     extrudes: HashMap<FeatureId, ExtrudeOut>,
+    /// Hole features: their tools (counterbore, then hole), for patterns.
+    holes: HashMap<FeatureId, Vec<ExtrudeOut>>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     bodies: BTreeMap<BodyId, BodyState>,
     /// Body ids in creation order.
@@ -308,6 +310,7 @@ impl Snapshot {
         Self {
             sketches: HashMap::new(),
             extrudes: HashMap::new(),
+            holes: HashMap::new(),
             imported_faces: HashMap::new(),
             bodies: BTreeMap::new(),
             created: Vec::new(),
@@ -660,6 +663,48 @@ pub fn regenerate_cached_opts(
                     k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
+            }
+            FeatureKind::Hole {
+                plane,
+                center,
+                diameter,
+                depth,
+                counterbore,
+                target,
+            } => {
+                let frame = match plane {
+                    SketchPlane::WorldXY => Frame::XY,
+                    SketchPlane::WorldXZ => Frame::XZ,
+                    SketchPlane::WorldYZ => FRAME_YZ,
+                    SketchPlane::Face(fr) => {
+                        let rf = resolve_face(id, fr, &st)?;
+                        r.resolved_face = Some(rf.clone());
+                        rf.frame
+                    }
+                };
+                r.frame = Some(frame);
+                let tools = hole_tools(
+                    &st,
+                    id,
+                    &frame,
+                    *center,
+                    *diameter,
+                    *depth,
+                    *counterbore,
+                    *target,
+                )?;
+                let mut body = brep_target(&st, id, *target)?;
+                let labels: &[&str] = if tools.len() == 2 {
+                    &["counterbore", "hole"]
+                } else {
+                    &["hole"]
+                };
+                for (what, tool) in labels.iter().zip(&tools) {
+                    body = apply_tool(&body, tool, &frame, Some(what), id)?.0;
+                }
+                replace_body(&mut st, id, *target, body);
+                st.holes.insert(id, tools);
+                r.body = Some(*target);
             }
             FeatureKind::Import3mf { blob, bodies } => {
                 let b = doc.blob(*blob)?;
@@ -1269,15 +1314,99 @@ fn apply_tool(
     Ok((out, span))
 }
 
-/// Pattern/mirror seeds: an evaluated Extrude Join or Cut.
-fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<ExtrudeOut> {
+/// Tools of a Hole, in application order (`[counterbore, hole]` or `[hole]`),
+/// as blind/through cuts from the face in `frame` into the material of
+/// `target`.
+#[allow(clippy::too_many_arguments)]
+fn hole_tools(
+    st: &Snapshot,
+    id: FeatureId,
+    frame: &Frame,
+    center: [f64; 2],
+    diameter: f64,
+    depth: Option<f64>,
+    counterbore: Option<crate::Counterbore>,
+    target: BodyId,
+) -> Result<Vec<ExtrudeOut>> {
+    let t = brep_target(st, id, target)?;
+    let side = k::coplanar_face_side(&t, frame)
+        .map_err(kernel(id))?
+        .ok_or_else(|| {
+            DocError::ProductLimit(format!(
+                "{id}: a hole starts on a planar face of its target body; the chosen plane holds \
+                 no face of {target}"
+            ))
+        })?;
+    let dir = -side;
+    let finite = |v: f64, what: &str| {
+        (v.is_finite() && v > 0.0)
+            .then_some(v)
+            .ok_or_else(|| DocError::Validation(format!("{id}.{what}: must be > 0 mm, got {v}")))
+    };
+    finite(diameter, "diameter")?;
+    if !(center[0].is_finite() && center[1].is_finite()) {
+        return Err(DocError::Validation(format!("{id}: centre must be finite")));
+    }
+    let tool = |d: f64, len: Option<f64>| {
+        let span = match len {
+            Some(l) if dir > 0.0 => (0.0, l),
+            Some(l) => (-l, 0.0),
+            None => (0.0, 0.0),
+        };
+        ExtrudeOut {
+            start: *frame,
+            distance: len.unwrap_or(0.0),
+            dir,
+            extent: if len.is_some() {
+                Extent::Distance
+            } else {
+                Extent::ThroughAll
+            },
+            profile: SketchProfile::Circle {
+                center,
+                radius: d / 2.0,
+            },
+            entities: vec![],
+            holes: vec![],
+            span,
+            nominal: span,
+            side: Some(side),
+            removes: true,
+            joined: false,
+            body: target,
+        }
+    };
+    let mut v = Vec::new();
+    if let Some(c) = counterbore {
+        finite(c.diameter, "cbore_diameter")?;
+        finite(c.depth, "cbore_depth")?;
+        if c.diameter <= diameter || depth.is_some_and(|d| c.depth >= d) {
+            return Err(DocError::Validation(format!(
+                "{id}: the counterbore must be wider than the hole and shallower than its depth"
+            )));
+        }
+        v.push(tool(c.diameter, Some(c.depth)));
+    }
+    if let Some(d) = depth {
+        finite(d, "depth")?;
+    }
+    v.push(tool(diameter, depth));
+    Ok(v)
+}
+
+/// Pattern/mirror seeds: an evaluated Extrude Join or Cut, or a Hole (its
+/// counterbore and hole tools, applied in that order).
+fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<ExtrudeOut>> {
+    if let Some(tools) = st.holes.get(&seed) {
+        return Ok(tools.clone());
+    }
     let e = st
         .extrudes
         .get(&seed)
         .cloned()
         .ok_or(DocError::BrokenReference {
             from: id,
-            detail: format!("{seed} is not an evaluated extrusion"),
+            detail: format!("{seed} is not an evaluated extrusion or hole"),
         })?;
     if !e.removes && !e.joined {
         return Err(DocError::ProductLimit(format!(
@@ -1285,7 +1414,7 @@ fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<ExtrudeOut
              body)"
         )));
     }
-    Ok(e)
+    Ok(vec![e])
 }
 
 /// Linear pattern of an Extrude Join/Cut: the seed's exact tool (same span along
@@ -1298,7 +1427,8 @@ fn linear_pattern(
     spacing: f64,
     direction: [f64; 2],
 ) -> Result<BodyId> {
-    let e = copy_seed(st, id, seed)?;
+    let tools = copy_seed(st, id, seed)?;
+    let e = tools[0].clone();
     if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
         return Err(DocError::Validation(format!(
             "{id}.count: must be in 2..={}, got {count}",
@@ -1334,14 +1464,16 @@ fn linear_pattern(
             ],
             ..f
         };
-        body = apply_tool(
-            &body,
-            &e,
-            &frame,
-            Some(&format!("instance {} of {count}", i + 1)),
-            id,
-        )?
-        .0;
+        for tool in &tools {
+            body = apply_tool(
+                &body,
+                tool,
+                &frame,
+                Some(&format!("instance {} of {count}", i + 1)),
+                id,
+            )?
+            .0;
+        }
     }
     replace_body(st, id, e.body, body);
     Ok(e.body)
@@ -1357,7 +1489,8 @@ fn circular_pattern(
     angle: f64,
     center: [f64; 2],
 ) -> Result<BodyId> {
-    let e = copy_seed(st, id, seed)?;
+    let tools = copy_seed(st, id, seed)?;
+    let e = tools[0].clone();
     if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
         return Err(DocError::Validation(format!(
             "{id}.count: must be in 2..={}, got {count}",
@@ -1404,31 +1537,33 @@ fn circular_pattern(
             y: rot(f.y, t),
             z: f.z,
         };
-        body = apply_tool(
-            &body,
-            &e,
-            &frame,
-            Some(&format!("instance {} of {count}", i + 1)),
-            id,
-        )?
-        .0;
+        for tool in &tools {
+            body = apply_tool(
+                &body,
+                tool,
+                &frame,
+                Some(&format!("instance {} of {count}", i + 1)),
+                id,
+            )?
+            .0;
+        }
     }
     replace_body(st, id, e.body, body);
     Ok(e.body)
 }
 
-/// Mirror of an Extrude Join/Cut across the plane of `mirror` (z = plane
-/// normal): the reflected tool, applied to the seed's target. A reflection
-/// reverses orientation, so the copy uses the right-handed frame (R o, R x, R y,
-/// R x × R y = −R z) with the same 2D profile, and the span along the normal is
-/// negated (−b..−a) so the tool still extends along R z.
+/// Mirror of an Extrude Join/Cut (or a Hole) across the plane of `mirror`
+/// (z = plane normal): the reflected tools, applied to the seed's target. A
+/// reflection reverses orientation, so each copy uses the right-handed frame
+/// (R o, R x, R y, R x × R y = −R z) with the same 2D profile, and the spans
+/// along the normal are negated (−b..−a) so each tool still extends along R z.
 fn mirror_feature(
     st: &mut Snapshot,
     id: FeatureId,
     seed: FeatureId,
     mirror: &Frame,
 ) -> Result<BodyId> {
-    let mut e = copy_seed(st, id, seed)?;
+    let tools = copy_seed(st, id, seed)?;
     let n = mirror.z;
     let refl_v = |v: [f64; 3]| {
         let d = 2.0 * dot(v, n);
@@ -1438,22 +1573,25 @@ fn mirror_feature(
         let d = 2.0 * dot(sub(p, mirror.origin), n);
         [p[0] - d * n[0], p[1] - d * n[1], p[2] - d * n[2]]
     };
-    let f = e.start;
-    let (x, y) = (refl_v(f.x), refl_v(f.y));
-    let frame = Frame {
-        origin: refl_p(f.origin),
-        x,
-        y,
-        z: cross(x, y),
-    };
-    // Along the reflected frame's normal (−R z) the tool and the face sides flip.
-    e.nominal = (-e.nominal.1, -e.nominal.0);
-    e.dir = -e.dir;
-    e.side = e.side.map(|s| -s);
-    let body = brep_target(st, id, e.body)?;
-    let (out, _) = apply_tool(&body, &e, &frame, Some("mirrored copy"), id)?;
-    replace_body(st, id, e.body, out);
-    Ok(e.body)
+    let target = tools[0].body;
+    let mut body = brep_target(st, id, target)?;
+    for mut e in tools {
+        let f = e.start;
+        let (x, y) = (refl_v(f.x), refl_v(f.y));
+        let frame = Frame {
+            origin: refl_p(f.origin),
+            x,
+            y,
+            z: cross(x, y),
+        };
+        // Along the reflected frame's normal (−R z) the tool and the face sides flip.
+        e.nominal = (-e.nominal.1, -e.nominal.0);
+        e.dir = -e.dir;
+        e.side = e.side.map(|s| -s);
+        body = apply_tool(&body, &e, &frame, Some("mirrored copy"), id)?.0;
+    }
+    replace_body(st, id, target, body);
+    Ok(target)
 }
 
 /// Run-1/2 circular cut (`depth == None`: through all) and pocket features on

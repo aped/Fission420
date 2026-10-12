@@ -603,6 +603,7 @@ impl F420App {
                 "linear_pattern" | "circular_pattern" => "Pattern",
                 "mirror" => "Mirror",
                 "chamfer" => "Chamfer",
+                "hole" => "Hole",
                 "import_step" | "import_mesh" => "Import",
                 k => k,
             };

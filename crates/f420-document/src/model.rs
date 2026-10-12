@@ -279,6 +279,30 @@ pub enum FeatureKind {
         b: FaceRef,
         distance: f64,
     },
+    /// Round hole (run 4) drilled into `target` from `plane` (which must hold a
+    /// planar face of the target; the hole goes into the material), centred at
+    /// `center` (plane coordinates): `diameter`, `depth` mm from the face
+    /// (`None`: through all), and an optional counterbore. Parameters
+    /// "diameter", "depth", "cbore_diameter", "cbore_depth", "center_x",
+    /// "center_y". Built as a counterbore cut then the hole cut, each checked
+    /// like an Extrude Cut (ADR 0005). Countersinks are not supported.
+    Hole {
+        plane: SketchPlane,
+        center: [f64; 2],
+        diameter: f64,
+        #[serde(default)]
+        depth: Option<f64>,
+        #[serde(default)]
+        counterbore: Option<Counterbore>,
+        target: BodyId,
+    },
+}
+
+/// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Counterbore {
+    pub diameter: f64,
+    pub depth: f64,
 }
 
 impl FeatureKind {
@@ -338,6 +362,11 @@ impl Feature {
                 }
                 v
             }
+            FeatureKind::Hole {
+                plane: SketchPlane::Face(r),
+                ..
+            } => vec![r.feature],
+            FeatureKind::Hole { .. } => vec![],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -368,7 +397,8 @@ impl Feature {
                 ..
             }
             | FeatureKind::Cut { target, .. }
-            | FeatureKind::Pocket { target, .. } => Some(*target),
+            | FeatureKind::Pocket { target, .. }
+            | FeatureKind::Hole { target, .. } => Some(*target),
             _ => None,
         }
     }
@@ -409,6 +439,25 @@ impl Feature {
             FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Hole {
+                center,
+                diameter,
+                depth,
+                counterbore,
+                ..
+            } => {
+                let mut v = vec![("diameter".into(), *diameter)];
+                if let Some(d) = depth {
+                    v.push(("depth".into(), *d));
+                }
+                if let Some(c) = counterbore {
+                    v.push(("cbore_diameter".into(), c.diameter));
+                    v.push(("cbore_depth".into(), c.depth));
+                }
+                v.push(("center_x".into(), center[0]));
+                v.push(("center_y".into(), center[1]));
+                v
+            }
             FeatureKind::LinearPattern { count, spacing, .. } => vec![
                 ("count".into(), f64::from(*count)),
                 ("spacing".into(), *spacing),
@@ -515,6 +564,79 @@ impl Feature {
                     )));
                 }
                 *spacing = value;
+                Ok(())
+            }
+            FeatureKind::Hole {
+                center,
+                diameter,
+                depth,
+                counterbore,
+                ..
+            } => {
+                let pos = |what: &str| {
+                    (value > 0.0).then_some(()).ok_or_else(|| {
+                        DocError::Validation(format!(
+                            "{id}.{name}: {what} must be > 0 mm, got {value}"
+                        ))
+                    })
+                };
+                match (name, counterbore.as_mut(), depth.as_mut()) {
+                    ("diameter", cb, _) => {
+                        pos("hole diameter")?;
+                        if let Some(c) = cb
+                            && c.diameter <= value
+                        {
+                            return Err(DocError::Validation(format!(
+                                "{id}.diameter: the hole ({value} mm) must be smaller than its \
+                                 counterbore ({} mm)",
+                                c.diameter
+                            )));
+                        }
+                        *diameter = value;
+                    }
+                    ("depth", cb, Some(d)) => {
+                        pos("hole depth")?;
+                        if let Some(c) = cb
+                            && c.depth >= value
+                        {
+                            return Err(DocError::Validation(format!(
+                                "{id}.depth: the hole ({value} mm) must be deeper than its \
+                                 counterbore ({} mm)",
+                                c.depth
+                            )));
+                        }
+                        *d = value;
+                    }
+                    ("cbore_diameter", Some(c), _) => {
+                        if value <= *diameter {
+                            return Err(DocError::Validation(format!(
+                                "{id}.cbore_diameter: the counterbore ({value} mm) must be wider \
+                                 than the hole ({diameter} mm)"
+                            )));
+                        }
+                        c.diameter = value;
+                    }
+                    ("cbore_depth", Some(c), d) => {
+                        pos("counterbore depth")?;
+                        if let Some(d) = d
+                            && value >= *d
+                        {
+                            return Err(DocError::Validation(format!(
+                                "{id}.cbore_depth: the counterbore ({value} mm) must be shallower \
+                                 than the hole ({d} mm)"
+                            )));
+                        }
+                        c.depth = value;
+                    }
+                    ("center_x", _, _) => center[0] = value,
+                    ("center_y", _, _) => center[1] = value,
+                    _ => {
+                        return Err(DocError::UnknownParameter {
+                            feature: id,
+                            name: name.into(),
+                        });
+                    }
+                }
                 Ok(())
             }
             FeatureKind::Chamfer { distance, .. } if name == "distance" => {

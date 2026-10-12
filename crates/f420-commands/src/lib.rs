@@ -135,6 +135,23 @@ pub enum Command {
         b: FaceRef,
         distance: f64,
     },
+    /// Round hole (run 4) from a planar face of `target` (default: the body
+    /// owning the face), centred at `center` (plane coordinates): `diameter`,
+    /// `depth` mm (omit for through all), optional `counterbore`
+    /// `[diameter, depth]`. Patternable and mirrorable like an Extrude Cut.
+    Hole {
+        #[serde(default)]
+        name: Option<String>,
+        plane: SketchPlane,
+        center: [f64; 2],
+        diameter: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        counterbore: Option<[f64; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<BodyId>,
+    },
     SetParameter {
         feature: FeatureId,
         name: String,
@@ -348,6 +365,7 @@ impl Command {
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::SetParameter { .. } => "set_parameter",
+            Command::Hole { .. } => "hole",
             Command::SetUserParameter { .. } => "set_user_parameter",
             Command::RenameUserParameter { .. } => "rename_user_parameter",
             Command::DeleteUserParameter { .. } => "delete_user_parameter",
@@ -990,6 +1008,57 @@ impl Session {
                 let c = self.model_mut()?.set_parameter(*feature, name, *value)?;
                 r.feature = Some(*feature);
                 r.message = Some(format!("{}.{}: {} -> {}", c.feature, c.name, c.old, c.new));
+            }
+            Command::Hole {
+                name,
+                plane,
+                center,
+                diameter,
+                depth,
+                counterbore,
+                target,
+            } => {
+                let (name, plane, center, diameter, depth) =
+                    (name.clone(), *plane, *center, *diameter, *depth);
+                let counterbore = counterbore.map(|[d, h]| f420_document::Counterbore {
+                    diameter: d,
+                    depth: h,
+                });
+                let m = self.model_mut()?;
+                let target = match target {
+                    Some(t) => *t,
+                    None => {
+                        let SketchPlane::Face(r) = plane else {
+                            return Err(DocError::Validation(
+                                "choose a target body for a hole on a world plane".into(),
+                            ));
+                        };
+                        m.evaluation()
+                            .faces
+                            .iter()
+                            .find(|c| c.reference == r)
+                            .map(|c| c.body)
+                            .ok_or_else(|| DocError::BrokenReference {
+                                from: FeatureId(0),
+                                detail: "the hole's face does not resolve to one face".into(),
+                            })?
+                    }
+                };
+                let id = m.transact("Hole", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Hole"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Hole {
+                            plane,
+                            center,
+                            diameter,
+                            depth,
+                            counterbore,
+                            target,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
             }
             Command::SetUserParameter {
                 name,
@@ -1787,6 +1856,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::CircularPattern { .. } => ("circular_pattern", None),
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
+                FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {

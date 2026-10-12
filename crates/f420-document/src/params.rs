@@ -649,8 +649,22 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
             Some(SlotKind::Length)
         }
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
+        FeatureKind::Hole { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         _ => None,
     }
+}
+
+fn kind_has(kind: &FeatureKind, name: &str) -> bool {
+    crate::Feature {
+        id: FeatureId(0),
+        name: String::new(),
+        kind: kind.clone(),
+        notes: vec![],
+        expressions: Default::default(),
+    }
+    .parameters()
+    .iter()
+    .any(|(n, _)| n == name)
 }
 
 /// Re-derive every bound feature value from its expression (and the user
