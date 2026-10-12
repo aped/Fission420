@@ -292,6 +292,13 @@ impl Sketch {
                 )
             }
             Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
+            Constraint::Offset { pairs, dim } => format!(
+                "{} = {} (offset of {} curve{})",
+                dim.name,
+                fmt_mm(dim.value),
+                pairs.len(),
+                if pairs.len() == 1 { "" } else { "s" }
+            ),
             Constraint::PointOnCircle { point, circle } => {
                 let kind = match self.entity(*circle) {
                     Some(Entity::Circle { .. }) => "C",
@@ -468,7 +475,8 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Parallel { .. }
         | Constraint::Perpendicular { .. }
         | Constraint::EqualLength { .. }
-        | Constraint::Angle { .. } => vec![],
+        | Constraint::Angle { .. }
+        | Constraint::Offset { .. } => vec![],
     }
 }
 
@@ -486,6 +494,7 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         | Constraint::Angle { a, b, .. } => vec![*a, *b],
         Constraint::PointOnLine { line, .. } => vec![*line],
         Constraint::PointOnCircle { circle, .. } => vec![*circle],
+        Constraint::Offset { pairs, .. } => pairs.iter().flat_map(|p| [p.source, p.copy]).collect(),
         _ => vec![],
     }
 }
