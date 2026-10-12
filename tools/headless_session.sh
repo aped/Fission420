@@ -18,6 +18,14 @@
 # its children: runs 2-4 left 74 mutters, 192 private dbus-daemons and 192 gvfsd behind.
 # gvfs is disabled inside the session (GIO_USE_VFS=local): the private bus otherwise
 # activates a gvfsd that outlives it.
+#
+# Renderer (2026-10-12): the app runs with WGPU_BACKEND=${F420_WGPU_BACKEND:-gl}. With
+# wgpu's default Vulkan backend (Mesa 26.2 RADV, FIFO present) under headless mutter 50.5,
+# the app intermittently stops drawing: its UI thread idles in ep_poll with a redraw
+# requested, i.e. the Wayland frame callback for its last commit never arrives (winit only
+# delivers a requested redraw after it). The "hole" scene stalled in 3/6, 5/6 (low-power
+# adapter) and 3/4 attempts on Vulkan, and 0/18 with the GL backend. Set
+# F420_WGPU_BACKEND=vulkan to reproduce.
 set -u
 STATE=$1; SIZE=$2; shift 2
 mkdir -p "$STATE"
@@ -38,7 +46,7 @@ exec systemd-run --user --scope --quiet --collect --unit="$UNIT" \
   # The socket appears before the virtual monitor exists; a window created with no
   # output can wait forever for its first frame callback. Wait for the monitor.
   for i in $(seq 1 100); do grep -q "Added virtual monitor" "'"$STATE"'/mutter.log" 2>/dev/null && break; sleep 0.1; done
-  WAYLAND_DISPLAY='"$SOCK"' DISPLAY= "$@" > "'"$STATE"'/app.log" 2>&1
+  WAYLAND_DISPLAY='"$SOCK"' DISPLAY= WGPU_BACKEND='"${F420_WGPU_BACKEND:-gl}"' "$@" > "'"$STATE"'/app.log" 2>&1
   RC=$?
   kill $MP 2>/dev/null; wait $MP 2>/dev/null
   echo $RC > "'"$STATE"'/exit"
