@@ -26,6 +26,11 @@ pub const SCENES: &[&str] = &[
     "sideface",
     "import",
     "export",
+    "params",
+    "measure",
+    "param_error",
+    "print_export",
+    "hole",
 ];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -307,6 +312,40 @@ impl F420App {
                         form.set_orientation(BodyId(2), f420_commands::print::Orient::FaceDown(r));
                     }
                     a.dialog = Some(Dialog::Export3mf(form));
+                }),
+            ],
+            // Run 4: Hole dialog with a counterbore on the bracket template.
+            "hole" => vec![
+                Cmd(Command::NewDocument),
+                Ui(|a| {
+                    for c in crate::app::PrintTemplate::Bracket
+                        .commands()
+                        .into_iter()
+                        .skip(1)
+                    {
+                        a.request(c);
+                    }
+                }),
+                Ui(|a| {
+                    a.set_view(f420_viewport::ViewPreset::Iso);
+                    if let Some(g) = face_group(a, 1, [0.0, 0.0, 1.0], 5.0) {
+                        a.select_face(Some(g));
+                        let info = a.selected_face().cloned();
+                        if let Some((info, r)) = info.and_then(|i| i.reference.map(|r| (i, r))) {
+                            let [cx, cy] = a.face_centre_local(&info, &r).unwrap_or([0.0, 0.0]);
+                            a.dialog = Some(Dialog::Hole {
+                                face: r,
+                                cx: crate::params_ui::fmt_value(cx),
+                                cy: crate::params_ui::fmt_value(cy - 8.0),
+                                diameter: "5.5".into(),
+                                through: true,
+                                depth: "8".into(),
+                                counterbore: true,
+                                cb_diameter: "10".into(),
+                                cb_depth: "3".into(),
+                            });
+                        }
+                    }
                 }),
             ],
             _ => return false,

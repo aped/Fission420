@@ -4,7 +4,7 @@
 # usage: tools/bench/imports.sh
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-OUT="$REPO/artifacts/run3/bench"
+OUT="${F420_BENCH_OUT:-$REPO/artifacts/run3/bench}"
 mkdir -p "$OUT"
 cargo build -q --release -p f420-cli || exit 1
 CLI="$REPO/target/release/f420-cli"
