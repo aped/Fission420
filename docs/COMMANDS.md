@@ -101,7 +101,14 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `custom` | `sketch` (a full `Sketch` object) | a sketch as produced by the interactive editor; validated and solved before it is stored |
 
 `center` = `[x, y]` in the plane's frame, default origin. `plane`: `"WorldXY"`, `"WorldXZ"`
-(x = world X, y = world Z) or `{"Face":{"feature":N,"role":"ExtrudeEndCap"|"ExtrudeStartCap"}}`.
+(x = world X, y = world Z), `"WorldYZ"`, `{"Face":{"feature":N,"role":"ExtrudeEndCap"|"ExtrudeStartCap"}}`,
+or (run 4) an offset construction plane `{"Offset":{"base":B,"distance":d}}` with `B` one of
+`"WorldXY"`, `"WorldXZ"`, `"WorldYZ"`, `{"Face":{…}}`: the base moved `d` mm (finite, may be negative
+or 0) along its normal (a face's outward normal; +Z, −Y, +X for the world planes), same in-plane
+axes. The same plane forms are accepted by `set_sketch_plane`, `mirror` and `hole`. A sketch on an
+offset plane has the parameter `plane_offset` (mm, bindable to an expression); a face base resolves
+like `Face` at every regeneration (`BrokenReference` when it is gone) and makes the sketch depend
+on the face's feature. Older plane values serialize exactly as before (native format stays v4).
 
 A usable profile is one circle, or one closed loop of lines and arcs (shared endpoints or
 `Coincident` points, every vertex joining exactly two curves); construction entities are

@@ -127,6 +127,14 @@ pub(crate) enum Dialog {
         b: Option<f420_document::FaceRef>,
         distance: String,
     },
+    /// Start a sketch on an offset construction plane (world plane or the
+    /// face selected when the dialog opened, moved along its normal).
+    OffsetPlane {
+        base: f420_document::PlaneBase,
+        /// Face offered as a base (selected when the dialog opened).
+        face: Option<(f420_document::FaceRef, String)>,
+        distance: String,
+    },
     /// Scoped shell of a New Body extrusion (docs/SHELL.md).
     Shell {
         extrude: FeatureId,
@@ -165,6 +173,7 @@ impl Dialog {
             Dialog::Chamfer { .. } => "Chamfer edge",
             Dialog::Hole { .. } => "Hole",
             Dialog::Shell { .. } => "Shell (scoped)",
+            Dialog::OffsetPlane { .. } => "Sketch on offset plane",
         }
     }
 }
@@ -1207,6 +1216,9 @@ impl F420App {
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
             Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
             Dialog::Shell { extrude, .. } => (vec![*extrude], vec![]),
+            Dialog::OffsetPlane { face, .. } => {
+                (face.iter().map(|(r, _)| r.feature).collect(), vec![])
+            }
             Dialog::Chamfer { a, b, .. } => (
                 std::iter::once(a.feature)
                     .chain(b.map(|b| b.feature))
@@ -1477,6 +1489,9 @@ impl F420App {
     /// Frame of a sketch plane from the current document summary.
     pub fn plane_frame(&self, plane: &SketchPlane) -> Result<PlaneFrame, String> {
         match plane {
+            SketchPlane::Offset { base, distance } => {
+                Ok(self.plane_frame(&base.plane())?.offset(*distance))
+            }
             SketchPlane::WorldXY => Ok(PlaneFrame::WORLD_XY),
             SketchPlane::WorldXZ => Ok(PlaneFrame::from_kernel(&f420_kernel::Frame::XZ)),
             SketchPlane::WorldYZ => Ok(PlaneFrame::from_kernel(&f420_document::FRAME_YZ)),
@@ -1691,6 +1706,11 @@ impl F420App {
 
     pub(crate) fn plane_text(&self, plane: &SketchPlane) -> String {
         match plane {
+            SketchPlane::Offset { base, distance } => format!(
+                "offset {} mm from {}",
+                f420_sketch::fmt_mm(*distance),
+                self.plane_text(&base.plane()).trim_start_matches("on ")
+            ),
             SketchPlane::WorldXY => "on World XY".into(),
             SketchPlane::WorldXZ => "on World XZ".into(),
             SketchPlane::WorldYZ => "on World YZ".into(),
@@ -2221,6 +2241,9 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             },
             target: None,
         },
+        Dialog::OffsetPlane { .. } => {
+            return Err("an offset plane starts a sketch session (no command)".into());
+        }
         Dialog::Shell {
             extrude,
             open_end,
