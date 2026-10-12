@@ -482,6 +482,29 @@ impl System {
                         push(Eq::PointLine { p, a, b });
                     }
                 }
+                Constraint::PointOnCircle { point, circle } => {
+                    let Some(&p) = point_col.get(point) else {
+                        continue;
+                    };
+                    if let Some(&(c, start, _)) = arcs.get(circle) {
+                        // |p − c| − |start − c|
+                        push(Eq::SameDist {
+                            c,
+                            a: p,
+                            d: c,
+                            b: start,
+                        });
+                    } else if let (Some(&r), Some(Entity::Circle { center, .. })) =
+                        (circles.get(circle), entity(circle))
+                    {
+                        // |p − c| − r
+                        push(Eq::DistVar {
+                            c: point_col[center],
+                            a: p,
+                            r,
+                        });
+                    }
+                }
             }
         }
         // Pseudo-owner for equations that are not user constraints (arc-implied
@@ -1093,5 +1116,43 @@ mod tests {
         let sys = System::build(&s);
         let j = sys.jacobian(&sys.initial, &sys.all_rows());
         assert!(j.iter().all(|v| v.is_finite()));
+    }
+
+    /// PointOnCircle rows (circle: `|p − c| − r`, arc: `|p − c| − |start − c|`)
+    /// against central finite differences and hand values at a generic
+    /// (unsolved) configuration, including the radius column of the circle.
+    #[test]
+    fn point_on_circle_rows_match_finite_differences() {
+        let mut s = Sketch::default();
+        let c0 = s.add_point(1.0, -2.0);
+        let circle = s.add_circle(c0, 7.5);
+        let a0 = s.add_point(0.0, 0.0);
+        let a1 = s.add_point(10.0, 0.0);
+        let arc = s.add_arc_3pt(a1, a0, [5.0, 5.0]).unwrap();
+        let p = s.add_point(9.3, 4.1);
+        s.constraints = vec![
+            Constraint::PointOnCircle { point: p, circle },
+            Constraint::PointOnCircle {
+                point: p,
+                circle: arc,
+            },
+        ];
+        s.validate().unwrap();
+        let sys = System::build(&s);
+        // Two constraint rows plus the arc's implied equal-radius row.
+        assert_eq!(sys.eqs.len(), 3);
+        let x0 = sys.initial.clone();
+        let err = fd_error(&sys, &x0, 1e-6);
+        assert!(err < 1e-7, "Jacobian vs finite differences: {err:e}");
+        // Hand values: |(9.3, 4.1) − (1, −2)| − 7.5; the arc's centre is the
+        // circumcentre of (0,0), (10,0), (5,5): (5, 0), radius 5.
+        let want0 = (8.3f64).hypot(6.1) - 7.5;
+        let want1 = (4.3f64).hypot(4.1) - 5.0;
+        assert!((sys.eqs[0].eval(&x0) - want0).abs() < 1e-12);
+        assert!((sys.eqs[1].eval(&x0) - want1).abs() < 1e-12);
+        // Circle row depends on the radius unknown (d/dr = −1).
+        let j = sys.jacobian(&x0, &sys.all_rows());
+        let rcol = sys.radius_col[0].1;
+        assert_eq!(j[(0, rcol)], -1.0);
     }
 }
