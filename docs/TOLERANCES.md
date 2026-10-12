@@ -56,3 +56,16 @@ volumes and bounds keep the GOAL.md tolerances.
 
 Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware; fine for parts of
 ~1 mm to ~10 m, unverified beyond (review finding 6).
+
+## Added 2026-10-12
+
+| name | value | kind | meaning |
+|---|---|---|---|
+| `prismatic::GRID_STEPS_PER_MM` | 1e9 (1e-9 mm grid) | construction | integer grid of the slab construction's 2-D booleans (ADR 0006); result coordinates are on it in the tool frame |
+| slab level / wall plane merge | `FACE_MATCH` (1e-7 mm) | geometric | cap levels, wall planes and vertices of the slab construction closer than this are one |
+| `profile_within_face` area test | `slack × perimeter` | geometric | the profile's area outside the face regions (exact 2-D boolean) must not exceed this |
+| `CANONICAL_GRID` (f420-kernel `mesh.rs`) | 1e-6 mm | export | key resolution of the canonical vertex / triangle order of print exports |
+| 3MF coordinates | 1e-9 mm in the file unit | export | fixed decimals (9 in mm, 11 in inch), so float noise does not change the text |
+| STEP REALs, native-file cache | 1e-9 | export | rounded so recomputed geometry gives the same text |
+| planar re-triangulation ties | in-circle `|det| <= 1e-9 L^4` | export/display | cocircular quads (rectangles) get the diagonal avoiding the smallest-key vertex |
+

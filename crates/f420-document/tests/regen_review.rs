@@ -258,20 +258,22 @@ fn adopted_measurement_is_reused_on_redo() {
 
 // ---------------------------------------------------------------- finding 3
 
-/// Truck 0.6 cannot cut with a cap coplanar to a partial face: the case is
-/// refused with a structured product-limit error naming the problem, never a
-/// plausible wrong volume. (These cases used to cut `wrong` mm^3.)
-fn refused(r: Result<Evaluation>, why: &str, wrong: f64) {
-    match r {
-        Err(DocError::ProductLimit(msg)) => {
-            assert!(msg.contains(why) && msg.contains("coplanar"), "{msg}");
-        }
-        Ok(e) => panic!(
-            "expected a refusal, got volume {} (old wrong {wrong})",
-            body_vol(&e)
-        ),
-        Err(e) => panic!("expected a product-limit refusal, got {e:?}"),
-    }
+/// Truck 0.6 cannot cut with a cap coplanar to a partial face. Run 4 refused
+/// these cases (they used to cut `wrong` mm^3); since ADR 0006 the exact slab
+/// construction builds them, checked by the result gate: the exact volume, and
+/// the material that must stay (bounds along z) intact.
+fn exact(r: Result<Evaluation>, want: f64, wrong: f64, z: (f64, f64)) {
+    let e = r.unwrap_or_else(|e| panic!("expected the exact result {want}, got {e:?}"));
+    let v = body_vol(&e);
+    assert!(
+        (v - want).abs() < VOL_TOL,
+        "volume {v}, exact {want} (old wrong {wrong})"
+    );
+    let bb = &e.bodies[0].measurements.as_ref().unwrap().bounds;
+    assert!(
+        (bb.min[2] - z.0).abs() < 1e-9 && (bb.max[2] - z.1).abs() < 1e-9,
+        "{bb:?}"
+    );
 }
 
 /// A slot sketched on the top face running off the block's edge: the face
@@ -321,8 +323,8 @@ fn cut_from_face_does_not_gouge_material_above_the_plane() {
         rect(10.0, 6.0, 10.0, 5.0),
     );
     cut(&mut d, s3, 3.0, b);
-    // Exact would be 2720 - 180 = 2540; the cutter cannot start on the plane.
-    refused(regenerate(&d), "rises", 2495.0);
+    // 2720 - 10x6x3 = 2540; the raised step (to z = 20) is untouched.
+    exact(regenerate(&d), 2540.0, 2495.0, (0.0, 20.0));
 }
 
 /// Normal case: a cut fully inside the open part of the face is unchanged.
@@ -414,8 +416,8 @@ fn blind_cut_floor_on_a_partial_face_does_not_overcut() {
         rect(10.0, 6.0, 10.0, 5.0),
     );
     cut(&mut d, s3, 10.0, b);
-    // Exact would be 1760; the floor cannot stay on the partial face.
-    refused(regenerate(&d), "floor", 1719.6);
+    // 1760; the boss below the floor (to z = -5) is untouched.
+    exact(regenerate(&d), 1760.0, 1719.6, (-5.0, 10.0));
 }
 
 /// Normal case: a full-thickness blind cut on a plain block still goes through

@@ -357,7 +357,17 @@ pub fn profile_within_face(body: &Body, frame: &Frame, profile: &Profile) -> Res
                 }
             }
         }
-        Ok(true)
+        // Exact area test (2-D boolean on the integer grid): sampling misses a
+        // notch of the face whose edges run along the profile's (observed: a
+        // profile along the face's edge across a boss footprint and a slot).
+        let n = pts.len();
+        let perimeter: f64 = (0..n)
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % n]);
+                (b[0] - a[0]).hypot(b[1] - a[1])
+            })
+            .sum();
+        Ok(crate::prismatic::area_outside(&pts, &regions)? <= slack * perimeter)
     })?
 }
 

@@ -11,6 +11,7 @@ mod exact;
 mod measure;
 mod mesh;
 mod ops;
+pub mod prismatic;
 mod step;
 mod step_in;
 mod validate;

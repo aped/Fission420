@@ -1352,14 +1352,20 @@ fn apply_tool(
                 blind_cut_span(body, frame, &kp, e.nominal, e.dir, e.side, margin).map_err(err)?,
             )
         };
-        let out =
-            k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(
-                |x| match x {
-                    x if refused.is_some() => coplanar_cut_error(id, refused, x),
-                    x => err(x),
-                },
-            )?;
-        check(&out, k::PrismOp::Cut, nominal, span)?;
+        let truck = k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0)
+            .map_err(|x| match x {
+                x if refused.is_some() => coplanar_cut_error(id, refused, x),
+                x => err(x),
+            })
+            .and_then(|out| check(&out, k::PrismOp::Cut, nominal, span).map(|()| out));
+        let out = match truck {
+            Ok(out) => out,
+            Err(e) => {
+                let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Cut, e)?;
+                check(&out, k::PrismOp::Cut, nominal, span).map_err(slab_checked)?;
+                out
+            }
+        };
         return Ok((out, span));
     }
     let (a, b) = e.nominal;
@@ -1371,7 +1377,22 @@ fn apply_tool(
             // the material, which is only exact when the profile lies on the
             // face (material under the whole profile) and the overlap stays
             // inside material that no other surface crosses.
+            let slab = k::prismatic::applicable(body, &kp, frame);
             if !k::profile_within_face(body, frame, &kp).map_err(err)? {
+                if slab {
+                    // Prismatic target: the exact slab construction needs no
+                    // overlap into the support, so the profile may leave the face.
+                    let out = k::prismatic::prism_boolean(
+                        body,
+                        &kp,
+                        &frame.offset(a),
+                        b - a,
+                        k::prismatic::SlabOp::Join,
+                    )
+                    .map_err(err)?;
+                    check(&out, k::PrismOp::Join, (a, b), (a, b))?;
+                    return Ok((out, (a, b)));
+                }
                 return Err(DocError::ProductLimit(format!(
                     "{id}: {prefix}a Join sketched on a face of the target must lie inside \
                      that face; the profile is not inside a face here (it crosses the face \
@@ -1399,9 +1420,65 @@ fn apply_tool(
             }
         }
     };
-    let out = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(err)?;
-    check(&out, k::PrismOp::Join, (a, b), span)?;
+    let truck = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0)
+        .map_err(err)
+        .and_then(|out| check(&out, k::PrismOp::Join, (a, b), span).map(|()| out));
+    let out = match truck {
+        Ok(out) => out,
+        Err(e) => {
+            let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Join, e)?;
+            check(&out, k::PrismOp::Join, (a, b), span).map_err(slab_checked)?;
+            out
+        }
+    };
     Ok((out, span))
+}
+
+/// A result check failure of the exact slab construction (says so: it is a
+/// defect of that construction, not Truck's).
+fn slab_checked(e: DocError) -> DocError {
+    match e {
+        DocError::GeometryCheck { feature, detail } => DocError::GeometryCheck {
+            feature,
+            detail: format!("exact slab construction: {detail}"),
+        },
+        other => other,
+    }
+}
+
+/// When Truck fails (or its result fails the check) on a prismatic target
+/// (every face planar, perpendicular or parallel to the tool axis) with a
+/// straight-edged profile, build the result exactly from slab regions instead
+/// (`k::prismatic`, ADR 0006): coplanar and coincident faces are exactly what
+/// Truck cannot handle. Otherwise, or if that fails too, the original error,
+/// with the slab construction's reason appended.
+fn slab_fallback(
+    body: &Body,
+    kp: &k::Profile,
+    frame: &Frame,
+    span: (f64, f64),
+    op: k::prismatic::SlabOp,
+    truck: DocError,
+) -> Result<Body> {
+    let note = |m: String| match truck.clone() {
+        DocError::Kernel { feature, detail } => DocError::Kernel {
+            feature,
+            detail: format!("{detail}; exact slab construction: {m}"),
+        },
+        DocError::ProductLimit(detail) => {
+            DocError::ProductLimit(format!("{detail}; exact slab construction: {m}"))
+        }
+        DocError::GeometryCheck { feature, detail } => DocError::GeometryCheck {
+            feature,
+            detail: format!("{detail}; exact slab construction: {m}"),
+        },
+        other => other,
+    };
+    if let Some(why) = k::prismatic::not_applicable(body, kp, frame) {
+        return Err(note(format!("not applicable: {why}")));
+    }
+    k::prismatic::prism_boolean(body, kp, &frame.offset(span.0), span.1 - span.0, op)
+        .map_err(|e| note(e.to_string()))
 }
 
 /// Frame of a sketch/mirror/hole plane: a world plane, a resolved face, or a

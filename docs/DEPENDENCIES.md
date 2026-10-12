@@ -75,3 +75,12 @@ New *direct* dependencies of `f420-exchange`; all three were already in `Cargo.l
 
 The ZIP container code (`f420-exchange/src/zip.rs`) and the 3MF model handling are our own.
 Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tools/fixtures/threemf/`.
+
+## Added 2026-10-12 (after run 4)
+
+| crate | version | license | used by |
+|---|---|---|---|
+| i_overlay | 8.1.2 (default features: no rayon) | MIT OR Apache-2.0 | f420-kernel `prismatic.rs`: exact 2-D region booleans on an integer grid (ADR 0006) |
+| i_float / i_shape / i_tree / i_key_sort | 4.1.0 / 4.0.0 / 0.19.0 / 0.11.0 (transitive) | MIT | i_overlay |
+
+Pure Rust, no C code. `i_overlay` is the boolean engine `geo` uses.
