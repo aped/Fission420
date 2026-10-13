@@ -140,6 +140,21 @@ pub struct ThickenArgs {
     pub hide_source: bool,
 }
 
+/// `surface_patch` / `surface_extrude`: a surface body from a sketch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceFromSketchArgs {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub sketch: FeatureId,
+    /// Extrusion only (mm).
+    #[serde(default)]
+    pub distance: f64,
+    #[serde(default)]
+    pub reverse: bool,
+    #[serde(default)]
+    pub body_name: Option<String>,
+}
+
 /// Who owns a new body (review #16): a modelled body joins the active
 /// component; a display body (flat pattern) joins none; a derived body
 /// (stitch / fill / thicken) takes its source's place in its component.
@@ -573,6 +588,38 @@ impl Session {
                 })?;
                 r.feature = Some(id);
                 r.message = self.feature_notes(id);
+            }
+            Command::SurfacePatch(a) | Command::SurfaceExtrude(a) => {
+                let patch = matches!(cmd, Command::SurfacePatch(_));
+                let a = a.clone();
+                let id = self.model_mut()?.transact(
+                    if patch {
+                        "Surface patch"
+                    } else {
+                        "Extrude surface"
+                    },
+                    |d| {
+                        let body = new_body(d, &a.body_name, "Surface", Owner::Active)?;
+                        let n = a.name.clone().unwrap_or_else(|| {
+                            d.default_name(if patch { "Patch" } else { "Surface" })
+                        });
+                        let kind = if patch {
+                            FeatureKind::SurfacePatch {
+                                sketch: a.sketch,
+                                body,
+                            }
+                        } else {
+                            FeatureKind::SurfaceExtrude {
+                                sketch: a.sketch,
+                                distance: a.distance,
+                                reverse: a.reverse,
+                                body,
+                            }
+                        };
+                        Ok(d.push(n, kind))
+                    },
+                )?;
+                r.feature = Some(id);
             }
             _ => return Ok(false),
         }

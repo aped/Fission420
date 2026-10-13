@@ -22,6 +22,7 @@ mod project;
 mod step;
 mod step_in;
 mod stitch;
+mod surface;
 mod sweep;
 mod taper;
 mod thicken;
@@ -71,6 +72,7 @@ pub use stitch::{
     BoundaryLoop, FillReport, FreeEdge, Gap, MergeStats, ShellAnalysis, StitchReport, analyze,
     fill_planar, glue, stitch, thicken,
 };
+pub use surface::{SurfacePath, extrude_surface, planar_patch};
 pub use sweep::{PathSegment, sweep};
 pub use taper::{taper_section, tapered_boolean, tapered_tool};
 pub use thread::{ThreadReport, ThreadSpec, threaded_nut, threaded_rod};

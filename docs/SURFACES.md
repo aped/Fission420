@@ -17,6 +17,15 @@ embedded). `import_step` on a file with only surface models is refused with a po
 surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside a
 `MANIFOLD_SOLID_BREP` stays an error (that is a malformed solid).
 
+## Surfaces from sketches
+
+* `surface_patch {sketch}` (UI: sketch inspector **Surface from sketch → Planar patch**): the
+  closed profile (holes allowed) as a one-face planar surface body.
+* `surface_extrude {sketch, distance, reverse?}` (**Extrude surface**): the closed profile, or
+  else the open chain of lines, swept along the sketch normal into an open ruled surface (planar
+  strips; exact cylindrical patches for arcs). No caps. Parameter `distance` (upstream edits
+  regenerate later stitch/fill/thicken).
+
 ## Analysis (before any repair)
 
 `analyze_surface {body, search = 0.1}` (UI: **Analyse**) reports, without changing anything:
@@ -88,7 +97,7 @@ positive volume = outward orientation, volume and bounding box).
 ## Not implemented (tracked)
 
 Non-planar patches (N-sided fill, boundary-blend), continuity (G1/G2) control, offset of general
-surfaces and multi-face thicken (offset with mitred joints), ruled/sweep/loft surface bodies,
+surfaces and multi-face thicken (offset with mitred joints), swept/lofted surface bodies (only straight extrusion of sketches),
 trimming and extending surfaces, surface-to-solid replace, sewing with geometry fitting (edges are
 merged, not re-fitted), T-splines / freeform modelling, export of surface bodies to STEP as
 `SHELL_BASED_SURFACE_MODEL` (STEP export of open bodies is not supported).

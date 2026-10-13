@@ -1273,6 +1273,26 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
+            FeatureKind::SurfacePatch { sketch, body }
+            | FeatureKind::SurfaceExtrude { sketch, body, .. } => {
+                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+                let geom = crate::surface::from_sketch(
+                    id,
+                    &f.kind,
+                    so.profile.as_ref().ok(),
+                    &so.solved,
+                    &so.frame,
+                )?;
+                r.frame = Some(so.frame);
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(geom),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
             FeatureKind::Thicken {
                 source,
                 distance,

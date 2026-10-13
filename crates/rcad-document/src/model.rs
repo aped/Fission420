@@ -676,6 +676,19 @@ pub enum FeatureKind {
         tolerance: f64,
         body: BodyId,
     },
+    /// Planar surface patch (run 7, format v7): the closed profile of
+    /// `sketch` (holes allowed) as a one-face open surface body `body`.
+    SurfacePatch { sketch: FeatureId, body: BodyId },
+    /// Ruled surface (run 7, format v7): the closed profile, or else the
+    /// open line chain, of `sketch` swept `distance` along the sketch normal
+    /// (`reverse`: against it) as an open surface body. Parameter "distance".
+    SurfaceExtrude {
+        sketch: FeatureId,
+        distance: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        body: BodyId,
+    },
     /// Thicken (run 7, format v7) the single planar or cylindrical face of
     /// surface body `source` by `distance` mm along its normal (`reverse`:
     /// against it) into new solid body `body`. Parameter "distance".
@@ -913,9 +926,10 @@ impl Feature {
             FeatureKind::SplitBody { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
-            FeatureKind::SheetMetal { sketch, .. } | FeatureKind::SheetBase { sketch, .. } => {
-                vec![*sketch]
-            }
+            FeatureKind::SheetMetal { sketch, .. }
+            | FeatureKind::SheetBase { sketch, .. }
+            | FeatureKind::SurfacePatch { sketch, .. }
+            | FeatureKind::SurfaceExtrude { sketch, .. } => vec![*sketch],
             FeatureKind::SheetFlange { base, .. } | FeatureKind::SheetFlat { base, .. } => {
                 vec![*base]
             }
@@ -965,6 +979,8 @@ impl Feature {
             | FeatureKind::SurfaceStitch { body, .. }
             | FeatureKind::SurfaceFill { body, .. }
             | FeatureKind::Thicken { body, .. }
+            | FeatureKind::SurfacePatch { body, .. }
+            | FeatureKind::SurfaceExtrude { body, .. }
             | FeatureKind::MeshRepair { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
@@ -1182,7 +1198,11 @@ impl Feature {
             | FeatureKind::SurfaceFill { tolerance, .. } => {
                 vec![("tolerance".into(), *tolerance)]
             }
-            FeatureKind::Thicken { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Thicken { distance, .. }
+            | FeatureKind::SurfaceExtrude { distance, .. } => {
+                vec![("distance".into(), *distance)]
+            }
+            FeatureKind::SurfacePatch { .. } => vec![],
             FeatureKind::MeshRepair { options, .. } => {
                 vec![("weld_tolerance".into(), options.weld_tolerance)]
             }
@@ -1626,7 +1646,10 @@ impl Feature {
                 *tolerance = value;
                 Ok(())
             }
-            FeatureKind::Thicken { distance, .. } if name == "distance" => {
+            FeatureKind::Thicken { distance, .. }
+            | FeatureKind::SurfaceExtrude { distance, .. }
+                if name == "distance" =>
+            {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.distance: must be > 0 mm, got {value}"

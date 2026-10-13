@@ -25,7 +25,7 @@ pub(crate) fn profile_face(profile: &Profile, frame: &Frame) -> Result<Face> {
 }
 
 /// Closed wire of one profile loop (counter-clockwise about `frame.z`).
-fn profile_wire(profile: &Profile, frame: &Frame, seam: f64) -> Result<Wire> {
+pub(crate) fn profile_wire(profile: &Profile, frame: &Frame, seam: f64) -> Result<Wire> {
     Ok(match profile {
         Profile::Polygon(pts) => {
             let verts: Vec<Vertex> = pts
