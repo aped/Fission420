@@ -181,6 +181,17 @@ fn tree_activation_and_joint_dialog() {
             .t
     };
     assert!((pin_world(&h)[0] - 25.0).abs() < 1e-12);
+    // The drive slider (keyboard step) commits a new value within the limits
+    // and the child follows it exactly.
+    h.get_by_label("Drive Joint1").focus();
+    let _ = h.try_run();
+    h.key_press(Key::ArrowRight);
+    settle(&mut h);
+    let v = h.state().summary().assembly.joints[0].value;
+    assert!(v > 25.0 && v <= 40.0, "{v}");
+    assert!((pin_world(&h)[0] - v).abs() < 1e-12);
+    type_into(&mut h, "Joint value", "25");
+    click(&mut h, "Set value");
     type_into(&mut h, "Joint value", "50");
     click(&mut h, "Set value");
     assert_eq!(h.state().summary().assembly.joints[0].value, 25.0);

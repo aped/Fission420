@@ -1060,6 +1060,34 @@ impl RcadApp {
                             });
                         }
                     });
+                    // Drive within the stored limits (motion preview of the
+                    // solved joint; one command when the drag ends).
+                    let (smin, smax) = if i == 0 {
+                        (j.min, j.max)
+                    } else {
+                        j.extra.get(i - 1).map_or((None, None), |d| (d.min, d.max))
+                    };
+                    if let (Some(a), Some(b)) = (smin, smax)
+                        && a < b
+                    {
+                        let mut x = parse(&vals[i]).unwrap_or(a).clamp(a, b);
+                        let l = format!("Drive{sfx} {}", j.name);
+                        let r = ui
+                            .add(egui::Slider::new(&mut x, a..=b).text("drive"))
+                            .on_hover_text("Drag to move the joint within its limits; the value is committed when you release")
+                            .named(&l);
+                        if r.changed() {
+                            vals[i] = fmt(x);
+                        }
+                        // Commit at drag end, or at once for keyboard steps.
+                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                            send.push(Command::SetJointValue {
+                                joint: j.id,
+                                value: x,
+                                index: i,
+                            });
+                        }
+                    }
                     ui.horizontal(|ui| {
                         let (lo, hi) = &mut lims[i];
                         crate::panels::num_field(ui, &format!("Min{sfx}"), lo);
