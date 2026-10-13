@@ -23,6 +23,7 @@ pub mod font;
 pub mod offset;
 mod profile;
 mod region;
+pub mod shapes;
 mod solver;
 pub mod text;
 
@@ -36,6 +37,7 @@ pub use fillet::FilletResult;
 pub use offset::{OffsetPair, OffsetResult, offset_profile};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
+pub use shapes::{PolygonFit, PolygonResult, SlotResult};
 pub use text::{FontSpec, HAlign, SketchText, TextLoop, TextSpec, VAlign};
 
 /// Absolute floor of the convergence tolerance, mm.

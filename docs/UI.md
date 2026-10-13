@@ -102,3 +102,8 @@ be interrupted and still completes, and Undo removes it in one step.
   still work). Glyph outlines are drawn as thin closed curves and become profile regions
   (counters are holes; docs/behavior/sketching.md "Sketch text"). Code: `sketch_edit.rs`
   (`text_*`), `text_ui.rs`, `sketch_view.rs`; UI test `crates/rcad/tests/sketch_text_ui.rs`.
+* **Slot / Polygon tools:** Slot = three clicks (centre, centre, width point); Polygon = centre +
+  vertex, with *Sides* and *Across flats* shown in the toolbar while the tool is active. Dashed
+  previews follow the cursor. Both create constrained, dimensioned ordinary geometry
+  (docs/behavior/sketching.md "Slot and regular polygon"). UI test
+  `crates/rcad/tests/sketch_shapes_ui.rs`.

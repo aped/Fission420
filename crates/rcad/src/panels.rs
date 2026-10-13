@@ -548,6 +548,8 @@ impl RcadApp {
                     SketchTool::Extend,
                     SketchTool::Offset,
                     SketchTool::Fillet,
+                    SketchTool::Slot,
+                    SketchTool::Polygon,
                     SketchTool::Text,
                 ] {
                     if ui
@@ -557,6 +559,23 @@ impl RcadApp {
                         .clicked()
                     {
                         ed.set_tool(t);
+                    }
+                }
+                if ed.tool == SketchTool::Polygon {
+                    let l = ui.label("Sides");
+                    ui.add(egui::DragValue::new(&mut ed.polygon_sides).range(3..=64))
+                        .labelled_by(l.id);
+                    let mut circ = ed.polygon_fit == rcad_sketch::PolygonFit::Circumscribed;
+                    if ui
+                        .checkbox(&mut circ, "Across flats")
+                        .on_hover_text("Circumscribed: the dimension is the diameter across flats")
+                        .changed()
+                    {
+                        ed.polygon_fit = if circ {
+                            rcad_sketch::PolygonFit::Circumscribed
+                        } else {
+                            rcad_sketch::PolygonFit::Inscribed
+                        };
                     }
                 }
                 ui.separator();

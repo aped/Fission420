@@ -54,6 +54,11 @@ pub enum SketchTool {
     Fillet,
     /// Sketch text (run 6): click to place (or click a text to edit it).
     Text,
+    /// Centre-to-centre straight slot (run 6): two centres, then the width.
+    Slot,
+    /// Regular polygon (run 6): centre, then a vertex (inscribed) or an edge
+    /// midpoint (circumscribed); sides and fit from the toolbar.
+    Polygon,
 }
 
 impl SketchTool {
@@ -71,6 +76,8 @@ impl SketchTool {
             SketchTool::Offset => "Offset",
             SketchTool::Fillet => "Fillet",
             SketchTool::Text => "Text",
+            SketchTool::Slot => "Slot",
+            SketchTool::Polygon => "Polygon",
         }
     }
 
@@ -88,6 +95,8 @@ impl SketchTool {
             SketchTool::Offset => "O",
             SketchTool::Fillet => "toolbar",
             SketchTool::Text => "toolbar",
+            SketchTool::Slot => "toolbar",
+            SketchTool::Polygon => "toolbar",
         }
     }
 
@@ -124,6 +133,16 @@ impl SketchTool {
                  arc) meet, type the radius, Enter: both curves are trimmed and a tangent arc \
                  with an editable radius dimension is added (2D sketch only; solid edges cannot \
                  be filleted) · Esc cancels"
+            }
+            SketchTool::Slot => {
+                "Click the first arc centre, the second arc centre, then a point on the slot's side \
+                 (width) · adds lines + tangent arcs with slot_length / slot_width dimensions · Esc \
+                 cancels"
+            }
+            SketchTool::Polygon => {
+                "Click the centre, then a vertex (inscribed) or an edge midpoint (circumscribed) · \
+                 sides and fit in the toolbar · adds equal lines on a construction circle with a \
+                 diameter dimension · Esc cancels"
             }
             SketchTool::Text => {
                 "Click to place text (on a point: the text follows it), or click a text to edit \
@@ -215,6 +234,11 @@ enum Gesture {
     },
     /// Dimension tool: first point picked, waiting for the second.
     DimFirst(PointId),
+    /// Slot tool: both centres chosen, waiting for the width point.
+    SlotWidth {
+        c1: Snap,
+        c2: Snap,
+    },
 }
 
 /// Open fillet entry: the corner point and the typed radius.
@@ -294,6 +318,10 @@ pub struct SketchEditor {
     pub fillet_edit: Option<FilletEdit>,
     /// Text tool: text dialog open.
     pub text_edit: Option<TextEdit>,
+    /// Polygon tool: number of sides (3..=64).
+    pub polygon_sides: usize,
+    /// Polygon tool: size convention.
+    pub polygon_fit: rcad_sketch::PolygonFit,
     pub feedback: Option<Feedback>,
     undo: Vec<Sketch>,
     redo: Vec<Sketch>,
@@ -563,6 +591,8 @@ impl SketchEditor {
             offset_edit: None,
             fillet_edit: None,
             text_edit: None,
+            polygon_sides: 6,
+            polygon_fit: rcad_sketch::PolygonFit::Inscribed,
             feedback: None,
             undo: vec![],
             redo: vec![],
@@ -636,6 +666,7 @@ impl SketchEditor {
             Gesture::FirstClick(s) => Some(s.pos),
             Gesture::ArcEnd { start, .. } => Some(start.pos),
             Gesture::DimFirst(p) => self.sketch.point_xy(*p),
+            Gesture::SlotWidth { c1, .. } => Some(c1.pos),
             _ => None,
         }
     }
@@ -1181,6 +1212,17 @@ impl SketchEditor {
             SketchTool::Offset => self.offset_click(pos, screen, view),
             SketchTool::Fillet => self.fillet_click(pos, screen, view),
             SketchTool::Text => self.text_click(pos, view),
+            SketchTool::Slot => self.slot_click(pos, view),
+            SketchTool::Polygon => {
+                let s = self.snap(pos, None, None, view);
+                match self.gesture.clone() {
+                    Gesture::FirstClick(c) => {
+                        self.gesture = Gesture::Idle;
+                        self.make_polygon(c, s, view);
+                    }
+                    _ => self.gesture = Gesture::FirstClick(s),
+                }
+            }
         }
     }
 
@@ -2981,6 +3023,136 @@ fn fmt_num(v: f64) -> String {
     let s = format!("{v:.6}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s == "-0" { "0".into() } else { s.into() }
+}
+
+/// Slot and regular polygon tools (run 6, SK02).
+impl SketchEditor {
+    fn slot_click(&mut self, pos: [f64; 2], view: &View) {
+        match self.gesture.clone() {
+            Gesture::FirstClick(c1) => {
+                let c2 = self.snap(pos, Some(c1.pos), None, view);
+                if dist(c1.pos, c2.pos) <= view.mm(2.0) {
+                    self.fail(
+                        "The slot centres coincide: click the second centre elsewhere.".into(),
+                    );
+                    return;
+                }
+                self.gesture = Gesture::SlotWidth { c1, c2 };
+            }
+            Gesture::SlotWidth { c1, c2 } => {
+                let w = 2.0 * line_distance(pos, c1.pos, c2.pos);
+                if w <= view.mm(2.0) {
+                    self.fail("Slot width is zero: click beside the centre line.".into());
+                    return;
+                }
+                self.gesture = Gesture::Idle;
+                let pid = |s: &Snap| match s.kind {
+                    SnapKind::Point(p) => Some(p),
+                    _ => None,
+                };
+                let mut names = (String::new(), String::new());
+                let ok = self.try_change(true, |sk| {
+                    let ids = [
+                        pid(&c1).filter(|p| sk.point(*p).is_some()),
+                        pid(&c2).filter(|p| sk.point(*p).is_some()),
+                    ];
+                    let r = sk
+                        .add_slot(c1.pos, c2.pos, w, ids)
+                        .map_err(|e| format!("Slot refused: {e}"))?;
+                    names = r.dimensions;
+                    Ok(())
+                });
+                if ok {
+                    self.info(format!(
+                        "Slot added: {} = {} mm, {} = {} mm (editable dimensions).",
+                        names.0,
+                        rcad_sketch::fmt_mm(dist(c1.pos, c2.pos)),
+                        names.1,
+                        rcad_sketch::fmt_mm(w)
+                    ));
+                }
+            }
+            _ => self.gesture = Gesture::FirstClick(self.snap(pos, None, None, view)),
+        }
+    }
+
+    fn make_polygon(&mut self, center: Snap, vertex: Snap, view: &View) {
+        if dist(center.pos, vertex.pos) <= view.mm(2.0) {
+            self.fail("Polygon size is zero: click the vertex away from the centre.".into());
+            return;
+        }
+        let (n, fit) = (self.polygon_sides, self.polygon_fit);
+        let mut name = String::new();
+        let ok = self.try_change(true, |sk| {
+            let c = match center.kind {
+                SnapKind::Point(id) if sk.point(id).is_some() => Some(id),
+                _ => None,
+            };
+            let r = sk
+                .add_regular_polygon(center.pos, vertex.pos, n, fit, c)
+                .map_err(|e| format!("Polygon refused: {e}"))?;
+            name = r.dimension;
+            Ok(())
+        });
+        if ok {
+            self.info(format!(
+                "{n}-sided polygon added ({}); dimension '{name}'.",
+                match fit {
+                    rcad_sketch::PolygonFit::Inscribed => "across corners",
+                    rcad_sketch::PolygonFit::Circumscribed => "across flats",
+                }
+            ));
+        }
+    }
+
+    /// Preview outline (sketch mm) of the slot or polygon being placed.
+    pub fn shape_preview(&self) -> Option<Vec<[f64; 2]>> {
+        let cur = self.cursor?.pos;
+        match (&self.gesture, self.tool) {
+            (Gesture::FirstClick(c), SketchTool::Polygon) => {
+                let mut s = Sketch::default();
+                let r = s
+                    .add_regular_polygon(c.pos, cur, self.polygon_sides, self.polygon_fit, None)
+                    .ok()?;
+                let mut v: Vec<[f64; 2]> =
+                    r.vertices.iter().filter_map(|p| s.point_xy(*p)).collect();
+                v.push(*v.first()?);
+                Some(v)
+            }
+            (Gesture::SlotWidth { c1, c2 }, SketchTool::Slot) => {
+                let r = line_distance(cur, c1.pos, c2.pos);
+                let (a, b) = (c1.pos, c2.pos);
+                let l = dist(a, b);
+                if l <= 0.0 || r <= 0.0 {
+                    return None;
+                }
+                let u = [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+                let th = u[1].atan2(u[0]);
+                let mut v = Vec::new();
+                for (c, t0) in [
+                    (b, th - std::f64::consts::FRAC_PI_2),
+                    (a, th + std::f64::consts::FRAC_PI_2),
+                ] {
+                    for i in 0..=24 {
+                        let t = t0 + std::f64::consts::PI * i as f64 / 24.0;
+                        v.push([c[0] + r * t.cos(), c[1] + r * t.sin()]);
+                    }
+                }
+                v.push(v[0]);
+                Some(v)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Distance from `p` to the infinite line through `a` and `b`.
+fn line_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let l = dist(a, b);
+    if l <= 0.0 {
+        return dist(p, a);
+    }
+    ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])).abs() / l
 }
 
 #[cfg(test)]

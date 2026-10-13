@@ -871,6 +871,14 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
             | SketchTool::Offset
             | SketchTool::Fillet
             | SketchTool::Text => {}
+            SketchTool::Slot | SketchTool::Polygon => {
+                if let Some(v) = ed.shape_preview() {
+                    let pts: Vec<Pos2> = v.iter().filter_map(|p| pr.screen(*p)).collect();
+                    dashed(pts);
+                } else {
+                    dashed(vec![sf, sc]);
+                }
+            }
         }
     }
 }

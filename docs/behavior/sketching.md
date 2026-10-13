@@ -173,6 +173,26 @@ is a closed loop of the sketch and takes part in region extraction like any othe
   `crates/rcad-commands/tests/sketch_text.rs` (need the installed font Liberation Sans;
   `RCAD_SKIP_FONT_TESTS=1` skips them explicitly).
 
+## Slot and regular polygon (Slot / Polygon tools) — run 6
+
+Both tools add ordinary lines/arcs with constraints, so the result stays editable like drawn
+geometry (`crates/rcad-sketch/src/shapes.rs`).
+
+* **Slot** (centre to centre): click the first arc centre, the second, then a point beside the
+  centre line (its distance is half the width). Adds a bottom line, an end arc, a top line and an
+  end arc joined by four `Tangent` constraints and `EqualRadius`, with dimensions `slot_length`
+  (aligned distance between the arc centres, L) and `slot_width` (between the two tangent points
+  at the first end, W). Clicking an existing point reuses it as a centre. 3 DOF remain (position
+  and direction). Profile area L·W + π(W/2)² (tests: `shapes.rs` unit tests,
+  `crates/rcad/tests/sketch_shapes_ui.rs` extrudes it to that area × depth).
+* **Regular polygon:** set *Sides* (3–64) and *Across flats* in the toolbar, click the centre,
+  then a vertex (inscribed: diameter across corners `polygon_d`) or an edge midpoint
+  (circumscribed: diameter across flats `polygon_flats`). N lines with vertices on a
+  construction circle (`PointOnCircle`) and N−1 `EqualLength`; circumscribed adds an inner
+  construction circle carrying the dimension and the first edge's midpoint on it. 3 DOF remain
+  (centre and rotation). Areas (N/2)R² sin(2π/N) and N a² tan(π/N) are checked in the tests.
+* Center rectangle already existed (Center Rect tool, run 2).
+
 ## Offset (Offset tool, `O`) — run 4
 
 Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from
