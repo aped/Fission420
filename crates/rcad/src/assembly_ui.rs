@@ -121,6 +121,9 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// Instance path of the last viewport face pick (a new pick selects its
+    /// tree row).
+    pub last_pick: Option<String>,
     /// External component insertion: path, linked.
     pub external_path: String,
     pub external_linked: bool,
@@ -256,6 +259,14 @@ impl RcadApp {
     pub(crate) fn components_browser(&mut self, ui: &mut egui::Ui) {
         let asm = self.summary.assembly.clone();
         let mut send: Vec<Command> = Vec::new();
+        // A face picked on a placed copy selects that instance's tree row.
+        let pick = self.picked_face_instance().and_then(|(_, p)| p);
+        if pick != self.assembly_ui.last_pick {
+            self.assembly_ui.last_pick = pick.clone();
+            if pick.is_some() {
+                self.assembly_ui.selected = pick;
+            }
+        }
         let before_hl = self.assembly_ui.highlight_paths(&self.summary);
         ui.separator();
         ui.label(RichText::new(format!("Assembly ({} components)", asm.components.len())).strong())
