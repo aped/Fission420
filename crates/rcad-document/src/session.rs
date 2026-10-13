@@ -79,6 +79,9 @@ impl Model {
     /// file could not be opened to repair it). The next edit re-derives every
     /// bound value, so it is refused until the named parameter is fixed.
     pub fn from_document_reporting(mut doc: Document) -> Result<(Self, Option<DocError>)> {
+        // Run 7 (review #6): ids of deleted occurrences that an older build
+        // left in configurations are dropped on load (reported below).
+        let pruned = doc.prune_configuration_occurrences();
         let stored = doc.clone();
         let warning = match crate::params::apply_expressions(&mut doc) {
             Ok(()) => None,
@@ -87,6 +90,13 @@ impl Model {
                 Some(e)
             }
         };
+        let warning = warning.or_else(|| {
+            (pruned > 0).then(|| {
+                DocError::Validation(format!(
+                    "removed {pruned} reference(s) to deleted occurrences from configurations"
+                ))
+            })
+        });
         let mut cache = RegenCache::default();
         let eval = regenerate_cached(&doc, Some(&mut cache))?;
         Ok((

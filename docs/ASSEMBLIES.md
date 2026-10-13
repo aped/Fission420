@@ -47,7 +47,15 @@ document without them still saves as v6 (frozen fixtures in
 * **Active component** (`activate_component`): bodies created while a component is active
   join its definition (`Document::add_body`), so every occurrence shows them. Features stay in
   the single document history (the definition is "the history of those bodies"). Display: the
-  instances outside the active component and loose bodies are drawn dimmed.
+  instances outside the active component and loose bodies are drawn dimmed. Display and derived
+  bodies are not auto-joined: `Document::add_body_unowned` (display bodies such as flat
+  patterns) never joins; `Document::add_derived_body(name, source)` (stitch/fill/thicken/repair
+  results) takes the source's place in the source's component, or stays loose. *As of this run
+  the sheet-metal/surface commands still call `add_body` (owners: sheet/surface work) — until
+  they switch, their outputs join the active component.*
+* **Deleting** an occurrence or component also removes it from every configuration's excluded
+  occurrences; ids that an older build left behind are dropped (and reported) on open. Deleting
+  the feature that creates a component body removes the body from the definition.
 * **Grounding**: a grounded occurrence cannot be moved, aligned or driven by a joint.
 * **External components** (`insert_external_component {path, linked}`): another native
   document is loaded and regenerated; its visible solids (placed instances named by path, plus
@@ -80,7 +88,7 @@ the joint solver, not a simulation).
 | cylindrical | 2 | angle (°), distance (mm) | translate along axis ∘ rotate about it |
 | pin_slot | 2 | angle (°), slot distance (mm) | translate along `u` ∘ rotate about the pin axis |
 | planar | 3 | u (mm), w (mm), angle (°) | translate in the plane (normal = axis) ∘ rotate about the normal |
-| ball | 3 | angles about axis, u, w (°) | R(axis) ∘ R(u) ∘ R(w), all through origin, axes fixed in the parent |
+| ball | 3 | angles about axis, u, w (°) | R(axis, v1) ∘ R(u, v2) ∘ R(w, v3) through origin with axis/u/w the parent's fixed axes: the child turns first about w, then u, then axis (fixed axes) — equivalently about axis, then the moved u, then the moved w; gimbal lock at v2 = ±90° |
 
 `u` = `dir2` projected perpendicular to the axis (default: a fixed perpendicular), `w = axis ×
 u`. Each value has its own optional limits. **Enforcement**: a commanded value (or a limit

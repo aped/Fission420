@@ -138,6 +138,18 @@ pub struct AssemblyUi {
 impl AssemblyUi {
     /// Engine hook in `handle_reply`.
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
+        // Review run 7 #30: the joint dialog closes only when its joint was
+        // made; a refusal keeps every input.
+        if response.command == "add_joint"
+            && let Some(d) = &mut self.joint_dialog
+            && d.pending
+        {
+            if response.ok {
+                self.joint_dialog = None;
+            } else {
+                d.pending = false;
+            }
+        }
         let Some(a) = &response.assembly else {
             return;
         };
@@ -603,8 +615,9 @@ impl RcadApp {
                     && o.driven_by.is_none()
                     && ui.small_button("Move…").named(&l).probe(&l).clicked()
                 {
-                    let z = o.axis[2] >= 0.0;
-                    let ang = if z { o.angle_deg } else { -o.angle_deg };
+                    // Review run 7: keep the stored rotation axis (an aligned or
+                    // joint-released occurrence may turn about any axis).
+                    let ang = o.angle_deg;
                     self.assembly_ui.edit = Some((
                         o.id,
                         [
@@ -700,13 +713,19 @@ impl RcadApp {
                 && *id == o.id
             {
                 ui.horizontal(|ui| {
-                    for (i, l) in ["X (mm)", "Y (mm)", "Z (mm)", "Rotation Z (°)"]
+                    for (i, l) in ["X (mm)", "Y (mm)", "Z (mm)", "Rotation (°)"]
                         .iter()
                         .enumerate()
                     {
                         crate::panels::num_field(ui, l, &mut buf[i]);
                     }
                 });
+                ui.small(format!(
+                    "rotation about the axis ({}, {}, {}) through the owner's origin",
+                    fmt(o.axis[0]),
+                    fmt(o.axis[1]),
+                    fmt(o.axis[2])
+                ));
                 let vals: Vec<Option<f64>> = buf.iter().map(|t| parse(t)).collect();
                 ui.horizontal(|ui| {
                     if let [Some(x), Some(y), Some(z), Some(a)] = vals[..] {
@@ -718,7 +737,7 @@ impl RcadApp {
                             send.push(Command::SetOccurrenceTransform {
                                 occurrence: o.id,
                                 translate: [x, y, z],
-                                axis: Some([0.0, 0.0, 1.0]),
+                                axis: Some(o.axis),
                                 angle_deg: a,
                             });
                         }
@@ -750,7 +769,7 @@ impl RcadApp {
                                 send.push(Command::SetOccurrenceTransform {
                                     occurrence: o.id,
                                     translate: t,
-                                    axis: Some([0.0, 0.0, 1.0]),
+                                    axis: Some(o.axis),
                                     angle_deg: ang,
                                 });
                             }

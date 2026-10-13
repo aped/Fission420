@@ -423,3 +423,51 @@ fn part_number_delete_component_and_joint_axis() {
     assert_eq!(h.state().summary().assembly.joints[0].axis, [1.0, 0.0, 0.0]);
     assert_eq!(world(&h), before, "nothing moves");
 }
+
+/// Review run 7: a nudge keeps a non-Z rotation axis; the joint dialog stays
+/// open (inputs kept) when the engine refuses the joint, and closes on success.
+#[test]
+fn nudge_keeps_axis_and_dialog_survives_refusal() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let a = block(&mut h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let b = block(&mut h, 2.0, 2.0, 2.0, [20.0, 0.0]);
+    component(&mut h, "A", a);
+    component(&mut h, "B", b);
+    send(
+        &mut h,
+        Command::SetOccurrenceTransform {
+            occurrence: OccurrenceId(2),
+            translate: [0.0, 0.0, 0.0],
+            axis: Some([1.0, 0.0, 0.0]),
+            angle_deg: 90.0,
+        },
+    );
+    click(&mut h, "Occurrence B#1");
+    click(&mut h, "Move B#1");
+    click(&mut h, "+X");
+    let o = h.state().summary().assembly.occurrences[1].clone();
+    assert_eq!(o.translate, [5.0, 0.0, 0.0]);
+    assert_eq!(o.axis, [1.0, 0.0, 0.0]);
+    assert!((o.angle_deg - 90.0).abs() < 1e-12);
+    // Joint dialog: initial value outside its own limits → refused, kept open.
+    click(&mut h, "Occurrence A#1");
+    click(&mut h, "Joint from A#1");
+    h.get_by_label("Joint child").click();
+    settle(&mut h);
+    h.get_by_label("B#1").click();
+    settle(&mut h);
+    type_into(&mut h, "Initial value", "50");
+    type_into(&mut h, "Upper limit", "40");
+    click(&mut h, "Create joint");
+    assert!(h.state().summary().assembly.joints.is_empty());
+    assert!(h.state().diagnostics().last().unwrap().error);
+    h.get_by_label("Create joint");
+    type_into(&mut h, "Initial value", "30");
+    click(&mut h, "Create joint");
+    assert_eq!(h.state().summary().assembly.joints.len(), 1);
+    assert!(
+        h.query_by_label("Create joint").is_none(),
+        "closed on success"
+    );
+}

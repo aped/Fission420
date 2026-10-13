@@ -2016,8 +2016,56 @@ impl Document {
         self.check_suppression()
     }
 
+    /// Drop configuration exclusions of occurrences that no longer exist;
+    /// returns how many were removed (run 7, review #6).
+    pub fn prune_configuration_occurrences(&mut self) -> usize {
+        let live: std::collections::BTreeSet<_> =
+            self.assembly.occurrences.iter().map(|o| o.id).collect();
+        let mut n = 0;
+        for c in &mut self.configurations {
+            let before = c.excluded_occurrences.len();
+            c.excluded_occurrences.retain(|o| live.contains(o));
+            n += before - c.excluded_occurrences.len();
+        }
+        n
+    }
+
+    /// Register a body that never joins the active component: display or
+    /// derived bodies (flat patterns, repaired/stitched/thickened results)
+    /// whose source decides their component (run 7, review #16).
+    pub fn add_body_unowned(&mut self, name: impl Into<String>) -> BodyId {
+        let active = self.assembly.active.take();
+        let id = self.add_body(name);
+        self.assembly.active = active;
+        id
+    }
+
+    /// Register a body derived from `source` (stitched, filled, thickened,
+    /// repaired; run 7, review #16): when `source` belongs to a component the
+    /// new body takes its place in that definition (the source leaves it, so a
+    /// hidden source is not exported or checked twice); otherwise the new body
+    /// is unowned. The active component is not consulted.
+    pub fn add_derived_body(&mut self, name: impl Into<String>, source: BodyId) -> BodyId {
+        let id = self.add_body_unowned(name);
+        if let Some(c) = self
+            .assembly
+            .components
+            .iter_mut()
+            .find(|c| c.bodies.contains(&source))
+        {
+            for b in &mut c.bodies {
+                if *b == source {
+                    *b = id;
+                }
+            }
+        }
+        id
+    }
+
     /// Allocate a body id and register its metadata (`name` must be unique;
-    /// see [`Document::default_body_name`]).
+    /// see [`Document::default_body_name`]). While a component is active
+    /// (run 7) the new body joins its definition; display/derived bodies use
+    /// [`Document::add_body_unowned`].
     pub fn add_body(&mut self, name: impl Into<String>) -> BodyId {
         let id = BodyId(self.next_body_id.clamp(1, u32::MAX - 1));
         self.next_body_id = id.0.saturating_add(1);
@@ -2353,6 +2401,11 @@ impl Document {
             .flat_map(Feature::created_bodies)
             .collect();
         self.bodies.retain(|b| made.contains(&b.id));
+        // Run 7: component definitions drop the removed bodies too (a
+        // component may become empty; its occurrences stay).
+        for c in &mut self.assembly.components {
+            c.bodies.retain(|b| made.contains(b));
+        }
     }
 
     pub fn feature(&self, id: FeatureId) -> Result<&Feature> {

@@ -959,3 +959,113 @@ fn joint_axis_redefinition_keeps_the_pose() {
     assert_eq!(s.summary().assembly.joints[0].axis, [0.0, 0.0, 1.0]);
     assert!(near3(p(&s), [0.0, 20.0, 0.0], 1e-12));
 }
+
+/// Review run 7 fixes: configuration exclusions of deleted occurrences, an
+/// interference request naming an occurrence without instances, an empty
+/// nested sub-assembly in the hierarchical export, alignment to a joint
+/// descendant, surplus joint values, and add_derived_body semantics.
+#[test]
+fn review_fixes_for_assemblies() {
+    let mut f = fixture();
+    let s = &mut f.s;
+    // #6: a configuration excluding Module#2; deleting it drops the id.
+    ok(
+        s,
+        json!({"cmd": "set_configuration", "name": "A", "excluded_occurrences": [f.o_mod2]}),
+    );
+    ok(
+        s,
+        json!({"cmd": "delete_occurrence", "occurrence": f.o_mod2}),
+    );
+    let cfg = &s.model().unwrap().document().configurations[0];
+    assert!(cfg.excluded_occurrences.is_empty());
+    // The configuration can still be edited afterwards.
+    ok(
+        s,
+        json!({"cmd": "set_configuration", "name": "A", "part_number": "X"}),
+    );
+    ok(s, json!({"cmd": "undo"}));
+    ok(s, json!({"cmd": "undo"}));
+    // A saved file with a dangling exclusion (an older build) opens; the id is
+    // dropped and reported.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dangling.rcad.json");
+    ok(s, json!({"cmd": "save", "path": path}));
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    v["document"]["configurations"][0]["excluded_occurrences"] = json!([f.o_mod2, 999]);
+    std::fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+    let mut t = Session::new();
+    let r = ok(&mut t, json!({"cmd": "open", "path": path}));
+    let _ = r;
+    let ex = &t.model().unwrap().document().configurations[0].excluded_occurrences;
+    assert_eq!(ex.len(), 1, "{ex:?}");
+    // #22: an occurrence without any evaluated instance is an error.
+    ok(
+        s,
+        json!({"cmd": "set_occurrence_suppressed", "occurrence": f.o_mod2, "suppressed": true}),
+    );
+    let e = refused(s, json!({"cmd": "interference", "occurrences": [f.o_mod2]}));
+    assert!(e.contains("no evaluated instance"), "{e}");
+    ok(s, json!({"cmd": "undo"}));
+    // #21: an empty sub-assembly inside an empty sub-assembly is left out of
+    // the hierarchical export instead of refusing it.
+    let e1 = out(ok(s, json!({"cmd": "create_component", "name": "Empty1"})))
+        .component
+        .unwrap()
+        .0;
+    let e2 = out(ok(s, json!({"cmd": "create_component", "name": "Empty2"})))
+        .component
+        .unwrap()
+        .0;
+    ok(
+        s,
+        json!({"cmd": "add_occurrence", "component": e2, "owner": e1}),
+    );
+    let r = ok(
+        s,
+        json!({"cmd": "export_assembly", "path": dir.path().join("t.step"), "format": "step_assembly"}),
+    );
+    let msg = r.message.unwrap();
+    assert!(msg.contains("empty occurrences left out"), "{msg}");
+    // Surplus extra values are refused (cylindrical has 2 values).
+    let e = refused(
+        s,
+        json!({"cmd": "add_joint", "kind": "cylindrical", "parent": f.o_mod1, "child": f.o_mod2,
+               "extra": [{}, {}]}),
+    );
+    assert!(e.contains("at most 1 extra"), "{e}");
+}
+
+#[test]
+fn align_to_a_joint_descendant_is_refused() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let (a, _) = block(&mut s, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let (b, _) = block(&mut s, 4.0, 4.0, 2.0, [50.0, 0.0]);
+    let oa = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "A", "bodies": [a]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let ob = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "B", "bodies": [b]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "slider", "parent": oa, "child": ob, "axis": [1.0, 0.0, 0.0]}),
+    );
+    let top = face_with_normal(&mut s, a, [0.0, 0.0, 1.0]);
+    let bottom = face_with_normal(&mut s, b, [0.0, 0.0, -1.0]);
+    let e = refused(
+        &mut s,
+        json!({"cmd": "align_occurrence", "occurrence": oa, "from": {"body": a, "face": top},
+               "target": ob, "to": {"body": b, "face": bottom}}),
+    );
+    assert!(e.contains("would move with it"), "{e}");
+}

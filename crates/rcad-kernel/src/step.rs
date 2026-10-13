@@ -803,7 +803,7 @@ pub fn export_step_assembly(
                 let idt = push(
                     format!(
                         "ITEM_DEFINED_TRANSFORMATION('','', #{}, #{});",
-                        ident[i], usage_axes[i][k]
+                        ident[*c], usage_axes[i][k]
                     ),
                     &mut stmts,
                 );

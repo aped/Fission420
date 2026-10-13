@@ -201,3 +201,48 @@ fn embedded_external_component_and_bad_sources() {
         json!({"cmd": "insert_external_component", "path": junk}),
     );
 }
+
+/// Review run 7 #24: an update whose solids changed names/order is refused
+/// (bodies would silently swap geometry).
+#[test]
+fn reordered_source_solids_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("pair.rcad.json");
+    source(&src, 5.0, true);
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let c = out(ok(
+        &mut s,
+        json!({"cmd": "insert_external_component", "path": src, "linked": true}),
+    ))
+    .component
+    .unwrap();
+    // Swap the two body names in the source.
+    let mut t = Session::new();
+    ok(&mut t, json!({"cmd": "open", "path": src}));
+    let b = t.summary().bodies.clone();
+    ok(
+        &mut t,
+        json!({"cmd": "rename_body", "body": b[0].id, "name": "tmp"}),
+    );
+    ok(
+        &mut t,
+        json!({"cmd": "rename_body", "body": b[1].id, "name": b[0].name}),
+    );
+    ok(
+        &mut t,
+        json!({"cmd": "rename_body", "body": b[0].id, "name": b[1].name}),
+    );
+    ok(&mut t, json!({"cmd": "save", "path": src}));
+    let e = refused(
+        &mut s,
+        json!({"cmd": "update_external_component", "component": c}),
+    );
+    assert!(e.contains("changed names or order"), "{e}");
+    // A FIFO / directory as the source is diagnosed, not read forever.
+    let e = refused(
+        &mut s,
+        json!({"cmd": "insert_external_component", "path": dir.path()}),
+    );
+    assert!(e.contains("not a regular file"), "{e}");
+}
