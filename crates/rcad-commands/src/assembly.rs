@@ -1250,6 +1250,10 @@ fn placed(m: &Model, i: usize) -> Result<Vec<Body>, DocError> {
     Ok(out)
 }
 
+/// Contact tolerance (mm) of the interference check: bounding boxes whose
+/// common extent on some axis is at most this are touching, not overlapping.
+pub const CONTACT_TOLERANCE: f64 = 1e-6;
+
 /// Samples per axis of the interference membership fallback.
 const INTERFERENCE_GRID: usize = 10;
 
@@ -1258,7 +1262,9 @@ fn pair_status(a: &Body, b: &Body) -> Result<InterferenceStatus, DocError> {
         k::bounds(a).map_err(|e| v(e.to_string()))?,
         k::bounds(b).map_err(|e| v(e.to_string()))?,
     );
-    if (0..3).any(|i| ba.max[i] < bb.min[i] || bb.max[i] < ba.min[i]) {
+    // Disjoint boxes, or boxes that only touch (common extent within the
+    // contact tolerance on some axis): no volumetric overlap is possible.
+    if (0..3).any(|i| ba.max[i].min(bb.max[i]) - ba.min[i].max(bb.min[i]) <= CONTACT_TOLERANCE) {
         return Ok(InterferenceStatus::Clear);
     }
     match k::boolean(a, b, k::CombineOp::Intersect) {

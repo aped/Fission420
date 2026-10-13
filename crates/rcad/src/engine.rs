@@ -85,6 +85,11 @@ pub struct DisplayBody {
     pub groups: std::ops::Range<u32>,
     /// Viewport tint palette index (see `Viewport::set_group_tints`).
     pub tint: u8,
+    /// Run 7: the assembly instance path ("O3/O7") this copy displays, if the
+    /// body belongs to a component.
+    pub instance: Option<String>,
+    /// Run 7: outside the active component (drawn dimmed).
+    pub inactive: bool,
 }
 
 /// Combined display tessellation of every visible body. Group ids are offset
@@ -290,7 +295,7 @@ pub fn display_scene_with(
         };
         // Component bodies are drawn once per occurrence, placed (run 6,
         // docs/ASSEMBLIES.md); other bodies once, in place.
-        for tm in crate::assembly_ui::placed_meshes(ev, b.id, tm) {
+        for (tm, instance, inactive) in crate::assembly_ui::placed_meshes(ev, b.id, tm) {
             let rm = to_render_mesh(&tm);
             let groups = if mesh_body {
                 1
@@ -325,6 +330,8 @@ pub fn display_scene_with(
                 } else {
                     (i % 6) as u8 + 1
                 },
+                instance,
+                inactive,
             });
             next_group = end;
         }
