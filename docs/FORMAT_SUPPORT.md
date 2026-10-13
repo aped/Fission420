@@ -46,6 +46,12 @@ B-rep reconstruction, recovered feature history from STEP.
 | DXF import | | | new sketch on a chosen plane or planar face, no constraints except the origin |
 | DXF export | | | a sketch's lines/arcs/circles in its local 2D coordinates |
 
+STEP header: truck-stepio 0.3 writes `FILE_NAME` author/organization as nested lists
+(`((''))`), which OpenCascade reports as "StepReaderData: Unresolved Reference: Fails Count: 2"
+(FreeCAD 1.1.4; the solids still load). Since run 6 the exporter writes the
+ISO 10303-21 `LIST OF STRING` form `('')`; the shipped `examples/print/*.step` headers were
+corrected the same way (geometry unchanged).
+
 Imported B-rep bodies take part in exact operations (sketch on their planar faces, Extrude
 New/Join/Cut with them as target, export). Mesh bodies render, can be renamed, hidden, saved
 and exported as meshes; every exact operation on them is refused with an explanation.

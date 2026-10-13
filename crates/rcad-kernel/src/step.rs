@@ -21,7 +21,7 @@ pub fn export_step(body: &Body, organization_system: &str) -> Result<String> {
             out::CompleteStepDisplay::new(out::StepModel::from(&cs), header(organization_system))
                 .to_string();
         check_unique_ids(&text)?;
-        Ok(round_reals(&text))
+        Ok(round_reals(&fix_file_name(&text)))
     })?
 }
 
@@ -64,7 +64,7 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
         let text = out::CompleteStepDisplay::new(models, header(organization_system)).to_string();
         check_unique_ids(&text)?;
         let names: Vec<&str> = bodies.iter().map(|(n, _)| *n).collect();
-        label_solids(&round_reals(&text), &names)
+        label_solids(&round_reals(&fix_file_name(&text)), &names)
     })?
 }
 
@@ -105,6 +105,20 @@ fn header(organization_system: &str) -> out::StepHeaderDescriptor {
         time_stamp: iso8601_utc(secs),
         ..Default::default()
     }
+}
+
+/// truck-stepio 0.3 writes the `FILE_NAME` author and organization as nested
+/// lists (`((''))`); ISO 10303-21 declares both `LIST OF STRING`, so they are
+/// `('')`. OCCT (FreeCAD 1.1.4) reports the nested form as "StepReaderData:
+/// Unresolved Reference: Fails Count: 2". Only the header line is rewritten;
+/// a header that already has flat lists is left unchanged.
+fn fix_file_name(text: &str) -> String {
+    let Some(start) = text.find("FILE_NAME(") else {
+        return text.to_string();
+    };
+    let end = text[start..].find(";\n").map_or(text.len(), |e| start + e);
+    let line = text[start..end].replace("(('')), (('')), 'truck'", "(''), (''), 'truck'");
+    format!("{}{}{}", &text[..start], line, &text[end..])
 }
 
 /// `secs` since the Unix epoch as `YYYY-MM-DDTHH:MM:SS` (UTC; proleptic
@@ -412,6 +426,19 @@ mod tests {
             "{r}"
         );
         assert!(r.contains("FILE_NAME('a 1.25', '')"));
+    }
+
+    #[test]
+    fn file_name_lists_are_flat() {
+        let t = "HEADER;\nFILE_NAME('', 'T', (('')), (('')), 'truck', 'R-CAD', '');\nENDSEC;\nDATA;\n#1 = X((('')));\n";
+        let r = fix_file_name(t);
+        assert!(
+            r.contains("FILE_NAME('', 'T', (''), (''), 'truck', 'R-CAD', '');"),
+            "{r}"
+        );
+        assert!(r.ends_with("#1 = X((('')));\n"), "data untouched: {r}");
+        assert_eq!(fix_file_name(&r), r);
+        assert_eq!(fix_file_name("DATA;\n"), "DATA;\n");
     }
 
     #[test]
