@@ -1172,3 +1172,39 @@ fn joint_snaps_the_child_axis_onto_the_parent_axis() {
     let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
     assert!(near3(p, [52.0, 30.0, 1.0], 1e-12));
 }
+
+/// BOM CSV export (flattened and structured), RFC 4180 quoting.
+#[test]
+fn bom_csv_export() {
+    let mut f = fixture();
+    let s = &mut f.s;
+    ok(
+        s,
+        json!({"cmd": "set_part_number", "component": f.bolt, "part_number": "BT-1, \"M3\""}),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let (p1, p2) = (dir.path().join("flat.csv"), dir.path().join("tree.csv"));
+    ok(s, json!({"cmd": "export_bom", "path": p1}));
+    ok(
+        s,
+        json!({"cmd": "export_bom", "path": p2, "structured": true}),
+    );
+    let flat = std::fs::read_to_string(&p1).unwrap();
+    let tree = std::fs::read_to_string(&p2).unwrap();
+    let fl: Vec<&str> = flat.lines().collect();
+    assert_eq!(fl[0], "item,name,part_number,quantity,material,occurrences");
+    assert!(fl[1].starts_with("1,Plate,PL-1,2,"), "{}", fl[1]);
+    assert!(
+        fl[2].starts_with("2,Bolt,\"BT-1, \"\"M3\"\"\",4,"),
+        "{}",
+        fl[2]
+    );
+    let tl: Vec<&str> = tree.lines().collect();
+    assert_eq!(
+        tl[0],
+        "item,level,name,part_number,quantity,assembly,material"
+    );
+    assert_eq!(tl[1], "1,0,Module,MOD-1,2,true,—");
+    assert!(tl[3].starts_with("1.2,1,Bolt,"), "{}", tl[3]);
+    assert_eq!(tl.len(), 4);
+}

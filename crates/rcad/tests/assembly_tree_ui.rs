@@ -547,3 +547,34 @@ fn import_step_assembly_from_the_browser() {
             .any(|i| i.path_name.ends_with("/BoxB"))
     );
 }
+
+/// Assembly mass (missing material reported) and BOM CSV export from the
+/// browser.
+#[test]
+fn assembly_mass_and_bom_csv() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness();
+    click(&mut h, "New");
+    let b = block(&mut h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    component(&mut h, "Cube", b);
+    click(&mut h, "Assembly mass");
+    h.get_by_label_contains("No assembly total");
+    send(
+        &mut h,
+        Command::SetBodyMaterial {
+            body: b,
+            material: None,
+            density: Some(2.0),
+            density_unit: rcad_document::DensityUnit::GPerCm3,
+            name: None,
+        },
+    );
+    click(&mut h, "Assembly mass");
+    // 1000 mm³ at 2 g/cm³ = 2 g, centre (0, 0, 5).
+    h.get_by_label_contains("Assembly: 2 g, 1000 mm³, centre of mass (0, 0, 5) mm");
+    let p = dir.path().join("bom.csv");
+    type_into(&mut h, "BOM CSV path", p.to_str().unwrap());
+    click(&mut h, "Export BOM CSV");
+    let t = std::fs::read_to_string(&p).unwrap();
+    assert!(t.lines().nth(1).unwrap().starts_with("1,Cube,,1,"), "{t}");
+}

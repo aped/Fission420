@@ -123,6 +123,8 @@ constraint analysis.
   sub-assembly row's definition) one row per component used there, in first-use order, with
   the quantity per one parent (`1`, `1.1`, `1.2`, …); loose bodies at level 0.
 
+CSV export: `export_bom {path, structured}`.
+
 ## Mass properties
 
 Loose visible bodies plus every instance (each counts its evaluated definition bodies placed

@@ -901,6 +901,20 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             r.message = Some(update_external(m, *component)?);
             out.component = Some(*component);
         }
+        Command::ExportBom { path, structured } => {
+            let text = bom_csv(m, *structured)?;
+            rcad_document::write_atomic(path, text.as_bytes())?;
+            r.message = Some(format!(
+                "{} BOM written to {} ({} rows)",
+                if *structured {
+                    "structured"
+                } else {
+                    "flattened"
+                },
+                path.display(),
+                text.lines().count().saturating_sub(1)
+            ));
+        }
         Command::JointSweep {
             joint,
             index,
@@ -1904,6 +1918,51 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
             assembly: false,
             material: material_names(m, &[b.id]),
         });
+    }
+    Ok(out)
+}
+
+/// One CSV field (RFC 4180 quoting).
+fn csv(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// The BOM as CSV text: flattened (`item,name,part_number,quantity,material,
+/// occurrences`) or structured (`item,level,name,part_number,quantity,
+/// assembly,material`).
+pub fn bom_csv(m: &Model, structured: bool) -> Result<String, DocError> {
+    let mut out = String::new();
+    if structured {
+        out.push_str("item,level,name,part_number,quantity,assembly,material\n");
+        for r in structured_bom(m)? {
+            out.push_str(&format!(
+                "{},{},{},{},{},{},{}\n",
+                csv(&r.item),
+                r.level,
+                csv(&r.name),
+                csv(&r.part_number),
+                r.quantity,
+                r.assembly,
+                csv(&r.material)
+            ));
+        }
+    } else {
+        out.push_str("item,name,part_number,quantity,material,occurrences\n");
+        for r in bom(m) {
+            out.push_str(&format!(
+                "{},{},{},{},{},{}\n",
+                r.item,
+                csv(&r.name),
+                csv(&r.part_number),
+                r.quantity,
+                csv(&r.material),
+                csv(&r.occurrences.join("; "))
+            ));
+        }
     }
     Ok(out)
 }
