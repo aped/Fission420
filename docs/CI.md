@@ -63,6 +63,15 @@ The only C code compiled is `lzma-sys`, pulled in by `truck-shapeops → truck-m
 needs a C compiler:
 
 - **Debian container:** `build-essential pkg-config liblzma-dev`. With these it links the system liblzma.
+
+Test-only runtime dependency: the sketch-text tests (`rcad-sketch/tests/text.rs`,
+`rcad-commands/tests/{sketch_text,text_emboss,rounded_enclosure}.rs`, `rcad/tests/sketch_text_ui.rs`)
+need the **Liberation Sans** font and fail, with that message, when it is missing
+(`RCAD_SKIP_FONT_TESTS=1` skips them explicitly). The Ubuntu image has it; the Debian container
+installs `fonts-liberation` (2.1.5); macOS and Windows fetch the upstream 2.1.5 TTF release,
+pinned by SHA-256, and point `RCAD_FONT_DIRS` at it. All are version 2.1.5, but the distro
+packages are rebuilt from source and differ in bytes from upstream (and from each other); the
+tests compare outlines with tolerances, so this does not matter.
 - **Ubuntu, macOS and Windows:** the runner images already have what it needs. MSVC builds the bundled source.
 
 Nothing else links natively at build time. Wayland, X11, xkbcommon, EGL and Vulkan are
@@ -135,6 +144,7 @@ expected; **C** = cosmetic.
 | L5 | R | Windows | `crates/rcad-document/src/io.rs:111-116` | Saving copies the target's permissions onto the temp file before the rename. On Windows a read-only target, or a target another process holds open, makes the rename fail. The previous file survives, so it is safe, but the save fails. | Do not copy the read-only bit on Windows; retry the rename briefly on `PermissionDenied`. Add a test for saving over a read-only file. |
 | L6 | T? | slow runners | `crates/rcad/tests/exchange_ui.rs:375` (20 s); `tests/measure_imports.rs:28` (30 s); `tests/frame_pacing.rs:94-104` | Wall-clock limits tuned on a 9800X3D. A shared CI runner may be several times slower. | Raise them to about 120 s. They guard against hangs, not performance. |
 | L7 | **T (confirmed, intermittent)** | macOS | `crates/rcad-commands/tests/export_determinism.rs:114` (`bracket_exports_and_saves_are_byte_identical`); `crates/rcad-document/src/io.rs:48-52` (cache rounding) | Seen in run 38346875644 after two green macOS runs. The two saves of the mounting bracket differ at byte 13523 of 13701, inside `"cache": {"volume": 20245.180555535}`. The bracket's volume is a `TessellationEstimate`. The likely cause, inferred and not yet reproduced locally, is that its floating-point sum follows Truck's pointer-derived face order. Rounding the cache to 1e-9 does not absorb a summation-order difference of that size, and macOS's randomised allocation changes the order between sessions where glibc's allocator happened not to. This is a real save-determinism defect, not a test bug. | Sum per-face contributions in a canonical face order (the same canonical ordering `step.rs` uses), or round estimate-method volumes in the cache to their error bound. Then run the test in a loop on macOS. Do not loosen the byte-identity assertion. **Fix exists on `work/run-5` (`bbd19c9`, cache volume rounded to 1e-6 mm³), pending port.** |
+| F4 | T | Debian container, macOS, Windows | `crates/rcad-sketch/src/font.rs:52-71` (`font_dirs`); the 17 tests listed under "Native build dependencies" | Seen on run 38437546623 (`work/run-6`): the Debian container has no fonts, so 17 sketch-text tests failed with "font family 'Liberation Sans' is not installed". macOS and Windows do not ship Liberation Sans either, and `font_dirs` searches only Linux directories. | **applied (CI):** `fonts-liberation` in the Debian container (and `tools/ci/container_check.sh`); a pinned upstream 2.1.5 download plus `RCAD_FONT_DIRS` on macOS and Windows. Local `tools/ci/container_check.sh debian:trixie` with the package: pass (131 test binaries, 0 failed; acceptance 855/855; examples unchanged). The macOS/Windows step was only simulated on Linux (download, checksum, extract). **Open (R):** the app finds no installed fonts on macOS or Windows; add `/Library/Fonts`, `/System/Library/Fonts`, `~/Library/Fonts` and `%WINDIR%\Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts` to `font_dirs`. |
 | C1 | C | Windows | `crates/rcad/src/main.rs:1` | The GUI binary opens a console window. | `#![cfg_attr(windows, windows_subsystem = "windows")]`, once a log location exists. |
 | C2 | C | non-Linux | `crates/rcad/Cargo.toml`, `crates/rcad-viewport/Cargo.toml` | eframe's `wayland`/`x11` features do nothing there. They build fine. | None. |
 | C3 | C | all | `tools/heavy.sh:7` (hard-coded `ROOT`); `tools/*freecad*`, `tools/print/slice_bambu.sh` (flatpak) | Local-only tooling. Neither tests nor CI use it. | None for CI. |

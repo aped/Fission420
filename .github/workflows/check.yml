@@ -42,11 +42,29 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         # C compiler for lzma-sys (truck-meshalgo -> vtkio -> xz2); nothing else is linked
-        # at build time (wayland/x11/xkbcommon are dlopen'ed at runtime).
+        # at build time (wayland/x11/xkbcommon are dlopen'ed at runtime). fonts-liberation:
+        # the sketch-text tests use Liberation Sans (2.1.5 in trixie, as on the dev machine).
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config liblzma-dev python3
+            ca-certificates curl git build-essential pkg-config liblzma-dev python3 \
+            fonts-liberation
+
+      - name: Test font (Liberation Sans 2.1.5)
+        if: runner.os != 'Linux'
+        # macOS and Windows do not ship Liberation Sans. Pinned upstream release (SIL OFL 1.1),
+        # byte-identical to Fedora's and Debian's 2.1.5; found through RCAD_FONT_DIRS.
+        run: |
+          url=https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz
+          sum=7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0
+          dir="$RUNNER_TEMP/test-fonts"
+          mkdir -p "$dir"
+          curl -sSLf --retry 3 -o "$dir/lf.tar.gz" "$url"
+          if command -v sha256sum >/dev/null; then got=$(sha256sum "$dir/lf.tar.gz"); else got=$(shasum -a 256 "$dir/lf.tar.gz"); fi
+          [ "${got%% *}" = "$sum" ] || { echo "::error::font archive checksum mismatch: ${got%% *}"; exit 1; }
+          # Relative archive name: GNU tar reads "D:\..." as a remote host.
+          (cd "$dir" && tar -xzf lf.tar.gz)
+          echo "RCAD_FONT_DIRS=$dir" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v7
 
