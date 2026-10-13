@@ -1,0 +1,167 @@
+{
+ "a1_nested_assembly_mm.step": {
+  "bbox": [
+   -10.0,
+   -3.0,
+   0.0,
+   3.0,
+   80.0,
+   25.0
+  ],
+  "solids": 2,
+  "valid": true,
+  "volume": 1706.858347,
+  "volumes": [
+   706.858347,
+   1000.0
+  ]
+ },
+ "a2_repeated_links_mm.step": {
+  "bbox": [
+   -2.5,
+   -2.5,
+   0.0,
+   42.5,
+   2.5,
+   16.0
+  ],
+  "solids": 3,
+  "valid": true,
+  "volume": 942.477796,
+  "volumes": [
+   314.159265,
+   314.159265,
+   314.159265
+  ]
+ },
+ "a3_rotated_parts_mm.step": {
+  "bbox": [
+   -8.0,
+   -34.142136,
+   0.0,
+   50.0,
+   30.0,
+   34.142136
+  ],
+  "solids": 2,
+  "valid": true,
+  "volume": 10941.50426,
+  "volumes": [
+   2412.743158,
+   8528.761102
+  ]
+ },
+ "m1_cylinder_binary.stl": {
+  "bbox": [
+   -10.0,
+   -9.996892,
+   0.0,
+   10.0,
+   9.996892,
+   20.0
+  ],
+  "facets": 500,
+  "solid": true,
+  "volume": 6280.568359
+ },
+ "m2_sphere_ascii.stl": {
+  "bbox": [
+   -8.0,
+   -8.0,
+   -8.0,
+   8.0,
+   8.0,
+   8.0
+  ],
+  "facets": 760,
+  "solid": true,
+  "volume": 2096.568604
+ },
+ "p1_bracket_holes_mm.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   60.0,
+   40.0,
+   10.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 22683.672678,
+  "volumes": [
+   22683.672678
+  ]
+ },
+ "p2_plate_inch.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   50.8,
+   38.1,
+   6.35
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 11485.899877,
+  "volumes": [
+   11485.899877
+  ]
+ },
+ "p3_curved_multi_mm.step": {
+  "bbox": [
+   -10.0,
+   -16.235883,
+   -10.0,
+   96.235883,
+   16.235883,
+   15.0
+  ],
+  "solids": 3,
+  "valid": true,
+  "volume": 8771.067025,
+  "volumes": [
+   2131.834551,
+   2450.44227,
+   4188.790205
+  ]
+ },
+ "p4_rotated_box_mm.step": {
+  "bbox": [
+   100.0,
+   46.464466,
+   14.393398,
+   132.865661,
+   70.669873,
+   40.731322
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 6000.0,
+  "volumes": [
+   6000.0
+  ]
+ },
+ "p5_stepped_shaft_mm.step": {
+  "bbox": [
+   -10.0,
+   -10.0,
+   0.0,
+   10.0,
+   10.0,
+   50.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 11686.724671,
+  "volumes": [
+   11686.724671
+  ]
+ },
+ "p6_open_shell_mm.step": {
+  "area": 900.0,
+  "faces": 2,
+  "solids": 0
+ }
+}
