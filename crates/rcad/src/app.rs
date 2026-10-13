@@ -973,7 +973,9 @@ impl RcadApp {
                 format!("not displayed: {e} (the model is unchanged; export and measurements use the exact solid)"),
             );
         }
-        match upload(&scene.mesh, &scene.tints()) {
+        // Run 7: assembly highlight / inactive dimming (assembly_ui::tints).
+        let hl = self.assembly_ui.highlight_paths(&self.summary);
+        match upload(&scene.mesh, &crate::assembly_ui::tints(&scene, &hl)) {
             Ok(()) => {
                 self.mesh_triangles = scene.mesh.triangle_count();
                 self.selected_face = None;

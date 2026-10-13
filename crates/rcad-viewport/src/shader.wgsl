@@ -21,7 +21,7 @@ const SECTION_INSIDE: vec3<f32> = vec3<f32>(0.62, 0.30, 0.26);
 
 const FLAG_SELECTED: u32 = 1u;
 // Flag bits 8..11: body tint index (0 = u.base_color). Linear RGB.
-const TINTS = array<vec3<f32>, 8>(
+const TINTS = array<vec3<f32>, 16>(
     vec3<f32>(0.42, 0.52, 0.66),
     vec3<f32>(0.42, 0.52, 0.66),
     vec3<f32>(0.40, 0.62, 0.45),
@@ -30,6 +30,16 @@ const TINTS = array<vec3<f32>, 8>(
     vec3<f32>(0.40, 0.62, 0.66),
     vec3<f32>(0.66, 0.46, 0.42),
     vec3<f32>(0.62, 0.60, 0.56),
+    // 8: assembly highlight (interference / selected occurrence).
+    vec3<f32>(0.95, 0.30, 0.12),
+    // 9: outside the active component (dimmed).
+    vec3<f32>(0.33, 0.34, 0.36),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
+    vec3<f32>(0.42, 0.52, 0.66),
 );
 // Lines are pulled toward the eye by this fraction of their eye distance
 // (3 µm at 300 mm). The main defence against coplanar z-fighting is the
@@ -87,7 +97,7 @@ fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
     // Small fill light from the view direction so back-lit faces are not flat.
     let fill = max(dot(n, v), 0.0);
     var base = u.base_color.rgb;
-    let tint = (i.flags >> 8u) & 7u;
+    let tint = (i.flags >> 8u) & 15u;
     if tint != 0u {
         var tints = TINTS;
         base = tints[tint];

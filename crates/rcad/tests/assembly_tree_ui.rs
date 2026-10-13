@@ -1,0 +1,244 @@
+//! Run 7 assembly UI through the real widgets (egui_kittest): the occurrence
+//! tree with a sub-assembly, component activation (new bodies join the active
+//! component, the rest is dimmed), the joint-creation dialog (kind, child,
+//! explicit axis, limits, DOF feedback) and joint editing with a refused
+//! out-of-limit value, selectable interference results highlighting both
+//! occurrences, the structured BOM and the exploded-view toggle.
+use std::time::{Duration, Instant};
+
+use eframe::egui::{Key, Modifiers};
+use egui_kittest::{Harness, kittest::Queryable as _};
+use rcad::{ExecMode, RcadApp};
+use rcad_commands::{Command, SketchTemplate};
+use rcad_document::assembly::{ComponentId, JointKind, OccurrenceId};
+use rcad_document::{BodyId, FeatureId, SketchPlane};
+
+fn harness() -> Harness<'static, RcadApp> {
+    Harness::builder()
+        .with_size([1600.0, 1000.0])
+        .with_max_steps(64)
+        .build_ui_state(
+            |ui, app: &mut RcadApp| app.ui(ui),
+            RcadApp::new(ExecMode::Sync, None),
+        )
+}
+
+fn settle(h: &mut Harness<'_, RcadApp>) {
+    let start = Instant::now();
+    loop {
+        let _ = h.try_run();
+        if h.state().idle() {
+            let _ = h.try_run();
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(180), "not idle");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn click(h: &mut Harness<'_, RcadApp>, label: &str) {
+    h.get_by_label(label).click();
+    settle(h);
+}
+
+fn type_into(h: &mut Harness<'_, RcadApp>, label: &str, text: &str) {
+    h.get_by_label(label).focus();
+    let _ = h.try_run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    let _ = h.try_run();
+    h.get_by_label(label).type_text(text);
+    let _ = h.try_run();
+}
+
+fn send(h: &mut Harness<'_, RcadApp>, c: Command) {
+    h.state_mut().request(c);
+    settle(h);
+    let d = h.state().diagnostics().last().cloned();
+    assert!(d.as_ref().is_none_or(|d| !d.error), "{d:?}");
+}
+
+/// Box `w` × `h` × `d` with its base centred at `c`.
+fn block(h: &mut Harness<'_, RcadApp>, w: f64, ht: f64, d: f64, c: [f64; 2]) -> BodyId {
+    let f = h.state().summary().features.len() as u32 + 1;
+    send(
+        h,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: w,
+                height: ht,
+                center: Some(c),
+            },
+        },
+    );
+    send(h, Command::extrude(None, FeatureId(f), d));
+    h.state().summary().bodies.last().unwrap().id
+}
+
+fn component(h: &mut Harness<'_, RcadApp>, name: &str, b: BodyId) {
+    send(
+        h,
+        Command::CreateComponent {
+            name: name.into(),
+            bodies: vec![b],
+            part_number: None,
+            occurrences: vec![],
+        },
+    );
+}
+
+#[test]
+fn tree_activation_and_joint_dialog() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let base = block(&mut h, 40.0, 20.0, 4.0, [0.0, 0.0]);
+    let pin = block(&mut h, 2.0, 2.0, 10.0, [30.0, 0.0]);
+    component(&mut h, "Base", base);
+    component(&mut h, "Pin", pin);
+    // Group both into a sub-assembly through the tree.
+    click(&mut h, "Occurrence Base#1");
+    click(&mut h, "Group Base#1");
+    h.get_by_label("Include Pin#1").click();
+    settle(&mut h);
+    type_into(&mut h, "Sub-assembly name", "Station");
+    click(&mut h, "Create sub-assembly");
+    let a = h.state().summary().assembly.clone();
+    assert_eq!(
+        a.components.len(),
+        3,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    // The tree shows the nested rows by path.
+    h.get_by_label("Occurrence Station#1");
+    h.get_by_label("Occurrence Station#1/Pin#1");
+    // Activate Pin from its nested row: a new body joins Pin; Base is dimmed.
+    click(&mut h, "Occurrence Station#1/Pin#1");
+    click(&mut h, "Activate Pin");
+    assert_eq!(h.state().summary().assembly.active, Some(ComponentId(2)));
+    let boss = block(&mut h, 2.0, 2.0, 2.0, [30.0, 5.0]);
+    let pin_c = h.state().summary().assembly.components[1].clone();
+    assert_eq!(pin_c.bodies, vec![pin, boss]);
+    let tints = h.state().display_tints();
+    let scene = h.state().scene().clone();
+    let base_tint = scene
+        .bodies
+        .iter()
+        .zip(&tints)
+        .find(|(b, _)| b.id == base)
+        .map(|(_, t)| t.1)
+        .unwrap();
+    assert_eq!(base_tint, rcad_viewport::TINT_DIMMED);
+    // The selected Pin row is highlighted.
+    let pin_tint = scene
+        .bodies
+        .iter()
+        .zip(&tints)
+        .find(|(b, _)| b.id == pin)
+        .map(|(_, t)| t.1)
+        .unwrap();
+    assert_eq!(pin_tint, rcad_viewport::TINT_HIGHLIGHT);
+    click(&mut h, "Return to top level");
+    assert_eq!(h.state().summary().assembly.active, None);
+    // Joint dialog from the Base row: slider Base → Pin along +x, 0–40.
+    click(&mut h, "Occurrence Station#1/Base#1");
+    click(&mut h, "Joint from Base#1");
+    h.get_by_label("Joint type").click();
+    settle(&mut h);
+    h.get_by_label("Slider").click();
+    settle(&mut h);
+    h.get_by_label("Joint child").click();
+    settle(&mut h);
+    h.get_by_label("Pin#1").click();
+    settle(&mut h);
+    type_into(&mut h, "Axis X", "1");
+    type_into(&mut h, "Axis Z", "0");
+    type_into(&mut h, "Lower limit", "0");
+    type_into(&mut h, "Upper limit", "40");
+    h.get_by_label_contains("Leaves 1 DOF");
+    click(&mut h, "Create joint");
+    let a = h.state().summary().assembly.clone();
+    assert_eq!(a.joints.len(), 1, "{:?}", h.state().diagnostics().last());
+    let j = &a.joints[0];
+    assert_eq!(j.kind, JointKind::Slider);
+    assert_eq!((j.min, j.max), (Some(0.0), Some(40.0)));
+    assert_eq!(j.axis, [1.0, 0.0, 0.0]);
+    // Edit: 25 accepted, 50 refused (value unchanged, no drift).
+    click(&mut h, "Edit Joint1");
+    type_into(&mut h, "Joint value", "25");
+    click(&mut h, "Set value");
+    assert_eq!(h.state().summary().assembly.joints[0].value, 25.0);
+    let pin_world = |h: &Harness<'_, RcadApp>| {
+        h.state()
+            .summary()
+            .assembly
+            .occurrences
+            .iter()
+            .find(|o| o.id == OccurrenceId(2))
+            .unwrap()
+            .world
+            .t
+    };
+    assert!((pin_world(&h)[0] - 25.0).abs() < 1e-12);
+    type_into(&mut h, "Joint value", "50");
+    click(&mut h, "Set value");
+    assert_eq!(h.state().summary().assembly.joints[0].value, 25.0);
+    assert!(h.state().diagnostics().last().unwrap().error);
+    assert!((pin_world(&h)[0] - 25.0).abs() < 1e-12);
+}
+
+#[test]
+fn interference_highlight_structured_bom_and_explode() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let b = block(&mut h, 20.0, 30.0, 40.0, [10.0, 15.0]);
+    component(&mut h, "Block", b);
+    send(
+        &mut h,
+        Command::AddOccurrence {
+            component: ComponentId(1),
+            name: None,
+            owner: None,
+            translate: [10.0, 3.0, 5.0],
+            axis: None,
+            angle_deg: 0.0,
+        },
+    );
+    click(&mut h, "Check interference");
+    h.get_by_label_contains("Block#1 ∩ Block#2").click();
+    settle(&mut h);
+    let hl = h.state().assembly_highlight();
+    assert_eq!(hl, vec!["O1".to_string(), "O2".to_string()]);
+    let tints = h.state().display_tints();
+    assert_eq!(tints.len(), 2);
+    assert!(tints.iter().all(|t| t.1 == rcad_viewport::TINT_HIGHLIGHT));
+    // Structured BOM (no nesting: one level).
+    click(&mut h, "Structured BOM");
+    h.get_by_label("1 Block ×2");
+    // Exploded view: offset Block#2 by +100 z, toggle on: display moves,
+    // the document geometry does not.
+    click(&mut h, "Occurrence Block#2");
+    click(&mut h, "Explode Block#2");
+    type_into(&mut h, "Explode Z", "100");
+    click(&mut h, "Set explode offset");
+    h.get_by_label("Exploded view").click();
+    settle(&mut h);
+    let a = h.state().summary().assembly.clone();
+    assert!(a.exploded);
+    assert_eq!(a.occurrences[1].world.t, [10.0, 3.0, 5.0]);
+    let zmax = h
+        .state()
+        .scene()
+        .mesh
+        .positions
+        .iter()
+        .map(|p| p[2])
+        .fold(f32::MIN, f32::max);
+    assert!((zmax - 145.0).abs() < 1e-3, "{zmax}");
+    // Hide Block#2: display drops it, BOM keeps it.
+    click(&mut h, "Hide Block#2");
+    assert_eq!(h.state().scene().bodies.len(), 1);
+    click(&mut h, "Bill of materials");
+    h.get_by_label("1. Block ×2");
+}
