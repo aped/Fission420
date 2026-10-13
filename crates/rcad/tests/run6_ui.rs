@@ -408,3 +408,23 @@ fn sheet_metal_flange_and_flat_pattern_from_the_inspector() {
     click(&mut h, "Export flat pattern");
     assert!(path.is_file());
 }
+
+#[test]
+fn thread_rod_and_nut_from_the_dialog() {
+    let mut h = harness();
+    click(&mut h, "New");
+    click(&mut h, "Thread…");
+    click(&mut h, "OK");
+    assert!(
+        (h.state().volume().unwrap() - 3215.09586).abs() < 1e-3,
+        "{:?}",
+        h.state().volume()
+    );
+    click(&mut h, "Thread…");
+    click(
+        &mut h,
+        "Square nut (internal thread, 0.1 mm radial clearance)",
+    );
+    click(&mut h, "OK");
+    assert_eq!(h.state().summary().bodies.len(), 2);
+}

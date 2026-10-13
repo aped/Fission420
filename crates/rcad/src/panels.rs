@@ -366,6 +366,21 @@ impl RcadApp {
                 reverse: false,
             });
         }
+        if ui
+            .add_enabled(self.summary.open, egui::Button::new("Thread…"))
+            .probe("Thread…")
+            .on_hover_text("Modeled thread (faceted solid, stated 60° V test profile): a rod or a square nut on World XY")
+            .clicked()
+        {
+            self.dialog = Some(Dialog::Thread {
+                diameter: "20".into(),
+                pitch: "2".into(),
+                length: "12".into(),
+                nut: false,
+                nut_width: "30".into(),
+                left_hand: false,
+            });
+        }
         // Run 5: exact loft / sweep (new bodies from two sketches).
         ui.menu_button("Loft / Sweep", |ui| {
             if ui
@@ -1752,6 +1767,25 @@ impl RcadApp {
                         num_field(ui, "XZ rectangle center X (mm)", cx);
                         num_field(ui, "XZ rectangle center Z (mm)", cz);
                         ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
+                    }
+                    Dialog::Thread {
+                        diameter,
+                        pitch,
+                        length,
+                        nut,
+                        nut_width,
+                        left_hand,
+                    } => {
+                        num_field(ui, "Thread diameter (mm)", diameter);
+                        num_field(ui, "Thread pitch (mm)", pitch);
+                        num_field(ui, "Thread length (mm)", length);
+                        ui.checkbox(left_hand, "Left hand").probe("Left hand");
+                        ui.checkbox(nut, "Square nut (internal thread, 0.1 mm radial clearance)")
+                            .probe("Square nut");
+                        if *nut {
+                            num_field(ui, "Nut width (mm)", nut_width);
+                        }
+                        ui.small("Faceted solid (planar facets within 0.01 mm of the ideal helicoid), stated 60° symmetric V test profile with one-turn lead-in/runout; not a certified standard thread. Length: a whole number of pitches. Printable geometry, not cosmetic. ADR 0011.");
                     }
                     Dialog::Revolve {
                         sketch,

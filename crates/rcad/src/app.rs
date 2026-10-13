@@ -49,6 +49,15 @@ pub(crate) enum Dialog {
         cx: String,
         cz: String,
     },
+    /// Run 6: modeled (faceted) thread: rod, or square nut (ADR 0011).
+    Thread {
+        diameter: String,
+        pitch: String,
+        length: String,
+        nut: bool,
+        nut_width: String,
+        left_hand: bool,
+    },
     Revolve {
         sketch: Option<FeatureId>,
         angle: String,
@@ -184,6 +193,7 @@ impl Dialog {
             Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
             Dialog::Revolve { .. } => "New revolve",
+            Dialog::Thread { .. } => "New modeled thread",
             Dialog::LoftSweep { sweep: false, .. } => "New loft",
             Dialog::LoftSweep { sweep: true, .. } => "New sweep",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
@@ -1328,6 +1338,7 @@ impl RcadApp {
             Dialog::Revolve { sketch, .. } | Dialog::Cut { sketch, .. } => {
                 (sketch.iter().copied().collect(), vec![])
             }
+            Dialog::Thread { .. } => (vec![], vec![]),
             Dialog::LoftSweep { a, b, .. } => (a.iter().chain(b.iter()).copied().collect(), vec![]),
             Dialog::CircleOnFace { extrude, .. } => (extrude.iter().copied().collect(), vec![]),
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
@@ -2364,6 +2375,30 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             name: None,
             profile: need(a, "profile sketch")?,
             path: need(b, "path sketch")?,
+            body_name: None,
+        },
+        Dialog::Thread {
+            diameter,
+            pitch,
+            length,
+            nut,
+            nut_width,
+            left_hand,
+        } => Command::Thread {
+            name: None,
+            plane: rcad_document::SketchPlane::WorldXY,
+            center: [0.0, 0.0],
+            diameter: parse_num("diameter", diameter)?,
+            pitch: parse_num("pitch", pitch)?,
+            length: parse_num("length", length)?,
+            left_hand: *left_hand,
+            chord_tol: 0.01,
+            nut_width: if *nut {
+                Some(parse_num("nut width", nut_width)?)
+            } else {
+                None
+            },
+            clearance: 0.1,
             body_name: None,
         },
         Dialog::Revolve {
