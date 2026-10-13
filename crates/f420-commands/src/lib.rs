@@ -1072,10 +1072,19 @@ impl Session {
                 let target = match target {
                     Some(t) => *t,
                     None => {
-                        let SketchPlane::Face(r) = plane else {
-                            return Err(DocError::Validation(
-                                "choose a target body for a hole on a world plane".into(),
-                            ));
+                        // A face, or a construction plane offset from one: the
+                        // face's body (run 5).
+                        let r = match plane {
+                            SketchPlane::Face(r)
+                            | SketchPlane::Offset {
+                                base: f420_document::PlaneBase::Face(r),
+                                ..
+                            } => r,
+                            _ => {
+                                return Err(DocError::Validation(
+                                    "choose a target body for a hole on a world plane".into(),
+                                ));
+                            }
                         };
                         m.evaluation()
                             .faces

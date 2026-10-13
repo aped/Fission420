@@ -887,7 +887,10 @@ impl F420App {
                         angle: "60".into(),
                         center_x: "0".into(),
                         center_y: "0".into(),
-                        mirror: SketchPlane::WorldYZ,
+                        mirror: self
+                            .selected_face()
+                            .and_then(|i| i.reference)
+                            .map_or(SketchPlane::WorldYZ, SketchPlane::Face),
                         mirror_face: self.selected_face().and_then(|i| i.reference),
                         mirror_offset: "0".into(),
                     });
@@ -1706,13 +1709,43 @@ impl F420App {
                                     ui.radio_value(mirror, SketchPlane::WorldYZ, "World YZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXZ, "World XZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXY, "World XY");
-                                    if let Some(r) = mirror_face {
-                                        ui.radio_value(mirror, SketchPlane::Face(*r), "Selected face")
-                                            .probe("Mirror on selected face");
-                                    }
                                 });
+                                // Or a planar face of the model (semantic reference).
+                                let faces: Vec<f420_commands::FaceSummary> = self
+                                    .summary
+                                    .features
+                                    .iter()
+                                    .flat_map(|f| f.faces.iter().cloned())
+                                    .collect();
+                                let label = |r: &f420_document::FaceRef| {
+                                    format!(
+                                        "{} {}",
+                                        self.feature_name(r.feature),
+                                        crate::face_role_label(&r.role)
+                                    )
+                                };
+                                let current = match mirror {
+                                    SketchPlane::Face(r) => label(r),
+                                    _ => "world plane (above)".to_string(),
+                                };
+                                egui::ComboBox::from_label("Mirror face")
+                                    .selected_text(current)
+                                    .show_ui(ui, |ui| {
+                                        for f in &faces {
+                                            if ui
+                                                .selectable_label(
+                                                    *mirror == SketchPlane::Face(f.reference),
+                                                    label(&f.reference),
+                                                )
+                                                .clicked()
+                                            {
+                                                *mirror = SketchPlane::Face(f.reference);
+                                                *mirror_face = Some(f.reference);
+                                            }
+                                        }
+                                    });
                                 num_field(ui, "Mirror plane offset (mm)", mirror_offset);
-                                ui.small("Adds the reflected copy of the seed's tool (the seed stays). A joined copy must land on a face of the target. A non-zero offset mirrors across a construction plane parallel to the chosen one (parameter plane_offset, bindable in the inspector). Select a face before opening this dialog to mirror across it.");
+                                ui.small("Adds the reflected copy of the seed's tool (the seed stays). A joined copy must land on a face of the target. A non-zero offset mirrors across a construction plane parallel to the chosen one (parameter plane_offset, bindable in the inspector). Or mirror across a planar face of the model (Mirror face; the face selected when the dialog opened is preselected).");
                             }
                         }
                     }
