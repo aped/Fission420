@@ -684,6 +684,7 @@ impl RcadApp {
         }
         self.parameters_panel(ui);
         self.configurations_panel(ui);
+        self.configuration_table(ui);
         self.drawings_panel(ui);
         ui.separator();
         self.bodies_browser(ui);

@@ -427,6 +427,7 @@ pub struct RcadApp {
     pub(crate) config_form: (String, String),
     /// Browser Drawings section: export path, last export report (run 6).
     pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
+    pub(crate) config_table: crate::config_ui::ConfigTableUi,
     /// Body material form and last mass-properties report (run 6).
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state (run 6).
@@ -532,6 +533,7 @@ impl RcadApp {
             split_form: (0, "0".into()),
             config_form: Default::default(),
             drawing_ui: Default::default(),
+            config_table: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
             assembly_ui: Default::default(),

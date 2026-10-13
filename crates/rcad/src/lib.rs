@@ -7,6 +7,7 @@
 pub mod app;
 pub mod assembly_ui;
 pub mod bodies;
+pub mod config_ui;
 pub mod direct_edit_ui;
 #[cfg(test)]
 mod display_fault_tests;

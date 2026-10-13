@@ -584,6 +584,14 @@ pub enum Command {
     DeleteConfiguration {
         name: String,
     },
+    /// Run 7: replace every configuration at once (the configuration table
+    /// editor; one undo step). Each row is checked like `set_configuration`
+    /// and names must be unique; the active configuration is re-applied (or
+    /// cleared when it is no longer in the table). Features and occurrences
+    /// that no configuration controls any more are restored (unsuppressed).
+    SetConfigurationTable {
+        configurations: Vec<rcad_document::Configuration>,
+    },
     /// Apply configuration `name` (one undo step): its parameter values and
     /// the suppression of every configured feature; refused unchanged when the
     /// result does not regenerate.
@@ -1014,6 +1022,7 @@ impl Command {
             Command::SetRollback { .. } => "set_rollback",
             Command::SetConfiguration { .. } => "set_configuration",
             Command::DeleteConfiguration { .. } => "delete_configuration",
+            Command::SetConfigurationTable { .. } => "set_configuration_table",
             Command::SetOccurrenceSuppressed { .. } => "set_occurrence_suppressed",
             Command::ActivateConfiguration { .. } => "activate_configuration",
             Command::ExportConfigurations { .. } => "export_configurations",
@@ -2710,47 +2719,16 @@ impl Session {
                 part_number,
                 excluded_occurrences,
             } => {
-                use rcad_document::params;
-                let name = name.trim().to_string();
-                if name.is_empty()
-                    || !name
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
-                {
-                    return Err(DocError::Validation(format!(
-                        "configuration name '{name}': letters, digits, space, _ - . only"
-                    )));
-                }
-                for (p, e) in values {
-                    params::check_syntax(e).map_err(|x| DocError::Expression {
-                        name: p.clone(),
-                        detail: format!("'{e}': {x}"),
-                    })?;
-                }
                 let c = rcad_document::Configuration {
-                    name: name.clone(),
+                    name: name.trim().to_string(),
                     values: values.clone(),
                     suppressed: suppressed.iter().copied().collect(),
                     part_number: part_number.trim().to_string(),
                     excluded_occurrences: excluded_occurrences.iter().copied().collect(),
                 };
                 let m = self.model_mut()?;
-                for f in &c.suppressed {
-                    m.document().feature(*f)?;
-                }
-                for o in &c.excluded_occurrences {
-                    if !m.document().assembly.occurrences.iter().any(|x| x.id == *o) {
-                        return Err(DocError::Validation(format!("unknown occurrence {o:?}")));
-                    }
-                }
-                for p in c.values.keys() {
-                    if !m.document().parameters.iter().any(|x| x.name == *p) {
-                        return Err(DocError::Expression {
-                            name: p.clone(),
-                            detail: "no such parameter".into(),
-                        });
-                    }
-                }
+                check_configuration(m.document(), &c)?;
+                let name = c.name.clone();
                 m.transact(&format!("Configuration {name}"), |d| {
                     match d.configurations.iter_mut().find(|x| x.name == name) {
                         Some(x) => *x = c,
@@ -2758,6 +2736,55 @@ impl Session {
                     }
                     if d.active_configuration.as_deref() == Some(&name) {
                         d.apply_configuration(&name)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::SetConfigurationTable { configurations } => {
+                let mut list = configurations.clone();
+                let m = self.model_mut()?;
+                for (i, c) in list.iter_mut().enumerate() {
+                    c.name = c.name.trim().to_string();
+                    c.part_number = c.part_number.trim().to_string();
+                    check_configuration(m.document(), c)?;
+                    if list_has_name(&configurations[..i], &c.name) {
+                        return Err(DocError::Validation(format!(
+                            "configuration '{}' appears twice in the table",
+                            c.name
+                        )));
+                    }
+                }
+                m.transact("Edit configuration table", |d| {
+                    // Features/occurrences no configuration controls any more
+                    // return to unsuppressed (instead of keeping whatever the
+                    // last activation left).
+                    let old_f = d.configured_features();
+                    let old_o: std::collections::BTreeSet<_> = d
+                        .configurations
+                        .iter()
+                        .flat_map(|c| c.excluded_occurrences.iter().copied())
+                        .collect();
+                    d.configurations = list;
+                    let new_f = d.configured_features();
+                    for f in old_f.difference(&new_f) {
+                        d.feature_mut(*f)?.suppressed = false;
+                    }
+                    let new_o: std::collections::BTreeSet<_> = d
+                        .configurations
+                        .iter()
+                        .flat_map(|c| c.excluded_occurrences.iter().copied())
+                        .collect();
+                    for o in old_o.difference(&new_o) {
+                        if let Some(x) = d.assembly.occurrences.iter_mut().find(|x| x.id == *o) {
+                            x.suppressed = false;
+                        }
+                    }
+                    match d.active_configuration.clone() {
+                        Some(a) if d.configurations.iter().any(|c| c.name == a) => {
+                            d.apply_configuration(&a)?;
+                        }
+                        Some(_) => d.active_configuration = None,
+                        None => {}
                     }
                     Ok(())
                 })?;
@@ -4232,4 +4259,50 @@ pub fn end_cap_of(extrude: FeatureId) -> SketchPlane {
         feature: extrude,
         role: FaceRole::ExtrudeEndCap,
     })
+}
+
+fn list_has_name(list: &[rcad_document::Configuration], name: &str) -> bool {
+    list.iter().any(|c| c.name.trim() == name)
+}
+
+/// A configuration's name, expressions, features, occurrences and parameters
+/// must be valid for `d` (shared by `set_configuration` and the table).
+fn check_configuration(
+    d: &rcad_document::Document,
+    c: &rcad_document::Configuration,
+) -> Result<(), DocError> {
+    use rcad_document::params;
+    let name = &c.name;
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
+    {
+        return Err(DocError::Validation(format!(
+            "configuration name '{name}': letters, digits, space, _ - . only"
+        )));
+    }
+    for (p, e) in &c.values {
+        params::check_syntax(e).map_err(|x| DocError::Expression {
+            name: p.clone(),
+            detail: format!("'{e}': {x}"),
+        })?;
+    }
+    for f in &c.suppressed {
+        d.feature(*f)?;
+    }
+    for o in &c.excluded_occurrences {
+        if !d.assembly.occurrences.iter().any(|x| x.id == *o) {
+            return Err(DocError::Validation(format!("unknown occurrence {o:?}")));
+        }
+    }
+    for p in c.values.keys() {
+        if !d.parameters.iter().any(|x| x.name == *p) {
+            return Err(DocError::Expression {
+                name: p.clone(),
+                detail: "no such parameter".into(),
+            });
+        }
+    }
+    Ok(())
 }

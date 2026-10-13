@@ -190,8 +190,8 @@ build refuses such a file instead of dropping the annotations).
   occurrence, quantity = evaluated occurrences of it anywhere in the hierarchy; component
   order gives the item numbers. Part number and material come from the model (component
   part number; distinct materials of its definition bodies). Long texts are cut with
-  "..." (Helvetica width estimate). Default position right-aligned on top of the title
-  block; overlap with a view is reported as an issue. `Response.drawing_report.bom` lists
+  "..." (Helvetica width estimate). Default position: the top-right corner inside the border;
+  overlap with a view is reported as an issue (`set_bom_table {position}` moves it). `Response.drawing_report.bom` lists
   the rows as drawn. A structured (indented) BOM is the assembly command's
   (`bom`), not the sheet's.
 * **Balloons** (`set_balloons`, annotation `balloons`): one per BOM item shown in the

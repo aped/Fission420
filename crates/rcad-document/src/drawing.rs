@@ -457,8 +457,8 @@ pub struct Note {
 
 /// The bill-of-materials table on the sheet (run 7, v7): flattened
 /// quantities of the evaluated assembly (see [`bom_rows`]). `position`: its
-/// bottom-left corner in sheet mm (default: right-aligned on the title
-/// block).
+/// bottom-left corner in sheet mm (default: the sheet's top-right corner
+/// inside the border).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct BomTable {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2779,7 +2779,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         }
     }
     if let Some(t) = &dr.bom {
-        let (g, lo, hi) = bom_table(&bom, t, w);
+        let (g, lo, hi) = bom_table(&bom, t, w, h);
         for (vid, p) in &placed {
             if lo[0] < p.hi[0] && hi[0] > p.lo[0] && lo[1] < p.hi[1] && hi[1] > p.lo[1] {
                 issues.push(format!(
@@ -3193,10 +3193,12 @@ fn fit_text(t: &str, width: f64, size: f64) -> String {
 
 /// The BOM table group and its sheet box (header row on top, items below
 /// in order, bottom row = last item).
-fn bom_table(rows: &[BomRow], t: &BomTable, w: f64) -> (Group, [f64; 2], [f64; 2]) {
+fn bom_table(rows: &[BomRow], t: &BomTable, w: f64, h: f64) -> (Group, [f64; 2], [f64; 2]) {
     let width: f64 = BOM_COLS.iter().map(|c| c.1).sum();
     let height = BOM_ROW * (rows.len() + 1) as f64;
-    let p0 = t.position.unwrap_or([w - 10.0 - width, 10.0 + 32.0]);
+    // Default: top-right corner inside the border (views are placed from the
+    // lower left, the title block is bottom right).
+    let p0 = t.position.unwrap_or([w - 10.0 - width, h - 10.0 - height]);
     let (lo, hi) = (p0, [p0[0] + width, p0[1] + height]);
     let mut prims = vec![Prim::Polygon {
         pts: vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]],
