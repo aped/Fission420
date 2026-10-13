@@ -44,7 +44,8 @@ within gap × face area of the ideal one; the gap-box test checks exactly that).
 no free edges is a closed solid (oriented outward by its signed volume); otherwise it stays an
 open shell (possibly several pieces; a result of several separate *closed* pieces is refused,
 because one body is one solid). A tolerance large enough to make an edge shared by three
-faces, or to collapse an edge, is refused. Tolerance range [0, 1] mm.
+faces, to collapse an edge, or to chain merges so a vertex moves farther than the tolerance, is
+refused. Tolerance range [0, 1] mm.
 
 ## Fill (patch)
 
@@ -64,7 +65,9 @@ must be stitched first. If the result is closed it is a solid.
 * cylindrical face bounded by circles perpendicular to the axis and 0 or 2 straight rulings
   (a full tube or a sector patch): the exact annular sector between radius r and r ± d, extruded
   along the axis. Thickening **toward the axis** by d ≥ r collapses the offset surface and is
-  refused with the largest possible thickness.
+  refused with the largest possible thickness. The cylinder (axis, radius) is fitted from the
+  face's samples and verified against all of them within the import consistency tolerance; a face
+  that is not a cylinder within it is refused.
 
 Other surfaces, several faces, trimmed cylinders, or a closed body are refused by name. The
 result's volume and orientation are checked in closed form and by FreeCAD.
