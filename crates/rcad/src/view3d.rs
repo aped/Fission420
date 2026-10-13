@@ -41,6 +41,8 @@ pub const VIEW_KEYS: &[(egui::Key, ViewPreset)] = &[
     (egui::Key::Num7, ViewPreset::Top),
     (egui::Key::Num1, ViewPreset::Front),
     (egui::Key::Num3, ViewPreset::Right),
+    (egui::Key::Num4, ViewPreset::Left),
+    (egui::Key::Num6, ViewPreset::Back),
     (egui::Key::Num0, ViewPreset::Iso),
 ];
 
@@ -1272,7 +1274,9 @@ fn inline_number_editor(
                             )));
                         out.state.store(ui.ctx(), id);
                     }
-                    let r = Response::clone(&out.response).labelled_by(l.id);
+                    let r = Response::clone(&out.response)
+                        .labelled_by(l.id)
+                        .probe(label);
                     let (enter, esc) = ui.input(|i| {
                         (
                             i.key_pressed(egui::Key::Enter),

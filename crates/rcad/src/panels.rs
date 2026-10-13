@@ -362,6 +362,8 @@ impl RcadApp {
             self.dialog = Some(Dialog::Revolve {
                 sketch: self.unused_sketch(),
                 angle: "360".into(),
+                axis: Default::default(),
+                reverse: false,
             });
         }
         // Run 5: exact loft / sweep (new bodies from two sketches).
@@ -656,6 +658,7 @@ impl RcadApp {
             return;
         }
         self.parameters_panel(ui);
+        self.configurations_panel(ui);
         ui.separator();
         self.bodies_browser(ui);
         ui.add_space(4.0);
@@ -754,8 +757,19 @@ impl RcadApp {
                     ui.label(RichText::new(sym).color(c)).on_hover_text(t);
                 }
                 if f.profile_error.is_some() {
-                    ui.label(RichText::new("open").color(BAD_COLOR).small())
-                        .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                    // Several loops (e.g. text): regions are extrudable one by
+                    // one or all together; only a sketch with none is "open".
+                    let n = crate::extrude::sketch_regions(f).len();
+                    if n > 0 {
+                        ui.label(RichText::new(format!("{n} regions")).weak().small())
+                            .on_hover_text(
+                                "No single profile: extrude picks a region (or all \
+                                 outermost regions)",
+                            );
+                    } else {
+                        ui.label(RichText::new("open").color(BAD_COLOR).small())
+                            .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                    }
                 }
             });
             if let Some(p) = &f.plane
@@ -1035,6 +1049,7 @@ impl RcadApp {
                     }
                 });
                 self.projection_ui(ui, &f);
+                self.sheet_ui(ui, &f);
                 match &f.profile_error {
                     None => {
                         ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
@@ -1051,6 +1066,7 @@ impl RcadApp {
                     ui.small(format!("Used by {}", c.name));
                 }
             }
+            "sheet_metal" => self.flat_pattern_ui(ui, &f),
             "extrude" => {
                 // Scoped shell of a New Body extrusion (dialog: extrude.rs).
                 if matches!(f.operation, Some(rcad_document::Operation::NewBody { .. }))
@@ -1734,9 +1750,48 @@ impl RcadApp {
                         num_field(ui, "XZ rectangle center Z (mm)", cz);
                         ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
                     }
-                    Dialog::Revolve { sketch, angle } => {
+                    Dialog::Revolve {
+                        sketch,
+                        angle,
+                        axis,
+                        reverse,
+                    } => {
                         feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
                         num_field(ui, "Revolve angle (deg)", angle);
+                        // Lines of the chosen sketch can be the axis.
+                        let lines: Vec<rcad_sketch::EntityId> = sketch
+                            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
+                            .and_then(|f| f.sketch.as_ref())
+                            .map(|s| {
+                                s.entities
+                                    .iter()
+                                    .filter(|e| matches!(e, rcad_sketch::Entity::Line { .. }))
+                                    .map(|e| e.id())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let label = |a: &rcad_document::RevolveAxis| match a {
+                            rcad_document::RevolveAxis::SketchY => "Sketch Y axis".to_string(),
+                            rcad_document::RevolveAxis::SketchX => "Sketch X axis".to_string(),
+                            rcad_document::RevolveAxis::Line(e) => format!("Sketch line L{}", e.0),
+                        };
+                        egui::ComboBox::from_label("Revolve axis")
+                            .selected_text(label(axis))
+                            .show_ui(ui, |ui| {
+                                for a in [
+                                    rcad_document::RevolveAxis::SketchY,
+                                    rcad_document::RevolveAxis::SketchX,
+                                ]
+                                .into_iter()
+                                .chain(lines.iter().map(|e| rcad_document::RevolveAxis::Line(*e)))
+                                {
+                                    ui.selectable_value(axis, a, label(&a)).probe(&label(&a));
+                                }
+                            })
+                            .response
+                            .probe("Revolve axis");
+                        ui.checkbox(reverse, "Reverse direction").probe("Revolve reverse");
+                        ui.small("The profile must lie on one side of the axis (either side). Partial angles sweep toward −normal, or +normal with Reverse. A construction line is the usual axis.");
                     }
                     Dialog::LoftSweep { a, b, sweep } => {
                         if *sweep {
@@ -1893,9 +1948,12 @@ impl RcadApp {
                                     .selected_text(current)
                                     .show_ui(ui, |ui| {
                                         for f in &others {
-                                            ui.selectable_value(b, Some(f.reference), label(f));
+                                            ui.selectable_value(b, Some(f.reference), label(f))
+                                                .probe(&label(f));
                                         }
-                                    });
+                                    })
+                                    .response
+                                    .probe("Second face");
                             }
                             None => {
                                 ui.label("The selected face is no longer available.");
@@ -2309,51 +2367,228 @@ impl RcadApp {
                 ));
             }
         }
-        ui.collapsing("Project geometry into this sketch", |ui| {
-            if choices.is_empty() {
-                ui.weak("No earlier parallel face or sketch to project.");
-            }
-            for (label, src) in choices {
-                ui.horizontal(|ui| {
-                    ui.label(&label);
-                    if ui
-                        .small_button("Project")
-                        .named(&format!("Project {label}"))
-                        .clicked()
-                    {
-                        self.request(Command::Project {
-                            sketch: f.id,
-                            source: src,
-                            construction: false,
-                        });
-                    }
-                    if ui.small_button("as construction").clicked() {
-                        self.request(Command::Project {
-                            sketch: f.id,
-                            source: src,
-                            construction: true,
-                        });
-                    }
-                });
-            }
-            ui.small(
-                "Projected lines/arcs follow their source at every regeneration; if the source \
+        let header = egui::CollapsingHeader::new("Project geometry into this sketch")
+            .id_salt(("project_into", f.id.0))
+            .show(ui, |ui| {
+                if choices.is_empty() {
+                    ui.weak("No earlier parallel face or sketch to project.");
+                }
+                for (label, src) in choices {
+                    ui.horizontal(|ui| {
+                        ui.label(&label);
+                        if ui
+                            .small_button("Project")
+                            .named(&format!("Project {label}"))
+                            .clicked()
+                        {
+                            self.request(Command::Project {
+                                sketch: f.id,
+                                source: src,
+                                construction: false,
+                            });
+                        }
+                        if ui.small_button("as construction").clicked() {
+                            self.request(Command::Project {
+                                sketch: f.id,
+                                source: src,
+                                construction: true,
+                            });
+                        }
+                    });
+                }
+                ui.small(
+                    "Projected lines/arcs follow their source at every regeneration; if the source \
                  changes shape the sketch reports a broken reference until you unlink it.",
-            );
-            for (i, p) in f.projections.iter().enumerate() {
+                );
+                for (i, p) in f.projections.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Link {}: {p:?}", i + 1));
+                        if ui
+                            .small_button("Unlink")
+                            .named(&format!("Unlink {}", i + 1))
+                            .clicked()
+                        {
+                            self.request(Command::UnlinkProjection {
+                                sketch: f.id,
+                                link: i,
+                            });
+                        }
+                    });
+                }
+            });
+        header
+            .header_response
+            .probe("Project geometry into this sketch");
+    }
+}
+
+impl RcadApp {
+    /// Run 6 (pull-forward of SESSION_7 §3): named configurations. "Save
+    /// current" stores every user parameter's expression and the features
+    /// suppressed now; Activate applies one (one Undo step each).
+    fn configurations_panel(&mut self, ui: &mut egui::Ui) {
+        let configs = self.summary.configurations.clone();
+        let active = self.summary.active_configuration.clone();
+        let header = egui::CollapsingHeader::new(format!("Configurations ({})", configs.len()))
+            .id_salt("configurations_panel")
+            .show(ui, |ui| {
+                for c in &configs {
+                    ui.horizontal(|ui| {
+                        let is_active = active.as_deref() == Some(c.name.as_str());
+                        let t = if is_active {
+                            RichText::new(format!("● {}", c.name)).strong()
+                        } else {
+                            RichText::new(&c.name)
+                        };
+                        ui.label(t);
+                        if !c.part_number.is_empty() {
+                            ui.label(RichText::new(&c.part_number).weak().small());
+                        }
+                        if ui
+                            .add_enabled(!is_active, egui::Button::new("Activate").small())
+                            .named(&format!("Activate {}", c.name))
+                            .clicked()
+                        {
+                            self.request(Command::ActivateConfiguration {
+                                name: c.name.clone(),
+                            });
+                        }
+                        if ui
+                            .small_button("Delete")
+                            .named(&format!("Delete configuration {}", c.name))
+                            .clicked()
+                        {
+                            self.request(Command::DeleteConfiguration {
+                                name: c.name.clone(),
+                            });
+                        }
+                    })
+                    .response
+                    .on_hover_text(format!(
+                        "{}; suppresses {}",
+                        c.values
+                            .iter()
+                            .map(|(k, v)| format!("{k} = {v}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        if c.suppressed.is_empty() {
+                            "nothing".to_string()
+                        } else {
+                            c.suppressed
+                                .iter()
+                                .map(|f| f.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ));
+                }
                 ui.horizontal(|ui| {
-                    ui.label(format!("Link {}: {p:?}", i + 1));
-                    if ui
-                        .small_button("Unlink")
-                        .named(&format!("Unlink {}", i + 1))
-                        .clicked()
-                    {
-                        self.request(Command::UnlinkProjection {
-                            sketch: f.id,
-                            link: i,
-                        });
-                    }
+                    let f = &mut self.config_form;
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.0)
+                            .hint_text("name")
+                            .desired_width(80.0),
+                    )
+                    .named("Configuration name");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.1)
+                            .hint_text("part number")
+                            .desired_width(80.0),
+                    )
+                    .named("Part number");
                 });
+                if ui
+                    .button("Save current as configuration")
+                    .probe("Save current as configuration")
+                    .on_hover_text(
+                        "Stores every user parameter's current expression and the features \
+                         suppressed now (they become configured features)",
+                    )
+                    .clicked()
+                {
+                    let (name, part) = self.config_form.clone();
+                    let values = self
+                        .summary
+                        .parameters
+                        .iter()
+                        .map(|p| (p.name.clone(), p.expression.clone()))
+                        .collect();
+                    let suppressed = self
+                        .summary
+                        .features
+                        .iter()
+                        .filter(|f| f.suppressed)
+                        .map(|f| f.id)
+                        .collect();
+                    self.request(Command::SetConfiguration {
+                        name,
+                        values,
+                        suppressed,
+                        part_number: part,
+                    });
+                }
+            });
+        header.header_response.probe("Configurations header");
+    }
+}
+
+impl RcadApp {
+    /// Run 6: sheet-metal flange from this sketch's open line chain, and the
+    /// flat-pattern export of a flange feature (docs/SHEET_METAL.md).
+    fn sheet_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        let mut send = None;
+        let header = egui::CollapsingHeader::new("Sheet metal flange")
+            .id_salt(("sheet_ui", f.id.0))
+            .show(ui, |ui| {
+                let b = &mut self.sheet_form;
+                for (i, l) in ["Thickness (mm)", "Inner bend radius (mm)", "K-factor", "Width (mm)"]
+                    .iter()
+                    .enumerate()
+                {
+                    num_field(ui, l, &mut b[i]);
+                }
+                let v: Vec<Option<f64>> = b
+                    .iter()
+                    .map(|t| t.trim().parse::<f64>().ok().filter(|x| x.is_finite()))
+                    .collect();
+                if ui
+                    .add_enabled(v.iter().all(Option::is_some), egui::Button::new("Create flange"))
+                    .probe("Create flange")
+                    .clicked()
+                {
+                    send = Some(Command::SheetMetal {
+                        name: None,
+                        sketch: f.id,
+                        thickness: v[0].unwrap_or(1.0),
+                        radius: v[1].unwrap_or(1.0),
+                        k_factor: v[2].unwrap_or(0.44),
+                        width: v[3].unwrap_or(10.0),
+                        flip: false,
+                        body_name: None,
+                    });
+                }
+                ui.small("Open chain of lines = one sheet surface; material to the right of the chain; bends at the corners (inner radius); flat length by K-factor.");
+            });
+        header.header_response.probe("Sheet metal flange");
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+
+    /// Flat-pattern DXF export of a sheet-metal flange feature.
+    pub(crate) fn flat_pattern_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        ui.horizontal(|ui| {
+            text_field(ui, "Flat pattern DXF path", &mut self.flat_path);
+            if ui
+                .button("Export flat pattern")
+                .probe("Export flat pattern")
+                .clicked()
+            {
+                let c = Command::ExportFlatPattern {
+                    feature: f.id,
+                    path: self.flat_path.clone().into(),
+                };
+                self.request(c);
             }
         });
     }

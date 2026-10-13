@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod mass;
 pub mod print;
 pub mod printables;
 pub mod scenarios;
@@ -87,12 +88,21 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
         options: ExtrudeOptions,
     },
-    /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
+    /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis),
+    /// or (run 6) its local X axis or one of its lines (`axis`); `reverse` sweeps toward
+    /// +normal instead of −normal.
     Revolve {
         #[serde(default)]
         name: Option<String>,
         sketch: FeatureId,
         angle_deg: f64,
+        #[serde(
+            default,
+            skip_serializing_if = "rcad_document::RevolveAxis::is_default"
+        )]
+        axis: rcad_document::RevolveAxis,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
     },
     /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
     /// `a` and `b` (parallel planes) as a new body: equal-count polygons with
@@ -341,6 +351,43 @@ pub enum Command {
         body: BodyId,
         visible: bool,
     },
+    /// Physical material of a body for mass properties (run 6, format v6; one
+    /// undo step). `material`: a catalog key (`rcad_document::material::CATALOG`,
+    /// e.g. "pla"); or `density` (in `density_unit`, default g/cm³) with an
+    /// optional `name` for a user-defined material; neither: clear it. Both
+    /// `material` and `density` is refused (ambiguous provenance).
+    SetBodyMaterial {
+        body: BodyId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        material: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        density: Option<f64>,
+        #[serde(default)]
+        density_unit: rcad_document::DensityUnit,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Body Combine (run 6, format v6; one undo step): join `tools` to,
+    /// cut them from, or intersect them with `target`
+    /// (`FeatureKind::Combine`). Without `keep_tools` the tool bodies are
+    /// consumed (they leave the model; their creators stay in history).
+    /// Refused (document unchanged) when Truck fails, the result is not one
+    /// closed solid, or the independent check disagrees (`GeometryCheck`).
+    Combine {
+        #[serde(default)]
+        name: Option<String>,
+        target: BodyId,
+        tools: Vec<BodyId>,
+        op: k::CombineOp,
+        #[serde(default)]
+        keep_tools: bool,
+    },
+    /// Volume, mass, centre of mass and inertia of `bodies` (default: every
+    /// visible body) and their total (`Response::mass_properties`). Read-only.
+    MassProperties {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bodies: Option<Vec<BodyId>>,
+    },
     /// Suppress (or restore) a feature: kept in history, not evaluated (run
     /// 5; one undo step). With `with_dependents`, every feature depending on
     /// it (transitively) gets the same state; otherwise the change is refused
@@ -389,6 +436,81 @@ pub enum Command {
         angle_deg: f64,
         #[serde(default)]
         copy: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
+    /// Create or replace configuration `name` (run 6; one undo step):
+    /// user-parameter expressions, the features it suppresses (they become
+    /// configured features), part number. Re-applied when it is active.
+    SetConfiguration {
+        name: String,
+        #[serde(default)]
+        values: std::collections::BTreeMap<String, String>,
+        #[serde(default)]
+        suppressed: Vec<FeatureId>,
+        #[serde(default)]
+        part_number: String,
+    },
+    DeleteConfiguration {
+        name: String,
+    },
+    /// Apply configuration `name` (one undo step): its parameter values and
+    /// the suppression of every configured feature; refused unchanged when the
+    /// result does not regenerate.
+    ActivateConfiguration {
+        name: String,
+    },
+    /// Export every configuration (or `configurations`) as
+    /// `<dir>/<stem>-<configuration>[-<part number>].<ext>` for each requested
+    /// format; the document's state is restored afterwards (the activations
+    /// are undone). Names are sanitized; an existing file is overwritten only
+    /// with `overwrite`.
+    ExportConfigurations {
+        dir: PathBuf,
+        stem: String,
+        #[serde(default)]
+        configurations: Vec<String>,
+        #[serde(default)]
+        step: bool,
+        #[serde(default)]
+        stl: bool,
+        #[serde(default, rename = "3mf")]
+        threemf: bool,
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Sheet-metal contour flange (run 6; docs/SHEET_METAL.md): the open
+    /// line chain of `sketch` with `thickness`, inner bend `radius`,
+    /// `k_factor` (default 0.44) and `width`; `flip` puts the material on the
+    /// left of the chain. A new body (`body_name`).
+    SheetMetal {
+        #[serde(default)]
+        name: Option<String>,
+        sketch: FeatureId,
+        thickness: f64,
+        radius: f64,
+        #[serde(default = "default_k")]
+        k_factor: f64,
+        width: f64,
+        #[serde(default)]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
+    /// Write the flat pattern of sheet-metal feature `feature` as an R12 DXF
+    /// (mm): outline on layer CUT, bend centre lines on layer BEND. The
+    /// response message carries the flat length.
+    ExportFlatPattern {
+        feature: FeatureId,
+        path: PathBuf,
+    },
+    /// Split `body` by `plane` (run 6; one undo step): the body keeps the
+    /// part behind the plane, a new body (`body_name`) the part in front.
+    SplitBody {
+        #[serde(default)]
+        name: Option<String>,
+        body: BodyId,
+        plane: SketchPlane,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
     },
@@ -592,11 +714,21 @@ impl Command {
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
             Command::SetRollback { .. } => "set_rollback",
+            Command::SetConfiguration { .. } => "set_configuration",
+            Command::DeleteConfiguration { .. } => "delete_configuration",
+            Command::ActivateConfiguration { .. } => "activate_configuration",
+            Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
+            Command::SplitBody { .. } => "split_body",
+            Command::SheetMetal { .. } => "sheet_metal",
+            Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
             Command::SetBodyVisible { .. } => "set_body_visible",
+            Command::SetBodyMaterial { .. } => "set_body_material",
+            Command::MassProperties { .. } => "mass_properties",
+            Command::Combine { .. } => "combine",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -620,6 +752,10 @@ impl Command {
             Command::Inspect => "inspect",
         }
     }
+}
+
+fn default_k() -> f64 {
+    0.44
 }
 
 /// One entry of [`Command::SetUserParameters`].
@@ -684,6 +820,13 @@ pub struct BodySummary {
     /// kind, for direct editing (ADR 0010). Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imported_faces: Vec<ImportedFace>,
+    /// Run 6: physical material (None: not assigned).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<rcad_document::Material>,
+    /// Run 6: mass in g = density × the measured volume (None without a
+    /// material or a volume). Labelled like the volume (exact or estimate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
 }
 
 /// One face of [`BodySummary::imported_faces`].
@@ -803,6 +946,11 @@ pub struct DocSummary {
     /// Named user parameters in display order.
     #[serde(default)]
     pub parameters: Vec<ParameterSummary>,
+    /// Named configurations (run 6) and the active one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<rcad_document::Configuration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_configuration: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -824,6 +972,9 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// `mass_properties`: per-body and total mass properties (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_properties: Option<mass::MassReport>,
     /// `add_sketch_text`: the new text item's id (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<u32>,
@@ -1137,8 +1288,11 @@ impl Session {
                 name,
                 sketch,
                 angle_deg,
+                axis,
+                reverse,
             } => {
-                let (name, sketch, a) = (name.clone(), *sketch, *angle_deg);
+                let (name, sketch, a, axis, reverse) =
+                    (name.clone(), *sketch, *angle_deg, *axis, *reverse);
                 if !a.is_finite() || a <= 0.0 || a > 360.0 {
                     return Err(DocError::Validation(format!(
                         "revolve angle must be in (0, 360] degrees, got {a}"
@@ -1153,6 +1307,8 @@ impl Session {
                             sketch,
                             angle: a.to_radians(),
                             body,
+                            axis,
+                            reverse,
                         },
                     ))
                 })?;
@@ -1998,8 +2154,20 @@ impl Session {
                                 }
                                 rcad_kernel::Curve2::Arc { c, a, b, ccw } => {
                                     let (a, b) = if ccw { (a, b) } else { (b, a) };
-                                    let (pc, pa, pb) =
-                                        (point(sketch, c), point(sketch, a), point(sketch, b));
+                                    let (pa, pb) = (point(sketch, a), point(sketch, b));
+                                    // The centre follows from the fixed ends and
+                                    // the arc's equal-radius equation plus one
+                                    // coordinate (the well-conditioned one: x
+                                    // when the chord is steep, else y), so
+                                    // nothing is pinned twice.
+                                    let pc = sketch.add_point(c[0], c[1]);
+                                    sketch.constraints.push(
+                                        if (b[1] - a[1]).abs() >= (b[0] - a[0]).abs() {
+                                            rcad_sketch::Constraint::FixedX { p: pc, x: c[0] }
+                                        } else {
+                                            rcad_sketch::Constraint::FixedY { p: pc, y: c[1] }
+                                        },
+                                    );
                                     let id = sketch.next_entity_id();
                                     sketch.entities.push(rcad_sketch::Entity::Arc {
                                         id,
@@ -2069,10 +2237,19 @@ impl Session {
                                 continue;
                             };
                             for c in sketch.constraints.iter_mut() {
-                                if let rcad_sketch::Constraint::FixedPoint { p: r, x, y } = c
-                                    && r == q
-                                {
-                                    (*x, *y) = (p.x, p.y);
+                                match c {
+                                    rcad_sketch::Constraint::FixedPoint { p: r, x, y }
+                                        if r == q =>
+                                    {
+                                        (*x, *y) = (p.x, p.y);
+                                    }
+                                    rcad_sketch::Constraint::FixedX { p: r, x } if r == q => {
+                                        *x = p.x;
+                                    }
+                                    rcad_sketch::Constraint::FixedY { p: r, y } if r == q => {
+                                        *y = p.y;
+                                    }
+                                    _ => {}
                                 }
                             }
                             if let Some(sp) = sketch.points.iter_mut().find(|sp| sp.id == *q) {
@@ -2121,7 +2298,10 @@ impl Session {
                                     "another body is already named '{n}'"
                                 )));
                             }
-                            Some(d.add_body(n))
+                            let mat = d.body(body)?.material.clone();
+                            let id = d.add_body(n);
+                            d.body_mut(id)?.material = mat;
+                            Some(id)
                         } else {
                             None
                         };
@@ -2143,6 +2323,325 @@ impl Session {
                 )?;
                 r.feature = Some(id);
             }
+            Command::SetConfiguration {
+                name,
+                values,
+                suppressed,
+                part_number,
+            } => {
+                use rcad_document::params;
+                let name = name.trim().to_string();
+                if name.is_empty()
+                    || !name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
+                {
+                    return Err(DocError::Validation(format!(
+                        "configuration name '{name}': letters, digits, space, _ - . only"
+                    )));
+                }
+                for (p, e) in values {
+                    params::check_syntax(e).map_err(|x| DocError::Expression {
+                        name: p.clone(),
+                        detail: format!("'{e}': {x}"),
+                    })?;
+                }
+                let c = rcad_document::Configuration {
+                    name: name.clone(),
+                    values: values.clone(),
+                    suppressed: suppressed.iter().copied().collect(),
+                    part_number: part_number.trim().to_string(),
+                };
+                let m = self.model_mut()?;
+                for f in &c.suppressed {
+                    m.document().feature(*f)?;
+                }
+                for p in c.values.keys() {
+                    if !m.document().parameters.iter().any(|x| x.name == *p) {
+                        return Err(DocError::Expression {
+                            name: p.clone(),
+                            detail: "no such parameter".into(),
+                        });
+                    }
+                }
+                m.transact(&format!("Configuration {name}"), |d| {
+                    match d.configurations.iter_mut().find(|x| x.name == name) {
+                        Some(x) => *x = c,
+                        None => d.configurations.push(c),
+                    }
+                    if d.active_configuration.as_deref() == Some(&name) {
+                        d.apply_configuration(&name)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::DeleteConfiguration { name } => {
+                let name = name.clone();
+                let m = self.model_mut()?;
+                if !m.document().configurations.iter().any(|c| c.name == name) {
+                    return Err(DocError::Validation(format!(
+                        "no configuration named '{name}'"
+                    )));
+                }
+                m.transact(&format!("Delete configuration {name}"), |d| {
+                    d.configurations.retain(|c| c.name != name);
+                    if d.active_configuration.as_deref() == Some(&name) {
+                        d.active_configuration = None;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::ActivateConfiguration { name } => {
+                let name = name.clone();
+                self.model_mut()?
+                    .transact(&format!("Activate configuration {name}"), |d| {
+                        d.apply_configuration(&name)
+                    })?;
+                r.message = Some(format!("configuration {name} active"));
+            }
+            Command::ExportConfigurations {
+                dir,
+                stem,
+                configurations,
+                step,
+                stl,
+                threemf,
+                overwrite,
+            } => {
+                let (dir, stem, overwrite) = (dir.clone(), stem.clone(), *overwrite);
+                let formats: Vec<&str> = [(*step, "step"), (*stl, "stl"), (*threemf, "3mf")]
+                    .into_iter()
+                    .filter_map(|(on, e)| on.then_some(e))
+                    .collect();
+                if formats.is_empty() {
+                    return Err(DocError::Validation(
+                        "choose at least one format (step, stl, 3mf)".into(),
+                    ));
+                }
+                let all: Vec<rcad_document::Configuration> =
+                    self.model_mut()?.document().configurations.clone();
+                let chosen: Vec<rcad_document::Configuration> = if configurations.is_empty() {
+                    all
+                } else {
+                    configurations
+                        .iter()
+                        .map(|n| {
+                            all.iter().find(|c| c.name == *n).cloned().ok_or_else(|| {
+                                DocError::Validation(format!("no configuration named '{n}'"))
+                            })
+                        })
+                        .collect::<Result<_, _>>()?
+                };
+                if chosen.is_empty() {
+                    return Err(DocError::Validation(
+                        "the document has no configurations".into(),
+                    ));
+                }
+                let clean = |t: &str| -> String {
+                    t.chars()
+                        .map(|c| {
+                            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect()
+                };
+                // Plan every path first: refuse before changing anything.
+                let mut plan = Vec::new();
+                for c in &chosen {
+                    let mut base = format!("{}-{}", clean(&stem), clean(&c.name));
+                    if !c.part_number.is_empty() {
+                        base.push('-');
+                        base.push_str(&clean(&c.part_number));
+                    }
+                    for e in &formats {
+                        let p = dir.join(format!("{base}.{e}"));
+                        if p.exists() && !overwrite {
+                            return Err(DocError::File(format!(
+                                "{} exists; pass overwrite to replace it",
+                                p.display()
+                            )));
+                        }
+                        plan.push((c.name.clone(), *e, p));
+                    }
+                }
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| DocError::File(format!("{}: {e}", dir.display())))?;
+                let mut activations = 0;
+                let mut written = Vec::new();
+                let mut result = Ok(());
+                for c in &chosen {
+                    let a = self.run(
+                        &Command::ActivateConfiguration {
+                            name: c.name.clone(),
+                        },
+                        &mut Response::default(),
+                    );
+                    if let Err(e) = a {
+                        result = Err(e);
+                        break;
+                    }
+                    activations += 1;
+                    for (_, e, p) in plan.iter().filter(|(n, _, _)| *n == c.name) {
+                        let cmd = match *e {
+                            "step" => Command::ExportStep {
+                                path: p.clone(),
+                                bodies: None,
+                            },
+                            "stl" => Command::ExportStl {
+                                path: p.clone(),
+                                chord: None,
+                                bodies: None,
+                                print: Default::default(),
+                            },
+                            _ => Command::Export3mf {
+                                path: p.clone(),
+                                chord: None,
+                                bodies: None,
+                                unit: None,
+                                print: Default::default(),
+                            },
+                        };
+                        if let Err(x) = self.run(&cmd, &mut Response::default()) {
+                            result = Err(x);
+                            break;
+                        }
+                        written.push(p.display().to_string());
+                    }
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                // Restore the document as it was (undo the activations).
+                for _ in 0..activations {
+                    self.model_mut()?.undo()?;
+                }
+                result?;
+                r.message = Some(format!("wrote {}", written.join(", ")));
+            }
+            Command::SheetMetal {
+                name,
+                sketch,
+                thickness,
+                radius,
+                k_factor,
+                width,
+                flip,
+                body_name,
+            } => {
+                let (name, sketch, body_name) = (name.clone(), *sketch, body_name.clone());
+                let (thickness, radius, k_factor, width, flip) =
+                    (*thickness, *radius, *k_factor, *width, *flip);
+                let id = self.model_mut()?.transact("Sheet metal flange", |d| {
+                    let n = match &body_name {
+                        Some(n) => valid_name(n, "body")?,
+                        None => d.default_body_name(),
+                    };
+                    if d.bodies.iter().any(|b| b.name == n) {
+                        return Err(DocError::Validation(format!(
+                            "another body is already named '{n}'"
+                        )));
+                    }
+                    let body = d.add_body(n);
+                    let n = name.unwrap_or_else(|| d.default_name("Flange"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::SheetMetal {
+                            sketch,
+                            thickness,
+                            radius,
+                            k_factor,
+                            width,
+                            flip,
+                            body,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ExportFlatPattern { feature, path } => {
+                let (feature, path) = (*feature, path.clone());
+                let m = self.model_mut()?;
+                let FeatureKind::SheetMetal {
+                    sketch,
+                    thickness,
+                    radius,
+                    k_factor,
+                    width,
+                    flip,
+                    ..
+                } = m.document().feature(feature)?.kind.clone()
+                else {
+                    return Err(DocError::Validation(format!(
+                        "{feature} is not a sheet-metal feature"
+                    )));
+                };
+                let solved = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == sketch)
+                    .and_then(|f| f.solved_sketch.clone())
+                    .ok_or_else(|| {
+                        DocError::Validation(format!("{sketch} is not an evaluated sketch"))
+                    })?;
+                let chain = rcad_document::sheet::line_chain(&solved)
+                    .map_err(|e| DocError::Validation(format!("{feature}: {e}")))?;
+                let part = rcad_document::sheet::contour_flange(
+                    feature, &chain, thickness, radius, k_factor, flip,
+                )?;
+                let flat = rcad_document::sheet::flat_pattern_sketch(&part, width);
+                let text = rcad_exchange::dxf::export(
+                    &flat,
+                    &rcad_exchange::dxf::DxfExportOptions {
+                        layer: "CUT".into(),
+                        include_construction: true,
+                        construction_layer: "BEND".into(),
+                    },
+                )
+                .map_err(|e| DocError::File(e.to_string()))?;
+                write_atomic(&path, text.as_bytes())?;
+                r.message = Some(format!(
+                    "flat pattern {:.6} x {width} mm, {} bend line(s)",
+                    part.flat_length,
+                    part.bend_lines.len()
+                ));
+            }
+            Command::SplitBody {
+                name,
+                body,
+                plane,
+                body_name,
+            } => {
+                let (name, body, plane, body_name) =
+                    (name.clone(), *body, *plane, body_name.clone());
+                let m = self.model_mut()?;
+                let src = m.document().body(body)?.name.clone();
+                let id = m.transact(&format!("Split {src}"), |d| {
+                    let n = match &body_name {
+                        Some(n) => valid_name(n, "body")?,
+                        None => d.default_body_name(),
+                    };
+                    if d.bodies.iter().any(|b| b.name == n) {
+                        return Err(DocError::Validation(format!(
+                            "another body is already named '{n}'"
+                        )));
+                    }
+                    let new_body = d.add_body(n);
+                    let n = name.unwrap_or_else(|| d.default_name("Split"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::SplitBody {
+                            body,
+                            plane,
+                            new_body,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetRollback { at } => {
                 let at = *at;
                 let m = self.model_mut()?;
@@ -2159,6 +2658,76 @@ impl Session {
                 let name = m.document().feature(feature)?.name.clone();
                 m.transact(&format!("Move {name}"), |d| d.move_feature(feature, before))?;
                 r.feature = Some(feature);
+            }
+            Command::SetBodyMaterial {
+                body,
+                material,
+                density,
+                density_unit,
+                name,
+            } => {
+                let body = *body;
+                let mat = match (material, density) {
+                    (Some(_), Some(_)) => {
+                        return Err(DocError::Validation(
+                            "give a catalog material or a density, not both (a changed density is a user-defined material: density + name)".into(),
+                        ));
+                    }
+                    (Some(key), None) => Some(rcad_document::Material::from_catalog(key)?),
+                    (None, Some(d)) => Some(rcad_document::Material::user(
+                        name.as_deref(),
+                        *d,
+                        *density_unit,
+                    )?),
+                    (None, None) => None,
+                };
+                let m = self.model_mut()?;
+                let bname = m.document().body(body)?.name.clone();
+                let label = match &mat {
+                    Some(x) => format!("Set material of {bname} to {}", x.name),
+                    None => format!("Clear material of {bname}"),
+                };
+                m.transact(&label, |d| {
+                    d.body_mut(body)?.material = mat.clone();
+                    Ok(())
+                })?;
+            }
+            Command::Combine {
+                name,
+                target,
+                tools,
+                op,
+                keep_tools,
+            } => {
+                let (target, tools, op, keep_tools) = (*target, tools.clone(), *op, *keep_tools);
+                let name = name.clone();
+                let m = self.model_mut()?;
+                let tname = m.document().body(target)?.name.clone();
+                for t in &tools {
+                    m.document().body(*t)?;
+                }
+                let verb = match op {
+                    k::CombineOp::Join => "Join",
+                    k::CombineOp::Cut => "Cut",
+                    k::CombineOp::Intersect => "Intersect",
+                };
+                let id = m.transact(&format!("Combine ({verb}) into {tname}"), |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Combine"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Combine {
+                            target,
+                            tools,
+                            op,
+                            keep_tools,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::MassProperties { bodies } => {
+                let m = self.model_mut()?;
+                r.mass_properties = Some(mass::report(m, bodies.as_deref())?);
             }
             Command::SetBodyVisible { body, visible } => {
                 let (body, visible) = (*body, *visible);
@@ -2665,6 +3234,8 @@ impl Session {
                 features: vec![],
                 bodies: vec![],
                 parameters: vec![],
+                configurations: vec![],
+                active_configuration: None,
             };
         };
         DocSummary {
@@ -2698,6 +3269,12 @@ impl Session {
                     planes: b.geometry.brep().map(k::face_planes).unwrap_or_default(),
                     measure_error: b.measure_error.clone(),
                     imported_faces: imported_faces(m.evaluation(), b.id),
+                    material: m
+                        .document()
+                        .body(b.id)
+                        .ok()
+                        .and_then(|i| i.material.clone()),
+                    mass: body_mass(m, b),
                     bounds: match &b.measurements {
                         Some(m) => Some(m.bounds),
                         None => b.geometry.brep().and_then(|g| k::bounds(g).ok()),
@@ -2705,8 +3282,27 @@ impl Session {
                 })
                 .collect(),
             parameters: parameter_summaries(m.document()),
+            configurations: m.document().configurations.clone(),
+            active_configuration: m.document().active_configuration.clone(),
         }
     }
+}
+
+/// Density × measured (or mesh) volume, g.
+fn body_mass(m: &Model, b: &rcad_document::EvalBody) -> Option<f64> {
+    let mat = m.document().body(b.id).ok()?.material.as_ref()?;
+    let v = match (&b.measurements, b.geometry.mesh()) {
+        (
+            Some(Measurements {
+                volume: k::VolumeResult::Value { volume, .. },
+                ..
+            }),
+            _,
+        ) => *volume,
+        (_, Some(mb)) if mb.diagnostics.closed => mb.diagnostics.signed_volume?,
+        _ => return None,
+    };
+    (v > 0.0).then(|| v * mat.g_per_mm3())
 }
 
 fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
@@ -2735,7 +3331,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
+                FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
+                FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
+                FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
                 FeatureKind::Thread { plane, .. } => ("thread", Some(*plane)),
             };

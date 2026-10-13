@@ -282,3 +282,129 @@ fn move_and_copy_a_body_from_the_inspector() {
     click(&mut h, "Undo");
     assert_eq!(h.state().summary().bodies.len(), 1);
 }
+
+#[test]
+fn save_and_activate_configurations_from_the_browser() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::SetUserParameter {
+        name: "length".into(),
+        expression: "100".into(),
+        unit: None,
+        comment: None,
+    });
+    settle(&mut h);
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(100.0, 30.0));
+    h.state_mut().request(Command::SetExpression {
+        feature: s1,
+        name: "width".into(),
+        expression: "length".into(),
+    });
+    settle(&mut h);
+    request(&mut h, Command::extrude(None, s1, 10.0));
+    click(&mut h, "Configurations (0)");
+    type_into(&mut h, "Configuration name", "Long");
+    type_into(&mut h, "Part number", "P-100");
+    click(&mut h, "Save current as configuration");
+    assert_eq!(h.state().summary().configurations.len(), 1);
+    h.state_mut().request(Command::SetUserParameter {
+        name: "length".into(),
+        expression: "60".into(),
+        unit: None,
+        comment: None,
+    });
+    settle(&mut h);
+    type_into(&mut h, "Configuration name", "Short");
+    type_into(&mut h, "Part number", "P-60");
+    click(&mut h, "Save current as configuration");
+    assert!((h.state().volume().unwrap() - 18000.0).abs() < 1e-6);
+    click(&mut h, "Activate Long");
+    assert!((h.state().volume().unwrap() - 30000.0).abs() < 1e-6);
+    assert_eq!(
+        h.state().summary().active_configuration.as_deref(),
+        Some("Long")
+    );
+    click(&mut h, "Activate Short");
+    assert!((h.state().volume().unwrap() - 18000.0).abs() < 1e-6);
+}
+
+#[test]
+fn revolve_about_the_sketch_x_axis_from_the_dialog() {
+    let mut h = harness();
+    click(&mut h, "New");
+    sketch(
+        &mut h,
+        SketchPlane::WorldXY,
+        SketchTemplate::Polygon {
+            vertices: vec![[0.0, 5.0], [30.0, 5.0], [30.0, 15.0], [0.0, 15.0]],
+        },
+    );
+    click(&mut h, "Revolve…");
+    type_into(&mut h, "Revolve angle (deg)", "360");
+    h.get_by_label("Revolve axis").click();
+    let _ = h.try_run();
+    click(&mut h, "Sketch X axis");
+    click(&mut h, "OK");
+    assert!(
+        (h.state().volume().unwrap() - PI * 200.0 * 30.0).abs() < 1e-6,
+        "{:?}",
+        h.state().volume()
+    );
+}
+
+#[test]
+fn split_a_body_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    request(&mut h, Command::extrude(None, s1, 10.0));
+    let name = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name);
+    click(&mut h, "Split by plane");
+    type_into(&mut h, "Split plane offset (mm)", "4");
+    click(&mut h, "Split body");
+    let bodies = h.state().summary().bodies.clone();
+    assert_eq!(bodies.len(), 2);
+    let v = |i: usize| match bodies[i].measurements.as_ref().unwrap().volume {
+        rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+        ref x => panic!("{x:?}"),
+    };
+    assert!((v(0) - 4800.0).abs() < 1e-6 && (v(1) - 7200.0).abs() < 1e-6);
+}
+
+#[test]
+fn sheet_metal_flange_and_flat_pattern_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[0.0, 22.0], [0.0, 0.0], [64.0, 0.0], [64.0, 22.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..3 {
+        sk.add_line(p[i], p[i + 1]);
+    }
+    let s1 = sketch(
+        &mut h,
+        SketchPlane::WorldXY,
+        SketchTemplate::Custom { sketch: sk },
+    );
+    let n = fname(&h, s1);
+    click(&mut h, &n);
+    click(&mut h, "Sheet metal flange");
+    type_into(&mut h, "K-factor", "0.4");
+    click(&mut h, "Create flange");
+    let want = 40.0 * 100.0 + 40.0 * 2.0 * (PI / 4.0) * (9.0 - 4.0);
+    assert!(
+        (h.state().volume().unwrap() - want).abs() < 1e-6,
+        "{:?}",
+        h.state().volume()
+    );
+    let f = h.state().summary().features.last().unwrap().clone();
+    click(&mut h, &f.name);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.dxf");
+    type_into(&mut h, "Flat pattern DXF path", path.to_str().unwrap());
+    click(&mut h, "Export flat pattern");
+    assert!(path.is_file());
+}

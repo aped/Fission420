@@ -1,5 +1,10 @@
 //! Bodies in the browser and the body inspector.
 //!
+//! Run 6: the inspector also sets a body's physical material (catalog or a
+//! user density, `SetBodyMaterial`) and shows its mass properties
+//! (`MassProperties`: volume, mass, centre of mass, inertia; world frame,
+//! mm / g / g·mm²; exact or a labelled estimate).
+//!
 //! The browser lists every body of the document above the feature history:
 //! select (highlights all of its faces in the view), inline rename
 //! (double-click or context menu; Enter commits, Esc cancels), show/hide.
@@ -12,14 +17,15 @@
 //! operations are unavailable.
 
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{BodySummary, Command};
-use rcad_document::{BodyId, BodySource};
+use rcad_commands::mass::MassReport;
+use rcad_commands::{BodySummary, Command, DocSummary};
+use rcad_document::material::{CATALOG, catalog_entry};
+use rcad_document::{BodyId, BodySource, DensityUnit};
 use rcad_kernel::VolumeResult;
 
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 
-/// Inline rename buffer of a body row.
 /// Edit buffers of the body Move / Copy form (run 6).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveForm {
@@ -38,6 +44,79 @@ impl Default for MoveForm {
             axis: 2,
             copy: false,
         }
+    }
+}
+
+/// Material form and the last mass-properties report (run 6).
+#[derive(Debug, Clone, Default)]
+pub struct BodyProps {
+    /// Body the form was filled for (reset when another body is shown).
+    pub body: Option<BodyId>,
+    /// Catalog key, `CUSTOM` or `NONE`.
+    pub choice: String,
+    pub density: String,
+    pub name: String,
+    pub unit: DensityUnit,
+    /// (doc_id, revision, report) of the last `MassProperties` reply.
+    pub report: Option<(u64, u64, MassReport)>,
+    /// Combine form (run 6): tool body, operation (0 join, 1 cut, 2 intersect),
+    /// keep the tool.
+    pub combine_tool: Option<BodyId>,
+    pub combine_op: usize,
+    pub keep_tools: bool,
+}
+
+const CUSTOM: &str = "custom";
+const NONE: &str = "none";
+
+impl BodyProps {
+    /// Keep the report of a `MassProperties` reply (engine hook in `handle_reply`).
+    pub(crate) fn on_reply(&mut self, response: &rcad_commands::Response, summary: &DocSummary) {
+        if let Some(r) = &response.mass_properties {
+            self.report = Some((summary.doc_id, summary.revision, r.clone()));
+        }
+    }
+
+    fn reset_for(&mut self, b: &BodySummary) {
+        self.body = Some(b.id);
+        self.unit = DensityUnit::GPerCm3;
+        match &b.material {
+            Some(m) if m.catalog.is_some() => {
+                self.choice = m.catalog.clone().unwrap_or_default();
+                self.density = m.density.to_string();
+                self.name.clear();
+            }
+            Some(m) => {
+                self.choice = CUSTOM.into();
+                self.density = m.density.to_string();
+                self.name = m.name.clone();
+            }
+            None => {
+                self.choice = NONE.into();
+                self.density.clear();
+                self.name.clear();
+            }
+        }
+    }
+}
+
+fn choice_text(choice: &str) -> String {
+    match choice {
+        NONE => "None".into(),
+        CUSTOM => "Custom density".into(),
+        k => catalog_entry(k).map_or_else(
+            || k.to_string(),
+            |e| format!("{} ({} g/cm³)", e.name, e.density),
+        ),
+    }
+}
+
+/// A readout with a precision suited to the magnitude.
+fn num(x: f64) -> String {
+    if x != 0.0 && (x.abs() >= 1e6 || x.abs() < 1e-3) {
+        format!("{x:.6e}")
+    } else {
+        format!("{x:.4}")
     }
 }
 
@@ -253,6 +332,8 @@ impl RcadApp {
         ui.label(provenance(&b));
         if b.kind != "mesh" {
             self.move_ui(ui, b.id);
+            self.split_ui(ui, b.id);
+            self.combine_ui(ui, b.id);
         }
         if b.kind == "mesh" {
             ui.colored_label(
@@ -370,16 +451,237 @@ impl RcadApp {
                 ui.weak("No measurements available.");
             }
         }
+        ui.separator();
+        self.material_ui(ui, &b);
+    }
+
+    /// Material assignment and mass properties of body `b` (run 6).
+    fn material_ui(&mut self, ui: &mut egui::Ui, b: &BodySummary) {
+        if self.body_props.body != Some(b.id) {
+            self.body_props.reset_for(b);
+        }
+        let estimate = matches!(
+            b.measurements.as_ref().map(|m| &m.volume),
+            Some(VolumeResult::Value {
+                method: rcad_kernel::VolumeMethod::TessellationEstimate,
+                ..
+            })
+        );
+        match &b.material {
+            Some(m) => {
+                ui.label(format!("Material: {}", m.describe()))
+                    .on_hover_text("Physical material for mass properties (not the display colour). Catalog densities are typical nominal values of the solid material; a printed part with infill weighs less.");
+            }
+            None => {
+                ui.label("Material: none (no mass)");
+            }
+        }
+        if let Some(mass) = b.mass {
+            let t = if estimate {
+                format!("Mass ≈ {} g (volume is an estimate)", num(mass))
+            } else if b.kind == "mesh" {
+                format!("Mass {} g (of the triangle mesh)", num(mass))
+            } else {
+                format!("Mass {} g", num(mass))
+            };
+            ui.label(t);
+        }
+        let mut send = None;
+        ui.collapsing("Set material", |ui| {
+            let f = &mut self.body_props;
+            egui::ComboBox::from_label("Material")
+                .selected_text(choice_text(&f.choice))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.choice, NONE.to_string(), choice_text(NONE));
+                    ui.selectable_value(&mut f.choice, CUSTOM.to_string(), choice_text(CUSTOM));
+                    for e in CATALOG {
+                        ui.selectable_value(&mut f.choice, e.key.to_string(), choice_text(e.key));
+                    }
+                });
+            let custom = f.choice == CUSTOM;
+            if custom {
+                crate::panels::text_field(ui, "Material name", &mut f.name);
+                ui.horizontal(|ui| {
+                    crate::panels::num_field(ui, "Density", &mut f.density);
+                    ui.radio_value(&mut f.unit, DensityUnit::GPerCm3, "g/cm³");
+                    ui.radio_value(&mut f.unit, DensityUnit::KgPerM3, "kg/m³");
+                });
+            } else if let Some(e) = catalog_entry(&f.choice) {
+                ui.small(format!(
+                    "{} g/cm³, typical nominal (published values {}–{} g/cm³)",
+                    e.density, e.range.0, e.range.1
+                ));
+            }
+            let density = f
+                .density
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|d| d.is_finite());
+            let ready = !custom || density.is_some();
+            let r = ui
+                .add_enabled(ready, egui::Button::new("Apply material"))
+                .probe("Apply material");
+            if r.clicked() {
+                send = Some(Command::SetBodyMaterial {
+                    body: b.id,
+                    material: (!custom && f.choice != NONE).then(|| f.choice.clone()),
+                    density: if custom { density } else { None },
+                    density_unit: f.unit,
+                    name: (custom && !f.name.trim().is_empty()).then(|| f.name.clone()),
+                });
+            }
+        });
+        if let Some(c) = send {
+            // Refill the form from the reply's state on a later frame.
+            self.body_props.body = None;
+            self.request(c);
+        }
+        if ui
+            .button("Mass properties")
+            .on_hover_text("Volume, mass, centre of mass and inertia of this body (world frame)")
+            .probe("Mass properties")
+            .clicked()
+        {
+            self.request(Command::MassProperties {
+                bodies: Some(vec![b.id]),
+            });
+        }
+        let current = self
+            .body_props
+            .report
+            .as_ref()
+            .filter(|(d, r, _)| *d == self.summary.doc_id && *r == self.summary.revision);
+        let Some(bm) = current.and_then(|(_, _, rep)| rep.bodies.iter().find(|x| x.body == b.id))
+        else {
+            return;
+        };
+        let Some(p) = &bm.properties else {
+            ui.colored_label(
+                Color32::from_rgb(255, 170, 90),
+                format!(
+                    "Mass properties unavailable: {}",
+                    bm.error.as_deref().unwrap_or("unknown")
+                ),
+            );
+            return;
+        };
+        ui.label(RichText::new("Mass properties (world frame; mm, g, g·mm²)").strong());
+        if bm.exact {
+            ui.small(format!("Exact boundary integral ({:?})", p.method));
+        } else {
+            ui.colored_label(
+                Color32::from_rgb(255, 200, 120),
+                format!(
+                    "Estimate ({:?}): volume ±{} mm³, centre ±{} mm",
+                    p.method,
+                    num(p.volume_error),
+                    num(p.centroid_error)
+                ),
+            );
+        }
+        ui.label(format!("Volume {} mm³", num(p.volume)));
+        match bm.mass {
+            Some(m) => ui.label(format!("Mass {} g", num(m))),
+            None => ui.label("Mass: assign a material"),
+        };
+        let c = p.centroid;
+        ui.label(format!(
+            "Centre of mass ({}, {}, {}) mm",
+            num(c[0]),
+            num(c[1]),
+            num(c[2])
+        ));
+        if let Some(i) = bm.inertia {
+            ui.small("Inertia about the centre of mass, world axes (g·mm²):");
+            for row in i {
+                ui.small(format!(
+                    "[{}  {}  {}]",
+                    num(row[0]),
+                    num(row[1]),
+                    num(row[2])
+                ));
+            }
+        }
     }
 }
 
 impl RcadApp {
+    /// Combine this body with another one (run 6, `Command::Combine`).
+    fn combine_ui(&mut self, ui: &mut egui::Ui, target: BodyId) {
+        let others: Vec<(BodyId, String)> = self
+            .summary
+            .bodies
+            .iter()
+            .filter(|o| o.id != target && o.kind != "mesh")
+            .map(|o| (o.id, o.name.clone()))
+            .collect();
+        let mut send = None;
+        ui.collapsing("Combine with…", |ui| {
+            if others.is_empty() {
+                ui.weak("No other solid body to combine with.");
+                return;
+            }
+            let f = &mut self.body_props;
+            if !f
+                .combine_tool
+                .is_some_and(|t| others.iter().any(|o| o.0 == t))
+            {
+                f.combine_tool = Some(others[0].0);
+            }
+            let name = |id: Option<BodyId>| {
+                others
+                    .iter()
+                    .find(|o| Some(o.0) == id)
+                    .map_or(String::new(), |o| o.1.clone())
+            };
+            egui::ComboBox::from_label("Tool body")
+                .selected_text(name(f.combine_tool))
+                .show_ui(ui, |ui| {
+                    for (id, n) in &others {
+                        ui.selectable_value(&mut f.combine_tool, Some(*id), n);
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut f.combine_op, 0, "Join");
+                ui.radio_value(&mut f.combine_op, 1, "Cut");
+                ui.radio_value(&mut f.combine_op, 2, "Intersect");
+            });
+            ui.checkbox(&mut f.keep_tools, "Keep tool body")
+                .on_hover_text(
+                    "Off: the tool body is consumed (it disappears; its features stay in History)",
+                );
+            if ui.button("Combine").probe("Combine").clicked()
+                && let Some(t) = f.combine_tool
+            {
+                send = Some(Command::Combine {
+                    name: None,
+                    target,
+                    tools: vec![t],
+                    op: match f.combine_op {
+                        0 => rcad_kernel::CombineOp::Join,
+                        1 => rcad_kernel::CombineOp::Cut,
+                        _ => rcad_kernel::CombineOp::Intersect,
+                    },
+                    keep_tools: f.keep_tools,
+                });
+            }
+            ui.small(
+                "Checked independently against both bodies; refused (nothing changes) when \
+                 Truck fails or the check disagrees. Bodies that only touch usually fail.",
+            );
+        });
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+
     /// Move / Copy a body (run 6): rotation about a world axis through the
     /// origin, then a translation; one undo step; a feature in History whose
     /// values stay editable parameters (tx, ty, tz, angle_deg).
     fn move_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
         let mut send = None;
-        ui.collapsing("Move / Copy", |ui| {
+        let header = ui.collapsing("Move / Copy", |ui| {
             let f = &mut self.move_form;
             ui.horizontal(|ui| {
                 for (i, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
@@ -429,6 +731,58 @@ impl RcadApp {
                  follow the body). Patterns/mirrors of features made before the move are refused.",
             );
         });
+        header.header_response.probe("Move / Copy");
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+}
+
+impl RcadApp {
+    /// Split a body by a world plane moved along its normal (run 6). The body
+    /// keeps the part behind the plane; a new body gets the part in front.
+    fn split_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
+        let mut send = None;
+        let header = egui::CollapsingHeader::new("Split by plane")
+            .id_salt(("split_ui", body.0))
+            .show(ui, |ui| {
+                let (base, offset) = &mut self.split_form;
+                ui.horizontal(|ui| {
+                    ui.radio_value(base, 0, "World XY").probe("Split XY");
+                    ui.radio_value(base, 1, "World XZ").probe("Split XZ");
+                    ui.radio_value(base, 2, "World YZ").probe("Split YZ");
+                });
+                crate::panels::num_field(ui, "Split plane offset (mm)", offset);
+                let off = offset.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+                if ui
+                    .add_enabled(off.is_some(), egui::Button::new("Split body"))
+                    .probe("Split body")
+                    .clicked()
+                    && let Some(d) = off
+                {
+                    let base = match *base {
+                        0 => rcad_document::PlaneBase::WorldXY,
+                        1 => rcad_document::PlaneBase::WorldXZ,
+                        _ => rcad_document::PlaneBase::WorldYZ,
+                    };
+                    send = Some(Command::SplitBody {
+                        name: None,
+                        body,
+                        plane: rcad_document::SketchPlane::Offset {
+                            base,
+                            distance: d,
+                            angle: 0.0,
+                        },
+                        body_name: None,
+                    });
+                }
+                ui.small(
+                    "Offset along the plane's normal (+Z, −Y, +X). This body keeps the part \
+                     behind the plane; a new body gets the part in front. The offset stays a \
+                     parameter (plane_offset).",
+                );
+            });
+        header.header_response.probe("Split by plane");
         if let Some(c) = send {
             self.request(c);
         }

@@ -680,6 +680,15 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
         FeatureKind::Shell { .. } if name == "thickness" => Some(SlotKind::Length),
         FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
+        // The K-factor is a ratio: dimensionless like an angle.
+        FeatureKind::SheetMetal { .. } if name == "k_factor" => Some(SlotKind::Angle),
+        FeatureKind::SheetMetal { .. } => kind_has(kind, name).then_some(SlotKind::Length),
+        FeatureKind::SplitBody { .. } if name == "plane_angle_deg" => {
+            kind_has(kind, name).then_some(SlotKind::Angle)
+        }
+        FeatureKind::SplitBody { .. } if name == "plane_offset" => {
+            kind_has(kind, name).then_some(SlotKind::Length)
+        }
         FeatureKind::MoveBody { .. } if matches!(name, "tx" | "ty" | "tz") => {
             Some(SlotKind::Length)
         }

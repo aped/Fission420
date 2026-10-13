@@ -1,0 +1,73 @@
+# Run 6 (SESSION_6 acceptance 6): direct editing of an independently generated
+# STEP body (FreeCAD fixture tools/fixtures/step/direct_edit.py: block 60x40x20,
+# D8 through hole at (15,20), D6x8 blind hole at (30,12), D10x5 boss at (45,25);
+# V = 48000 - 267 pi) through real pointer/keyboard input: pick the top face ->
+# Offset face 3; pick the through-hole wall -> Resize hole to D12; pick the
+# blind-hole wall -> Remove hole; an impossible resize is refused unchanged;
+# undo/redo; save/close/reopen without the source file; STEP export.
+# Expected: V1 = V0 + 3 (2400 - 50 pi); V2 = V1 - 20 pi 23; V3 = V2 + 9 pi 11.
+clickw New
+wait_idle
+clickw Import…
+typew Import file path | @ROOT@/crates/rcad-kernel/tests/fixtures/step/direct_edit_block_mm.step
+clickw OK
+wait_idle
+expect volume 47161.194761 0.001
+key 0
+key f
+wait_idle
+wclick 5 5 20
+clickw Offset face…
+typew Distance (mm) | 3
+clickw OK
+wait_idle
+expect last_reply.ok true
+expect volume 53889.955863 0.001
+shot
+# The far wall of the through hole, seen through its opening.
+wclick 15 24 21.5
+clickw Resize hole…
+typew New diameter (mm) | 12
+clickw OK
+wait_idle
+expect last_reply.ok true
+expect volume 52444.823243 0.001
+# D40 would cut through the block's edges: refused, nothing changes.
+wclick 15 26 21.5
+clickw Resize hole…
+typew New diameter (mm) | 40
+clickw OK
+wait_idle
+expect last_reply.ok false
+expect volume 52444.823243 0.001
+wclick 30 15 21.5
+clickw Remove hole
+clickw OK
+wait_idle
+expect last_reply.ok true
+expect volume 52755.840916 0.001
+shot
+key ctrl+z
+wait_idle
+expect volume 52444.823243 0.001
+key ctrl+shift+z
+wait_idle
+expect volume 52755.840916 0.001
+key ctrl+shift+s
+typew File path | @OUT@/step_direct_edit.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/step_direct_edit.rcad.json
+key Return
+wait_idle
+expect volume 52755.840916 0.001
+clickw Export
+clickw Export STEP…
+typew STEP path | @OUT@/step_direct_edit.step
+clickw All visible bodies
+clickw OK
+wait_idle
+shot

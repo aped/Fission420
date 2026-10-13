@@ -173,6 +173,8 @@ fn revolve_washer_edit_undo_and_limits() {
         name: None,
         sketch: FeatureId(1),
         angle_deg: 360.0,
+        axis: Default::default(),
+        reverse: false,
     });
     assert!(r.ok, "{:?}", r.error);
     assert!(

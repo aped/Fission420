@@ -175,6 +175,12 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if doc.rollback.is_some() {
         return Some("a rolled-back timeline marker");
     }
+    if !doc.configurations.is_empty() || doc.active_configuration.is_some() {
+        return Some("configurations");
+    }
+    if doc.bodies.iter().any(|b| b.material.is_some()) {
+        return Some("body materials");
+    }
     for f in &doc.features {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");
@@ -185,13 +191,35 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::Thread { .. }) {
             return Some("modeled threads");
         }
+        if let crate::FeatureKind::Revolve { axis, reverse, .. } = &f.kind
+            && (!axis.is_default() || *reverse)
+        {
+            return Some("revolve axis/direction options");
+        }
+        if matches!(f.kind, crate::FeatureKind::SheetMetal { .. }) {
+            return Some("sheet-metal flanges");
+        }
+        if matches!(f.kind, crate::FeatureKind::SplitBody { .. }) {
+            return Some("split bodies");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }
-        if let crate::FeatureKind::Sketch { links, .. } = &f.kind
-            && !links.is_empty()
-        {
-            return Some("projected sketch geometry (projection links)");
+        if matches!(f.kind, crate::FeatureKind::Combine { .. }) {
+            return Some("body combines");
+        }
+        if let crate::FeatureKind::Sketch { links, sketch, .. } = &f.kind {
+            if !links.is_empty() {
+                return Some("projected sketch geometry (projection links)");
+            }
+            if sketch.constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    rcad_sketch::Constraint::FixedX { .. } | rcad_sketch::Constraint::FixedY { .. }
+                )
+            }) {
+                return Some("single-coordinate fixed constraints");
+            }
         }
         if let crate::FeatureKind::Extrude {
             options, operation, ..

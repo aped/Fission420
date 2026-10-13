@@ -1,0 +1,255 @@
+# Run 6 (SESSION_6 acceptance 1): a rounded, labelled enclosure built from New
+# through real pointer/keyboard input with general tools: parameters, a drawn
+# and bound rectangle, extrusion, four solid fillets bound to corner_r, the
+# cavity from the projected top face offset inward by the wall (associative),
+# a lid projected from the bottom face on an offset plane, raised "B8" text
+# with all glyph regions in one Join; then a length edit that the cavity, lid
+# and text follow, an excessive radius refused, undo/redo, save/close/reopen
+# and STEP export. Expected volumes: closed-form (rounded rectangle areas;
+# glyph area of B8 at 12 mm from tests/rounded_enclosure.rs = 103.380146 mm²).
+clickw New
+wait_idle
+typew New parameter name | length
+typew New parameter expression | 100
+clickw Add parameter
+wait_idle
+typew New parameter name | width
+typew New parameter expression | 70
+clickw Add parameter
+wait_idle
+typew New parameter name | height
+typew New parameter expression | 30
+clickw Add parameter
+wait_idle
+typew New parameter name | wall
+typew New parameter expression | 2.4
+clickw Add parameter
+wait_idle
+typew New parameter name | corner_r
+typew New parameter expression | 6
+clickw Add parameter
+wait_idle
+expect params.corner_r 6 0
+clickw Parameters header
+# Outline: corner rectangle from the origin, dimensioned, bound to length/width.
+clickw New Sketch on XY
+wait_idle
+clickw 2-Point Rect
+sclick 0.3 0.2
+sclick 40 30
+expect editing.entities 4
+key d
+sclick 20 0
+type 100
+key Return
+key f
+wait_idle
+sclick 100 15
+type 70
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Sketch1
+typew width (mm) | length
+typew height (mm) | width
+clickw Apply
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 30
+key Return
+wait_idle
+clickw Extrude1
+typew distance (mm) | height
+clickw Apply
+wait_idle
+expect volume 210000 0.01
+# Four vertical edges: pick a side face (front view: the front face; right
+# view: the right face; back view: the back face), Fillet edge…, the adjacent
+# side as the second face, radius 6; then bind each radius to corner_r.
+# Rectangle sides: entity 1 front (y = 0), 2 right, 3 back, 4 left.
+key 1
+key f
+wait_idle
+wclick 50 0 15
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 2)
+typew Fillet radius (mm) | 6
+clickw OK
+wait_idle
+wclick 50 0 15
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 4)
+typew Fillet radius (mm) | 6
+clickw OK
+wait_idle
+expect last_reply.ok true
+key 3
+key f
+wait_idle
+wclick 100 35 15
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 3)
+typew Fillet radius (mm) | 6
+clickw OK
+wait_idle
+expect last_reply.ok true
+key 6
+key f
+wait_idle
+wclick 50 70 15
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 4)
+typew Fillet radius (mm) | 6
+clickw OK
+wait_idle
+expect volume 209072.920066 0.01
+clickw Fillet1
+typew radius (mm) | corner_r
+clickw Apply
+wait_idle
+clickw Fillet2
+typew radius (mm) | corner_r
+clickw Apply
+wait_idle
+clickw Fillet3
+typew radius (mm) | corner_r
+clickw Apply
+wait_idle
+clickw Fillet4
+typew radius (mm) | corner_r
+clickw Apply
+wait_idle
+shot
+# Cavity: a sketch on the top face, the top face projected into it (sketch
+# inspector), offset inward by 2.4 in the editor, bound to wall; cut the
+# inner region 27.6 deep (height - floor).
+key 0
+key f
+wait_idle
+wclick 50 35 30
+clickw Create Sketch
+wait_idle
+clickw Finish Sketch
+wait_idle
+clickw Project geometry into this sketch
+clickw Project Extrude1 ExtrudeEndCap
+wait_idle
+expect last_reply.ok true
+clickw Edit Sketch
+wait_idle
+key o
+sclick 50 0
+typew Offset distance (mm, + out / − in) | -2.4
+key Return
+wait_idle
+clickw Finish Sketch
+wait_idle
+expect last_reply.ok true
+clickw Sketch2
+typew offset (mm) | wall
+clickw Apply
+wait_idle
+clickw Extrude…
+clickw Cut
+clickw Region
+clickw Region 2
+typew Extrude distance (mm) | 27.6
+clickw OK
+wait_idle
+expect body_volume.B1 38065.664940 0.01
+shot
+# Lid: a sketch 10 mm above the base on an offset plane, the base's bottom
+# face projected into it, extruded 2.4 as a new body.
+clickw Sketch on offset plane…
+clickw Base World XY
+typew Plane offset (mm) | 40
+clickw OK
+wait_idle
+clickw Finish Sketch
+wait_idle
+clickw Project geometry into this sketch
+clickw Project Extrude1 ExtrudeStartCap
+wait_idle
+clickw Extrude…
+clickw New Body
+typew Extrude distance (mm) | 2.4
+clickw OK
+wait_idle
+expect body_volume.B2 16725.833605 0.01
+# Raised B8 on the lid top, all glyph regions in one Join.
+key 0
+key f
+wait_idle
+wclick 50 35 42.4
+clickw Create Sketch
+wait_idle
+clickw Text
+sclick 40 30
+typew Text string | B8
+typew Height (mm, cap height) | 12
+clickw Apply text
+wait_idle
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+clickw All outermost regions
+clickw Join
+typew Extrude distance (mm) | 0.8
+clickw OK
+wait_idle
+expect body_volume.B2 16808.537722 0.01
+expect body_volume.B1 38065.664940 0.01
+shot
+# Revise: length 120. The cavity (projection + offset), lid (projection) and
+# text follow.
+clickw Parameters header
+clickw param length
+typew Parameter expression | 120
+clickw Apply parameter
+wait_idle
+expect body_volume.B1 44075.264940 0.01
+expect body_volume.B2 20168.537722 0.01
+shot
+# Excessive radius (> width / 2): refused, nothing changes.
+clickw param corner_r
+typew Parameter expression | 36
+clickw Apply parameter
+wait_idle
+expect last_reply.ok false
+expect params.corner_r 6 0
+expect body_volume.B1 44075.264940 0.01
+clickw Cancel parameter edit
+key ctrl+z
+wait_idle
+expect body_volume.B1 38065.664940 0.01
+key ctrl+shift+z
+wait_idle
+expect body_volume.B1 44075.264940 0.01
+clickw Parameters header
+# Save, close, reopen, export STEP.
+key ctrl+shift+s
+typew File path | @OUT@/rounded_enclosure.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/rounded_enclosure.rcad.json
+key Return
+wait_idle
+expect body_volume.B1 44075.264940 0.01
+expect body_volume.B2 20168.537722 0.01
+key 0
+key f
+clickw Export
+clickw Export STEP…
+typew STEP path | @OUT@/rounded_enclosure.step
+clickw All visible bodies
+clickw OK
+wait_idle
+shot

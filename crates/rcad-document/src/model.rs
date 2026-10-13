@@ -36,6 +36,10 @@ pub struct BodyInfo {
     pub name: String,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// Physical material for mass properties (run 6, format v6); None: not
+    /// assigned. Separate from appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<crate::Material>,
 }
 
 fn yes() -> bool {
@@ -311,6 +315,12 @@ pub enum FeatureKind {
         /// Body created (v3; assigned by migration for older files).
         #[serde(default)]
         body: BodyId,
+        /// Run 6 (format v6 when not the default): the axis, and `reverse`
+        /// (sweep toward +normal instead of −normal, the run-1 sense).
+        #[serde(default, skip_serializing_if = "RevolveAxis::is_default")]
+        axis: RevolveAxis,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
     },
     /// Extrusion of a sketch profile along the sketch normal (or against it when
     /// `reverse`): a new body, or joined to / cut from an explicit target body.
@@ -475,6 +485,35 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         copy: Option<BodyId>,
     },
+    /// Split body `body` by `plane` (run 6, format v6): `body` keeps the part
+    /// behind the plane (against its normal), new body `new_body` gets the
+    /// part in front of it. Each part is an exact, result-checked cut by a
+    /// half-space box (ADR 0005/0006); a plane that misses the body, or a
+    /// side that falls apart into several solids, is refused. Faces of the
+    /// new body are not referencable by role. Parameters "plane_offset",
+    /// "plane_angle_deg" for an offset plane.
+    SplitBody {
+        body: BodyId,
+        plane: SketchPlane,
+        new_body: BodyId,
+    },
+    /// Sheet-metal contour flange (run 6 pull-forward, `crate::sheet`,
+    /// format v6): the open line chain of sketch `sketch` is one surface of a
+    /// sheet `thickness` thick (material right of the chain, left with
+    /// `flip`), with cylindrical bends of inner `radius` at its corners,
+    /// extruded `width` along the sketch normal as new body `body`. Flat
+    /// pattern by K-factor (`k_factor`). Parameters "thickness", "radius",
+    /// "k_factor", "width".
+    SheetMetal {
+        sketch: FeatureId,
+        thickness: f64,
+        radius: f64,
+        k_factor: f64,
+        width: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        body: BodyId,
+    },
     /// Direct edit (run 6, ADR 0010) of an imported STEP body: `face` is an
     /// imported face (`FaceRole::Imported`, by stable import index) and `op`
     /// what is done to it, exactly (`rcad_kernel::{offset_face,
@@ -519,6 +558,20 @@ pub enum FeatureKind {
         nut: Option<NutSpec>,
         body: BodyId,
     },
+    /// Body Combine (run 6, format v6, SO04): `target` joined with / cut by /
+    /// intersected with the `tools` bodies, in order (`rcad_kernel::combine`:
+    /// Truck booleans plus an independent membership/volume check against the
+    /// inputs). Without `keep_tools` the tool bodies are consumed: they leave
+    /// the evaluated model (their creators stay in history; later features
+    /// using them are broken references). Faces of consumed tools are not
+    /// referencable afterwards.
+    Combine {
+        target: BodyId,
+        tools: Vec<BodyId>,
+        op: rcad_kernel::CombineOp,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_tools: bool,
+    },
 }
 
 /// Nut of a [`FeatureKind::Thread`]: square `width`, radial `clearance` (mm).
@@ -528,6 +581,7 @@ pub struct NutSpec {
     pub clearance: f64,
 }
 
+/// (Split body variant lives in FeatureKind; see `SplitBody`.)
 fn z_axis() -> [f64; 3] {
     [0.0, 0.0, 1.0]
 }
@@ -573,6 +627,25 @@ impl ExtrudeOptions {
     /// No run-6 option set (a run-5 extrusion).
     pub fn is_plain(&self) -> bool {
         *self == ExtrudeOptions::default()
+    }
+}
+
+/// Axis of a [`FeatureKind::Revolve`] (run 6). The profile must lie on one
+/// side of it (strictly). `Line`: a line of the profile sketch (typically
+/// construction), from its first to its second point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RevolveAxis {
+    /// The sketch's local Y axis through its origin (runs 1-5).
+    #[default]
+    SketchY,
+    /// The sketch's local X axis through its origin.
+    SketchX,
+    Line(rcad_sketch::EntityId),
+}
+
+impl RevolveAxis {
+    pub fn is_default(&self) -> bool {
+        *self == RevolveAxis::SketchY
     }
 }
 
@@ -720,11 +793,17 @@ impl Feature {
             }
             FeatureKind::Shell { extrude, .. } => vec![*extrude],
             FeatureKind::MoveBody { .. } => vec![],
+            FeatureKind::SplitBody { plane, .. } => {
+                plane.face().map(|r| r.feature).into_iter().collect()
+            }
+            FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             FeatureKind::Thread { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
+            // Body creators (target and tools) come from `Document::dependencies_of`.
+            FeatureKind::Combine { .. } => vec![],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -745,7 +824,9 @@ impl Feature {
             | FeatureKind::ImportMesh { body, .. }
             | FeatureKind::MoveBody {
                 copy: Some(body), ..
-            } => vec![*body],
+            }
+            | FeatureKind::SplitBody { new_body: body, .. }
+            | FeatureKind::SheetMetal { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -766,7 +847,9 @@ impl Feature {
             | FeatureKind::Cut { target, .. }
             | FeatureKind::Pocket { target, .. }
             | FeatureKind::Hole { target, .. }
-            | FeatureKind::MoveBody { body: target, .. } => Some(*target),
+            | FeatureKind::MoveBody { body: target, .. }
+            | FeatureKind::SplitBody { body: target, .. }
+            | FeatureKind::Combine { target, .. } => Some(*target),
             FeatureKind::DirectEdit {
                 face:
                     FaceRef {
@@ -776,6 +859,14 @@ impl Feature {
                 ..
             } => Some(*body),
             _ => None,
+        }
+    }
+
+    /// Bodies a [`FeatureKind::Combine`] reads besides its target.
+    pub fn tool_bodies(&self) -> Vec<BodyId> {
+        match &self.kind {
+            FeatureKind::Combine { tools, .. } => tools.clone(),
+            _ => vec![],
         }
     }
 
@@ -881,11 +972,35 @@ impl Feature {
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
+            FeatureKind::Combine { .. } => vec![],
             FeatureKind::Countersink {
                 diameter, angle, ..
             } => vec![
                 ("diameter".into(), *diameter),
                 ("angle_deg".into(), angle.to_degrees()),
+            ],
+            FeatureKind::SplitBody {
+                plane:
+                    SketchPlane::Offset {
+                        distance, angle, ..
+                    },
+                ..
+            } => vec![
+                ("plane_offset".into(), *distance),
+                ("plane_angle_deg".into(), angle.to_degrees()),
+            ],
+            FeatureKind::SplitBody { .. } => vec![],
+            FeatureKind::SheetMetal {
+                thickness,
+                radius,
+                k_factor,
+                width,
+                ..
+            } => vec![
+                ("thickness".into(), *thickness),
+                ("radius".into(), *radius),
+                ("k_factor".into(), *k_factor),
+                ("width".into(), *width),
             ],
             FeatureKind::MoveBody {
                 translate, angle, ..
@@ -1044,6 +1159,10 @@ impl Feature {
             | FeatureKind::Hole {
                 plane: SketchPlane::Offset { angle, .. },
                 ..
+            }
+            | FeatureKind::SplitBody {
+                plane: SketchPlane::Offset { angle, .. },
+                ..
             } if name == "plane_angle_deg" => {
                 if !(value.is_finite() && value.abs() < 180.0) {
                     return Err(DocError::Validation(format!(
@@ -1063,6 +1182,10 @@ impl Feature {
                 ..
             }
             | FeatureKind::Hole {
+                plane: SketchPlane::Offset { distance, .. },
+                ..
+            }
+            | FeatureKind::SplitBody {
                 plane: SketchPlane::Offset { distance, .. },
                 ..
             } if name == "plane_offset" => {
@@ -1208,6 +1331,35 @@ impl Feature {
                     )));
                 }
                 *angle = value.to_radians();
+                Ok(())
+            }
+            FeatureKind::SheetMetal {
+                thickness,
+                radius,
+                k_factor,
+                width,
+                ..
+            } if matches!(name, "thickness" | "radius" | "k_factor" | "width") => {
+                let ok = match name {
+                    "k_factor" => (0.0..=1.0).contains(&value),
+                    _ => value > 0.0,
+                };
+                if !ok {
+                    return Err(DocError::Validation(format!(
+                        "{id}.{name}: {}, got {value}",
+                        if name == "k_factor" {
+                            "the K-factor must be in [0, 1]"
+                        } else {
+                            "must be > 0 mm"
+                        }
+                    )));
+                }
+                *match name {
+                    "thickness" => thickness,
+                    "radius" => radius,
+                    "k_factor" => k_factor,
+                    _ => width,
+                } = value;
                 Ok(())
             }
             FeatureKind::MoveBody {
@@ -1490,6 +1642,30 @@ pub struct Document {
     /// then moves to the new feature). None: at the end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback: Option<FeatureId>,
+    /// Named configurations (run 6 pull-forward of SESSION_7 §3, format v6):
+    /// per configuration, user-parameter expressions, the suppression state
+    /// of the configured features, and a part number. Activating one applies
+    /// it in one transaction (`Document::apply_configuration`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<Configuration>,
+    /// The configuration last activated (None: none / not configured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_configuration: Option<String>,
+}
+
+/// A named variant of a document (see [`Document::configurations`]).
+/// `values` override user-parameter expressions; every feature in
+/// `controls` is suppressed when it is in `suppressed`, evaluated otherwise
+/// (features no configuration controls keep their own state).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Configuration {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub values: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub suppressed: std::collections::BTreeSet<FeatureId>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub part_number: String,
 }
 
 fn one() -> u32 {
@@ -1507,7 +1683,47 @@ impl Document {
             next_blob_id: 1,
             parameters: Vec::new(),
             rollback: None,
+            configurations: Vec::new(),
+            active_configuration: None,
         }
+    }
+
+    /// Features any configuration controls (suppressed in at least one).
+    pub fn configured_features(&self) -> std::collections::BTreeSet<FeatureId> {
+        self.configurations
+            .iter()
+            .flat_map(|c| c.suppressed.iter().copied())
+            .collect()
+    }
+
+    /// Apply configuration `name` to this document: set its parameter
+    /// expressions (each parameter must exist), suppress the configured
+    /// features it lists and restore the other configured features, and mark
+    /// it active. Dependents of a suppressed feature must be suppressed by the
+    /// same configuration (`check_suppression` refuses otherwise).
+    pub fn apply_configuration(&mut self, name: &str) -> Result<()> {
+        let c = self
+            .configurations
+            .iter()
+            .find(|c| c.name == name)
+            .cloned()
+            .ok_or_else(|| DocError::Validation(format!("no configuration named '{name}'")))?;
+        for (p, e) in &c.values {
+            let x = self
+                .parameters
+                .iter_mut()
+                .find(|x| x.name == *p)
+                .ok_or_else(|| DocError::Expression {
+                    name: p.clone(),
+                    detail: format!("configuration '{name}' sets a parameter that does not exist"),
+                })?;
+            x.expression = e.clone();
+        }
+        for f in self.configured_features() {
+            self.feature_mut(f)?.suppressed = c.suppressed.contains(&f);
+        }
+        self.active_configuration = Some(name.to_string());
+        self.check_suppression()
     }
 
     /// Allocate a body id and register its metadata (`name` must be unique;
@@ -1519,6 +1735,7 @@ impl Document {
             id,
             name: name.into(),
             visible: true,
+            material: None,
         });
         id
     }
@@ -1577,6 +1794,14 @@ impl Document {
             && !d.contains(&c)
         {
             d.push(c);
+        }
+        // A combine also reads its tool bodies.
+        for t in f.tool_bodies() {
+            if let Some(c) = self.body_creator(t)
+                && !d.contains(&c)
+            {
+                d.push(c);
+            }
         }
         d
     }
@@ -1760,6 +1985,11 @@ impl Document {
                     info.id
                 )));
             }
+            if let Some(m) = &info.material {
+                m.validate().map_err(|e| {
+                    DocError::Validation(format!("body {} ({}): {e}", info.id, info.name))
+                })?;
+            }
             if !created.contains_key(&info.id) {
                 return Err(DocError::Validation(format!(
                     "body {} ({}) is not created by any feature",
@@ -1782,6 +2012,14 @@ impl Document {
                     from: f.id,
                     detail: format!("target body {t} does not exist"),
                 });
+            }
+            for t in f.tool_bodies() {
+                if !created.contains_key(&t) {
+                    return Err(DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!("tool body {t} does not exist"),
+                    });
+                }
             }
             if let Some(b) = f.blob() {
                 self.blob(b).map_err(|_| DocError::BrokenReference {

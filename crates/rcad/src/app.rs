@@ -52,6 +52,10 @@ pub(crate) enum Dialog {
     Revolve {
         sketch: Option<FeatureId>,
         angle: String,
+        /// Run 6: axis (sketch Y, sketch X or a line of the sketch) and
+        /// direction.
+        axis: rcad_document::RevolveAxis,
+        reverse: bool,
     },
     /// Run 5: exact loft between two sketches (`sweep == false`) or sweep of
     /// sketch `a`'s profile along sketch `b`'s path (`sweep == true`).
@@ -179,7 +183,7 @@ impl Dialog {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
             Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
-            Dialog::Revolve { .. } => "New revolve (about world Z)",
+            Dialog::Revolve { .. } => "New revolve",
             Dialog::LoftSweep { sweep: false, .. } => "New loft",
             Dialog::LoftSweep { sweep: true, .. } => "New sweep",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
@@ -399,6 +403,15 @@ pub struct RcadApp {
     /// Inline rename of a body row in the browser.
     pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) move_form: crate::bodies::MoveForm,
+    /// Sheet-metal flange form: thickness, radius, K, width; flat-pattern path.
+    pub(crate) sheet_form: [String; 4],
+    pub(crate) flat_path: String,
+    /// Split-by-plane form: world plane (0 XY, 1 XZ, 2 YZ), offset text.
+    pub(crate) split_form: (u8, String),
+    /// Configuration name / part number being typed (run 6).
+    pub(crate) config_form: (String, String),
+    /// Body material form and last mass-properties report (run 6).
+    pub(crate) body_props: crate::bodies::BodyProps,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -452,6 +465,8 @@ impl RcadApp {
                 features: vec![],
                 bodies: vec![],
                 parameters: vec![],
+                configurations: vec![],
+                active_configuration: None,
             },
             measurements: None,
             selected: None,
@@ -487,6 +502,11 @@ impl RcadApp {
             rename: None,
             body_rename: None,
             move_form: Default::default(),
+            sheet_form: ["1".into(), "2".into(), "0.44".into(), "40".into()],
+            flat_path: String::new(),
+            split_form: (0, "0".into()),
+            config_form: Default::default(),
+            body_props: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -1059,6 +1079,7 @@ impl RcadApp {
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
         }
+        self.body_props.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;
@@ -1729,11 +1750,8 @@ impl RcadApp {
         let sketch = s.editor.sketch.clone();
         let cmd = match &s.target {
             SketchTarget::New { plane } => {
-                if sketch.entities.is_empty() {
-                    // Nothing drawn: finishing an empty new sketch just closes it.
-                    self.end_sketch_session();
-                    return;
-                }
+                // An empty (or text-only) sketch is still created (run 6): it
+                // can receive projected geometry from the sketch inspector.
                 Command::CreateSketch {
                     name: None,
                     plane: *plane,
@@ -2344,10 +2362,17 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             path: need(b, "path sketch")?,
             body_name: None,
         },
-        Dialog::Revolve { sketch, angle } => Command::Revolve {
+        Dialog::Revolve {
+            sketch,
+            angle,
+            axis,
+            reverse,
+        } => Command::Revolve {
             name: None,
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
+            axis: *axis,
+            reverse: *reverse,
         },
         Dialog::Extrude(form) => form.command()?,
         Dialog::Hole {

@@ -681,14 +681,26 @@ fn regen_impl(
                 sketch,
                 angle,
                 body,
+                axis,
+                reverse,
             } => {
                 let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let b = k::revolve(
-                    &to_kernel(s.single_loop(id, *sketch, "Revolve")?),
-                    &s.frame,
-                    *angle,
-                )
-                .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let profile = s.single_loop(id, *sketch, "Revolve")?.clone();
+                // Runs 1-5: about the sketch Y axis with the profile on +X,
+                // straight to the kernel (unchanged results); otherwise (other
+                // axes, the profile on −X, reverse) through `revolve_about`.
+                let legacy = (axis.is_default() && !*reverse)
+                    .then(|| k::revolve(&to_kernel(&profile), &s.frame, *angle));
+                let b = match legacy {
+                    Some(Ok(b)) => b,
+                    Some(Err(e)) => {
+                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)
+                            .map_err(|_| DocError::Validation(format!("{id}: {e}")))?
+                    }
+                    None => {
+                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)?
+                    }
+                };
                 create_body(
                     &mut st,
                     id,
@@ -963,6 +975,68 @@ fn regen_impl(
                     }
                 }
             }
+            FeatureKind::SheetMetal {
+                sketch,
+                thickness,
+                radius,
+                k_factor,
+                width,
+                flip,
+                body,
+            } => {
+                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+                let chain = crate::sheet::line_chain(&so.solved)
+                    .map_err(|m| DocError::Validation(format!("{id}: sheet metal profile: {m}")))?;
+                let part = crate::sheet::contour_flange(
+                    id, &chain, *thickness, *radius, *k_factor, *flip,
+                )?;
+                if !(width.is_finite() && *width > 0.0) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.width: must be > 0 mm, got {width}"
+                    )));
+                }
+                let solid = k::extrude_region(&to_kernel(&part.section), &[], &so.frame, *width)
+                    .map_err(kernel(id))?;
+                r.frame = Some(so.frame);
+                r.notes.push(format!(
+                    "flat length {:.6} mm (K {}), bend lines at {}",
+                    part.flat_length,
+                    k_factor,
+                    part.bend_lines
+                        .iter()
+                        .map(|x| format!("{x:.6}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::SplitBody {
+                body,
+                plane,
+                new_body,
+            } => {
+                let (pf, rf) = plane_frame(id, plane, &st)?;
+                r.frame = Some(pf);
+                r.resolved_face = rf;
+                let t = brep_target(&st, id, *body)?;
+                let (behind, front) = split_by_plane(&t, &pf, id)?;
+                replace_body(&mut st, id, *body, behind);
+                create_body(
+                    &mut st,
+                    id,
+                    *new_body,
+                    BodyGeometry::Brep(front),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*new_body);
+            }
             FeatureKind::Shell {
                 extrude,
                 open,
@@ -1082,6 +1156,27 @@ fn regen_impl(
                 replace_body(&mut st, id, target, out);
                 r.frame = Some(frame);
                 r.body = Some(target);
+            }
+            FeatureKind::Combine {
+                target,
+                tools,
+                op,
+                keep_tools,
+            } => {
+                let a = brep_target(&st, id, *target)?;
+                let bs = tools
+                    .iter()
+                    .map(|t| brep_target(&st, id, *t))
+                    .collect::<Result<Vec<_>>>()?;
+                let (out, notes) = crate::combine::evaluate(id, *target, tools, &a, &bs, *op)?;
+                replace_body(&mut st, id, *target, out);
+                if !keep_tools {
+                    for t in tools {
+                        st.bodies.remove(t);
+                    }
+                }
+                r.notes = notes;
+                r.body = Some(*target);
             }
             FeatureKind::DirectEdit { face, op } => {
                 let bid = doc.face_body(face).ok_or_else(|| {
@@ -1764,6 +1859,72 @@ fn tapered_apply(
                 ),
             },
         })
+}
+
+/// Split `t` by the plane of `pf`: (the part behind the plane, the part in
+/// front of it), each an exact cut by a half-space box through
+/// [`apply_tool`] (result-checked; ADR 0005/0006).
+fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
+    let bb = k::bounds(t).map_err(kernel(id))?;
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for i in 0..8 {
+        let p = [
+            if i & 1 == 0 { bb.min[0] } else { bb.max[0] },
+            if i & 2 == 0 { bb.min[1] } else { bb.max[1] },
+            if i & 4 == 0 { bb.min[2] } else { bb.max[2] },
+        ];
+        let d = sub(p, pf.origin);
+        let q = [dot(d, pf.x), dot(d, pf.y), dot(d, pf.z)];
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
+        }
+    }
+    let eps = k::tol::KERNEL_LINEAR;
+    if lo[2] >= -eps || hi[2] <= eps {
+        return Err(DocError::Validation(format!(
+            "{id}: the split plane does not cross the body (it lies {} it)",
+            if lo[2] >= -eps { "below" } else { "above" }
+        )));
+    }
+    let m = k::through_all_margin(t).map_err(kernel(id))?;
+    let (x0, x1, y0, y1) = (lo[0] - m, hi[0] + m, lo[1] - m, hi[1] + m);
+    let boxp = SketchProfile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let piece = |span: (f64, f64)| ExtrudeOut {
+        start: *pf,
+        distance: span.1 - span.0,
+        dir: 1.0,
+        extent: Extent::Distance,
+        profile: boxp.clone(),
+        entities: vec![],
+        holes: vec![],
+        span,
+        nominal: span,
+        side: None,
+        removes: true,
+        joined: false,
+        intersect: false,
+        plain: true,
+        multi: false,
+        taper: 0.0,
+        body: BodyId(0),
+    };
+    let cut = |span: (f64, f64), what: &str| {
+        apply_tool(t, &piece(span), pf, Some(what), id, None)
+            .map(|(b, _)| b)
+            .map_err(|x| match x {
+                DocError::Kernel { detail, .. } if detail.contains("disconnected") => {
+                    DocError::ProductLimit(format!(
+                        "{id}: split: the {what} falls apart into several solids ({detail}); \
+                         split it further or choose another plane"
+                    ))
+                }
+                other => other,
+            })
+    };
+    let behind = cut((0.0, hi[2] + m), "part behind the plane")?;
+    let front = cut((lo[2] - m, 0.0), "part in front of the plane")?;
+    Ok((behind, front))
 }
 
 /// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:
@@ -3455,6 +3616,125 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
+/// Revolve `profile` (sketch coordinates on `frame`) by `angle` about
+/// `axis` (run 6). The kernel revolves about a frame's local Y with the
+/// profile on its +X side and sweeps toward that frame's −Z; the frame is
+/// chosen so the profile is on +X (a proper rotation of the sketch frame), and
+/// the result is turned back about the axis when the sweep must leave toward
+/// the other side (`reverse` false: toward −normal, as runs 1-5).
+fn revolve_about(
+    id: FeatureId,
+    profile: &SketchProfile,
+    frame: &Frame,
+    sketch: &rcad_sketch::Sketch,
+    axis: crate::RevolveAxis,
+    angle: f64,
+    reverse: bool,
+) -> Result<Body> {
+    let invalid = |m: String| DocError::Validation(format!("{id}: revolve: {m}"));
+    // Axis in sketch coordinates: point p, unit direction d.
+    let (p, d) = match axis {
+        crate::RevolveAxis::SketchY => ([0.0, 0.0], [0.0, 1.0]),
+        crate::RevolveAxis::SketchX => ([0.0, 0.0], [1.0, 0.0]),
+        crate::RevolveAxis::Line(e) => {
+            let Some(rcad_sketch::Entity::Line { a, b, .. }) =
+                sketch.entities.iter().find(|x| x.id() == e)
+            else {
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("revolve axis {e:?} is not a line of the sketch"),
+                });
+            };
+            let pt = |q: rcad_sketch::PointId| {
+                sketch
+                    .points
+                    .iter()
+                    .find(|x| x.id == q)
+                    .map(|x| [x.x, x.y])
+                    .ok_or_else(|| invalid(format!("axis point {q:?} missing")))
+            };
+            let (a, b) = (pt(*a)?, pt(*b)?);
+            let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+            if l < k::tol::MIN_LENGTH {
+                return Err(invalid("the axis line has no length".into()));
+            }
+            (a, [(b[0] - a[0]) / l, (b[1] - a[1]) / l])
+        }
+    };
+    // Side of the profile: the sign of (q − p) × d over its outline.
+    let (outline, _) = k::profile_outline(&to_kernel(profile));
+    let side = |q: [f64; 2]| (q[0] - p[0]) * d[1] - (q[1] - p[1]) * d[0];
+    let (lo, hi) = outline
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| {
+            let v = side(*q);
+            (l.min(v), h.max(v))
+        });
+    let s = if lo > 0.0 {
+        1.0
+    } else if hi < 0.0 {
+        -1.0
+    } else {
+        return Err(invalid(
+            "the profile crosses or touches the axis; it must lie on one side of it".into(),
+        ));
+    };
+    // New 2-D frame: x' = s·(d.y, −d.x) (toward the profile), y' = s·d: a
+    // rotation of the sketch axes (by 180° when s < 0), so the profile keeps
+    // its orientation and the normal is unchanged.
+    let xp = [s * d[1], -s * d[0]];
+    let yp = [s * d[0], s * d[1]];
+    let to = |q: [f64; 2]| {
+        let w = [q[0] - p[0], q[1] - p[1]];
+        [w[0] * xp[0] + w[1] * xp[1], w[0] * yp[0] + w[1] * yp[1]]
+    };
+    let mapped = map_profile(profile, &to);
+    let origin = frame.to_world(p);
+    let wx = sub(frame.to_world([p[0] + xp[0], p[1] + xp[1]]), origin);
+    let wy = sub(frame.to_world([p[0] + yp[0], p[1] + yp[1]]), origin);
+    let f2 = Frame {
+        origin,
+        x: wx,
+        y: wy,
+        z: frame.z,
+    };
+    let body = k::revolve(&to_kernel(&mapped), &f2, angle).map_err(|e| invalid(e.to_string()))?;
+    // The kernel's sweep leaves toward −f2.z = −frame.z; flip for `reverse`.
+    if reverse && angle < 2.0 * std::f64::consts::PI - 1e-12 {
+        let t = k::Rigid::new([0.0; 3], origin, wy, -angle).map_err(kernel(id))?;
+        return k::transform_body(&body, &t).map_err(kernel(id));
+    }
+    Ok(body)
+}
+
+/// `profile` with every point mapped by `f` (a proper rigid motion of the
+/// plane: orientation and arc senses are kept).
+fn map_profile(profile: &SketchProfile, f: &dyn Fn([f64; 2]) -> [f64; 2]) -> SketchProfile {
+    match profile {
+        SketchProfile::Polygon(v) => SketchProfile::Polygon(v.iter().map(|q| f(*q)).collect()),
+        SketchProfile::Circle { center, radius } => SketchProfile::Circle {
+            center: f(*center),
+            radius: *radius,
+        },
+        SketchProfile::Loop(segs) => SketchProfile::Loop(
+            segs.iter()
+                .map(|s| match *s {
+                    rcad_sketch::LoopSegment::Line { start } => {
+                        rcad_sketch::LoopSegment::Line { start: f(start) }
+                    }
+                    rcad_sketch::LoopSegment::Arc { start, center, ccw } => {
+                        rcad_sketch::LoopSegment::Arc {
+                            start: f(start),
+                            center: f(center),
+                            ccw,
+                        }
+                    }
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// `frame` carried back through `t` (the inverse of a rigid transform).
 fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
     let tr = |v: [f64; 3]| {
@@ -3704,16 +3984,29 @@ fn bind_link(
             return Err(broken(format!("{:?} changed kind", lc.entity)));
         }
         for (p, q) in pts.iter().zip(&lc.points) {
-            let fixed = s.constraints.iter_mut().find_map(|c| match c {
-                rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => Some((x, y)),
-                _ => None,
-            });
-            let Some((x, y)) = fixed else {
+            let mut pinned = false;
+            for c in s.constraints.iter_mut() {
+                match c {
+                    rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => {
+                        (*x, *y) = (p[0], p[1]);
+                        pinned = true;
+                    }
+                    rcad_sketch::Constraint::FixedX { p: r, x } if r == q => {
+                        *x = p[0];
+                        pinned = true;
+                    }
+                    rcad_sketch::Constraint::FixedY { p: r, y } if r == q => {
+                        *y = p[1];
+                        pinned = true;
+                    }
+                    _ => {}
+                }
+            }
+            if !pinned {
                 return Err(broken(format!(
                     "pinned point {q:?} lost its fixed constraint"
                 )));
-            };
-            (*x, *y) = (p[0], p[1]);
+            }
             if let Some(sp) = s.points.iter_mut().find(|sp| sp.id == *q) {
                 (sp.x, sp.y) = (p[0], p[1]);
             }
