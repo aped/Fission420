@@ -147,6 +147,34 @@ fn mesh_body(positions: &[[f64; 3]], tris: &[[u32; 3]], diagnostics: MeshDiagnos
     }
 }
 
+/// Run 7: repaired copy of a mesh body (`rcad_exchange::mesh_repair`). The
+/// display mesh's unshared corners are welded first (exact), then repaired.
+pub fn repaired(
+    m: &MeshBody,
+    opts: &rcad_exchange::mesh_repair::RepairOptions,
+) -> Result<(MeshBody, Vec<String>)> {
+    let (pos, tris, rep) =
+        rcad_exchange::mesh_repair::repair(&m.mesh.positions, &m.mesh.triangles, opts)
+            .map_err(DocError::Validation)?;
+    let mut notes = vec![format!(
+        "mesh repair: weld tolerance {} mm; {} vertices merged ({} by tolerance), {} degenerate \
+         and {} duplicate triangles removed, {} triangles flipped, {} holes filled ({} triangles), \
+         {} left open",
+        opts.weld_tolerance,
+        rep.welded_vertices,
+        rep.welded_by_tolerance,
+        rep.removed_degenerate,
+        rep.removed_duplicates,
+        rep.flipped_triangles,
+        rep.filled_holes,
+        rep.fill_triangles,
+        rep.unfilled_holes
+    )];
+    notes.extend(rep.notes.iter().cloned());
+    notes.extend(mesh_notes(&rep.after));
+    Ok((mesh_body(&pos, &tris, rep.after), notes))
+}
+
 /// One mesh object of an imported 3MF package.
 pub struct ThreeMfObject {
     pub name: Option<String>,

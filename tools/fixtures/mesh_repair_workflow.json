@@ -1,0 +1,9 @@
+[
+  {"cmd": "new_document"},
+  {"cmd": "import_stl", "path": "tools/fixtures/stl/broken_cube.stl", "units_to_mm": 1.0},
+  {"cmd": "repair_mesh", "body": 1, "options": {"fill_holes_max_edges": 8}, "preview": true},
+  {"cmd": "repair_mesh", "body": 1, "options": {"fill_holes_max_edges": 8}, "body_name": "Cube repaired"},
+  {"cmd": "export_stl", "path": "artifacts/mesh_repair_original.stl", "bodies": [1], "expect_ok": false},
+  {"cmd": "export_stl", "path": "artifacts/mesh_repair_repaired.stl", "bodies": [2]},
+  {"cmd": "save", "path": "artifacts/mesh_repair.rcad.json"}
+]

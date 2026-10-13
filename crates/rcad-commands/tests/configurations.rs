@@ -202,3 +202,36 @@ fn configuration_refusals_leave_the_document_unchanged() {
         assert_eq!(s.model().unwrap().document(), &before, "{c}");
     }
 }
+
+/// Review run 7 #7: renaming a user parameter renames it inside every
+/// configuration; deleting one a configuration sets is refused.
+#[test]
+fn parameter_rename_and_delete_keep_configurations_valid() {
+    let mut s = Session::new();
+    build(&mut s);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "rename_user_parameter", "name": "length", "new_name": "size"}),
+    );
+    let c = s.model().unwrap().document().configurations.clone();
+    assert!(
+        c.iter()
+            .all(|c| c.values.contains_key("size") && !c.values.contains_key("length"))
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "activate_configuration", "name": "Small"}),
+    );
+    assert!((tray::volume(&s) - vol(80.0, 2.0, false)).abs() < 1e-6);
+    let rev = s.summary().revision;
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "delete_user_parameter", "name": "size"}),
+    );
+    assert!(!r.ok && s.summary().revision == rev);
+    assert!(
+        format!("{:?}", r.error).contains("configuration"),
+        "{:?}",
+        r.error
+    );
+}
