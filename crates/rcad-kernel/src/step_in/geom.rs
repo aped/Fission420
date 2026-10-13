@@ -567,7 +567,7 @@ pub(super) fn analytic_distance(a: &Analytic, p: Point3) -> Option<f64> {
 /// most a quarter turn, double interior knots). An ellipse is the affine image of a
 /// circle, and the control points are mapped by that affine map, so the curve is
 /// exact.
-pub(super) fn conic_arc(
+pub(crate) fn conic_arc(
     c: Point3,
     x: Vector3,
     y: Vector3,

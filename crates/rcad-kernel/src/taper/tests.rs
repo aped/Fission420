@@ -219,10 +219,10 @@ fn round_tapered_cut_is_exact_or_refused() {
             );
             // Exported exactly when Truck's intersection edges have exact
             // replacements; otherwise the export refuses (never approximates).
-            match export_step(&b, "test") {
-                Ok(_) => evidence(&b, "taper_cut_round"),
-                Err(e) => eprintln!("round tapered cut: STEP export refused: {e}"),
-            }
+            // Run 6: the cone ∩ plane edges have exact circular replacements
+            // (exact.rs), so the result exports.
+            assert!(!crate::has_implicit_edges(&b), "implicit edges left");
+            evidence(&b, "taper_cut_round");
         }
         Err(e) => {
             assert!(
