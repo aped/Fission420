@@ -61,6 +61,24 @@ impl Rigid {
         Ok(Rigid { r, t })
     }
 
+    /// Uniform scaling by `factor` (> 0) about `center` (run 6: body Scale).
+    /// The matrix is then `factor · I`; [`Rigid::frame`] keeps frame axes unit.
+    pub fn scaling(center: [f64; 3], factor: f64) -> Result<Rigid> {
+        if !(factor.is_finite() && factor > 0.0) || !center.iter().all(|v| v.is_finite()) {
+            return Err(KernelError::InvalidInput(format!(
+                "scale: the factor must be a finite number > 0, got {factor}"
+            )));
+        }
+        Ok(Rigid {
+            r: [[factor, 0.0, 0.0], [0.0, factor, 0.0], [0.0, 0.0, factor]],
+            t: [
+                center[0] * (1.0 - factor),
+                center[1] * (1.0 - factor),
+                center[2] * (1.0 - factor),
+            ],
+        })
+    }
+
     pub fn point(&self, p: [f64; 3]) -> [f64; 3] {
         let q = mul(&self.r, p);
         [q[0] + self.t[0], q[1] + self.t[1], q[2] + self.t[2]]
@@ -85,11 +103,15 @@ impl Rigid {
     }
 
     pub fn frame(&self, f: &Frame) -> Frame {
+        let unit = |v: [f64; 3]| {
+            let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            [v[0] / n, v[1] / n, v[2] / n]
+        };
         Frame {
             origin: self.point(f.origin),
-            x: self.vector(f.x),
-            y: self.vector(f.y),
-            z: self.vector(f.z),
+            x: unit(self.vector(f.x)),
+            y: unit(self.vector(f.y)),
+            z: unit(self.vector(f.z)),
         }
     }
 

@@ -732,6 +732,22 @@ impl RcadApp {
             );
         });
         header.header_response.probe("Move / Copy");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.scale_factor).desired_width(50.0))
+                .named("Scale factor");
+            if ui.button("Scale body").probe("Scale body").clicked()
+                && let Ok(f) = self.scale_factor.trim().parse::<f64>()
+            {
+                send = Some(Command::ScaleBody {
+                    name: None,
+                    body,
+                    center: [0.0; 3],
+                    factor: f,
+                });
+            }
+        })
+        .response
+        .on_hover_text("Uniform scale about the world origin, in place (one Undo step; the factor stays a parameter)");
         if let Some(c) = send {
             self.request(c);
         }

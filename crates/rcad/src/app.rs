@@ -418,6 +418,7 @@ pub struct RcadApp {
     pub(crate) flat_path: String,
     /// Wall thickness typed for "Shell from this face" (run 6).
     pub(crate) shell_thickness: String,
+    pub(crate) scale_factor: String,
     /// Split-by-plane form: world plane (0 XY, 1 XZ, 2 YZ), offset text.
     pub(crate) split_form: (u8, String),
     /// Configuration name / part number being typed (run 6).
@@ -519,6 +520,7 @@ impl RcadApp {
             sheet_form: ["1".into(), "2".into(), "0.44".into(), "40".into()],
             flat_path: String::new(),
             shell_thickness: "2".into(),
+            scale_factor: "1".into(),
             split_form: (0, "0".into()),
             config_form: Default::default(),
             body_props: Default::default(),

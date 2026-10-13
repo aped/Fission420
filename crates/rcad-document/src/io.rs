@@ -198,6 +198,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         {
             return Some("revolve axis/direction options");
         }
+        if matches!(f.kind, crate::FeatureKind::ScaleBody { .. }) {
+            return Some("scaled bodies");
+        }
         if matches!(f.kind, crate::FeatureKind::ShellFace { .. }) {
             return Some("shells from a face");
         }

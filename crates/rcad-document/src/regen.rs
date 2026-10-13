@@ -1077,6 +1077,19 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
+            FeatureKind::ScaleBody {
+                body,
+                center,
+                factor,
+            } => {
+                let t = k::Rigid::scaling(*center, *factor)
+                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let b = brep_target(&st, id, *body)?;
+                let scaled = k::transform_body(&b, &t).map_err(kernel(id))?;
+                replace_body(&mut st, id, *body, scaled);
+                st.moves.push((*body, i, t));
+                r.body = Some(*body);
+            }
             FeatureKind::ShellFace { face, thickness } => {
                 let rf = resolve_face(id, face, &st)?;
                 r.frame = Some(rf.frame);
@@ -4055,11 +4068,15 @@ fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
             t.r[0][2] * v[0] + t.r[1][2] * v[1] + t.r[2][2] * v[2],
         ]
     };
+    // A similarity s·R (moves: s = 1; Scale: s ≠ 1): its inverse is Rᵀ/s, so
+    // Mᵀ q / s² for points; frame axes are re-normalized.
+    let s2 = t.r[0][0] * t.r[0][0] + t.r[1][0] * t.r[1][0] + t.r[2][0] * t.r[2][0];
+    let unit = |v: [f64; 3]| scale(v, 1.0 / dot(v, v).sqrt());
     Frame {
-        origin: tr(sub(frame.origin, t.t)),
-        x: tr(frame.x),
-        y: tr(frame.y),
-        z: tr(frame.z),
+        origin: scale(tr(sub(frame.origin, t.t)), 1.0 / s2),
+        x: unit(tr(frame.x)),
+        y: unit(tr(frame.y)),
+        z: unit(tr(frame.z)),
     }
 }
 

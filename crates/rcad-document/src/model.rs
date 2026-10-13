@@ -509,6 +509,15 @@ pub enum FeatureKind {
     /// to one thickness above the opposite cap (exact slab construction,
     /// result-checked). Refused otherwise by name. Parameter "thickness".
     ShellFace { face: FaceRef, thickness: f64 },
+    /// Uniform scale of body `body` by `factor` about `center` (run 6, format
+    /// v6), in place; faces made before it keep resolving (scaled with the
+    /// body, like moves). Parameter "factor" (ratio).
+    ScaleBody {
+        body: BodyId,
+        #[serde(default)]
+        center: [f64; 3],
+        factor: f64,
+    },
     /// Sheet-metal contour flange (run 6 pull-forward, `crate::sheet`,
     /// format v6): the open line chain of sketch `sketch` is one surface of a
     /// sheet `thickness` thick (material right of the chain, left with
@@ -810,6 +819,7 @@ impl Feature {
             }
             FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
+            FeatureKind::ScaleBody { .. } => vec![],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             // Body creators (target and tools) come from `Document::dependencies_of`.
@@ -864,6 +874,7 @@ impl Feature {
             | FeatureKind::Hole { target, .. }
             | FeatureKind::MoveBody { body: target, .. }
             | FeatureKind::SplitBody { body: target, .. }
+            | FeatureKind::ScaleBody { body: target, .. }
             | FeatureKind::Combine { target, .. }
             | FeatureKind::Revolve {
                 merge: Some(Operation::Join { target } | Operation::Cut { target }),
@@ -1010,6 +1021,7 @@ impl Feature {
             ],
             FeatureKind::SplitBody { .. } => vec![],
             FeatureKind::ShellFace { thickness, .. } => vec![("thickness".into(), *thickness)],
+            FeatureKind::ScaleBody { factor, .. } => vec![("factor".into(), *factor)],
             FeatureKind::SheetMetal {
                 thickness,
                 radius,
@@ -1398,6 +1410,15 @@ impl Feature {
                         *angle = value.to_radians();
                     }
                 }
+                Ok(())
+            }
+            FeatureKind::ScaleBody { factor, .. } if name == "factor" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.factor: the scale factor must be > 0, got {value}"
+                    )));
+                }
+                *factor = value;
                 Ok(())
             }
             FeatureKind::Shell { thickness, .. } | FeatureKind::ShellFace { thickness, .. }
