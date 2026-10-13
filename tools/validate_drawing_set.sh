@@ -21,8 +21,10 @@ OUT=${2:-artifacts/run7/drawing_set}
 ROOT=$(pwd)
 mkdir -p "$OUT"
 # The workflow writes to artifacts/run7/drawing_set; copy results to OUT if different.
-"$CLI" run tools/fixtures/drawing_set_workflow.json > "$OUT/run.jsonl"
 SRC=artifacts/run7/drawing_set
+mkdir -p "$SRC"   # the workflow writes there (absent in a clean checkout)
+"$CLI" run tools/fixtures/drawing_set_workflow.json > "$OUT/run.jsonl" ||
+  { echo "FAILED: workflow (see $OUT/run.jsonl)"; exit 1; }
 [ "$(readlink -f "$SRC")" = "$(readlink -f "$OUT")" ] || cp "$SRC"/*.{pdf,dxf,svg} "$SRC"/drawing_set.rcad.json "$OUT"/
 fail=0
 check() { if "$@"; then echo "PASS: ${*: -1}"; else echo "FAIL: ${*: -1}"; fail=1; fi; }

@@ -21,6 +21,8 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target-release}
 case "$CARGO_TARGET_DIR" in /tmp/*) echo "refusing tmpfs target dir" >&2; exit 2;; esac
 echo "building $NAME (target $CARGO_TARGET_DIR)"
 RCAD_GIT_REV=$REV tools/heavy.sh cargo build --release --locked -p rcad -p rcad-cli
+mkdir -p "$OUT"
+OUT=$(readlink -f "$OUT")
 STAGE="$OUT/$NAME"
 rm -rf -- "${STAGE:?}"
 mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/examples"
@@ -51,9 +53,9 @@ grep -q "$REV" "$STAGE/VERSION"
 "$STAGE/bin/rcad" --version | grep -q "$REV"
 mkdir -p "$SMOKE/examples" "$SMOKE/artifacts"
 cp "$STAGE"/examples/* "$SMOKE/examples/"
-(cd "$SMOKE" && "$ROOT/$STAGE/bin/rcad-cli" run examples/plate_workflow.json > plate.log)
+(cd "$SMOKE" && "$STAGE/bin/rcad-cli" run examples/plate_workflow.json > plate.log)
 cmp "$SMOKE/examples/plate.rcad.json" examples/plate.rcad.json
-(cd "$SMOKE" && "$ROOT/$STAGE/bin/rcad-cli" run examples/drawing_set_workflow.json > drawing_set.log)
+(cd "$SMOKE" && "$STAGE/bin/rcad-cli" run examples/drawing_set_workflow.json > drawing_set.log)
 [ -s "$SMOKE/artifacts/drawing_set_part.pdf" ]
 echo "smoke: --version, plate example (byte-identical native file), drawing set example: OK"
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
