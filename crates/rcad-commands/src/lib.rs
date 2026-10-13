@@ -87,12 +87,21 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
         options: ExtrudeOptions,
     },
-    /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
+    /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis),
+    /// or (run 6) its local X axis or one of its lines (`axis`); `reverse` sweeps toward
+    /// +normal instead of −normal.
     Revolve {
         #[serde(default)]
         name: Option<String>,
         sketch: FeatureId,
         angle_deg: f64,
+        #[serde(
+            default,
+            skip_serializing_if = "rcad_document::RevolveAxis::is_default"
+        )]
+        axis: rcad_document::RevolveAxis,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
     },
     /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
     /// `a` and `b` (parallel planes) as a new body: equal-count polygons with
@@ -1160,8 +1169,11 @@ impl Session {
                 name,
                 sketch,
                 angle_deg,
+                axis,
+                reverse,
             } => {
-                let (name, sketch, a) = (name.clone(), *sketch, *angle_deg);
+                let (name, sketch, a, axis, reverse) =
+                    (name.clone(), *sketch, *angle_deg, *axis, *reverse);
                 if !a.is_finite() || a <= 0.0 || a > 360.0 {
                     return Err(DocError::Validation(format!(
                         "revolve angle must be in (0, 360] degrees, got {a}"
@@ -1176,6 +1188,8 @@ impl Session {
                             sketch,
                             angle: a.to_radians(),
                             body,
+                            axis,
+                            reverse,
                         },
                     ))
                 })?;

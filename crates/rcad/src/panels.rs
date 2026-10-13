@@ -362,6 +362,8 @@ impl RcadApp {
             self.dialog = Some(Dialog::Revolve {
                 sketch: self.unused_sketch(),
                 angle: "360".into(),
+                axis: Default::default(),
+                reverse: false,
             });
         }
         // Run 5: exact loft / sweep (new bodies from two sketches).
@@ -1746,9 +1748,48 @@ impl RcadApp {
                         num_field(ui, "XZ rectangle center Z (mm)", cz);
                         ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
                     }
-                    Dialog::Revolve { sketch, angle } => {
+                    Dialog::Revolve {
+                        sketch,
+                        angle,
+                        axis,
+                        reverse,
+                    } => {
                         feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
                         num_field(ui, "Revolve angle (deg)", angle);
+                        // Lines of the chosen sketch can be the axis.
+                        let lines: Vec<rcad_sketch::EntityId> = sketch
+                            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
+                            .and_then(|f| f.sketch.as_ref())
+                            .map(|s| {
+                                s.entities
+                                    .iter()
+                                    .filter(|e| matches!(e, rcad_sketch::Entity::Line { .. }))
+                                    .map(|e| e.id())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let label = |a: &rcad_document::RevolveAxis| match a {
+                            rcad_document::RevolveAxis::SketchY => "Sketch Y axis".to_string(),
+                            rcad_document::RevolveAxis::SketchX => "Sketch X axis".to_string(),
+                            rcad_document::RevolveAxis::Line(e) => format!("Sketch line L{}", e.0),
+                        };
+                        egui::ComboBox::from_label("Revolve axis")
+                            .selected_text(label(axis))
+                            .show_ui(ui, |ui| {
+                                for a in [
+                                    rcad_document::RevolveAxis::SketchY,
+                                    rcad_document::RevolveAxis::SketchX,
+                                ]
+                                .into_iter()
+                                .chain(lines.iter().map(|e| rcad_document::RevolveAxis::Line(*e)))
+                                {
+                                    ui.selectable_value(axis, a, label(&a)).probe(&label(&a));
+                                }
+                            })
+                            .response
+                            .probe("Revolve axis");
+                        ui.checkbox(reverse, "Reverse direction").probe("Revolve reverse");
+                        ui.small("The profile must lie on one side of the axis (either side). Partial angles sweep toward −normal, or +normal with Reverse. A construction line is the usual axis.");
                     }
                     Dialog::LoftSweep { a, b, sweep } => {
                         if *sweep {

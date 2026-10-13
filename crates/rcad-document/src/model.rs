@@ -311,6 +311,12 @@ pub enum FeatureKind {
         /// Body created (v3; assigned by migration for older files).
         #[serde(default)]
         body: BodyId,
+        /// Run 6 (format v6 when not the default): the axis, and `reverse`
+        /// (sweep toward +normal instead of −normal, the run-1 sense).
+        #[serde(default, skip_serializing_if = "RevolveAxis::is_default")]
+        axis: RevolveAxis,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
     },
     /// Extrusion of a sketch profile along the sketch normal (or against it when
     /// `reverse`): a new body, or joined to / cut from an explicit target body.
@@ -543,6 +549,25 @@ impl ExtrudeOptions {
     /// No run-6 option set (a run-5 extrusion).
     pub fn is_plain(&self) -> bool {
         *self == ExtrudeOptions::default()
+    }
+}
+
+/// Axis of a [`FeatureKind::Revolve`] (run 6). The profile must lie on one
+/// side of it (strictly). `Line`: a line of the profile sketch (typically
+/// construction), from its first to its second point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RevolveAxis {
+    /// The sketch's local Y axis through its origin (runs 1-5).
+    #[default]
+    SketchY,
+    /// The sketch's local X axis through its origin.
+    SketchX,
+    Line(rcad_sketch::EntityId),
+}
+
+impl RevolveAxis {
+    pub fn is_default(&self) -> bool {
+        *self == RevolveAxis::SketchY
     }
 }
 

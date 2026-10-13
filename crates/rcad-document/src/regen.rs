@@ -681,14 +681,26 @@ fn regen_impl(
                 sketch,
                 angle,
                 body,
+                axis,
+                reverse,
             } => {
                 let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let b = k::revolve(
-                    &to_kernel(s.single_loop(id, *sketch, "Revolve")?),
-                    &s.frame,
-                    *angle,
-                )
-                .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let profile = s.single_loop(id, *sketch, "Revolve")?.clone();
+                // Runs 1-5: about the sketch Y axis with the profile on +X,
+                // straight to the kernel (unchanged results); otherwise (other
+                // axes, the profile on −X, reverse) through `revolve_about`.
+                let legacy = (axis.is_default() && !*reverse)
+                    .then(|| k::revolve(&to_kernel(&profile), &s.frame, *angle));
+                let b = match legacy {
+                    Some(Ok(b)) => b,
+                    Some(Err(e)) => {
+                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)
+                            .map_err(|_| DocError::Validation(format!("{id}: {e}")))?
+                    }
+                    None => {
+                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)?
+                    }
+                };
                 create_body(
                     &mut st,
                     id,
@@ -3390,6 +3402,125 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
+/// Revolve `profile` (sketch coordinates on `frame`) by `angle` about
+/// `axis` (run 6). The kernel revolves about a frame's local Y with the
+/// profile on its +X side and sweeps toward that frame's −Z; the frame is
+/// chosen so the profile is on +X (a proper rotation of the sketch frame), and
+/// the result is turned back about the axis when the sweep must leave toward
+/// the other side (`reverse` false: toward −normal, as runs 1-5).
+fn revolve_about(
+    id: FeatureId,
+    profile: &SketchProfile,
+    frame: &Frame,
+    sketch: &rcad_sketch::Sketch,
+    axis: crate::RevolveAxis,
+    angle: f64,
+    reverse: bool,
+) -> Result<Body> {
+    let invalid = |m: String| DocError::Validation(format!("{id}: revolve: {m}"));
+    // Axis in sketch coordinates: point p, unit direction d.
+    let (p, d) = match axis {
+        crate::RevolveAxis::SketchY => ([0.0, 0.0], [0.0, 1.0]),
+        crate::RevolveAxis::SketchX => ([0.0, 0.0], [1.0, 0.0]),
+        crate::RevolveAxis::Line(e) => {
+            let Some(rcad_sketch::Entity::Line { a, b, .. }) =
+                sketch.entities.iter().find(|x| x.id() == e)
+            else {
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("revolve axis {e:?} is not a line of the sketch"),
+                });
+            };
+            let pt = |q: rcad_sketch::PointId| {
+                sketch
+                    .points
+                    .iter()
+                    .find(|x| x.id == q)
+                    .map(|x| [x.x, x.y])
+                    .ok_or_else(|| invalid(format!("axis point {q:?} missing")))
+            };
+            let (a, b) = (pt(*a)?, pt(*b)?);
+            let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+            if l < k::tol::MIN_LENGTH {
+                return Err(invalid("the axis line has no length".into()));
+            }
+            (a, [(b[0] - a[0]) / l, (b[1] - a[1]) / l])
+        }
+    };
+    // Side of the profile: the sign of (q − p) × d over its outline.
+    let (outline, _) = k::profile_outline(&to_kernel(profile));
+    let side = |q: [f64; 2]| (q[0] - p[0]) * d[1] - (q[1] - p[1]) * d[0];
+    let (lo, hi) = outline
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| {
+            let v = side(*q);
+            (l.min(v), h.max(v))
+        });
+    let s = if lo > 0.0 {
+        1.0
+    } else if hi < 0.0 {
+        -1.0
+    } else {
+        return Err(invalid(
+            "the profile crosses or touches the axis; it must lie on one side of it".into(),
+        ));
+    };
+    // New 2-D frame: x' = s·(d.y, −d.x) (toward the profile), y' = s·d: a
+    // rotation of the sketch axes (by 180° when s < 0), so the profile keeps
+    // its orientation and the normal is unchanged.
+    let xp = [s * d[1], -s * d[0]];
+    let yp = [s * d[0], s * d[1]];
+    let to = |q: [f64; 2]| {
+        let w = [q[0] - p[0], q[1] - p[1]];
+        [w[0] * xp[0] + w[1] * xp[1], w[0] * yp[0] + w[1] * yp[1]]
+    };
+    let mapped = map_profile(profile, &to);
+    let origin = frame.to_world(p);
+    let wx = sub(frame.to_world([p[0] + xp[0], p[1] + xp[1]]), origin);
+    let wy = sub(frame.to_world([p[0] + yp[0], p[1] + yp[1]]), origin);
+    let f2 = Frame {
+        origin,
+        x: wx,
+        y: wy,
+        z: frame.z,
+    };
+    let body = k::revolve(&to_kernel(&mapped), &f2, angle).map_err(|e| invalid(e.to_string()))?;
+    // The kernel's sweep leaves toward −f2.z = −frame.z; flip for `reverse`.
+    if reverse && angle < 2.0 * std::f64::consts::PI - 1e-12 {
+        let t = k::Rigid::new([0.0; 3], origin, wy, -angle).map_err(kernel(id))?;
+        return k::transform_body(&body, &t).map_err(kernel(id));
+    }
+    Ok(body)
+}
+
+/// `profile` with every point mapped by `f` (a proper rigid motion of the
+/// plane: orientation and arc senses are kept).
+fn map_profile(profile: &SketchProfile, f: &dyn Fn([f64; 2]) -> [f64; 2]) -> SketchProfile {
+    match profile {
+        SketchProfile::Polygon(v) => SketchProfile::Polygon(v.iter().map(|q| f(*q)).collect()),
+        SketchProfile::Circle { center, radius } => SketchProfile::Circle {
+            center: f(*center),
+            radius: *radius,
+        },
+        SketchProfile::Loop(segs) => SketchProfile::Loop(
+            segs.iter()
+                .map(|s| match *s {
+                    rcad_sketch::LoopSegment::Line { start } => {
+                        rcad_sketch::LoopSegment::Line { start: f(start) }
+                    }
+                    rcad_sketch::LoopSegment::Arc { start, center, ccw } => {
+                        rcad_sketch::LoopSegment::Arc {
+                            start: f(start),
+                            center: f(center),
+                            ccw,
+                        }
+                    }
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// `frame` carried back through `t` (the inverse of a rigid transform).
 fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
     let tr = |v: [f64; 3]| {

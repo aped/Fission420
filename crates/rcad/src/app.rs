@@ -52,6 +52,10 @@ pub(crate) enum Dialog {
     Revolve {
         sketch: Option<FeatureId>,
         angle: String,
+        /// Run 6: axis (sketch Y, sketch X or a line of the sketch) and
+        /// direction.
+        axis: rcad_document::RevolveAxis,
+        reverse: bool,
     },
     /// Run 5: exact loft between two sketches (`sweep == false`) or sweep of
     /// sketch `a`'s profile along sketch `b`'s path (`sweep == true`).
@@ -179,7 +183,7 @@ impl Dialog {
             Dialog::Rectangle { .. } => "New rectangle sketch (XY)",
             Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
-            Dialog::Revolve { .. } => "New revolve (about world Z)",
+            Dialog::Revolve { .. } => "New revolve",
             Dialog::LoftSweep { sweep: false, .. } => "New loft",
             Dialog::LoftSweep { sweep: true, .. } => "New sweep",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
@@ -2346,10 +2350,17 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             path: need(b, "path sketch")?,
             body_name: None,
         },
-        Dialog::Revolve { sketch, angle } => Command::Revolve {
+        Dialog::Revolve {
+            sketch,
+            angle,
+            axis,
+            reverse,
+        } => Command::Revolve {
             name: None,
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
+            axis: *axis,
+            reverse: *reverse,
         },
         Dialog::Extrude(form) => form.command()?,
         Dialog::Hole {

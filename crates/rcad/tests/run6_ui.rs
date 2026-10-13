@@ -327,3 +327,27 @@ fn save_and_activate_configurations_from_the_browser() {
     click(&mut h, "Activate Short");
     assert!((h.state().volume().unwrap() - 18000.0).abs() < 1e-6);
 }
+
+#[test]
+fn revolve_about_the_sketch_x_axis_from_the_dialog() {
+    let mut h = harness();
+    click(&mut h, "New");
+    sketch(
+        &mut h,
+        SketchPlane::WorldXY,
+        SketchTemplate::Polygon {
+            vertices: vec![[0.0, 5.0], [30.0, 5.0], [30.0, 15.0], [0.0, 15.0]],
+        },
+    );
+    click(&mut h, "Revolve…");
+    type_into(&mut h, "Revolve angle (deg)", "360");
+    h.get_by_label("Revolve axis").click();
+    let _ = h.try_run();
+    click(&mut h, "Sketch X axis");
+    click(&mut h, "OK");
+    assert!(
+        (h.state().volume().unwrap() - PI * 200.0 * 30.0).abs() < 1e-6,
+        "{:?}",
+        h.state().volume()
+    );
+}
