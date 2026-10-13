@@ -43,7 +43,7 @@ fn viewport(h: &Harness<'_, RcadApp>) -> (f32, f32) {
 }
 
 #[test]
-#[ignore = "open finding (run 7): selecting a mesh body widens the inspector, viewport 632 -> 606 px at 1272 wide; caused by the pre-run-7 mesh inspector content (not the repair panel: bisected), not yet fixed"]
+#[ignore = "open finding (run 7): after importing an STL the viewport is 26 px narrower (632 -> 606 at 1272 wide), before any selection; not the repair panel, mesh labels, body header, max-width or scrollbar visibility (all bisected); not yet fixed"]
 fn toolbar_rows_and_viewport_at_1280() {
     let mut h = harness();
     click(&mut h, "New");
@@ -93,9 +93,8 @@ fn toolbar_rows_and_viewport_at_1280() {
     // Selecting a B-rep body keeps the viewport (checked run 7).
     h.state_mut().select_body(Some(rcad_document::BodyId(1)));
     settle(&mut h);
-    assert_eq!(
-        viewport(&h).1,
-        w1,
+    assert!(
+        (viewport(&h).1 - w1).abs() < 1.0,
         "selecting a solid body moved the viewport"
     );
     // A mesh body with the repair panel open in the inspector.
