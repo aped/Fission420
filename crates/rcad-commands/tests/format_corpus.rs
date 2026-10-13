@@ -29,7 +29,8 @@ fn corpus_imports_match_their_references() {
         let label = format!("{file} ({})", cmd["cmd"]);
         let mut s = Session::new();
         assert!(s.execute(&Command::NewDocument).ok);
-        let c: Command = serde_json::from_value(cmd.clone()).unwrap_or_else(|x| panic!("{label}: {x}"));
+        let c: Command =
+            serde_json::from_value(cmd.clone()).unwrap_or_else(|x| panic!("{label}: {x}"));
         let r = s.execute(&c);
         let exp = &e["expect"];
         let sum = s.summary();
@@ -62,6 +63,9 @@ fn corpus_imports_match_their_references() {
         }
         let mesh = exp.get("mesh").and_then(Value::as_bool).unwrap_or(false);
         let (mut vol, mut lo, mut hi) = (0.0, [f64::MAX; 3], [f64::MIN; 3]);
+        // Stated error of estimated volumes (labelled, e.g. a sphere's
+        // tessellation estimate): the comparison allows it.
+        let mut vol_err = 0.0;
         let mut grow = |a: [f64; 3], b: [f64; 3]| {
             for i in 0..3 {
                 lo[i] = lo[i].min(a[i]);
@@ -91,7 +95,14 @@ fn corpus_imports_match_their_references() {
                     bad(format!("closed = {}", m.all_shells_closed));
                 }
                 match &m.volume {
-                    VolumeResult::Value { volume, .. } => vol += volume,
+                    VolumeResult::Value {
+                        volume,
+                        error_estimate,
+                        ..
+                    } => {
+                        vol += volume;
+                        vol_err += error_estimate;
+                    }
                     VolumeResult::Unavailable { .. } => {
                         if exp.get("volume").is_some() {
                             bad("no volume".into());
@@ -101,16 +112,21 @@ fn corpus_imports_match_their_references() {
             }
         }
         if let (Some(v), Some(t)) = (f(exp, "volume"), f(exp, "vol_tol"))
-            && (vol - v).abs() > t
+            && (vol - v).abs() > t + vol_err
         {
-            bad(format!("volume {vol} vs {v} (tol {t})"));
+            bad(format!(
+                "volume {vol} vs {v} (tol {t} + stated error {vol_err})"
+            ));
         }
         if let Some(n) = exp.get("components").and_then(Value::as_u64)
             && comps as u64 != n
         {
             bad(format!("{comps} mesh components, expected {n}"));
         }
-        if let (Some(bb), Some(t)) = (exp.get("bbox").and_then(Value::as_array), f(exp, "bbox_tol")) {
+        if let (Some(bb), Some(t)) = (
+            exp.get("bbox").and_then(Value::as_array),
+            f(exp, "bbox_tol"),
+        ) {
             let got = [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]];
             let err = bb
                 .iter()
@@ -130,7 +146,11 @@ fn corpus_imports_match_their_references() {
             match sk {
                 None => bad("no sketch".into()),
                 Some(sk) => {
-                    let ents = sk.entities.iter().filter(|x| !sk.construction.contains(&x.id())).count();
+                    let ents = sk
+                        .entities
+                        .iter()
+                        .filter(|x| !sk.construction.contains(&x.id()))
+                        .count();
                     if ents as u64 != n {
                         bad(format!("{ents} sketch entities, expected {n}"));
                     }
