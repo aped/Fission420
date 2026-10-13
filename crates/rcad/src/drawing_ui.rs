@@ -230,6 +230,11 @@ impl RcadApp {
                                 orientation.label(),
                                 rcad_document::drawing::fmt_scale(*scale)
                             ),
+                            ViewKind::Detail { label, scale, .. } => format!(
+                                "{} detail {label} {}",
+                                v.id,
+                                rcad_document::drawing::fmt_scale(*scale)
+                            ),
                             ViewKind::Section { label, .. } => {
                                 format!("{} section {label}-{label}", v.id)
                             }

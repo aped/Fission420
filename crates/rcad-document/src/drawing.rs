@@ -284,16 +284,44 @@ pub enum ViewKind {
         offset: f64,
         label: String,
     },
+    /// Detail `label`: the region of the parent within `radius` model mm of
+    /// `center` (parent view coordinates: model mm along its right/up axes),
+    /// enlarged to `scale` and centred at `position` on the sheet. Same
+    /// orientation as the parent; curves are clipped to the circle.
+    Detail {
+        parent: ViewId,
+        center: [f64; 2],
+        radius: f64,
+        scale: f64,
+        position: [f64; 2],
+        label: String,
+    },
 }
 
 impl ViewKind {
     /// The parent and side of a projected or section view.
     pub fn parent(&self) -> Option<(ViewId, Side)> {
         match self {
-            ViewKind::Base { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Detail { .. } => None,
             ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
                 Some((*parent, *from))
             }
+        }
+    }
+    /// Label of a section or detail view.
+    pub fn label(&self) -> Option<&str> {
+        match self {
+            ViewKind::Section { label, .. } | ViewKind::Detail { label, .. } => Some(label),
+            _ => None,
+        }
+    }
+    /// The view this one is derived from (projected, section or detail).
+    pub fn parent_id(&self) -> Option<ViewId> {
+        match self {
+            ViewKind::Base { .. } => None,
+            ViewKind::Projected { parent, .. }
+            | ViewKind::Section { parent, .. }
+            | ViewKind::Detail { parent, .. } => Some(*parent),
         }
     }
 }
@@ -417,6 +445,16 @@ impl Drawing {
                     chain.push(*from);
                     cur = *parent;
                 }
+                ViewKind::Detail { parent, scale, .. } => {
+                    if cur != id || *parent == id {
+                        return Err(DocError::Validation(format!(
+                            "{}: views cannot be derived from the detail view {cur}",
+                            self.id
+                        )));
+                    }
+                    let (f, _, base) = self.resolve(*parent)?;
+                    return Ok((f, *scale, base));
+                }
             }
         }
     }
@@ -478,9 +516,9 @@ impl Drawing {
                             v.id
                         ));
                     };
-                    if matches!(pv.kind, ViewKind::Section { .. }) {
+                    if matches!(pv.kind, ViewKind::Section { .. } | ViewKind::Detail { .. }) {
                         return bad(format!(
-                            "{} cannot be derived from the section view {parent}",
+                            "{} cannot be derived from the section/detail view {parent}",
                             v.id
                         ));
                     }
@@ -506,11 +544,74 @@ impl Drawing {
                                 v.id
                             ));
                         }
-                        if self.views[..i].iter().any(
-                            |o| matches!(&o.kind, ViewKind::Section { label: l, .. } if l == label),
-                        ) {
-                            return bad(format!("section {label} already exists"));
+                        if self.views[..i]
+                            .iter()
+                            .any(|o| o.kind.label() == Some(label.as_str()))
+                        {
+                            return bad(format!("section/detail {label} already exists"));
                         }
+                    }
+                }
+                ViewKind::Detail {
+                    parent,
+                    center,
+                    radius,
+                    scale,
+                    position,
+                    label,
+                } => {
+                    let Some(pv) = self.views[..i].iter().find(|o| o.id == *parent) else {
+                        return bad(format!(
+                            "{} details {parent}, which is not an earlier view",
+                            v.id
+                        ));
+                    };
+                    if matches!(pv.kind, ViewKind::Section { .. } | ViewKind::Detail { .. }) {
+                        return bad(format!(
+                            "{} cannot be derived from the section/detail view {parent}",
+                            v.id
+                        ));
+                    }
+                    if !(center[0].is_finite() && center[1].is_finite()) {
+                        return bad(format!("{} detail centre must be finite", v.id));
+                    }
+                    if !(radius.is_finite() && *radius > k::tol::MIN_LENGTH) {
+                        return bad(format!(
+                            "{} detail radius must be positive, got {radius}",
+                            v.id
+                        ));
+                    }
+                    if !(scale.is_finite() && (MIN_SCALE..=MAX_SCALE).contains(scale)) {
+                        return bad(format!(
+                            "{} scale must be in {MIN_SCALE}..={MAX_SCALE}, got {scale}",
+                            v.id
+                        ));
+                    }
+                    if !(position[0].is_finite()
+                        && position[1].is_finite()
+                        && (0.0..=w).contains(&position[0])
+                        && (0.0..=h).contains(&position[1]))
+                    {
+                        return bad(format!(
+                            "{} position {position:?} is outside the {} sheet",
+                            v.id,
+                            self.sheet.label()
+                        ));
+                    }
+                    if label.is_empty()
+                        || label.chars().count() > 3
+                        || !label.chars().all(|c| c.is_ascii_alphanumeric())
+                    {
+                        return bad(format!(
+                            "{} detail label must be 1 to 3 letters/numbers, got '{label}'",
+                            v.id
+                        ));
+                    }
+                    if self.views[..i]
+                        .iter()
+                        .any(|o| o.kind.label() == Some(label.as_str()))
+                    {
+                        return bad(format!("section/detail {label} already exists"));
                     }
                 }
             }
@@ -1471,6 +1572,106 @@ struct Placed {
     frame: ViewFrame,
 }
 
+/// Clip a view's curves to the circle about `c` of radius `r` (detail views):
+/// lines exactly, arcs by the exact circle-circle intersection angles,
+/// polylines segment by segment. Only full circles lying inside stay
+/// "end-on circles" (centre marks).
+fn clip_to_circle(g: &mut ViewGeom, c: [f64; 2], r: f64) {
+    let seg = |a: [f64; 2], b: [f64; 2]| -> Option<([f64; 2], [f64; 2])> {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let f = [a[0] - c[0], a[1] - c[1]];
+        let qa = d[0] * d[0] + d[1] * d[1];
+        if qa <= 0.0 {
+            return None;
+        }
+        let qb = 2.0 * (f[0] * d[0] + f[1] * d[1]);
+        let qc = f[0] * f[0] + f[1] * f[1] - r * r;
+        let disc = qb * qb - 4.0 * qa * qc;
+        if disc <= 0.0 {
+            return None;
+        }
+        let s = disc.sqrt();
+        let (t0, t1) = (
+            ((-qb - s) / (2.0 * qa)).max(0.0),
+            ((-qb + s) / (2.0 * qa)).min(1.0),
+        );
+        (t1 > t0 + 1e-12).then(|| {
+            let p = |t: f64| [a[0] + d[0] * t, a[1] + d[1] * t];
+            (p(t0), p(t1))
+        })
+    };
+    let mut out = Vec::new();
+    for (p, vis) in std::mem::take(&mut g.prims) {
+        match p {
+            Prim::Line { a, b, style } => {
+                if let Some((a, b)) = seg(a, b) {
+                    out.push((Prim::Line { a, b, style }, vis));
+                }
+            }
+            Prim::Polyline { pts, style } => {
+                for w in pts.windows(2) {
+                    if let Some((a, b)) = seg(w[0], w[1]) {
+                        out.push((Prim::Line { a, b, style }, vis));
+                    }
+                }
+            }
+            Prim::Arc {
+                c: p0,
+                r: q,
+                start,
+                sweep,
+                style,
+            } => {
+                let d = (p0[0] - c[0]).hypot(p0[1] - c[1]);
+                if d + q <= r {
+                    out.push((
+                        Prim::Arc {
+                            c: p0,
+                            r: q,
+                            start,
+                            sweep,
+                            style,
+                        },
+                        vis,
+                    ));
+                    continue;
+                }
+                if d >= r + q || d + r <= q {
+                    continue;
+                }
+                let phi = (c[1] - p0[1]).atan2(c[0] - p0[0]);
+                let alpha = ((q * q + d * d - r * r) / (2.0 * q * d))
+                    .clamp(-1.0, 1.0)
+                    .acos();
+                let (a0, a1) = (start, start + sweep);
+                for kk in -1..=2 {
+                    let w0 = phi - alpha + TAU * kk as f64;
+                    let w1 = phi + alpha + TAU * kk as f64;
+                    let (s0, s1) = (a0.max(w0), a1.min(w1));
+                    if s1 > s0 + 1e-12 {
+                        out.push((
+                            Prim::Arc {
+                                c: p0,
+                                r: q,
+                                start: s0,
+                                sweep: s1 - s0,
+                                style,
+                            },
+                            vis,
+                        ));
+                    }
+                }
+            }
+            other => out.push((other, vis)),
+        }
+    }
+    g.prims = out;
+    g.circles
+        .retain(|(p, q)| (p[0] - c[0]).hypot(p[1] - c[1]) + q <= r);
+    g.lo = [c[0] - r, c[1] - r];
+    g.hi = [c[0] + r, c[1] + r];
+}
+
 /// Sheet spacing (mm) of section hatch lines (45°).
 pub const HATCH_SPACING: f64 = 2.5;
 
@@ -1717,6 +1918,9 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 format!("{} {} ({} {})", v.id, frame.name(), parent, from.label())
             }
             ViewKind::Section { label, .. } => format!("SECTION {label}-{label}"),
+            ViewKind::Detail { label, scale, .. } => {
+                format!("DETAIL {label} ({})", fmt_scale(*scale))
+            }
         };
         // Section views: the bodies cut by the section plane (part behind it).
         let mut section_data: Vec<BodyData> = Vec::new();
@@ -1756,7 +1960,11 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 section_data.iter().collect()
             };
         }
-        let geom = (!shown.is_empty()).then(|| view_geometry(&shown, &frame, chord, spacing, diag));
+        let mut geom =
+            (!shown.is_empty()).then(|| view_geometry(&shown, &frame, chord, spacing, diag));
+        if let (ViewKind::Detail { center, radius, .. }, Some(g)) = (&v.kind, geom.as_mut()) {
+            clip_to_circle(g, *center, *radius);
+        }
         // Placement.
         let (glo, ghi) = match &geom {
             Some(g) => (g.lo, g.hi),
@@ -1768,7 +1976,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         ];
         let half = if geom.is_some() { half } else { [30.0, 8.0] };
         let center = match &v.kind {
-            ViewKind::Base { position, .. } => *position,
+            ViewKind::Base { position, .. } | ViewKind::Detail { position, .. } => *position,
             ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
                 let p = placed.get(parent).ok_or_else(|| {
                     DocError::Validation(format!("{}: {} is placed before its parent", dr.id, v.id))
@@ -1949,7 +2157,11 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     }
                 }
             }
-            if dr.auto_dimensions && missing.is_empty() && cut_plane.is_none() {
+            if dr.auto_dimensions
+                && missing.is_empty()
+                && cut_plane.is_none()
+                && !matches!(v.kind, ViewKind::Detail { .. })
+            {
                 // Overall dimensions from the exact bounds, each world axis once.
                 let mut bb = k::Bounds {
                     min: [f64::INFINITY; 3],
@@ -2122,6 +2334,46 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             placed.get(&v.kind.parent().map(|x| x.0).unwrap_or(v.id)),
         ) {
             groups.push(cutting_line(*parent, *from, *offset, label, p, &frame));
+        }
+        if let ViewKind::Detail {
+            parent,
+            center: dc,
+            radius,
+            label,
+            ..
+        } = &v.kind
+            && let Some(p) = placed.get(parent)
+        {
+            // The detail's boundary in the detail view and on its parent.
+            let mut prims = vec![Prim::Arc {
+                c: [off[0] + dc[0] * scale, off[1] + dc[1] * scale],
+                r: radius * scale,
+                start: 0.0,
+                sweep: TAU,
+                style: LineStyle::Thin,
+            }];
+            let pc = [p.off[0] + dc[0] * p.scale, p.off[1] + dc[1] * p.scale];
+            let pr = radius * p.scale;
+            prims.push(Prim::Arc {
+                c: pc,
+                r: pr,
+                start: 0.0,
+                sweep: TAU,
+                style: LineStyle::Thin,
+            });
+            let s = std::f64::consts::FRAC_1_SQRT_2;
+            prims.push(Prim::Text {
+                at: [pc[0] + pr * s + 1.0, pc[1] + pr * s + 1.0],
+                size: TEXT,
+                text: label.clone(),
+                anchor: Anchor::Start,
+                style: LineStyle::Thin,
+            });
+            groups.push(Group {
+                id: format!("detail-{label}"),
+                label: format!("Detail {label} boundary on {parent} and {}", v.id),
+                prims,
+            });
         }
     }
     // Clipping check: everything drawn must be on the sheet inside the border.

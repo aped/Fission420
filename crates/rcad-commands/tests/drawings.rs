@@ -1092,3 +1092,92 @@ fn section_view_through_the_hole_follows_the_model() {
     let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
     assert!(g["view-5"].flagged && g["view-5"].visible.is_empty());
 }
+
+#[test]
+fn detail_views_clip_and_enlarge() {
+    let mut s = Session::new();
+    let (_, hole) = block(&mut s, 8.0, 20.0, 15.0);
+    let d = drawing_of(&mut s);
+    let detail = |label: &str, c: [f64; 2], r: f64, pos: [f64; 2]| Command::AddDrawingView {
+        drawing: d,
+        view: ViewSpec::Detail {
+            parent: ViewId(2),
+            center: c,
+            radius: r,
+            scale: None,
+            position: Some(pos),
+            label: label.into(),
+        },
+    };
+    // B: the whole hole (centre 4 mm from the detail centre, r 4 < 10 - 4).
+    ok(&mut s, detail("B", [24.0, 15.0], 10.0, [200.0, 150.0]));
+    // C: a chord of the block's right edge x = 40 (4 mm from the centre).
+    ok(&mut s, detail("C", [36.0, 15.0], 8.0, [255.0, 150.0]));
+    // D: the top part of the hole circle only (an arc).
+    ok(&mut s, detail("D", [20.0, 21.0], 4.0, [200.0, 95.0]));
+    // Refused: zero radius, duplicate label, detail of a detail.
+    assert!(!s.execute(&detail("E", [0.0, 0.0], 0.0, [100.0, 100.0])).ok);
+    assert!(!s.execute(&detail("B", [0.0, 0.0], 5.0, [100.0, 100.0])).ok);
+    assert!(
+        !s.execute(&Command::AddDrawingView {
+            drawing: d,
+            view: ViewSpec::Detail {
+                parent: ViewId(4),
+                center: [0.0, 0.0],
+                radius: 3.0,
+                scale: None,
+                position: None,
+                label: "F".into(),
+            },
+        })
+        .ok
+    );
+    let (r, svg) = export(&mut s, d, "details.svg");
+    let rep = r.drawing_report.unwrap();
+    assert!(rep.issues.is_empty(), "{:?}", rep.issues);
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    let b = &g["view-4"];
+    assert!(b.visible.is_empty() && b.hidden.is_empty(), "{b:?}");
+    assert_eq!(b.circles.len(), 1);
+    let (cx, cy, r) = (b.circles[0].0, b.circles[0].1, b.circles[0].2);
+    assert!((r - 8.0).abs() < 1e-3, "Ø8 at 2:1: r {r}");
+    // The hole centre is 4 mm left of the detail centre: 8 mm on the sheet.
+    assert!((cx - (200.0 - 8.0)).abs() < 1e-3 && (cy - 150.0).abs() < 1e-3);
+    assert_eq!(b.center.len(), 2);
+    assert!(b.texts.iter().any(|t| t.2 == "DETAIL B (2:1)"));
+    let bnd = &g["detail-B"];
+    let mut radii: Vec<f64> = bnd.circles.iter().map(|c| c.2).collect();
+    radii.sort_by(f64::total_cmp);
+    assert_eq!(
+        radii,
+        vec![10.0, 20.0],
+        "boundary on the top view (1:1) and the detail (2:1)"
+    );
+    let c = &g["view-5"];
+    assert_eq!(c.visible.len(), 1);
+    let want = 2.0 * (64.0f64 - 16.0).sqrt() * 2.0;
+    assert!(
+        (len(&c.visible[0]) - want).abs() < 1e-3,
+        "{}",
+        len(&c.visible[0])
+    );
+    assert!(
+        (c.visible[0].a[0] - (255.0 + 8.0)).abs() < 1e-3,
+        "x = 40 is 4 mm right of the centre"
+    );
+    assert!(c.circles.is_empty());
+    let dv = rep.views.iter().find(|v| v.id == ViewId(6)).unwrap();
+    assert_eq!((dv.visible_curves, dv.hidden_curves), (1, 0), "{dv:?}");
+    // The detail follows the model: the hole grows to Ø10.
+    ok(
+        &mut s,
+        Command::SetParameter {
+            feature: hole,
+            name: "diameter".into(),
+            value: 10.0,
+        },
+    );
+    let (_, svg) = export(&mut s, d, "details_edit.svg");
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    assert!((g["view-4"].circles[0].2 - 10.0).abs() < 1e-3);
+}

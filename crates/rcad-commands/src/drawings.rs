@@ -37,6 +37,20 @@ pub enum ViewSpec {
         offset: f64,
         label: String,
     },
+    /// Detail `label` of `parent`: the region within `radius` (model mm) of
+    /// `center` (parent view coordinates, model mm along its right/up axes),
+    /// at `scale` (default twice the parent's) centred at `position` (sheet
+    /// mm; default right of the middle of the sheet).
+    Detail {
+        parent: ViewId,
+        center: [f64; 2],
+        radius: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
+        label: String,
+    },
 }
 
 /// Export file format.
@@ -147,6 +161,26 @@ fn add_view(
                 parent: *parent,
                 from: *from,
                 offset: *offset,
+                label: label.clone(),
+            }
+        }
+        ViewSpec::Detail {
+            parent,
+            center,
+            radius,
+            scale,
+            position,
+            label,
+        } => {
+            dr.view(*parent)?;
+            let (_, ps, _) = dr.resolve(*parent)?;
+            let (w, h) = dr.sheet.mm();
+            ViewKind::Detail {
+                parent: *parent,
+                center: *center,
+                radius: *radius,
+                scale: scale.unwrap_or(ps * 2.0),
+                position: position.unwrap_or([w * 0.8, h * 0.45]),
                 label: label.clone(),
             }
         }
@@ -297,7 +331,9 @@ impl Session {
                         bodies_extent(m, bodies)?;
                         None
                     }
-                    ViewSpec::Projected { .. } | ViewSpec::Section { .. } => None,
+                    ViewSpec::Projected { .. }
+                    | ViewSpec::Section { .. }
+                    | ViewSpec::Detail { .. } => None,
                 };
                 let spec = view.clone();
                 let vid = m.transact(&format!("Add view to {id}"), |d| {
@@ -334,6 +370,23 @@ impl Session {
                                 *o = x;
                             }
                         }
+                        ViewKind::Detail {
+                            scale: s,
+                            position: p,
+                            ..
+                        } => {
+                            if orientation.is_some() {
+                                return Err(bad(format!(
+                                    "{vid} is a detail view: its orientation follows its parent"
+                                )));
+                            }
+                            if let Some(x) = scale {
+                                *s = x;
+                            }
+                            if let Some(x) = position {
+                                *p = x;
+                            }
+                        }
                         ViewKind::Projected { .. } | ViewKind::Section { .. } => {
                             if scale.is_some() || position.is_some() || orientation.is_some() {
                                 return Err(bad(format!(
@@ -356,7 +409,7 @@ impl Session {
                         let children: Vec<String> = dr
                             .views
                             .iter()
-                            .filter(|v| v.kind.parent().map(|p| p.0) == Some(vid))
+                            .filter(|v| v.kind.parent_id() == Some(vid))
                             .map(|v| v.id.to_string())
                             .collect();
                         if !children.is_empty() {
