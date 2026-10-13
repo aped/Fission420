@@ -620,6 +620,23 @@ pub enum Command {
         feature: FeatureId,
         path: PathBuf,
     },
+    /// Uniform scale of a body about `center` (run 6; one undo step).
+    ScaleBody {
+        #[serde(default)]
+        name: Option<String>,
+        body: BodyId,
+        #[serde(default)]
+        center: [f64; 3],
+        factor: f64,
+    },
+    /// Shell from any planar face of a body prismatic along its normal (run
+    /// 6; see `FeatureKind::ShellFace`).
+    ShellFace {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        thickness: f64,
+    },
     /// Split `body` by `plane` (run 6; one undo step): the body keeps the
     /// part behind the plane, a new body (`body_name`) the part in front.
     SplitBody {
@@ -836,6 +853,8 @@ impl Command {
             Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
             Command::SplitBody { .. } => "split_body",
+            Command::ShellFace { .. } => "shell_face",
+            Command::ScaleBody { .. } => "scale_body",
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::Project { .. } => "project",
@@ -2767,6 +2786,42 @@ impl Session {
                     part.bend_lines.len()
                 ));
             }
+            Command::ScaleBody {
+                name,
+                body,
+                center,
+                factor,
+            } => {
+                let (name, body, center, factor) = (name.clone(), *body, *center, *factor);
+                rcad_kernel::Rigid::scaling(center, factor)
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                let m = self.model_mut()?;
+                let src = m.document().body(body)?.name.clone();
+                let id = m.transact(&format!("Scale {src}"), |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Scale"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::ScaleBody {
+                            body,
+                            center,
+                            factor,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ShellFace {
+                name,
+                face,
+                thickness,
+            } => {
+                let (name, face, thickness) = (name.clone(), *face, *thickness);
+                let id = self.model_mut()?.transact("Shell", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Shell"));
+                    Ok(d.push(n, FeatureKind::ShellFace { face, thickness }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SplitBody {
                 name,
                 body,
@@ -3518,6 +3573,8 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
                 FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
+                FeatureKind::ShellFace { .. } => ("shell", None),
+                FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),

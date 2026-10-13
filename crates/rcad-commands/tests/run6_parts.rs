@@ -385,3 +385,81 @@ fn sweep_noncircular_profile_keeps_its_orientation() {
     );
     assert_eq!(p, vec![Some(true), Some(false), Some(false), Some(true)]);
 }
+
+fn rr(l: f64, w: f64, r: f64) -> f64 {
+    l * w - (4.0 - PI) * r * r
+}
+
+#[test]
+fn shell_from_the_top_face_of_a_filleted_box() {
+    let mut s = Session::new();
+    new_box(&mut s, 40.0, 30.0, 20.0);
+    for (a, b) in VERTICAL_EDGES {
+        tray::ok(&mut s, &fillet(side(a), side(b), 5.0));
+    }
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "shell_face", "face": {"feature": 2, "role": "ExtrudeEndCap"},
+                "thickness": 2.0}),
+    );
+    let want = rr(40.0, 30.0, 5.0) * 20.0 - rr(36.0, 26.0, 3.0) * 18.0;
+    assert!(
+        (tray::volume(&s) - want).abs() < 1e-6,
+        "{} vs {want}",
+        tray::volume(&s)
+    );
+    let p = tray::probe(
+        &s,
+        &[
+            [1.0, 15.0, 10.0],
+            [2.5, 15.0, 10.0],
+            [20.0, 15.0, 1.0],
+            [20.0, 15.0, 2.5],
+        ],
+    );
+    assert_eq!(p, vec![Some(true), Some(false), Some(true), Some(false)]);
+    // Upstream: thicker walls; the fillet radius follows too.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 7, "name": "thickness", "value": 3.0}),
+    );
+    let want3 = rr(40.0, 30.0, 5.0) * 20.0 - rr(34.0, 24.0, 2.0) * 17.0;
+    // Relative 1e-9: the regenerated offset arcs carry ~1e-10 mm of noise.
+    assert!(
+        (tray::volume(&s) - want3).abs() < 1e-9 * want3,
+        "{} vs {want3}",
+        tray::volume(&s)
+    );
+    // Too thick: refused unchanged.
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 7, "name": "thickness", "value": 16.0}),
+    );
+    assert!(!r.ok);
+    assert_eq!(s.model().unwrap().document(), &before);
+}
+
+#[test]
+fn shell_face_refuses_a_non_prismatic_body() {
+    // A chamfered edge tilts a wall: the body is not prismatic under the
+    // bottom face.
+    let mut t = Session::new();
+    new_box(&mut t, 40.0, 30.0, 20.0);
+    tray::ok(
+        &mut t,
+        &json!({"cmd": "chamfer", "a": {"feature": 2, "role": "ExtrudeEndCap"}, "b": side(1),
+                "distance": 4.0}),
+    );
+    let before = t.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut t,
+        &json!({"cmd": "shell_face", "face": {"feature": 2, "role": "ExtrudeStartCap"},
+                "thickness": 2.0}),
+    );
+    assert!(
+        !r.ok,
+        "shell under a chamfered (non-prismatic) body accepted"
+    );
+    assert_eq!(t.model().unwrap().document(), &before);
+}

@@ -64,6 +64,9 @@ if [ -f "$DIR/taper_cut_pocket.step" ]; then
 t=math.tan(math.radians(10)); exp=b.cut(Part.makeLoft([sq(5,10-10*t),sq(11,10+2*t)],True))" 0 $TOL
   check taper_join_boss.step "$SQ
 t=math.tan(math.radians(5)); exp=b.fuse(Part.makeLoft([sq(9.5,10+t),sq(15,10-10*t)],True)).removeSplitter()" 0 $TOL
+  # Round drafted pocket: Ø10 at (20,15), 5 deep, 10 deg (radius 5 - w tan10).
+  check taper_cut_round.step "b=Part.makeBox(40,30,10); t=math.tan(math.radians(10))
+exp=b.cut(Part.makeCone(5-5*t,5+t,6,V(20,15,5)))" 0 $TOL
 fi
 # Replace face (kernel direct::tests): Truck block 40x30x10 whose top is tilted 20 deg about
 # the centroid's X axis and moved 2 mm along the tilted normal: z_top(y) = 10 + 2/cos20 +

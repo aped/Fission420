@@ -366,6 +366,21 @@ impl RcadApp {
                 reverse: false,
             });
         }
+        if ui
+            .add_enabled(self.summary.open, egui::Button::new("Thread…"))
+            .probe("Thread…")
+            .on_hover_text("Modeled thread (faceted solid, stated 60° V test profile): a rod or a square nut on World XY")
+            .clicked()
+        {
+            self.dialog = Some(Dialog::Thread {
+                diameter: "20".into(),
+                pitch: "2".into(),
+                length: "12".into(),
+                nut: false,
+                nut_width: "30".into(),
+                left_hand: false,
+            });
+        }
         // Run 5: exact loft / sweep (new bodies from two sketches).
         ui.menu_button("Loft / Sweep", |ui| {
             if ui
@@ -838,6 +853,24 @@ impl RcadApp {
                             offset: "0".into(),
                         });
                     }
+                    // Run 6: shell the body under this face, leaving it open.
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.shell_thickness).desired_width(40.0),
+                    )
+                    .named("Shell thickness (mm)");
+                    if ui
+                        .button("Shell from this face")
+                        .probe("Shell from this face")
+                        .on_hover_text("Hollow the body under this face (left open) to walls and floor of the given thickness; bodies prismatic along the face normal")
+                        .clicked()
+                        && let Ok(t) = self.shell_thickness.trim().parse::<f64>()
+                    {
+                        self.request(Command::ShellFace {
+                            name: None,
+                            face: r,
+                            thickness: t,
+                        });
+                    }
                     if ui
                         .button("Chamfer edge…")
                         .probe("Chamfer edge…")
@@ -1269,6 +1302,8 @@ impl RcadApp {
                 "deg"
             } else if pname == "count" {
                 "count"
+            } else if pname == "k_factor" {
+                "ratio"
             } else {
                 "mm"
             }
@@ -1750,6 +1785,25 @@ impl RcadApp {
                         num_field(ui, "XZ rectangle center X (mm)", cx);
                         num_field(ui, "XZ rectangle center Z (mm)", cz);
                         ui.small("Must lie entirely at X > 0 to be revolved about world Z.");
+                    }
+                    Dialog::Thread {
+                        diameter,
+                        pitch,
+                        length,
+                        nut,
+                        nut_width,
+                        left_hand,
+                    } => {
+                        num_field(ui, "Thread diameter (mm)", diameter);
+                        num_field(ui, "Thread pitch (mm)", pitch);
+                        num_field(ui, "Thread length (mm)", length);
+                        ui.checkbox(left_hand, "Left hand").probe("Left hand");
+                        ui.checkbox(nut, "Square nut (internal thread, 0.1 mm radial clearance)")
+                            .probe("Square nut");
+                        if *nut {
+                            num_field(ui, "Nut width (mm)", nut_width);
+                        }
+                        ui.small("Faceted solid (planar facets within 0.01 mm of the ideal helicoid), stated 60° symmetric V test profile with one-turn lead-in/runout; not a certified standard thread. Length: a whole number of pitches. Printable geometry, not cosmetic. ADR 0011.");
                     }
                     Dialog::Revolve {
                         sketch,
@@ -2578,19 +2632,19 @@ impl RcadApp {
 
     /// Flat-pattern DXF export of a sheet-metal flange feature.
     pub(crate) fn flat_pattern_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
-        ui.horizontal(|ui| {
-            text_field(ui, "Flat pattern DXF path", &mut self.flat_path);
-            if ui
-                .button("Export flat pattern")
-                .probe("Export flat pattern")
-                .clicked()
-            {
-                let c = Command::ExportFlatPattern {
-                    feature: f.id,
-                    path: self.flat_path.clone().into(),
-                };
-                self.request(c);
-            }
-        });
+        ui.label("Flat pattern (DXF, layers CUT / BEND):");
+        ui.add(egui::TextEdit::singleline(&mut self.flat_path).desired_width(220.0))
+            .named("Flat pattern DXF path");
+        if ui
+            .button("Export flat pattern")
+            .probe("Export flat pattern")
+            .clicked()
+        {
+            let c = Command::ExportFlatPattern {
+                feature: f.id,
+                path: self.flat_path.clone().into(),
+            };
+            self.request(c);
+        }
     }
 }

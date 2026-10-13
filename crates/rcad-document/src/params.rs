@@ -678,8 +678,11 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         }
         FeatureKind::Extrude { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
-        FeatureKind::Shell { .. } if name == "thickness" => Some(SlotKind::Length),
+        FeatureKind::Shell { .. } | FeatureKind::ShellFace { .. } if name == "thickness" => {
+            Some(SlotKind::Length)
+        }
         FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
+        FeatureKind::ScaleBody { .. } if name == "factor" => Some(SlotKind::Angle),
         // The K-factor is a ratio: dimensionless like an angle.
         FeatureKind::SheetMetal { .. } if name == "k_factor" => Some(SlotKind::Angle),
         FeatureKind::SheetMetal { .. } => kind_has(kind, name).then_some(SlotKind::Length),

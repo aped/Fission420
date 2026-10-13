@@ -449,3 +449,59 @@ fn options_save_as_v6_and_older_labels_are_refused() {
     let e = format!("{:?}", r.error);
     assert!(e.contains("v6 feature"), "{e}");
 }
+
+#[test]
+fn thin_open_chain_ribs() {
+    // Plate 60 x 40 x 5; an L-shaped rib (centre line (10,10)-(30,10)-(30,30),
+    // 2 thick, 10 high) joined on the top face: a mitred band of area
+    // length × thickness = 40 × 2.
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            rect(json!("WorldXY"), 60.0, 40.0, [30.0, 20.0]),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 5.0}),
+        ],
+    );
+    let mut sk = Sketch::default();
+    let p: Vec<_> = [[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    sk.add_line(p[0], p[1]);
+    sk.add_line(p[1], p[2]);
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: serde_json::from_value(json!({"Face": {"feature": 2, "role": "ExtrudeEndCap"}}))
+            .unwrap(),
+        template: rcad_commands::SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 3, "distance": 10.0, "op": "join", "target": 1,
+                "options": {"thin": 2.0}}),
+    );
+    assert!(
+        (vol(&s, 1) - (12000.0 + 800.0)).abs() < 1e-6,
+        "{}",
+        vol(&s, 1)
+    );
+    let p = tray::probe(
+        &s,
+        &[
+            [20.0, 10.9, 10.0],
+            [20.0, 11.1, 10.0],
+            [30.9, 29.0, 10.0],
+            [31.1, 9.1, 10.0],
+        ],
+    );
+    assert_eq!(p, vec![Some(true), Some(false), Some(true), Some(false)]);
+    // Rib thickness is the `thin` parameter.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 4, "name": "thin", "value": 3.0}),
+    );
+    assert!((vol(&s, 1) - (12000.0 + 1200.0)).abs() < 1e-6);
+}

@@ -177,3 +177,50 @@ fn moves_refuse_seeds_made_before_them() {
     assert!(!r.ok);
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+#[test]
+fn scale_keeps_references_and_scales_volume() {
+    let mut s = Session::new();
+    block(&mut s);
+    // Scale 1.5 about the origin; then a pocket on the (scaled) top face at
+    // face coordinates (20, 15): the face frame moved with the body (origin
+    // scaled, axes unit), sketch coordinates stay in mm, so the pocket is at
+    // world (20, 15) on the new top z = 15.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "scale_body", "body": 1, "factor": 1.5}),
+    );
+    assert!((vol(&s, 1) - 12000.0 * 3.375).abs() < 1e-6);
+    assert!(near(body(&s, 1).bounds.unwrap().max, [60.0, 45.0, 15.0]));
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "create_sketch",
+                   "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+                   "template": "centered_circle", "diameter": 10.0, "center": [20.0, 15.0]}),
+            json!({"cmd": "extrude", "sketch": 4, "distance": 4.0, "op": "cut", "target": 1}),
+        ],
+    );
+    let p = tray::probe(
+        &s,
+        &[[20.0, 15.0, 14.0], [20.0, 15.0, 10.0], [30.0, 22.5, 14.0]],
+    );
+    assert_eq!(p, vec![Some(false), Some(true), Some(true)]);
+    // The factor is a parameter; invalid factors refused.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "factor", "value": 2.0}),
+    );
+    assert!(
+        (vol(&s, 1) - (96000.0 - 100.0 * PI)).abs() < 1e-6,
+        "{}",
+        vol(&s, 1)
+    );
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "factor", "value": 0.0}),
+    );
+    assert!(!r.ok);
+    assert_eq!(s.model().unwrap().document(), &before);
+}
