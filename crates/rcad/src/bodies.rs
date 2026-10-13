@@ -59,6 +59,11 @@ pub struct BodyProps {
     pub unit: DensityUnit,
     /// (doc_id, revision, report) of the last `MassProperties` reply.
     pub report: Option<(u64, u64, MassReport)>,
+    /// Combine form (run 6): tool body, operation (0 join, 1 cut, 2 intersect),
+    /// keep the tool.
+    pub combine_tool: Option<BodyId>,
+    pub combine_op: usize,
+    pub keep_tools: bool,
 }
 
 const CUSTOM: &str = "custom";
@@ -327,6 +332,7 @@ impl RcadApp {
         ui.label(provenance(&b));
         if b.kind != "mesh" {
             self.move_ui(ui, b.id);
+            self.combine_ui(ui, b.id);
         }
         if b.kind == "mesh" {
             ui.colored_label(
@@ -600,6 +606,75 @@ impl RcadApp {
 }
 
 impl RcadApp {
+    /// Combine this body with another one (run 6, `Command::Combine`).
+    fn combine_ui(&mut self, ui: &mut egui::Ui, target: BodyId) {
+        let others: Vec<(BodyId, String)> = self
+            .summary
+            .bodies
+            .iter()
+            .filter(|o| o.id != target && o.kind != "mesh")
+            .map(|o| (o.id, o.name.clone()))
+            .collect();
+        let mut send = None;
+        ui.collapsing("Combine with…", |ui| {
+            if others.is_empty() {
+                ui.weak("No other solid body to combine with.");
+                return;
+            }
+            let f = &mut self.body_props;
+            if !f
+                .combine_tool
+                .is_some_and(|t| others.iter().any(|o| o.0 == t))
+            {
+                f.combine_tool = Some(others[0].0);
+            }
+            let name = |id: Option<BodyId>| {
+                others
+                    .iter()
+                    .find(|o| Some(o.0) == id)
+                    .map_or(String::new(), |o| o.1.clone())
+            };
+            egui::ComboBox::from_label("Tool body")
+                .selected_text(name(f.combine_tool))
+                .show_ui(ui, |ui| {
+                    for (id, n) in &others {
+                        ui.selectable_value(&mut f.combine_tool, Some(*id), n);
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut f.combine_op, 0, "Join");
+                ui.radio_value(&mut f.combine_op, 1, "Cut");
+                ui.radio_value(&mut f.combine_op, 2, "Intersect");
+            });
+            ui.checkbox(&mut f.keep_tools, "Keep tool body")
+                .on_hover_text(
+                    "Off: the tool body is consumed (it disappears; its features stay in History)",
+                );
+            if ui.button("Combine").probe("Combine").clicked()
+                && let Some(t) = f.combine_tool
+            {
+                send = Some(Command::Combine {
+                    name: None,
+                    target,
+                    tools: vec![t],
+                    op: match f.combine_op {
+                        0 => rcad_kernel::CombineOp::Join,
+                        1 => rcad_kernel::CombineOp::Cut,
+                        _ => rcad_kernel::CombineOp::Intersect,
+                    },
+                    keep_tools: f.keep_tools,
+                });
+            }
+            ui.small(
+                "Checked independently against both bodies; refused (nothing changes) when \
+                 Truck fails or the check disagrees. Bodies that only touch usually fail.",
+            );
+        });
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+
     /// Move / Copy a body (run 6): rotation about a world axis through the
     /// origin, then a translation; one undo step; a feature in History whose
     /// values stay editable parameters (tx, ty, tz, angle_deg).

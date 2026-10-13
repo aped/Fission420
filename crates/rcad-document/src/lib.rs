@@ -5,6 +5,7 @@
 //! ([`Evaluation`]) is a disposable cache produced by [`regenerate`].
 
 mod blob;
+mod combine;
 pub mod direct;
 mod hole;
 pub mod import;

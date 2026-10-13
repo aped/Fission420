@@ -333,6 +333,21 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+    /// Body Combine (run 6, format v6; one undo step): join `tools` to,
+    /// cut them from, or intersect them with `target`
+    /// (`FeatureKind::Combine`). Without `keep_tools` the tool bodies are
+    /// consumed (they leave the model; their creators stay in history).
+    /// Refused (document unchanged) when Truck fails, the result is not one
+    /// closed solid, or the independent check disagrees (`GeometryCheck`).
+    Combine {
+        #[serde(default)]
+        name: Option<String>,
+        target: BodyId,
+        tools: Vec<BodyId>,
+        op: k::CombineOp,
+        #[serde(default)]
+        keep_tools: bool,
+    },
     /// Volume, mass, centre of mass and inertia of `bodies` (default: every
     /// visible body) and their total (`Response::mass_properties`). Read-only.
     MassProperties {
@@ -596,6 +611,7 @@ impl Command {
             Command::SetBodyVisible { .. } => "set_body_visible",
             Command::SetBodyMaterial { .. } => "set_body_material",
             Command::MassProperties { .. } => "mass_properties",
+            Command::Combine { .. } => "combine",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -2189,6 +2205,39 @@ impl Session {
                     Ok(())
                 })?;
             }
+            Command::Combine {
+                name,
+                target,
+                tools,
+                op,
+                keep_tools,
+            } => {
+                let (target, tools, op, keep_tools) = (*target, tools.clone(), *op, *keep_tools);
+                let name = name.clone();
+                let m = self.model_mut()?;
+                let tname = m.document().body(target)?.name.clone();
+                for t in &tools {
+                    m.document().body(*t)?;
+                }
+                let verb = match op {
+                    k::CombineOp::Join => "Join",
+                    k::CombineOp::Cut => "Cut",
+                    k::CombineOp::Intersect => "Intersect",
+                };
+                let id = m.transact(&format!("Combine ({verb}) into {tname}"), |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Combine"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Combine {
+                            target,
+                            tools,
+                            op,
+                            keep_tools,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::MassProperties { bodies } => {
                 let m = self.model_mut()?;
                 r.mass_properties = Some(mass::report(m, bodies.as_deref())?);
@@ -2792,6 +2841,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
+                FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
             };
             let (operation, extent, reverse) = match &f.kind {

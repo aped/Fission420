@@ -7,6 +7,7 @@
 
 mod build;
 mod chamfer;
+mod combine;
 mod direct;
 mod exact;
 mod faceref;
@@ -26,6 +27,10 @@ mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
+pub use combine::{
+    BoolOp, CHECK_GRID, CombineCheck, CombineOp, MembershipReport, boolean, combine,
+    verify_boolean_by_membership, verify_combine_by_membership,
+};
 pub use direct::{
     CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, countersink,
     cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,

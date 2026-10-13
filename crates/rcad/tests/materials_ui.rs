@@ -118,3 +118,58 @@ fn set_material_and_read_mass_properties_in_the_inspector() {
     click(&mut h, "Undo");
     assert!((mass(&h).unwrap() - 29.76).abs() < 1e-9);
 }
+
+#[test]
+fn combine_two_bodies_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    for (c, z) in [([20.0, 15.0], 0.0), ([40.0, 25.0], 5.0)] {
+        request(
+            &mut h,
+            Command::CreateSketch {
+                name: None,
+                plane: SketchPlane::WorldXY,
+                template: SketchTemplate::CenteredRectangle {
+                    width: 40.0,
+                    height: 30.0,
+                    center: Some(c),
+                },
+            },
+        );
+        let s = h.state().summary().features.last().unwrap().id;
+        request(&mut h, Command::extrude(None, s, 20.0));
+        if z > 0.0 {
+            let b = h.state().summary().bodies.last().unwrap().id;
+            request(
+                &mut h,
+                Command::MoveBody {
+                    name: None,
+                    body: b,
+                    translate: [0.0, 0.0, z],
+                    origin: [0.0; 3],
+                    axis: None,
+                    angle_deg: 0.0,
+                    copy: false,
+                    body_name: None,
+                },
+            );
+        }
+    }
+    let name = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name);
+    click(&mut h, "Combine with…");
+    click(&mut h, "Cut");
+    click(&mut h, "Combine");
+    let s = h.state().summary().clone();
+    let last = s.features.last().unwrap();
+    assert_eq!(last.kind, "combine", "{:?}", h.state().diagnostics().last());
+    assert_eq!(s.bodies.len(), 1, "the tool body is consumed");
+    let v = match s.bodies[0].measurements.as_ref().unwrap().volume {
+        rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+        ref v => panic!("{v:?}"),
+    };
+    // 24000 − overlap 20 × 20 × 15.
+    assert!((v - 18_000.0).abs() < 1e-6, "{v}");
+    click(&mut h, "Undo");
+    assert_eq!(h.state().summary().bodies.len(), 2);
+}

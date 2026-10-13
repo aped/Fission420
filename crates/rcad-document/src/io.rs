@@ -188,6 +188,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }
+        if matches!(f.kind, crate::FeatureKind::Combine { .. }) {
+            return Some("body combines");
+        }
         if let crate::FeatureKind::Sketch { links, sketch, .. } = &f.kind {
             if !links.is_empty() {
                 return Some("projected sketch geometry (projection links)");
