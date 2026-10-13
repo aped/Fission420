@@ -26,9 +26,19 @@ pub struct AssemblyOut {
     /// Run 7: indented BOM (quantity per parent; see [`structured_bom`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_bom: Option<Vec<StructuredBomRow>>,
+    /// Run 7: sampled motion check (`joint_sweep`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep: Option<Vec<SweepStep>>,
     /// Run 7: status of external components (`check_external_components`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<Vec<ExternalStatus>>,
+}
+
+/// One sample of a joint sweep (run 7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SweepStep {
+    pub value: f64,
+    pub interference: Vec<Interference>,
 }
 
 /// Source status of an external component (run 7).
@@ -888,6 +898,23 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             r.message = Some(update_external(m, *component)?);
             out.component = Some(*component);
         }
+        Command::JointSweep {
+            joint,
+            index,
+            from,
+            to,
+            steps,
+            occurrences,
+        } => {
+            out.sweep = Some(joint_sweep(
+                m,
+                *joint,
+                *index,
+                (*from, *to),
+                *steps,
+                occurrences.as_deref(),
+            )?);
+        }
         Command::CheckExternalComponents => {
             out.external = Some(external_status(m));
         }
@@ -1713,11 +1740,21 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
 /// Placed B-rep bodies of instance `i` of the evaluation (evaluated
 /// definition bodies; visibility is display only).
 fn placed(m: &Model, i: usize) -> Result<Vec<Body>, DocError> {
-    let ev = m.evaluation();
-    let eo = ev
+    let eo = m
+        .evaluation()
         .occurrences
         .get(i)
         .ok_or_else(|| v(format!("unknown instance {i}")))?;
+    placed_instance(m, eo)
+}
+
+/// Placed B-rep bodies of instance `eo` (its transform; bodies from the
+/// current evaluation).
+fn placed_instance(
+    m: &Model,
+    eo: &rcad_document::assembly::EvalOccurrence,
+) -> Result<Vec<Body>, DocError> {
+    let ev = m.evaluation();
     let mut out = Vec::new();
     for b in &eo.bodies {
         // Review run 6 #7: a definition body that is not evaluated (consumed
@@ -1839,20 +1876,67 @@ pub fn interference(
     m: &Model,
     list: Option<&[OccurrenceId]>,
 ) -> Result<Vec<Interference>, DocError> {
-    let ev = m.evaluation();
+    interference_with(m, &m.evaluation().occurrences, list)
+}
+
+/// Interference at `steps` samples of one joint value (document unchanged).
+fn joint_sweep(
+    m: &Model,
+    id: JointId,
+    index: usize,
+    (from, to): (f64, f64),
+    steps: usize,
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<SweepStep>, DocError> {
+    if !(2..=200).contains(&steps) {
+        return Err(v("a sweep takes 2 to 200 samples"));
+    }
+    let a = &m.document().assembly;
+    let j = a.joint(id)?;
+    let base = j.values();
+    if index >= base.len() {
+        return Err(v(format!("{} has no value {index}", j.name)));
+    }
+    let mut out = Vec::with_capacity(steps);
+    for k in 0..steps {
+        let t = k as f64 / (steps - 1) as f64;
+        let x = from + (to - from) * t;
+        let mut vals = base.clone();
+        vals[index] = x;
+        // Limits are enforced for every sample (no motion beyond them).
+        j.check_values(&vals)?;
+        let mut asm = a.clone();
+        let jm = asm.joint_mut(id)?;
+        jm.set_value(index, x);
+        let inst = asm.evaluate()?;
+        out.push(SweepStep {
+            value: x,
+            interference: interference_with(m, &inst, list)?,
+        });
+    }
+    Ok(out)
+}
+
+/// [`interference`] for the instances `inst` (current geometry, given
+/// placements; used by the joint sweep).
+fn interference_with(
+    m: &Model,
+    inst: &[rcad_document::assembly::EvalOccurrence],
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<Interference>, DocError> {
     if let Some(l) = list {
         for o in l {
             m.document().assembly.occurrence(*o)?;
         }
     }
-    let ids: Vec<usize> = (0..ev.occurrences.len())
-        .filter(|&i| list.is_none_or(|l| ev.occurrences[i].path.iter().any(|p| l.contains(p))))
+    let ids: Vec<usize> = (0..inst.len())
+        .filter(|&i| list.is_none_or(|l| inst[i].path.iter().any(|p| l.contains(p))))
         .collect();
     // Review run 7 #22: a listed occurrence without any evaluated instance
     // (suppressed, or no bodies anywhere below it) is an error, not "clear".
     if let Some(l) = list {
         for o in l {
-            if !ids.iter().any(|&i| ev.occurrences[i].path.contains(o)) {
+            if !ids.iter().any(|&i| inst[i].path.contains(o)) {
                 let n = m.document().assembly.occurrence(*o)?.name.clone();
                 return Err(v(format!(
                     "{n} has no evaluated instance with bodies (suppressed, or nothing to \
@@ -1863,7 +1947,7 @@ pub fn interference(
     }
     let mut cache: BTreeMap<usize, Vec<Body>> = BTreeMap::new();
     for i in &ids {
-        cache.insert(*i, placed(m, *i)?);
+        cache.insert(*i, placed_instance(m, &inst[*i])?);
     }
     let mut out = Vec::new();
     for (n, a) in ids.iter().enumerate() {
@@ -1899,7 +1983,7 @@ pub fn interference(
                 },
                 (None, None) => continue,
             };
-            let (ea, eb) = (&ev.occurrences[*a], &ev.occurrences[*b]);
+            let (ea, eb) = (&inst[*a], &inst[*b]);
             out.push(Interference {
                 a: ea.id,
                 b: eb.id,

@@ -1151,14 +1151,20 @@ fn joint_snaps_the_child_axis_onto_the_parent_axis() {
     // (z) position is kept, the hole axes are parallel (no rotation needed,
     // or a half turn when the face axes point opposite ways).
     let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
-    assert!((p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL, "{p:?}");
+    assert!(
+        (p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL,
+        "{p:?}"
+    );
     // Turning the joint keeps the child's hole on the axis.
     ok(
         &mut s,
         json!({"cmd": "set_joint_value", "joint": j, "value": 37.0}),
     );
     let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
-    assert!((p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL, "{p:?}");
+    assert!(
+        (p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL,
+        "{p:?}"
+    );
     // One undo step removes the joint and restores the child placement.
     ok(&mut s, json!({"cmd": "undo"}));
     ok(&mut s, json!({"cmd": "undo"}));

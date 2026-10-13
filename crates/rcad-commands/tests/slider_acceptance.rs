@@ -248,3 +248,92 @@ fn slider_fixture() {
         .unwrap();
     assert!(list.is_empty(), "{list:?}");
 }
+
+/// Sampled motion check over the slider travel: carriage 1 (x 0..20 + value)
+/// against a fixed second carriage at x 25..45, y -7..13, z 12..20: they
+/// overlap exactly when value > 5, in (min(v + 20, 45) − max(v, 25)) × 17 × 6 mm³
+/// (closed form); the document is unchanged; a range beyond the limits and
+/// fewer than 2 samples are refused.
+#[test]
+fn slider_sweep_reports_where_it_collides() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let (rail, _, _) = block(&mut s, 100.0, 10.0, 10.0, [50.0, 0.0]);
+    let (car, _, _) = block(&mut s, 20.0, 20.0, 8.0, [10.0, 0.0]);
+    let orail = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "Rail", "bodies": [rail]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let o = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "Carriage", "bodies": [car]}),
+    ));
+    let (ccar, ocar) = (o.component.unwrap().0, o.occurrence.unwrap().0);
+    ok(
+        &mut s,
+        json!({"cmd": "set_grounded", "occurrence": orail, "grounded": true}),
+    );
+    ok(
+        &mut s,
+        json!({"cmd": "set_occurrence_transform", "occurrence": ocar, "translate": [0.0, 0.0, 10.0]}),
+    );
+    let j = out(ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "slider", "parent": orail, "child": ocar,
+               "axis": [1.0, 0.0, 0.0], "min": 0.0, "max": 40.0}),
+    ))
+    .joint
+    .unwrap()
+    .0;
+    // A fixed obstacle carriage at x 25..45, y -7..13, z 12..20.
+    ok(
+        &mut s,
+        json!({"cmd": "add_occurrence", "component": ccar, "translate": [25.0, 3.0, 12.0]}),
+    );
+    let before = s.model().unwrap().document().clone();
+    let sw = out(ok(
+        &mut s,
+        // Samples 2, 8, …, 38 (no sample puts faces exactly coplanar, where
+        // Truck's intersection is unreliable).
+        json!({"cmd": "joint_sweep", "joint": j, "from": 2.0, "to": 38.0, "steps": 7}),
+    ))
+    .sweep
+    .unwrap();
+    assert_eq!(s.model().unwrap().document(), &before);
+    assert_eq!(sw.len(), 7);
+    for st in &sw {
+        // Carriage 1 spans x v..v+20, the obstacle 25..45: the x overlap is
+        // min(v + 20, 45) − max(v, 25).
+        let ox = (st.value + 20.0).min(45.0) - st.value.max(25.0);
+        let hit = st
+            .interference
+            .iter()
+            .find(|i| i.a.0 == ocar && i.b.0 != orail);
+        if ox > 0.0 {
+            let i = hit.unwrap_or_else(|| panic!("no hit at {}", st.value));
+            match &i.status {
+                InterferenceStatus::Overlap { volume, .. } => {
+                    assert!(
+                        (volume - ox * 17.0 * 6.0).abs() < 1e-6,
+                        "{} {volume}",
+                        st.value
+                    )
+                }
+                x => panic!("{x:?}"),
+            }
+        } else {
+            assert!(hit.is_none(), "{}: {hit:?}", st.value);
+        }
+    }
+    refused(
+        &mut s,
+        json!({"cmd": "joint_sweep", "joint": j, "from": 0.0, "to": 50.0, "steps": 5}),
+    );
+    refused(
+        &mut s,
+        json!({"cmd": "joint_sweep", "joint": j, "from": 0.0, "to": 40.0, "steps": 1}),
+    );
+}

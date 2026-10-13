@@ -142,6 +142,13 @@ decides (the **sampled** scope): points inside both → "overlap, volume unknown
 Touching contact and overlaps thinner than the sample spacing are not reported. Results carry
 both instance paths; clicking a result in the browser highlights both occurrences in the view.
 
+**Sampled motion check** (`joint_sweep {joint, index?, from, to, steps, occurrences?}`,
+read-only): one joint value is stepped across `[from, to]` (inside its limits; 2–200 samples)
+and the static check runs on the solved placements at each sample (`Response.assembly.sweep`).
+Interference between samples is not detected; this is a sampled check of the joint solver's
+poses, not collision avoidance or simulation. UI: joint **Edit…** → **Sweep check** (21 samples
+across the limits).
+
 ## Exploded view
 
 Per-instance offsets (`set_explode_offset {path, offset}`, world mm, accumulating down the
