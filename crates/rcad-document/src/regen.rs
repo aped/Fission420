@@ -3488,16 +3488,29 @@ fn bind_link(
             return Err(broken(format!("{:?} changed kind", lc.entity)));
         }
         for (p, q) in pts.iter().zip(&lc.points) {
-            let fixed = s.constraints.iter_mut().find_map(|c| match c {
-                rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => Some((x, y)),
-                _ => None,
-            });
-            let Some((x, y)) = fixed else {
+            let mut pinned = false;
+            for c in s.constraints.iter_mut() {
+                match c {
+                    rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => {
+                        (*x, *y) = (p[0], p[1]);
+                        pinned = true;
+                    }
+                    rcad_sketch::Constraint::FixedX { p: r, x } if r == q => {
+                        *x = p[0];
+                        pinned = true;
+                    }
+                    rcad_sketch::Constraint::FixedY { p: r, y } if r == q => {
+                        *y = p[1];
+                        pinned = true;
+                    }
+                    _ => {}
+                }
+            }
+            if !pinned {
                 return Err(broken(format!(
                     "pinned point {q:?} lost its fixed constraint"
                 )));
-            };
-            (*x, *y) = (p[0], p[1]);
+            }
             if let Some(sp) = s.points.iter_mut().find(|sp| sp.id == *q) {
                 (sp.x, sp.y) = (p[0], p[1]);
             }

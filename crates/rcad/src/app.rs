@@ -1729,11 +1729,8 @@ impl RcadApp {
         let sketch = s.editor.sketch.clone();
         let cmd = match &s.target {
             SketchTarget::New { plane } => {
-                if sketch.entities.is_empty() {
-                    // Nothing drawn: finishing an empty new sketch just closes it.
-                    self.end_sketch_session();
-                    return;
-                }
+                // An empty (or text-only) sketch is still created (run 6): it
+                // can receive projected geometry from the sketch inspector.
                 Command::CreateSketch {
                     name: None,
                     plane: *plane,

@@ -1892,8 +1892,20 @@ impl Session {
                                 }
                                 rcad_kernel::Curve2::Arc { c, a, b, ccw } => {
                                     let (a, b) = if ccw { (a, b) } else { (b, a) };
-                                    let (pc, pa, pb) =
-                                        (point(sketch, c), point(sketch, a), point(sketch, b));
+                                    let (pa, pb) = (point(sketch, a), point(sketch, b));
+                                    // The centre follows from the fixed ends and
+                                    // the arc's equal-radius equation plus one
+                                    // coordinate (the well-conditioned one: x
+                                    // when the chord is steep, else y), so
+                                    // nothing is pinned twice.
+                                    let pc = sketch.add_point(c[0], c[1]);
+                                    sketch.constraints.push(
+                                        if (b[1] - a[1]).abs() >= (b[0] - a[0]).abs() {
+                                            rcad_sketch::Constraint::FixedX { p: pc, x: c[0] }
+                                        } else {
+                                            rcad_sketch::Constraint::FixedY { p: pc, y: c[1] }
+                                        },
+                                    );
                                     let id = sketch.next_entity_id();
                                     sketch.entities.push(rcad_sketch::Entity::Arc {
                                         id,
@@ -1963,10 +1975,19 @@ impl Session {
                                 continue;
                             };
                             for c in sketch.constraints.iter_mut() {
-                                if let rcad_sketch::Constraint::FixedPoint { p: r, x, y } = c
-                                    && r == q
-                                {
-                                    (*x, *y) = (p.x, p.y);
+                                match c {
+                                    rcad_sketch::Constraint::FixedPoint { p: r, x, y }
+                                        if r == q =>
+                                    {
+                                        (*x, *y) = (p.x, p.y);
+                                    }
+                                    rcad_sketch::Constraint::FixedX { p: r, x } if r == q => {
+                                        *x = p.x;
+                                    }
+                                    rcad_sketch::Constraint::FixedY { p: r, y } if r == q => {
+                                        *y = p.y;
+                                    }
+                                    _ => {}
                                 }
                             }
                             if let Some(sp) = sketch.points.iter_mut().find(|sp| sp.id == *q) {

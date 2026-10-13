@@ -230,3 +230,44 @@ fn cycles_and_oblique_sources_are_refused() {
     );
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+#[test]
+fn projected_sketches_are_fully_constrained_not_redundant() {
+    // A face with arcs (fillet-rounded corners) and a circle (a hole):
+    // every projected point is determined exactly once.
+    let mut s = Session::new();
+    holed_block(&mut s);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "fillet", "a": {"feature": 2, "role": {"ExtrudeSide": {"entity": 1}}},
+                "b": {"feature": 2, "role": {"ExtrudeSide": {"entity": 2}}}, "radius": 4.0}),
+    );
+    // F7: an empty sketch above; project the rounded, holed top face.
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: serde_json::from_value(json!({"Offset": {"base": "WorldXY", "distance": 25.0}}))
+            .unwrap(),
+        template: rcad_commands::SketchTemplate::Custom {
+            sketch: rcad_sketch::Sketch::default(),
+        },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    let f = r.feature.unwrap();
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "project", "sketch": f, "source": top_face()}),
+    );
+    let fs = s
+        .summary()
+        .features
+        .into_iter()
+        .find(|x| x.id == f)
+        .unwrap();
+    assert_eq!(
+        fs.solve_status,
+        Some(rcad_sketch::SolveStatus::FullyConstrained),
+        "{:?} {:?}",
+        fs.solve_dof,
+        fs.solve_conflicts
+    );
+}

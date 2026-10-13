@@ -70,6 +70,9 @@ pub struct ExtrudeMore {
         Option<rcad_kernel::FacePlane>,
     )>,
     pub to_offset: String,
+    /// Extrude every outermost region of the sketch in one feature (e.g. the
+    /// glyphs of a text): the regions, refreshed from the sketch each frame.
+    pub all_outer: Option<Vec<RegionRef>>,
 }
 
 impl Default for ExtrudeMore {
@@ -84,6 +87,7 @@ impl Default for ExtrudeMore {
             to_base: rcad_document::PlaneBase::WorldXY,
             to_face: None,
             to_offset: "0".into(),
+            all_outer: None,
         }
     }
 }
@@ -116,6 +120,9 @@ impl ExtrudeMore {
             o.thin = Some(parse_num("thin wall thickness", &self.thin_t)?);
         }
         o.taper = parse_num("taper", &self.taper_deg)?.to_radians();
+        if let Some(all) = &self.all_outer {
+            o.regions = all.iter().skip(1).cloned().collect();
+        }
         Ok(o)
     }
 
@@ -190,7 +197,10 @@ impl RcadApp {
         else {
             return false;
         };
-        form.region.is_none() && s.profile_error.is_some() && sketch_regions(s).len() > 1
+        form.region.is_none()
+            && form.more.all_outer.is_none()
+            && s.profile_error.is_some()
+            && sketch_regions(s).len() > 1
     }
 }
 
@@ -402,6 +412,10 @@ impl ExtrudeForm {
             ExtrudeOp::NewBody => None,
             _ => Some(self.target.ok_or("choose a target body for Join / Cut")?),
         };
+        let region = match &self.more.all_outer {
+            Some(all) => Some(all.first().cloned().ok_or("the sketch has no regions")?),
+            None => self.region.clone(),
+        };
         Ok(Command::Extrude {
             name: None,
             sketch,
@@ -411,7 +425,7 @@ impl ExtrudeForm {
             through_all,
             reverse: self.reverse,
             body_name: None,
-            region: self.region.clone(),
+            region,
             options,
         })
     }
@@ -763,9 +777,34 @@ impl RcadApp {
                         ui.selectable_value(&mut form.region, None, "Whole profile");
                     }
                     for (i, r) in regions.iter().enumerate() {
-                        ui.selectable_value(&mut form.region, Some(r.id.clone()), label(r, i));
+                        ui.selectable_value(&mut form.region, Some(r.id.clone()), label(r, i))
+                            .probe(&format!("Region {}", i + 1));
                     }
-                });
+                })
+                .response
+                .probe("Region");
+            let outer: Vec<RegionRef> = regions
+                .iter()
+                .filter(|r| r.depth == 0)
+                .map(|r| r.id.clone())
+                .collect();
+            if outer.len() > 1 {
+                let mut all = form.more.all_outer.is_some();
+                ui.checkbox(
+                    &mut all,
+                    format!(
+                        "All {} outermost regions (e.g. text glyphs), one feature",
+                        outer.len()
+                    ),
+                )
+                .named("All outermost regions");
+                form.more.all_outer = all.then_some(outer);
+                if all {
+                    ui.small("Join or Cut only. The preview shows the first region.");
+                }
+            } else {
+                form.more.all_outer = None;
+            }
             ui.label(format!("Extrudes: {current}"));
             ui.small("Or click inside a region on the sketch plane in the 3D view. The picked region is shaded; it is stored by its bounding entities and survives dimension edits.");
             if form.region.is_none() && !whole_ok {

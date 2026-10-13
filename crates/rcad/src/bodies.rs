@@ -379,7 +379,7 @@ impl RcadApp {
     /// values stay editable parameters (tx, ty, tz, angle_deg).
     fn move_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
         let mut send = None;
-        ui.collapsing("Move / Copy", |ui| {
+        let header = ui.collapsing("Move / Copy", |ui| {
             let f = &mut self.move_form;
             ui.horizontal(|ui| {
                 for (i, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
@@ -429,6 +429,7 @@ impl RcadApp {
                  follow the body). Patterns/mirrors of features made before the move are refused.",
             );
         });
+        header.header_response.probe("Move / Copy");
         if let Some(c) = send {
             self.request(c);
         }
