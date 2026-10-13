@@ -125,6 +125,9 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// BOM CSV path; whether an assembly mass report was requested.
+    pub bom_path: String,
+    pub mass_requested: bool,
     /// Last joint sweep: (doc, revision, joint, samples).
     pub sweep: Option<(u64, u64, JointId, Vec<rcad_commands::assembly::SweepStep>)>,
     /// Joint of the sweep request in flight.
@@ -1136,6 +1139,8 @@ impl RcadApp {
                     {
                         crate::panels::num_field(ui, l, &mut ax[3 + k]);
                     }
+                });
+                {
                     let nums: Vec<Option<f64>> = ax.iter().map(|t| parse(t)).collect();
                     if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..]
                         && ui
@@ -1152,7 +1157,7 @@ impl RcadApp {
                             dir2: j.dir2,
                         });
                     }
-                });
+                }
                 for i in 0..vals.len() {
                     let sfx = if i == 0 {
                         String::new()
@@ -1202,7 +1207,13 @@ impl RcadApp {
                                 occurrences: None,
                             });
                         }
-                        let mut x = parse(&vals[i]).unwrap_or(a).clamp(a, b);
+                        // The slider shows the solved (stored) value.
+                        let stored = if i == 0 {
+                            j.value
+                        } else {
+                            j.extra.get(i - 1).map_or(a, |d| d.value)
+                        };
+                        let mut x = stored.clamp(a, b);
                         let l = format!("Drive{sfx} {}", j.name);
                         let r = ui
                             .add(egui::Slider::new(&mut x, a..=b).text("drive"))
@@ -1312,6 +1323,18 @@ impl RcadApp {
             {
                 send.push(Command::Interference { occurrences: None });
             }
+            if ui
+                .button("Assembly mass")
+                .on_hover_text("Mass, volume and centre of mass of every occurrence instance and loose visible body (world frame)")
+                .probe("Assembly mass")
+                .clicked()
+            {
+                self.assembly_ui.mass_requested = true;
+                send.push(Command::MassProperties {
+                    bodies: None,
+                    occurrences: None,
+                });
+            }
             let mut ex = asm.exploded;
             if ui
                 .checkbox(&mut ex, "Exploded view")
@@ -1323,6 +1346,52 @@ impl RcadApp {
             }
         });
         let (doc, rev) = (self.summary.doc_id, self.summary.revision);
+        if self.assembly_ui.mass_requested
+            && let Some((d, r, rep)) = &self.body_props.report
+            && (*d, *r) == (doc, rev)
+        {
+            match &rep.total {
+                Some(t) => {
+                    ui.label(format!(
+                        "Assembly: {} g, {} mm³, centre of mass ({}, {}, {}) mm{} · {} instance(s)",
+                        fmt(t.mass),
+                        fmt(t.volume),
+                        fmt(t.center_of_mass[0]),
+                        fmt(t.center_of_mass[1]),
+                        fmt(t.center_of_mass[2]),
+                        if t.exact { "" } else { " (estimate)" },
+                        rep.occurrences.len()
+                    ));
+                }
+                None => {
+                    ui.colored_label(
+                        Color32::from_rgb(255, 190, 90),
+                        format!("No assembly total: {}", rep.total_missing.join("; ")),
+                    );
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            crate::panels::short_text_field(ui, "BOM CSV path", &mut self.assembly_ui.bom_path);
+        });
+        {
+            let p = self.assembly_ui.bom_path.trim().to_string();
+            for (label, structured) in [
+                ("Export BOM CSV", false),
+                ("Export structured BOM CSV", true),
+            ] {
+                if ui
+                    .add_enabled(!p.is_empty(), egui::Button::new(label))
+                    .probe(label)
+                    .clicked()
+                {
+                    send.push(Command::ExportBom {
+                        path: p.clone().into(),
+                        structured,
+                    });
+                }
+            }
+        }
         if let Some((d, r, flat, tree)) = &self.assembly_ui.bom
             && (*d, *r) == (doc, rev)
         {

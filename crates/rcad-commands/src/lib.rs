@@ -536,6 +536,13 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir2: Option<[f64; 3]>,
     },
+    /// Run 7: write the BOM as CSV (flattened, or structured with item
+    /// numbers and levels); atomic write. Read-only for the document.
+    ExportBom {
+        path: PathBuf,
+        #[serde(default)]
+        structured: bool,
+    },
     /// Run 7: sampled motion check (read-only): value `index` of `joint` is
     /// stepped from `from` to `to` (both within its limits) in `steps`
     /// samples (2–200); at each sample the static interference check runs on
@@ -1265,6 +1272,7 @@ impl Command {
             Command::SetJointValues { .. } => "set_joint_values",
             Command::SetJointAxis { .. } => "set_joint_axis",
             Command::JointSweep { .. } => "joint_sweep",
+            Command::ExportBom { .. } => "export_bom",
             Command::InsertExternalComponent { .. } => "insert_external_component",
             Command::ImportStepAssembly { .. } => "import_step_assembly",
             Command::UpdateExternalComponent { .. } => "update_external_component",
@@ -3511,6 +3519,7 @@ impl Session {
             | Command::SetJointValues { .. }
             | Command::SetJointAxis { .. }
             | Command::JointSweep { .. }
+            | Command::ExportBom { .. }
             | Command::InsertExternalComponent { .. }
             | Command::ImportStepAssembly { .. }
             | Command::UpdateExternalComponent { .. }
