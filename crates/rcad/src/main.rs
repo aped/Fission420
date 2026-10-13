@@ -306,7 +306,11 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         .map(|j| format!("\"{}\":{}", j.id, j.value))
         .collect();
     let run7 = format!(
-        "\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
+        "\"interference\":{},\"highlight\":{},\"exploded\":{},\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
+        app.interference_count()
+            .map_or("null".to_string(), |n| n.to_string()),
+        app.assembly_highlight().len(),
+        s.assembly.exploded,
         s.assembly.occurrences.len(),
         s.assembly.total_dof,
         joints.join(","),

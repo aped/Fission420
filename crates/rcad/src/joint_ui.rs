@@ -174,13 +174,15 @@ pub(crate) fn joint_dialog(
                 .map_or("—".to_string(), |x| x.name.clone())
         };
         ui.horizontal(|ui| {
-            egui::ComboBox::from_label("Joint type")
+            let r = egui::ComboBox::from_label("Joint type")
                 .selected_text(kind_label(d.kind))
                 .show_ui(ui, |ui| {
                     for k in JointKind::ALL {
-                        ui.selectable_value(&mut d.kind, k, kind_label(k));
+                        let l = format!("Joint type option {}", kind_label(k));
+                        ui.selectable_value(&mut d.kind, k, kind_label(k)).probe(&l);
                     }
                 });
+            r.response.probe("Joint type");
         });
         // Siblings only: the child list follows the parent's owner.
         let owner = d
@@ -192,7 +194,7 @@ pub(crate) fn joint_dialog(
             ("Joint child", &mut d.child, true),
         ] {
             ui.horizontal(|ui| {
-                egui::ComboBox::from_label(label)
+                let r = egui::ComboBox::from_label(label)
                     .selected_text(name_of(*slot))
                     .show_ui(ui, |ui| {
                         for o in asm
@@ -200,9 +202,11 @@ pub(crate) fn joint_dialog(
                             .iter()
                             .filter(|o| !is_child || owner.is_none_or(|w| o.owner == w))
                         {
-                            ui.selectable_value(slot, Some(o.id), &o.name);
+                            let l = format!("{label} option {}", o.name);
+                            ui.selectable_value(slot, Some(o.id), &o.name).probe(&l);
                         }
                     });
+                r.response.probe(label);
             });
         }
         ui.horizontal(|ui| {
@@ -305,7 +309,7 @@ pub(crate) fn joint_dialog(
         let n = u32::from(d.kind.dof());
         ui.small(match child_dof {
             Some(cd) => format!(
-                "Leaves {n} DOF between parent and child ({}); assembly total DOF {} → {}",
+                "Leaves {n} DOF between parent and child ({}); assembly total DOF {} -> {}",
                 if names.is_empty() {
                     "none".to_string()
                 } else {

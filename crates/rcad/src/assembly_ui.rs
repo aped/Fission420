@@ -162,8 +162,11 @@ impl AssemblyUi {
             && (*d, *r) == (summary.doc_id, summary.revision)
             && let Some(x) = list.get(i)
         {
-            out.push(x.a_path.clone());
-            out.push(x.b_path.clone());
+            for p in [&x.a_path, &x.b_path] {
+                if !out.contains(p) {
+                    out.push(p.clone());
+                }
+            }
         }
         out
     }
@@ -222,6 +225,17 @@ impl RcadApp {
     /// interference pair).
     pub fn assembly_highlight(&self) -> Vec<String> {
         self.assembly_ui.highlight_paths(&self.summary)
+    }
+
+    /// Number of interference results of the current revision (None when
+    /// no check was run for it).
+    pub fn interference_count(&self) -> Option<usize> {
+        let (d, r) = (self.summary.doc_id, self.summary.revision);
+        self.assembly_ui
+            .interference
+            .as_ref()
+            .filter(|x| (x.0, x.1) == (d, r))
+            .map(|x| x.2.len())
     }
 
     /// The viewport tint table for the current scene and highlight.
@@ -490,7 +504,7 @@ impl RcadApp {
                     tags.push_str(" · hidden");
                 }
                 if asm.active == Some(i.component) {
-                    tags.push_str(" · ✎ active");
+                    tags.push_str(" · (active)");
                 }
                 ui.small(tags);
             });
@@ -992,7 +1006,7 @@ impl RcadApp {
                 .join(", ");
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "{} {:?}: {} → {} {} · DOF {}",
+                    "{} {:?}: {} -> {} {} · DOF {}",
                     j.name,
                     j.kind,
                     occ(j.parent),
@@ -1109,6 +1123,7 @@ impl RcadApp {
             if ui
                 .checkbox(&mut ex, "Exploded view")
                 .on_hover_text("Display the per-occurrence exploded offsets (display only)")
+                .probe("Exploded view")
                 .changed()
             {
                 send.push(Command::SetExploded { exploded: ex });
@@ -1175,7 +1190,7 @@ impl RcadApp {
                         error_estimate,
                     } => (
                         format!(
-                            "{} ∩ {}: {} mm³{}",
+                            "{} × {}: {} mm³{}",
                             i.a_name,
                             i.b_name,
                             fmt(*volume),
@@ -1192,7 +1207,7 @@ impl RcadApp {
                         ),
                     ),
                     InterferenceStatus::OverlapVolumeUnknown { reason } => (
-                        format!("{} ∩ {}: overlap, volume unknown", i.a_name, i.b_name),
+                        format!("{} × {}: overlap, volume unknown", i.a_name, i.b_name),
                         format!("Sampled (10³ points in the common box): {reason}"),
                     ),
                     _ => continue,
@@ -1204,6 +1219,7 @@ impl RcadApp {
                         "{scope}. Touching contact (coincident faces) is not reported; no contact tolerance is applied."
                     ))
                     .named(&t)
+                    .probe(&format!("Interference {}", k + 1))
                     .clicked()
                 {
                     self.assembly_ui.interference_pick = (!sel).then_some(k);

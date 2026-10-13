@@ -1,0 +1,103 @@
+# Run 7 (SESSION_7 acceptance 1/2 UI): assemblies through real pointer/keyboard
+# input on examples/hinge_assembly.rcad.json (grounded leaf A + pin, the Wing
+# sub-assembly with leaf B and three linked screws on a revolute hinge at 90°
+# (0–180°), an independent screw copy). Tree selection, component activation,
+# a numeric move that creates an overlap, interference check with highlight,
+# a new revolute joint through the joint dialog (value inside its limits, one
+# outside refused), exploded view, undo, save/reopen.
+key ctrl+o
+typew File path | @ROOT@/examples/hinge_assembly.rcad.json
+key Return
+wait_idle
+expect occurrences 8
+expect joints.J2 90
+expect active_component null
+scroll 180 500 10
+sleep 1000
+shot
+# Activate the Wing sub-assembly from its tree row (the rest is dimmed).
+clickw Occurrence Wing#1
+clickw Activate Wing
+wait_idle
+expect active_component C6
+shot
+clickw Deactivate Wing
+wait_idle
+expect active_component null
+# Move the independent screw copy into leaf A (x -40: 4 × 4 × 4 overlap).
+clickw Occurrence Screw#4
+clickw Move Screw#4
+typew X (mm) | -40
+typew Y (mm) | 0
+clickw Apply placement
+wait_idle
+expect last_reply.ok true
+scroll 180 500 10
+sleep 1000
+clickw Check interference
+wait_idle
+expect last_reply.ok true
+expect interference 1
+clickw Interference 1
+sleep 500
+expect highlight 2
+shot
+# New revolute joint LeafA#1 → Screw#4 about +Z through the origin, 0–90°.
+scroll 180 500 -10
+sleep 1000
+clickw Occurrence LeafA#1
+clickw Joint from LeafA#1
+scroll 180 500 10
+sleep 1000
+clickw Joint child
+clickw Joint child option Screw#4
+typew Lower limit | 0
+typew Upper limit | 90
+clickw Create joint
+wait_idle
+expect last_reply.ok true
+expect joints.J3 0
+clickw Edit Joint3
+typew Joint value | 45
+clickw Set value
+wait_idle
+expect joints.J3 45
+typew Joint value | 120
+clickw Set value
+wait_idle
+expect last_reply.ok false
+expect joints.J3 45
+shot
+# Exploded view of the Wing (display only), then undo it.
+scroll 180 500 -10
+sleep 1000
+clickw Occurrence Wing#1
+clickw Explode Wing#1
+typew Explode Z | 30
+clickw Set explode offset
+wait_idle
+scroll 180 500 10
+sleep 1000
+clickw Exploded view
+wait_idle
+expect exploded true
+expect joints.J2 90
+shot
+key ctrl+z
+wait_idle
+expect exploded false
+# Save, close, reopen.
+key ctrl+shift+s
+typew File path | @OUT@/hinge.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/hinge.rcad.json
+key Return
+wait_idle
+expect occurrences 8
+expect joints.J3 45
+expect joints.J2 90
+shot

@@ -206,7 +206,7 @@ fn interference_highlight_structured_bom_and_explode() {
         },
     );
     click(&mut h, "Check interference");
-    h.get_by_label_contains("Block#1 ∩ Block#2").click();
+    h.get_by_label_contains("Block#1 × Block#2").click();
     settle(&mut h);
     let hl = h.state().assembly_highlight();
     assert_eq!(hl, vec!["O1".to_string(), "O2".to_string()]);
