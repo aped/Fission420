@@ -163,6 +163,69 @@ impl RcadApp {
     pub fn start_scene(&mut self, name: &str) -> bool {
         use SceneStep::*;
         let steps: Vec<SceneStep> = match name {
+            // Run 6: the rounded labelled enclosure (committed example).
+            "run6_enclosure" => vec![
+                Cmd(Command::Open {
+                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../examples/rounded_enclosure.rcad.json"),
+                }),
+                Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
+            ],
+            // Run 6: sheet-metal U-channel (flange inspector selected).
+            "run6_sheet_metal" => {
+                let mut sk = rcad_sketch::Sketch::default();
+                let p: Vec<_> = [[0.0, 22.0], [0.0, 0.0], [64.0, 0.0], [64.0, 22.0]]
+                    .iter()
+                    .map(|q| sk.add_point(q[0], q[1]))
+                    .collect();
+                for i in 0..3 {
+                    sk.add_line(p[i], p[i + 1]);
+                }
+                vec![
+                    Cmd(Command::NewDocument),
+                    Cmd(Command::CreateSketch {
+                        name: None,
+                        plane: rcad_document::SketchPlane::WorldXY,
+                        template: SketchTemplate::Custom { sketch: sk },
+                    }),
+                    Cmd(Command::SheetMetal {
+                        name: None,
+                        sketch: FeatureId(1),
+                        thickness: 1.0,
+                        radius: 2.0,
+                        k_factor: 0.4,
+                        width: 40.0,
+                        flip: false,
+                        body_name: Some("U-channel".into()),
+                    }),
+                    Ui(|a| {
+                        a.set_view(rcad_viewport::ViewPreset::Iso);
+                        a.select(Some(FeatureId(2)));
+                    }),
+                ]
+            }
+            // Run 6: modeled (faceted) thread pair, rod and nut side by side.
+            "run6_thread" => {
+                let t = |center: [f64; 2], nut: Option<f64>| Command::Thread {
+                    name: None,
+                    plane: rcad_document::SketchPlane::WorldXY,
+                    center,
+                    diameter: 20.0,
+                    pitch: 2.0,
+                    length: 12.0,
+                    left_hand: false,
+                    chord_tol: 0.01,
+                    nut_width: nut,
+                    clearance: 0.1,
+                    body_name: None,
+                };
+                vec![
+                    Cmd(Command::NewDocument),
+                    Cmd(t([0.0, 0.0], None)),
+                    Cmd(t([40.0, 0.0], Some(30.0))),
+                    Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
+                ]
+            }
             "multibody" => {
                 let mut v = two_bodies();
                 v.push(Ui(|a| a.select_body(Some(BodyId(2)))));

@@ -17,8 +17,11 @@
 //!
 //! Every replacement is *verified* against the original edge before it is accepted
 //! (see [`VERIFY_TOL`]); any mismatch keeps the original intersection curve, which
-//! stays correct, only slow. Other intersection types (cylinder ∩ cylinder, plane
-//! oblique to the extrusion) are never replaced.
+//! stays correct, only slow. Run 6: a plane perpendicular to the axis of a
+//! surface of revolution (a lofted or revolved cone/cylinder) meets it in a circle
+//! about the axis, rebuilt as the exact rational arc and verified the same way.
+//! Other intersection types (cylinder ∩ cylinder, plane oblique to the extrusion
+//! or to the revolution axis) are never replaced.
 use crate::{KernelError, Result, guarded};
 use truck_modeling::*;
 
@@ -109,6 +112,9 @@ pub(crate) fn exact_edge(
     if (n.magnitude() - 1.0).abs() > 1e-12 {
         return Err(unsupported("degenerate plane normal"));
     }
+    if let Surface::RevolutedCurve(rev) = other {
+        return plane_revolution_edge(ic, plane, rev, p0, p1);
+    }
     let Surface::NurbsSurface(ns) = other else {
         return Err(unsupported("intersection with a non-NURBS surface"));
     };
@@ -172,6 +178,111 @@ pub(crate) fn exact_edge(
         prev_t = t;
     }
     Ok(Curve::NurbsCurve(sub))
+}
+
+/// A plane perpendicular to the axis of a surface of revolution (a cone or
+/// cylinder from a loft, a revolve) meets it in circles about the axis (run 6:
+/// round tapered Join/Cut tools). The edge is the exact rational arc about the
+/// axis point in the plane from `p0` to `p1`, in the sense the original edge
+/// runs. Verified like the other cases: ends on the vertices, interior samples
+/// on both surfaces, the original's samples on the arc at increasing parameter.
+fn plane_revolution_edge(
+    ic: &IntersectionCurve<Leader, Surface>,
+    plane: &Plane,
+    rev: &Processor<RevolutedCurve<Curve>, Matrix4>,
+    p0: Point3,
+    p1: Point3,
+) -> Result<Curve> {
+    let t = *rev.transform();
+    let (ao, aa) = (
+        t.transform_point(rev.entity().origin()),
+        t.transform_vector(rev.entity().axis()),
+    );
+    if aa.magnitude() < 1e-12 {
+        return Err(unsupported("degenerate revolution axis"));
+    }
+    let a = aa.normalize();
+    let n = plane.normal();
+    let o = plane.origin();
+    if n.cross(a).magnitude() > 1e-9 {
+        return Err(unsupported(
+            "plane not perpendicular to the revolution axis",
+        ));
+    }
+    let c = ao + a * (o - ao).dot(a);
+    let (d0, d1) = (p0 - c, p1 - c);
+    let r = d0.magnitude();
+    if r < REBUILD_TOL
+        || (d1.magnitude() - r).abs() > REBUILD_TOL
+        || d0.dot(a).abs() > REBUILD_TOL
+        || d1.dot(a).abs() > REBUILD_TOL
+    {
+        return Err(unsupported(
+            "edge vertices not on one circle about the axis",
+        ));
+    }
+    let x = d0 / r;
+    let tau = std::f64::consts::TAU;
+    let sample = |k: usize| -> Result<Point3> {
+        let (l0, l1) = ic.leader().range_tuple();
+        let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
+        Ok(ic
+            .search_triple(l)
+            .ok_or_else(|| unsupported("cannot evaluate original edge"))?
+            .0)
+    };
+    // Sense: the side of the original's quarter sample.
+    let q = sample(VERIFY_SAMPLES.div_ceil(4))?;
+    let mut y = a.cross(x);
+    let ang = |p: Point3, y: Vector3| {
+        let d = p - c;
+        let t = d.dot(y).atan2(d.dot(x));
+        if t < 0.0 { t + tau } else { t }
+    };
+    let closed = (p1 - p0).magnitude() < REBUILD_TOL;
+    let end = |y: Vector3| if closed { tau } else { ang(p1, y) };
+    if ang(q, y) > end(y) {
+        y = -y;
+    }
+    let sweep = end(y);
+    if sweep.is_nan() || sweep <= 1e-9 {
+        return Err(unsupported("zero arc sweep"));
+    }
+    let arc = crate::step_in::geom::conic_arc(c, x, y, r, r, 0.0, sweep)
+        .map_err(|e| unsupported(&e.0))?;
+    let (s0, s1) = arc.range_tuple();
+    if arc.subs(s0).distance(p0) > REBUILD_TOL || arc.subs(s1).distance(p1) > REBUILD_TOL {
+        return Err(unsupported("rebuilt arc endpoints do not match vertices"));
+    }
+    for k in 1..8 {
+        let p = arc.subs(s0 + (s1 - s0) * k as f64 / 8.0);
+        let on_plane = (p - o).dot(n).abs() < REBUILD_TOL;
+        let on_surface = rev
+            .search_nearest_parameter(p, None, 100)
+            .is_some_and(|(u, v)| rev.subs(u, v).distance(p) < REBUILD_TOL);
+        if !(on_plane && on_surface) {
+            return Err(unsupported("rebuilt arc does not lie on both surfaces"));
+        }
+    }
+    let mut prev = s0 - 1e-9;
+    for k in 0..=VERIFY_SAMPLES + 1 {
+        let q = sample(k)?;
+        let t = arc
+            .search_nearest_parameter(q, None, 100)
+            .ok_or_else(|| unsupported("original edge point not on rebuilt arc"))?;
+        let t = if k == VERIFY_SAMPLES + 1 && closed {
+            s1
+        } else {
+            t
+        };
+        if t < s0 - 1e-9 || t > s1 + 1e-9 || arc.subs(t).distance(q) > VERIFY_TOL || t < prev {
+            return Err(unsupported(
+                "rebuilt arc is not the same arc as the original",
+            ));
+        }
+        prev = t;
+    }
+    Ok(Curve::NurbsCurve(arc))
 }
 
 /// Two planes meet in a straight line, so the edge between its vertices is exactly

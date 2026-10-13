@@ -1269,6 +1269,8 @@ impl RcadApp {
                 "deg"
             } else if pname == "count" {
                 "count"
+            } else if pname == "k_factor" {
+                "ratio"
             } else {
                 "mm"
             }
@@ -2578,19 +2580,19 @@ impl RcadApp {
 
     /// Flat-pattern DXF export of a sheet-metal flange feature.
     pub(crate) fn flat_pattern_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
-        ui.horizontal(|ui| {
-            text_field(ui, "Flat pattern DXF path", &mut self.flat_path);
-            if ui
-                .button("Export flat pattern")
-                .probe("Export flat pattern")
-                .clicked()
-            {
-                let c = Command::ExportFlatPattern {
-                    feature: f.id,
-                    path: self.flat_path.clone().into(),
-                };
-                self.request(c);
-            }
-        });
+        ui.label("Flat pattern (DXF, layers CUT / BEND):");
+        ui.add(egui::TextEdit::singleline(&mut self.flat_path).desired_width(220.0))
+            .named("Flat pattern DXF path");
+        if ui
+            .button("Export flat pattern")
+            .probe("Export flat pattern")
+            .clicked()
+        {
+            let c = Command::ExportFlatPattern {
+                feature: f.id,
+                path: self.flat_path.clone().into(),
+            };
+            self.request(c);
+        }
     }
 }
