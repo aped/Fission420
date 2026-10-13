@@ -1662,6 +1662,10 @@ pub struct Document {
     /// The configuration last activated (None: none / not configured).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_configuration: Option<String>,
+    /// Drawing sheets (run 6, format v6; docs/DRAWINGS.md). Views reference
+    /// bodies by id; geometry is computed at export from the evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drawings: Vec<crate::drawing::Drawing>,
 }
 
 /// A named variant of a document (see [`Document::configurations`]).
@@ -1696,6 +1700,7 @@ impl Document {
             rollback: None,
             configurations: Vec::new(),
             active_configuration: None,
+            drawings: Vec::new(),
         }
     }
 

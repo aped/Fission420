@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
 pub mod print;
@@ -672,6 +673,90 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bodies: Option<Vec<BodyId>>,
     },
+    /// Drawing sheet (run 6, format v6; docs/DRAWINGS.md). With `bodies`, a
+    /// Front base view (auto scale) and, unless `standard_views: false`, the
+    /// views from above and from the right. `Response.drawing` is the new id.
+    CreateDrawing {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sheet: Option<rcad_document::drawing::SheetSize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection: Option<rcad_document::drawing::Projection>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part_number: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        material: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bodies: Vec<BodyId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        standard_views: Option<bool>,
+    },
+    /// Change drawing fields (empty `part_number` / `material`: from the model).
+    EditDrawing {
+        drawing: rcad_document::drawing::DrawingId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sheet: Option<rcad_document::drawing::SheetSize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection: Option<rcad_document::drawing::Projection>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part_number: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        material: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_dimensions: Option<bool>,
+    },
+    DeleteDrawing {
+        drawing: rcad_document::drawing::DrawingId,
+    },
+    /// Add a base view (`{"kind": "base", "bodies", "orientation", "scale"?,
+    /// "position"?}`) or a projected view (`{"kind": "projected", "parent",
+    /// "from"}`). `Response.view` is the new view id.
+    AddDrawingView {
+        drawing: rcad_document::drawing::DrawingId,
+        view: drawings::ViewSpec,
+    },
+    /// Scale, position (sheet mm) or orientation of a base view.
+    EditDrawingView {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orientation: Option<rcad_document::drawing::Orientation>,
+    },
+    /// Remove a view (refused while projected views depend on it).
+    RemoveDrawingView {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+    },
+    /// Semantic diameter callout of Hole feature `feature` in a view.
+    AddHoleCallout {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        feature: FeatureId,
+    },
+    RemoveHoleCallout {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        feature: FeatureId,
+    },
+    /// Render the drawing from the current geometry and write it (`format`
+    /// default from the extension: .svg / .pdf). `Response.drawing_report`.
+    ExportDrawing {
+        drawing: rcad_document::drawing::DrawingId,
+        path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format: Option<drawings::DrawingFormat>,
+    },
     Measure,
     Inspect,
 }
@@ -763,6 +848,15 @@ impl Command {
             Command::OpenCopy { .. } => "open_copy",
             Command::ExportStl { .. } => "export_stl",
             Command::ExportStep { .. } => "export_step",
+            Command::CreateDrawing { .. } => "create_drawing",
+            Command::EditDrawing { .. } => "edit_drawing",
+            Command::DeleteDrawing { .. } => "delete_drawing",
+            Command::AddDrawingView { .. } => "add_drawing_view",
+            Command::EditDrawingView { .. } => "edit_drawing_view",
+            Command::RemoveDrawingView { .. } => "remove_drawing_view",
+            Command::AddHoleCallout { .. } => "add_hole_callout",
+            Command::RemoveHoleCallout { .. } => "remove_hole_callout",
+            Command::ExportDrawing { .. } => "export_drawing",
             Command::Measure => "measure",
             Command::Inspect => "inspect",
         }
@@ -966,6 +1060,9 @@ pub struct DocSummary {
     pub configurations: Vec<rcad_document::Configuration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_configuration: Option<String>,
+    /// Drawing sheets (run 6; docs/DRAWINGS.md).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drawings: Vec<rcad_document::drawing::Drawing>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -996,6 +1093,14 @@ pub struct Response {
     /// `add_sketch_text`: the new text item's id (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<u32>,
+    /// Drawing commands (run 6): the drawing and view acted on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing: Option<rcad_document::drawing::DrawingId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<rcad_document::drawing::ViewId>,
+    /// `export_drawing`: per-view report and issues (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_report: Option<drawings::DrawingReport>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1165,6 +1270,9 @@ impl Session {
     }
 
     fn run(&mut self, cmd: &Command, r: &mut Response) -> Result<(), DocError> {
+        if self.run_drawing(cmd, r)? {
+            return Ok(());
+        }
         match cmd {
             Command::NewDocument => {
                 self.model = Some(Model::new());
@@ -3255,6 +3363,16 @@ impl Session {
                 r.measurements = m.evaluation().measurements.clone();
             }
             Command::Inspect => {}
+            // Handled by `run_drawing` above.
+            Command::CreateDrawing { .. }
+            | Command::EditDrawing { .. }
+            | Command::DeleteDrawing { .. }
+            | Command::AddDrawingView { .. }
+            | Command::EditDrawingView { .. }
+            | Command::RemoveDrawingView { .. }
+            | Command::AddHoleCallout { .. }
+            | Command::RemoveHoleCallout { .. }
+            | Command::ExportDrawing { .. } => {}
         }
         r.summary = Some(self.summary());
         Ok(())
@@ -3276,6 +3394,7 @@ impl Session {
                 parameters: vec![],
                 configurations: vec![],
                 active_configuration: None,
+                drawings: vec![],
             };
         };
         DocSummary {
@@ -3324,6 +3443,7 @@ impl Session {
             parameters: parameter_summaries(m.document()),
             configurations: m.document().configurations.clone(),
             active_configuration: m.document().active_configuration.clone(),
+            drawings: m.document().drawings.clone(),
         }
     }
 }

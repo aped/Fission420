@@ -469,6 +469,7 @@ impl RcadApp {
                 parameters: vec![],
                 configurations: vec![],
                 active_configuration: None,
+                drawings: vec![],
             },
             measurements: None,
             selected: None,

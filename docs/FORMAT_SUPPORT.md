@@ -253,6 +253,11 @@ density in a file is refused on load.
 **v6 (run 6)** = v5 plus `Combine` features (`{"Combine": {"target", "tools", "op", "keep_tools"}}`),
 written only when present (`io::v6_feature`, "body combines").
 
+**v6 (run 6)** = v5 plus drawings (`document.drawings`: sheet, projection convention, title
+block fields, views referencing bodies by id and hole callouts referencing features by id;
+docs/DRAWINGS.md). Written only when a document has a drawing (`io::v6_feature`,
+"drawings"). No geometry is stored: drawings are rendered from the regenerated model at export.
+
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
 `*.f420.json`. They load unchanged; no version changed with the name, and the extension is

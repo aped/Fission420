@@ -1,0 +1,455 @@
+//! Drawing commands (run 6; docs/DRAWINGS.md): create/edit/delete drawings,
+//! add/edit/remove views and hole callouts (each one undo step), and export a
+//! drawing rendered from the current geometry as SVG or vector PDF.
+use crate::{Command, Response, Session};
+use rcad_document::drawing::{
+    self as dw, Annotation, Drawing, DrawingId, DrawingView, Orientation, Projection, SheetSize,
+    Side, ViewId, ViewKind,
+};
+use rcad_document::{BodyId, DocError, Document, FeatureId, FeatureKind, write_atomic};
+use rcad_kernel as k;
+use serde::{Deserialize, Serialize};
+
+/// A view to add.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ViewSpec {
+    /// `scale` default: the largest standard scale that fits; `position`
+    /// default: the sheet's standard base-view position for the convention.
+    Base {
+        bodies: Vec<BodyId>,
+        orientation: Orientation,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
+    },
+    Projected {
+        parent: ViewId,
+        from: Side,
+    },
+}
+
+/// Export file format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrawingFormat {
+    Svg,
+    Pdf,
+}
+
+/// What an export reports (the sheet itself is in the file).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DrawingReport {
+    pub drawing: DrawingId,
+    pub format: DrawingFormat,
+    pub bytes: usize,
+    pub views: Vec<dw::ViewReport>,
+    /// Flagged views and dangling callouts; empty when every reference is valid.
+    pub issues: Vec<String>,
+    pub sample_spacing: f64,
+    pub chord: f64,
+}
+
+fn bad(m: String) -> DocError {
+    DocError::Validation(m)
+}
+
+/// Combined exact bounds of `bodies` in the current evaluation.
+fn bodies_extent(m: &rcad_document::Model, bodies: &[BodyId]) -> Result<f64, DocError> {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for b in bodies {
+        let eb = m
+            .evaluation()
+            .body_by_id(*b)
+            .ok_or_else(|| bad(format!("{b} is not an evaluated body")))?;
+        let g = eb.geometry.brep().ok_or_else(|| {
+            DocError::ProductLimit(format!(
+                "{b} is a mesh body; drawings need exact (B-rep) bodies"
+            ))
+        })?;
+        let bb = k::bounds(g).map_err(|e| bad(e.to_string()))?;
+        for i in 0..3 {
+            lo[i] = lo[i].min(bb.min[i]);
+            hi[i] = hi[i].max(bb.max[i]);
+        }
+    }
+    Ok((0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max))
+}
+
+/// Default base-view position: room for the view from above and from the
+/// right on the side the convention puts them.
+pub fn default_position(sheet: SheetSize, p: Projection) -> [f64; 2] {
+    let (w, h) = sheet.mm();
+    match p {
+        Projection::ThirdAngle => [w * 0.28, h * 0.36],
+        Projection::FirstAngle => [w * 0.56, h * 0.64],
+    }
+}
+
+/// Default scale for bodies of largest extent `ext` on `sheet`.
+pub fn default_scale(sheet: SheetSize, ext: f64) -> f64 {
+    let (w, h) = sheet.mm();
+    dw::fit_scale(ext, (w * 0.3).min(h * 0.28))
+}
+
+fn add_view(
+    d: &mut Document,
+    id: DrawingId,
+    spec: &ViewSpec,
+    auto_scale: Option<f64>,
+) -> Result<ViewId, DocError> {
+    let dr = d.drawing(id)?.clone();
+    let kind = match spec {
+        ViewSpec::Base {
+            bodies,
+            orientation,
+            scale,
+            position,
+        } => {
+            for b in bodies {
+                d.body(*b)?;
+            }
+            ViewKind::Base {
+                bodies: bodies.clone(),
+                orientation: *orientation,
+                scale: scale.or(auto_scale).unwrap_or(1.0),
+                position: position.unwrap_or_else(|| default_position(dr.sheet, dr.projection)),
+            }
+        }
+        ViewSpec::Projected { parent, from } => {
+            dr.view(*parent)?;
+            ViewKind::Projected {
+                parent: *parent,
+                from: *from,
+            }
+        }
+    };
+    let dr = d.drawing_mut(id)?;
+    let vid = ViewId(dr.next_view.max(1));
+    dr.next_view = vid.0 + 1;
+    dr.views.push(DrawingView {
+        id: vid,
+        kind,
+        annotations: Vec::new(),
+    });
+    dr.validate()?;
+    Ok(vid)
+}
+
+impl Session {
+    /// Drawing commands; `Ok(false)` when `cmd` is not one.
+    pub(crate) fn run_drawing(
+        &mut self,
+        cmd: &Command,
+        r: &mut Response,
+    ) -> Result<bool, DocError> {
+        match cmd {
+            Command::CreateDrawing {
+                name,
+                sheet,
+                projection,
+                title,
+                part_number,
+                material,
+                bodies,
+                standard_views,
+            } => {
+                let m = self.model_mut()?;
+                let sheet = sheet.unwrap_or_default();
+                let auto = if bodies.is_empty() {
+                    None
+                } else {
+                    Some(default_scale(sheet, bodies_extent(m, bodies)?))
+                };
+                let (name, projection) = (name.clone(), projection.unwrap_or_default());
+                let (title, pn, mat) = (title.clone(), part_number.clone(), material.clone());
+                let (bodies, standard) = (bodies.clone(), standard_views.unwrap_or(true));
+                let id = m.transact("Create drawing", |d| {
+                    let id = d.next_drawing_id();
+                    let n = name.unwrap_or_else(|| format!("Drawing{}", id.0));
+                    let mut dr = Drawing::new(id, &n);
+                    dr.sheet = sheet;
+                    dr.projection = projection;
+                    if let Some(t) = title {
+                        dr.title.title = t;
+                    }
+                    dr.title.part_number = pn.unwrap_or_default();
+                    dr.title.material = mat.unwrap_or_default();
+                    dr.validate()?;
+                    d.drawings.push(dr);
+                    if !bodies.is_empty() {
+                        let base = add_view(
+                            d,
+                            id,
+                            &ViewSpec::Base {
+                                bodies,
+                                orientation: Orientation::Front,
+                                scale: None,
+                                position: None,
+                            },
+                            auto,
+                        )?;
+                        if standard {
+                            for from in [Side::Above, Side::Right] {
+                                add_view(d, id, &ViewSpec::Projected { parent: base, from }, None)?;
+                            }
+                        }
+                    }
+                    Ok(id)
+                })?;
+                r.drawing = Some(id);
+            }
+            Command::EditDrawing {
+                drawing,
+                name,
+                sheet,
+                projection,
+                title,
+                part_number,
+                material,
+                auto_dimensions,
+            } => {
+                let id = *drawing;
+                let (name, title, part_number, material) = (
+                    name.clone(),
+                    title.clone(),
+                    part_number.clone(),
+                    material.clone(),
+                );
+                let (sheet, projection, auto_dimensions) = (*sheet, *projection, *auto_dimensions);
+                self.model_mut()?
+                    .transact(&format!("Edit drawing {id}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        if let Some(n) = name {
+                            dr.name = n;
+                        }
+                        if let Some(s) = sheet {
+                            dr.sheet = s;
+                        }
+                        if let Some(p) = projection {
+                            dr.projection = p;
+                        }
+                        if let Some(t) = title {
+                            dr.title.title = t;
+                        }
+                        if let Some(p) = part_number {
+                            dr.title.part_number = p;
+                        }
+                        if let Some(x) = material {
+                            dr.title.material = x;
+                        }
+                        if let Some(a) = auto_dimensions {
+                            dr.auto_dimensions = a;
+                        }
+                        dr.validate()
+                    })?;
+                r.drawing = Some(id);
+            }
+            Command::DeleteDrawing { drawing } => {
+                let id = *drawing;
+                self.model_mut()?
+                    .transact(&format!("Delete drawing {id}"), |d| {
+                        d.drawing(id)?;
+                        d.drawings.retain(|x| x.id != id);
+                        Ok(())
+                    })?;
+            }
+            Command::AddDrawingView { drawing, view } => {
+                let id = *drawing;
+                let m = self.model_mut()?;
+                let auto = match view {
+                    ViewSpec::Base {
+                        bodies,
+                        scale: None,
+                        ..
+                    } => {
+                        let sheet = m.document().drawing(id)?.sheet;
+                        Some(default_scale(sheet, bodies_extent(m, bodies)?))
+                    }
+                    ViewSpec::Base { bodies, .. } => {
+                        bodies_extent(m, bodies)?;
+                        None
+                    }
+                    ViewSpec::Projected { .. } => None,
+                };
+                let spec = view.clone();
+                let vid = m.transact(&format!("Add view to {id}"), |d| {
+                    add_view(d, id, &spec, auto)
+                })?;
+                r.drawing = Some(id);
+                r.view = Some(vid);
+            }
+            Command::EditDrawingView {
+                drawing,
+                view,
+                scale,
+                position,
+                orientation,
+            } => {
+                let (id, vid, scale, position, orientation) =
+                    (*drawing, *view, *scale, *position, *orientation);
+                self.model_mut()?.transact(&format!("Edit view {vid} of {id}"), |d| {
+                    let dr = d.drawing_mut(id)?;
+                    match &mut dr.view_mut(vid)?.kind {
+                        ViewKind::Base {
+                            scale: s,
+                            position: p,
+                            orientation: o,
+                            ..
+                        } => {
+                            if let Some(x) = scale {
+                                *s = x;
+                            }
+                            if let Some(x) = position {
+                                *p = x;
+                            }
+                            if let Some(x) = orientation {
+                                *o = x;
+                            }
+                        }
+                        ViewKind::Projected { .. } => {
+                            if scale.is_some() || position.is_some() || orientation.is_some() {
+                                return Err(bad(format!(
+                                    "{vid} is a projected view: its scale, position and orientation follow its parent"
+                                )));
+                            }
+                        }
+                    }
+                    dr.validate()
+                })?;
+                r.drawing = Some(id);
+                r.view = Some(vid);
+            }
+            Command::RemoveDrawingView { drawing, view } => {
+                let (id, vid) = (*drawing, *view);
+                self.model_mut()?.transact(&format!("Remove view {vid} from {id}"), |d| {
+                    let dr = d.drawing_mut(id)?;
+                    dr.view(vid)?;
+                    let children: Vec<String> = dr
+                        .views
+                        .iter()
+                        .filter(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == vid))
+                        .map(|v| v.id.to_string())
+                        .collect();
+                    if !children.is_empty() {
+                        return Err(bad(format!(
+                            "{vid} has projected views ({}); remove them first",
+                            children.join(", ")
+                        )));
+                    }
+                    dr.views.retain(|v| v.id != vid);
+                    Ok(())
+                })?;
+                r.drawing = Some(id);
+            }
+            Command::AddHoleCallout {
+                drawing,
+                view,
+                feature,
+            } => {
+                let (id, vid, feature) = (*drawing, *view, *feature);
+                self.model_mut()?
+                    .transact(&format!("Add hole callout to {vid}"), |d| {
+                        let f = d.feature(feature)?;
+                        if !matches!(f.kind, FeatureKind::Hole { .. }) {
+                            return Err(bad(format!("{feature} is not a hole")));
+                        }
+                        let v = d.drawing_mut(id)?.view_mut(vid)?;
+                        let a = Annotation::HoleCallout { feature };
+                        if v.annotations.contains(&a) {
+                            return Err(bad(format!("{vid} already has a callout of {feature}")));
+                        }
+                        v.annotations.push(a);
+                        Ok(())
+                    })?;
+                r.drawing = Some(id);
+                r.view = Some(vid);
+            }
+            Command::RemoveHoleCallout {
+                drawing,
+                view,
+                feature,
+            } => {
+                let (id, vid, feature) = (*drawing, *view, *feature);
+                self.model_mut()?
+                    .transact(&format!("Remove hole callout from {vid}"), |d| {
+                        let v = d.drawing_mut(id)?.view_mut(vid)?;
+                        let a = Annotation::HoleCallout { feature };
+                        if !v.annotations.contains(&a) {
+                            return Err(bad(format!("{vid} has no callout of {feature}")));
+                        }
+                        v.annotations.retain(|x| *x != a);
+                        Ok(())
+                    })?;
+            }
+            Command::ExportDrawing {
+                drawing,
+                path,
+                format,
+            } => {
+                let format = match format {
+                    Some(f) => *f,
+                    None => match path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref()
+                    {
+                        Some("svg") => DrawingFormat::Svg,
+                        Some("pdf") => DrawingFormat::Pdf,
+                        _ => {
+                            return Err(bad(format!(
+                                "give a format (svg or pdf) for {}",
+                                path.display()
+                            )));
+                        }
+                    },
+                };
+                let m = self.model_mut()?;
+                let out = dw::render(m.document(), m.evaluation(), *drawing)?;
+                let bytes = match format {
+                    DrawingFormat::Svg => {
+                        rcad_exchange::drawing::write_svg(&out.sheet).into_bytes()
+                    }
+                    DrawingFormat::Pdf => rcad_exchange::pdf::write_pdf(&out.sheet),
+                };
+                write_atomic(path, &bytes)?;
+                r.message = Some(format!(
+                    "wrote {} ({} bytes, {:?}, {} views{})",
+                    path.display(),
+                    bytes.len(),
+                    format,
+                    out.views.len(),
+                    if out.issues.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} issue(s): {}", out.issues.len(), out.issues.join("; "))
+                    }
+                ));
+                r.drawing = Some(*drawing);
+                r.drawing_report = Some(DrawingReport {
+                    drawing: *drawing,
+                    format,
+                    bytes: bytes.len(),
+                    views: out.views,
+                    issues: out.issues,
+                    sample_spacing: out.sample_spacing,
+                    chord: out.chord,
+                });
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+}
+
+/// Feature ids of Hole features (for UI pickers).
+pub fn hole_features(d: &Document) -> Vec<(FeatureId, String)> {
+    d.features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Hole { .. }))
+        .map(|f| (f.id, f.name.clone()))
+        .collect()
+}
