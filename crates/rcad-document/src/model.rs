@@ -453,6 +453,29 @@ pub enum FeatureKind {
         open: FaceRole,
         thickness: f64,
     },
+    /// Rigid move of body `body` (run 6, format v6): rotate `angle` rad
+    /// (parameter `angle_deg`) about the axis through `origin` along `axis`,
+    /// then translate by `translate` (parameters `tx`, `ty`, `tz`). With
+    /// `copy`, the moved result is the new, independent body `copy` and
+    /// `body` stays. Faces made before the move keep resolving (references
+    /// are transformed); pattern/mirror/shell seeds made before a move of
+    /// their body are refused.
+    MoveBody {
+        body: BodyId,
+        translate: [f64; 3],
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default = "z_axis")]
+        axis: [f64; 3],
+        #[serde(default)]
+        angle: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        copy: Option<BodyId>,
+    },
+}
+
+fn z_axis() -> [f64; 3] {
+    [0.0, 0.0, 1.0]
 }
 
 /// Run-6 options of a [`FeatureKind::Extrude`] (SESSION_6 §B, docs/COMMANDS.md).
@@ -622,6 +645,7 @@ impl Feature {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
             FeatureKind::Shell { extrude, .. } => vec![*extrude],
+            FeatureKind::MoveBody { .. } => vec![],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -638,7 +662,10 @@ impl Feature {
             | FeatureKind::Revolve { body, .. }
             | FeatureKind::Loft { body, .. }
             | FeatureKind::Sweep { body, .. }
-            | FeatureKind::ImportMesh { body, .. } => vec![*body],
+            | FeatureKind::ImportMesh { body, .. }
+            | FeatureKind::MoveBody {
+                copy: Some(body), ..
+            } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -658,7 +685,8 @@ impl Feature {
             }
             | FeatureKind::Cut { target, .. }
             | FeatureKind::Pocket { target, .. }
-            | FeatureKind::Hole { target, .. } => Some(*target),
+            | FeatureKind::Hole { target, .. }
+            | FeatureKind::MoveBody { body: target, .. } => Some(*target),
             _ => None,
         }
     }
@@ -747,6 +775,14 @@ impl Feature {
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
+            FeatureKind::MoveBody {
+                translate, angle, ..
+            } => vec![
+                ("tx".into(), translate[0]),
+                ("ty".into(), translate[1]),
+                ("tz".into(), translate[2]),
+                ("angle_deg".into(), angle.to_degrees()),
+            ],
             FeatureKind::Hole {
                 center,
                 diameter,
@@ -1051,6 +1087,24 @@ impl Feature {
                     )));
                 }
                 *angle = value.to_radians();
+                Ok(())
+            }
+            FeatureKind::MoveBody {
+                translate, angle, ..
+            } if matches!(name, "tx" | "ty" | "tz" | "angle_deg") => {
+                match name {
+                    "tx" => translate[0] = value,
+                    "ty" => translate[1] = value,
+                    "tz" => translate[2] = value,
+                    _ => {
+                        if value.abs() > 360.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.angle_deg: the rotation must be within ±360°, got {value}"
+                            )));
+                        }
+                        *angle = value.to_radians();
+                    }
+                }
                 Ok(())
             }
             FeatureKind::Shell { thickness, .. } if name == "thickness" => {

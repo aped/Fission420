@@ -20,6 +20,27 @@ use crate::app::RcadApp;
 use crate::probe::Probe as _;
 
 /// Inline rename buffer of a body row.
+/// Edit buffers of the body Move / Copy form (run 6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveForm {
+    pub t: [String; 3],
+    pub angle: String,
+    /// Rotation axis through the origin: 0 = X, 1 = Y, 2 = Z.
+    pub axis: usize,
+    pub copy: bool,
+}
+
+impl Default for MoveForm {
+    fn default() -> Self {
+        Self {
+            t: ["0".into(), "0".into(), "0".into()],
+            angle: "0".into(),
+            axis: 2,
+            copy: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BodyRename {
     pub body: BodyId,
@@ -230,6 +251,9 @@ impl RcadApp {
         };
         ui.label(format!("Kind: {kind}"));
         ui.label(provenance(&b));
+        if b.kind != "mesh" {
+            self.move_ui(ui, b.id);
+        }
         if b.kind == "mesh" {
             ui.colored_label(
                 Color32::from_rgb(255, 200, 120),
@@ -345,6 +369,68 @@ impl RcadApp {
             (None, None) => {
                 ui.weak("No measurements available.");
             }
+        }
+    }
+}
+
+impl RcadApp {
+    /// Move / Copy a body (run 6): rotation about a world axis through the
+    /// origin, then a translation; one undo step; a feature in History whose
+    /// values stay editable parameters (tx, ty, tz, angle_deg).
+    fn move_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
+        let mut send = None;
+        ui.collapsing("Move / Copy", |ui| {
+            let f = &mut self.move_form;
+            ui.horizontal(|ui| {
+                for (i, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+                    crate::panels::num_field(ui, &format!("{l} (mm)"), &mut f.t[i]);
+                }
+            });
+            ui.horizontal(|ui| {
+                crate::panels::num_field(ui, "Rotate (°)", &mut f.angle);
+                ui.label("about");
+                ui.radio_value(&mut f.axis, 0, "X");
+                ui.radio_value(&mut f.axis, 1, "Y");
+                ui.radio_value(&mut f.axis, 2, "Z");
+            });
+            ui.checkbox(
+                &mut f.copy,
+                "Copy (keep the original; the copy is independent)",
+            )
+            .probe("Copy body");
+            let parse = |t: &str| t.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+            let vals = (
+                parse(&f.t[0]),
+                parse(&f.t[1]),
+                parse(&f.t[2]),
+                parse(&f.angle),
+            );
+            let label = if f.copy { "Copy body" } else { "Move body" };
+            if let (Some(x), Some(y), Some(z), Some(a)) = vals {
+                if ui.button(label).probe(label).clicked() {
+                    let mut axis = [0.0; 3];
+                    axis[f.axis] = 1.0;
+                    send = Some(Command::MoveBody {
+                        name: None,
+                        body,
+                        translate: [x, y, z],
+                        origin: [0.0; 3],
+                        axis: Some(axis),
+                        angle_deg: a,
+                        copy: f.copy,
+                        body_name: None,
+                    });
+                }
+            } else {
+                ui.add_enabled(false, egui::Button::new(label));
+            }
+            ui.small(
+                "Faces made before the move keep their references (sketches, fillets, holes \
+                 follow the body). Patterns/mirrors of features made before the move are refused.",
+            );
+        });
+        if let Some(c) = send {
+            self.request(c);
         }
     }
 }

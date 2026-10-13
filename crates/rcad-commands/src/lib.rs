@@ -296,6 +296,27 @@ pub enum Command {
         sketch: FeatureId,
         link: usize,
     },
+    /// Rigid move of a body, or an independent copy (run 6; one undo step):
+    /// rotate `angle_deg` about the axis through `origin` along `axis`
+    /// (default +Z), then translate. With `copy`, a new body (`body_name`)
+    /// holds the moved result and the source stays.
+    MoveBody {
+        #[serde(default)]
+        name: Option<String>,
+        body: BodyId,
+        #[serde(default)]
+        translate: [f64; 3],
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default)]
+        angle_deg: f64,
+        #[serde(default)]
+        copy: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
     /// Timeline marker (run 6; one undo step): evaluate history up to and
     /// including `at`; later features are kept but not evaluated, and new
     /// features are inserted after the marker. `at: null` rolls to the end.
@@ -489,6 +510,7 @@ impl Command {
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
             Command::SetRollback { .. } => "set_rollback",
+            Command::MoveBody { .. } => "move_body",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
@@ -1832,6 +1854,65 @@ impl Session {
                 })?;
                 r.feature = Some(sk_id);
             }
+            Command::MoveBody {
+                name,
+                body,
+                translate,
+                origin,
+                axis,
+                angle_deg,
+                copy,
+                body_name,
+            } => {
+                let (name, body, translate, origin) = (name.clone(), *body, *translate, *origin);
+                let axis = axis.unwrap_or([0.0, 0.0, 1.0]);
+                if !angle_deg.is_finite() || angle_deg.abs() > 360.0 {
+                    return Err(DocError::Validation(format!(
+                        "the rotation must be within ±360°, got {angle_deg}"
+                    )));
+                }
+                let angle = angle_deg.to_radians();
+                // Validate before the transaction (a clear message).
+                rcad_kernel::Rigid::new(translate, origin, axis, angle)
+                    .map_err(|e| DocError::Validation(e.to_string()))?;
+                let (copy, body_name) = (*copy, body_name.clone());
+                let m = self.model_mut()?;
+                let src = m.document().body(body)?.name.clone();
+                let id = m.transact(
+                    &format!("{} {src}", if copy { "Copy" } else { "Move" }),
+                    |d| {
+                        let copy = if copy {
+                            let n = match &body_name {
+                                Some(n) => valid_name(n, "body")?,
+                                None => d.default_body_name(),
+                            };
+                            if d.bodies.iter().any(|b| b.name == n) {
+                                return Err(DocError::Validation(format!(
+                                    "another body is already named '{n}'"
+                                )));
+                            }
+                            Some(d.add_body(n))
+                        } else {
+                            None
+                        };
+                        let n = name.unwrap_or_else(|| {
+                            d.default_name(if copy.is_some() { "Copy" } else { "Move" })
+                        });
+                        Ok(d.push(
+                            n,
+                            FeatureKind::MoveBody {
+                                body,
+                                translate,
+                                origin,
+                                axis,
+                                angle,
+                                copy,
+                            },
+                        ))
+                    },
+                )?;
+                r.feature = Some(id);
+            }
             Command::SetRollback { at } => {
                 let at = *at;
                 let m = self.model_mut()?;
@@ -2421,6 +2502,8 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Fillet { .. } => ("fillet", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
+                FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
+                FeatureKind::MoveBody { .. } => ("copy_body", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {

@@ -354,9 +354,33 @@ struct Snapshot {
     /// Body ids in creation order.
     created: Vec<BodyId>,
     results: Vec<FeatureResult>,
+    /// Evaluation index of every evaluated feature (run 6).
+    index: HashMap<FeatureId, usize>,
+    /// Rigid moves of bodies (body, evaluation index of the move, transform),
+    /// in order: faces made before a move are found moved with the body.
+    moves: Vec<(BodyId, usize, k::Rigid)>,
 }
 
 impl Snapshot {
+    /// The transform carrying faces made by `feature` on `body` to where
+    /// `body` is now (the moves after `feature`).
+    fn placement(&self, body: BodyId, feature: FeatureId) -> k::Rigid {
+        let at = self.index.get(&feature).copied().unwrap_or(0);
+        self.moves
+            .iter()
+            .filter(|(b, i, _)| *b == body && *i > at)
+            .fold(k::Rigid::IDENTITY, |acc, (_, _, t)| t.after(&acc))
+    }
+
+    /// Whether `body` was moved after `feature`.
+    fn moved_since(&self, body: Option<BodyId>, feature: FeatureId) -> bool {
+        body.is_some_and(|b| !self.placement(b, feature).is_identity())
+    }
+
+    fn body_of_extrude(&self, f: FeatureId) -> Option<BodyId> {
+        self.extrudes.get(&f).map(|e| e.body)
+    }
+
     fn new() -> Self {
         Self {
             sketches: HashMap::new(),
@@ -368,6 +392,8 @@ impl Snapshot {
             bodies: BTreeMap::new(),
             created: Vec::new(),
             results: Vec::new(),
+            index: HashMap::new(),
+            moves: Vec::new(),
         }
     }
 }
@@ -564,6 +590,7 @@ fn regen_impl(
         if stop == Some(id) {
             return Ok(Regen::Stopped(Box::new(st)));
         }
+        st.index.insert(id, i);
         let f = doc.feature(id)?;
         let mut r = FeatureResult {
             id,
@@ -891,11 +918,47 @@ fn regen_impl(
                 st.holes.insert(id, tools);
                 r.body = Some(*target);
             }
+            FeatureKind::MoveBody {
+                body,
+                translate,
+                origin,
+                axis,
+                angle,
+                copy,
+            } => {
+                let t = k::Rigid::new(*translate, *origin, *axis, *angle)
+                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let b = brep_target(&st, id, *body)?;
+                let moved = k::transform_body(&b, &t).map_err(kernel(id))?;
+                match copy {
+                    Some(c) => {
+                        create_body(
+                            &mut st,
+                            id,
+                            *c,
+                            BodyGeometry::Brep(moved),
+                            BodySource::Modeled,
+                        )?;
+                        r.body = Some(*c);
+                    }
+                    None => {
+                        replace_body(&mut st, id, *body, moved);
+                        st.moves.push((*body, i, t));
+                        r.body = Some(*body);
+                    }
+                }
+            }
             FeatureKind::Shell {
                 extrude,
                 open,
                 thickness,
             } => {
+                if st.moved_since(st.body_of_extrude(*extrude), *extrude) {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: shell: the body of {extrude} was moved after it; the scoped \
+                         shell needs it in place (shell before the move)"
+                    )));
+                }
                 let (body, tool) = shell_tool(doc, &st, id, *extrude, *open, *thickness)?;
                 let target = brep_target(&st, id, body)?;
                 r.frame = Some(tool.start);
@@ -2336,6 +2399,17 @@ fn hole_tools(
 /// Pattern/mirror seeds: an evaluated Extrude Join or Cut, or a Hole (its
 /// counterbore and hole tools, applied in that order).
 fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<ExtrudeOut>> {
+    let body = st
+        .holes
+        .get(&seed)
+        .and_then(|t| t.first())
+        .map(|e| e.body)
+        .or(st.body_of_extrude(seed));
+    if st.moved_since(body, seed) {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: the body of {seed} was moved after it; pattern or mirror it before the move"
+        )));
+    }
     if let Some(tools) = st.holes.get(&seed) {
         return Ok(tools.clone());
     }
@@ -3125,6 +3199,23 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
+/// `frame` carried back through `t` (the inverse of a rigid transform).
+fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
+    let tr = |v: [f64; 3]| {
+        [
+            t.r[0][0] * v[0] + t.r[1][0] * v[1] + t.r[2][0] * v[2],
+            t.r[0][1] * v[0] + t.r[1][1] * v[1] + t.r[2][1] * v[2],
+            t.r[0][2] * v[0] + t.r[1][2] * v[1] + t.r[2][2] * v[2],
+        ]
+    };
+    Frame {
+        origin: tr(sub(frame.origin, t.t)),
+        x: tr(frame.x),
+        y: tr(frame.y),
+        z: tr(frame.z),
+    }
+}
+
 /// Projection source curves, loop by loop, each with its source entity.
 pub type SourceCurves = Vec<Vec<(k::Curve2, Option<EntityId>)>>;
 
@@ -3466,6 +3557,9 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         }
     };
     let tool = tool_of;
+    // Faces made before a move of their body are found moved with it.
+    let moved = st.placement(owner, fr.feature);
+    let frame = moved.frame(&frame);
     let state = st.bodies.get(&owner).ok_or(DocError::BrokenReference {
         from,
         detail: format!("body {owner} no longer exists"),
@@ -3486,7 +3580,9 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         // The face is the one this tool's footprint overlaps (review run 5:
         // also when the plane holds one face, which may be another tool's —
         // e.g. an occurrence's floor cut away and the seed's still there).
-        let (outline, curved) = footprint(e, role, &frame);
+        // The footprint is computed where the tool was made, then moved.
+        let (outline, curved) = footprint(e, role, &moved_back(&moved, &frame));
+        let outline: Vec<[f64; 3]> = outline.into_iter().map(|p| moved.point(p)).collect();
         if polygon_area(&outline) > 0.0 {
             let (hits, inside) = k::planar_faces_overlapping(body, &frame, &outline, curved)
                 .map_err(kernel(from))?;

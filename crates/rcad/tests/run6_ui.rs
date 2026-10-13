@@ -251,3 +251,34 @@ fn project_a_face_into_a_sketch_from_the_inspector() {
     click(&mut h, "Undo");
     assert_eq!(f(&h).projections.len(), 1);
 }
+
+#[test]
+fn move_and_copy_a_body_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    request(&mut h, Command::extrude(None, s1, 10.0));
+    let name = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name);
+    click(&mut h, "Move / Copy");
+    type_into(&mut h, "ΔX (mm)", "100");
+    click(&mut h, "Move body");
+    let b = h.state().summary().bodies[0].bounds.unwrap();
+    assert!(
+        (b.min[0] - 80.0).abs() < 1e-9 && (b.max[0] - 120.0).abs() < 1e-9,
+        "{b:?}"
+    );
+    assert!((h.state().volume().unwrap() - 12000.0).abs() < 1e-6);
+    // The new Move feature is selected after OK: back to the body.
+    click(&mut h, &name);
+    if h.query_by_label("Copy (keep the original; the copy is independent)")
+        .is_none()
+    {
+        click(&mut h, "Move / Copy");
+    }
+    click(&mut h, "Copy (keep the original; the copy is independent)");
+    click(&mut h, "Copy body");
+    assert_eq!(h.state().summary().bodies.len(), 2);
+    click(&mut h, "Undo");
+    assert_eq!(h.state().summary().bodies.len(), 1);
+}

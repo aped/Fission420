@@ -19,6 +19,7 @@ mod project;
 mod step;
 mod step_in;
 mod sweep;
+mod transform;
 mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
@@ -46,6 +47,7 @@ pub use step_in::{
     import_step,
 };
 pub use sweep::{PathSegment, sweep};
+pub use transform::{Rigid, transform_body};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
     verify_prism_boolean, verify_prisms_boolean,

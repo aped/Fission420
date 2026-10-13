@@ -679,6 +679,10 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::Extrude { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
         FeatureKind::Shell { .. } if name == "thickness" => Some(SlotKind::Length),
+        FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
+        FeatureKind::MoveBody { .. } if matches!(name, "tx" | "ty" | "tz") => {
+            Some(SlotKind::Length)
+        }
         FeatureKind::Hole { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         _ => None,
     }
