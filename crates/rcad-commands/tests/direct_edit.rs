@@ -427,3 +427,78 @@ fn documented_json_form_parses() {
     let r: Command = serde_json::from_str(r#"{"cmd": "imported_faces", "body": 1}"#).unwrap();
     assert!(matches!(r, Command::ImportedFaces { .. }));
 }
+
+/// Replace the x = 60 side face by its imported frame (centroid (60,20,10),
+/// x = +Y, y = +Z) tilted 10° and moved 2 mm along the tilted normal: the
+/// face area is 800, so the volume grows by 1600 / cos 10°; a sketch on the
+/// face follows the tilted plane; the angle is a bindable parameter.
+#[test]
+fn tilt_an_imported_side_face() {
+    let (mut s, body) = setup();
+    let side = plane(&mut s, body, [1.0, 0.0, 0.0], 60.0);
+    let a = 10f64.to_radians();
+    let f = edit(
+        &mut s,
+        side,
+        DirectOp::ReplaceFace {
+            distance: 2.0,
+            angle: a,
+        },
+    );
+    assert_volume(&s, body, V0 + 1600.0 / a.cos());
+    let sk = ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::Face(side),
+            template: rcad_commands::SketchTemplate::CenteredCircle {
+                diameter: 2.0,
+                center: None,
+            },
+        },
+    )
+    .feature
+    .unwrap();
+    let frame = |s: &Session| {
+        s.summary()
+            .features
+            .into_iter()
+            .find(|x| x.id == sk)
+            .unwrap()
+            .frame
+            .unwrap()
+    };
+    let z = frame(&s).z;
+    assert!(
+        (z[0] - a.cos()).abs() < 1e-12 && (z[2] + a.sin()).abs() < 1e-12,
+        "{z:?}"
+    );
+    ok(
+        &mut s,
+        Command::SetParameter {
+            feature: f,
+            name: "angle_deg".into(),
+            value: -5.0,
+        },
+    );
+    let b = 5f64.to_radians();
+    assert_volume(&s, body, V0 + 1600.0 / b.cos());
+    assert!((frame(&s).z[2] - b.sin()).abs() < 1e-12);
+    // The top face has inner loops: refused by name.
+    let top = plane(&mut s, body, [0.0, 0.0, 1.0], 20.0);
+    let e = err(
+        &mut s,
+        Command::DirectEdit {
+            name: None,
+            face: top,
+            op: DirectOp::ReplaceFace {
+                distance: 0.0,
+                angle: a,
+            },
+        },
+    );
+    assert!(
+        matches!(&e, DocError::ProductLimit(m) if m.contains("single-loop")),
+        "{e:?}"
+    );
+}

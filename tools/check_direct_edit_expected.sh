@@ -65,6 +65,13 @@ t=math.tan(math.radians(10)); exp=b.cut(Part.makeLoft([sq(5,10-10*t),sq(11,10+2*
   check taper_join_boss.step "$SQ
 t=math.tan(math.radians(5)); exp=b.fuse(Part.makeLoft([sq(9.5,10+t),sq(15,10-10*t)],True)).removeSplitter()" 0 $TOL
 fi
+# Replace face (kernel direct::tests): Truck block 40x30x10 whose top is tilted 20 deg about
+# the centroid's X axis and moved 2 mm along the tilted normal: z_top(y) = 10 + 2/cos20 +
+# (y - 15) tan20; FreeCAD extrudes that trapezoid along X.
+if [ -f "$DIR/replace_top_tilt20_up2.step" ]; then
+  check replace_top_tilt20_up2.step "a=math.radians(20); zt=lambda y: 10+2/math.cos(a)+(y-15)*math.tan(a)
+exp=Part.Face(Part.makePolygon([V(0,0,0),V(0,30,0),V(0,30,zt(30)),V(0,0,zt(0)),V(0,0,0)])).extrude(V(40,0,0))" 0 $TOL
+fi
 # Control: the countersunk export against the block WITHOUT the countersink must differ
 # by the countersink's volume, 256 pi / 3 = 268.08 mm^3.
 check csink_block_d16.step "$(blk 20 4 1 1)" 266 270

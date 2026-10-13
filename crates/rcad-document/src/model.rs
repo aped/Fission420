@@ -600,6 +600,12 @@ pub enum DirectOp {
     /// Delete the hole or boss whose cylindrical wall is the face and close
     /// the openings it leaves.
     RemoveCylinder,
+    /// Replace the planar face by another plane: its imported frame tilted
+    /// by `angle` (radians; parameter `angle_deg`) about the frame's x axis
+    /// through its origin, then moved `distance` mm along the tilted normal
+    /// (parameter "distance"). Single convex loop, planar neighbours only
+    /// (`rcad_kernel::replace_face`).
+    ReplaceFace { distance: f64, angle: f64 },
 }
 
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
@@ -841,6 +847,10 @@ impl Feature {
                 DirectOp::OffsetFace { distance } => vec![("distance".into(), *distance)],
                 DirectOp::ResizeCylinder { diameter } => vec![("diameter".into(), *diameter)],
                 DirectOp::RemoveCylinder => vec![],
+                DirectOp::ReplaceFace { distance, angle } => vec![
+                    ("distance".into(), *distance),
+                    ("angle_deg".into(), angle.to_degrees()),
+                ],
             },
             FeatureKind::Hole {
                 center,
@@ -1286,6 +1296,25 @@ impl Feature {
                     )));
                 }
                 *distance = value;
+                Ok(())
+            }
+            FeatureKind::DirectEdit {
+                op: DirectOp::ReplaceFace { distance, .. },
+                ..
+            } if name == "distance" => {
+                *distance = value;
+                Ok(())
+            }
+            FeatureKind::DirectEdit {
+                op: DirectOp::ReplaceFace { angle, .. },
+                ..
+            } if name == "angle_deg" => {
+                if value.abs() >= 89.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.angle_deg: the tilt must be below 89 degrees, got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
                 Ok(())
             }
             FeatureKind::DirectEdit {

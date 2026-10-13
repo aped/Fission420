@@ -1328,6 +1328,7 @@ impl Session {
                             rcad_document::DirectOp::OffsetFace { .. } => "Offset face",
                             rcad_document::DirectOp::ResizeCylinder { .. } => "Resize hole",
                             rcad_document::DirectOp::RemoveCylinder => "Remove hole",
+                            rcad_document::DirectOp::ReplaceFace { .. } => "Tilt face",
                         })
                     });
                     Ok(d.push(n, FeatureKind::DirectEdit { face, op }))

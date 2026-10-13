@@ -487,3 +487,90 @@ fn countersink_refusals() {
     // Not at a face holding the hole's opening (mid-depth plane).
     assert!(countersink(&b, [15.0, 20.0, 10.0], [0.0, 0.0, 1.0], 8.0, 12.0, PI / 2.0).is_err());
 }
+
+/// Truck-built block [0,40]x[0,30]x[0,10] (single-loop faces).
+fn plain_block() -> Body {
+    crate::extrude(
+        &Profile::Polygon(vec![[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]]),
+        &Frame::XY,
+        10.0,
+    )
+    .unwrap()
+}
+
+/// Top face frame as the importer would record it: centroid (20,15,10),
+/// x = world X (least aligned with +Z), y = +Y.
+const TOP_FRAME: Frame = Frame {
+    origin: [20.0, 15.0, 10.0],
+    x: [1.0, 0.0, 0.0],
+    y: [0.0, 1.0, 0.0],
+    z: [0.0, 0.0, 1.0],
+};
+
+#[test]
+fn replace_face_by_tilted_and_offset_planes() {
+    let b = plain_block();
+    let t = plane_face(&b, [0.0, 0.0, 1.0], [0.0, 0.0, 10.0]);
+    // Tilt 20 degrees about the centroid's x axis: the top becomes
+    // z = 10 + (y − 15) tan 20; the volume is unchanged (symmetric).
+    let a = 20f64.to_radians();
+    let f = tilt_offset_frame(&TOP_FRAME, 0.0, a);
+    let e = replace_face(&b, t, f.origin, f.z).unwrap();
+    assert_volume(&e.body, 12000.0);
+    let (lo, hi) = bounds(&e.body);
+    assert!((hi[2] - (10.0 + 15.0 * a.tan())).abs() < 1e-9, "{hi:?}");
+    assert!((lo[2]).abs() < 1e-9);
+    assert_eq!(crate::face_count(&e.body), 6);
+    // Plus 2 mm along the tilted normal: the height at the centroid grows by
+    // 2 / cos 20, so the volume by 1200 · 2 / cos 20.
+    let f = tilt_offset_frame(&TOP_FRAME, 2.0, a);
+    let e = replace_face(&b, t, f.origin, f.z).unwrap();
+    assert_volume(&e.body, 12000.0 + 1200.0 * 2.0 / a.cos());
+    // A side face tilted outward 10 degrees about its own x (world Y... its
+    // frame: centroid (40,15,5), x = Y, z = +X, y = z × x = +Z).
+    let side = plane_face(&b, [1.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
+    let sf = Frame {
+        origin: [40.0, 15.0, 5.0],
+        x: [0.0, 1.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [1.0, 0.0, 0.0],
+    };
+    let f = tilt_offset_frame(&sf, 0.0, 10f64.to_radians());
+    let e = replace_face(&b, side, f.origin, f.z).unwrap();
+    assert_volume(&e.body, 12000.0);
+    if let Ok(dir) = std::env::var("RCAD_EVIDENCE_DIR") {
+        let f = tilt_offset_frame(&TOP_FRAME, 2.0, a);
+        let s =
+            crate::export_step(&replace_face(&b, t, f.origin, f.z).unwrap().body, "R-CAD").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            std::path::Path::new(&dir).join("replace_top_tilt20_up2.step"),
+            s,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn replace_face_refusals() {
+    let b = plain_block();
+    let t = plane_face(&b, [0.0, 0.0, 1.0], [0.0, 0.0, 10.0]);
+    // 35 degrees: at y = 0 the top would drop below the bottom (15 tan 35 > 10).
+    let f = tilt_offset_frame(&TOP_FRAME, 0.0, 35f64.to_radians());
+    let e = replace_face(&b, t, f.origin, f.z).unwrap_err().to_string();
+    assert!(e.contains("collapses or inverts"), "{e}");
+    // Facing the other way.
+    assert!(replace_face(&b, t, [0.0, 0.0, 10.0], [0.0, 0.0, -1.0]).is_err());
+    // The imported block's top has holes (inner loops); its blind-hole floor
+    // has cylindrical neighbours.
+    let blk = block();
+    let e = replace_face(&blk, top(&blk), [0.0, 0.0, 21.0], [0.0, 0.0, 1.0])
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("single-loop"), "{e}");
+    let floor = plane_face(&blk, [0.0, 0.0, 1.0], [0.0, 0.0, 12.0]);
+    let e = replace_face(&blk, floor, [0.0, 0.0, 11.0], [0.0, 0.0, 1.0])
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not planar") || e.contains("curved edge"), "{e}");
+}

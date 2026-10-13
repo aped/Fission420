@@ -50,8 +50,23 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   between the radii over the axial span; removal: the disk). Interference with geometry
   away from the edited face (e.g. a hole growing into an internal void) therefore fails
   the probe check rather than producing a self-intersecting solid.
-* Not supported (named refusals): oblique neighbours (a general "replace face" that
-  recomputes neighbour intersections, task d of SESSION_6 §C, is not implemented),
+* `replace_face(body, face, origin, normal)` (task d of SESSION_6 §C): the planar face
+  replaced by another plane within 89° of it. **Precondition:** one convex loop of
+  straight edges, every touching face planar, exactly one straight side edge per
+  vertex. Each vertex slides along its side edge's line to the new plane (`t > 0`, the
+  edge keeps `MIN_LENGTH`), the face's edges become the exact segments between the moved
+  vertices, the face's surface becomes the new plane (surface normal on the old side so
+  the stored wire orientation stays valid). **Checks:** the face stays a convex loop,
+  every neighbour loop keeps its orientation and stays simple, edges on surfaces, one
+  closed shell, and point probes on both sides of the face and of every neighbour
+  against the expected solid (inside the column over the face, bounded by the
+  neighbours' planes: material below the new plane where there was material or the
+  region above the old plane; elsewhere the old body). Document: `DirectOp::ReplaceFace
+  { distance, angle }` relative to the imported face frame (pivot = its centroid, tilt
+  about its x axis, +angle turns +y toward the normal, then offset along the tilted
+  normal); the planar-face table's frame follows, so sketches on the face follow it.
+* Not supported (named refusals): offset with oblique neighbours (use replace),
+  replace with curved neighbours, inner loops or non-convex faces,
   cones / countersinks, holes ending on curved or tilted faces, partial-loop features
   (a hole breaking through a side wall), bodies with several shells.
 

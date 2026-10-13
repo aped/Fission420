@@ -88,6 +88,34 @@ fn volume(h: &Harness<'_, RcadApp>) -> f64 {
 }
 
 #[test]
+fn tilt_a_picked_side_face() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::ImportStep {
+        path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../rcad-kernel/tests/fixtures/step/direct_edit_block_mm.step"),
+        units_to_mm: None,
+    });
+    settle(&mut h);
+    let side = group(
+        &h,
+        |k| matches!(k, DirectFace::Plane { origin, normal } if normal[0] > 0.5 && (origin[0] - 60.0).abs() < 1e-9),
+    );
+    select(&mut h, side);
+    click(&mut h, "Tilt face…");
+    type_into(&mut h, "Tilt angle (deg)", "10");
+    type_into(&mut h, "Offset after tilt (mm)", "2");
+    click(&mut h, "OK");
+    let want = V0 + 1600.0 / 10f64.to_radians().cos();
+    assert!(
+        (volume(&h) - want).abs() < 1e-6 * want,
+        "{} vs {want}: {:?}",
+        volume(&h),
+        h.state().diagnostics().last()
+    );
+}
+
+#[test]
 fn offset_resize_remove_from_picked_faces() {
     let mut h = harness();
     click(&mut h, "New");

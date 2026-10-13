@@ -14,6 +14,8 @@ use rcad_kernel::DirectFace;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectKind {
     Offset,
+    /// Replace the face by its frame tilted about its x axis and offset.
+    Tilt,
     Resize,
     Remove,
     /// Countersink the hole of this Hole feature (`face` unused).
@@ -37,6 +39,7 @@ impl DirectForm {
     pub fn title(&self) -> &'static str {
         match self.kind {
             DirectKind::Offset => "Offset face",
+            DirectKind::Tilt => "Tilt face",
             DirectKind::Resize => "Resize hole / boss",
             DirectKind::Remove => "Remove hole / boss",
             DirectKind::Countersink(_) => "Countersink",
@@ -64,6 +67,10 @@ impl DirectForm {
             DirectKind::Offset => DirectOp::OffsetFace {
                 distance: crate::app::parse_num("distance", &self.value)?,
             },
+            DirectKind::Tilt => DirectOp::ReplaceFace {
+                distance: crate::app::parse_num("distance", &self.value)?,
+                angle: crate::app::parse_num("tilt angle", &self.angle)?.to_radians(),
+            },
             DirectKind::Resize => DirectOp::ResizeCylinder {
                 diameter: crate::app::parse_num("diameter", &self.value)?,
             },
@@ -82,6 +89,11 @@ impl DirectForm {
             DirectKind::Offset => {
                 crate::panels::num_field(ui, "Distance (mm)", &mut self.value);
                 ui.small("Moves the face along its outward normal (positive adds material). Every face next to it must be perpendicular to it (walls, or holes/bosses along its normal); refused when a neighbouring face would degenerate or the topology change. Editable and bindable afterwards as the parameter distance.");
+            }
+            DirectKind::Tilt => {
+                crate::panels::num_field(ui, "Tilt angle (deg)", &mut self.angle);
+                crate::panels::num_field(ui, "Offset after tilt (mm)", &mut self.value);
+                ui.small("Replaces the face by its plane tilted about the face frame's X axis through its centre (+ turns the frame's Y toward the normal), then moved along the tilted normal. Single convex loop with planar neighbours; refused when a neighbouring face would degenerate. Bindable afterwards as angle_deg and distance.");
             }
             DirectKind::Resize => {
                 crate::panels::num_field(ui, "New diameter (mm)", &mut self.value);
@@ -137,15 +149,32 @@ impl RcadApp {
                         format!("Planar {}", crate::face_role_label(&f.face.role)),
                     ));
                 }
+                if ui
+                    .button("Tilt face…")
+                    .on_hover_text("Replace this planar face by a tilted (and offset) plane (exact; planar neighbours)")
+                    .probe("Tilt face…")
+                    .clicked()
+                {
+                    let mut d = open(
+                        DirectKind::Tilt,
+                        "0".into(),
+                        format!("Planar {}", crate::face_role_label(&f.face.role)),
+                    );
+                    if let Dialog::DirectEdit(form) = &mut d {
+                        form.angle = "5".into();
+                    }
+                    self.dialog = Some(d);
+                }
             }
             DirectFace::Cylinder { radius, hole, .. } => {
                 let what = if hole { "hole" } else { "boss" };
                 let d = crate::params_ui::fmt_value(2.0 * radius);
                 ui.label(format!("Cylindrical {what} wall, Ø{d} mm"));
-                if                     ui.button("Resize hole…")
-                        .on_hover_text("Change the diameter of this hole or boss (exact)")
+                if ui
+                    .button("Resize hole…")
+                    .on_hover_text("Change the diameter of this hole or boss (exact)")
                     .probe("Resize hole…")
-                .clicked()
+                    .clicked()
                 {
                     self.dialog = Some(open(
                         DirectKind::Resize,
@@ -153,10 +182,11 @@ impl RcadApp {
                         format!("{what} Ø{d} mm ({})", crate::face_role_label(&f.face.role)),
                     ));
                 }
-                if                     ui.button("Remove hole")
-                        .on_hover_text("Delete this hole or boss and close the openings (exact)")
+                if ui
+                    .button("Remove hole")
+                    .on_hover_text("Delete this hole or boss and close the openings (exact)")
                     .probe("Remove hole")
-                .clicked()
+                    .clicked()
                 {
                     self.dialog = Some(open(
                         DirectKind::Remove,
@@ -167,9 +197,11 @@ impl RcadApp {
             }
             DirectFace::Other => {
                 ui.label(
-                    RichText::new("This face is neither planar nor a circular cylinder: no direct edits")
-                        .weak()
-                        .small(),
+                    RichText::new(
+                        "This face is neither planar nor a circular cylinder: no direct edits",
+                    )
+                    .weak()
+                    .small(),
                 );
             }
         }

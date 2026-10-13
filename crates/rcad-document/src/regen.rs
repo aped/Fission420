@@ -1039,8 +1039,23 @@ fn regen_impl(
                 })?;
                 let target = brep_target(&st, id, bid)?;
                 let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
-                let out =
-                    crate::direct::apply(id, face, *op, &target, last, st.face_ids.get(&bid))?;
+                let pivot = match face.role {
+                    FaceRole::Imported { face: index, .. } => st
+                        .imported_faces
+                        .get(&(face.feature, bid))
+                        .and_then(|t| t.iter().find(|f| f.index == index))
+                        .map(|f| f.frame),
+                    _ => None,
+                };
+                let out = crate::direct::apply(
+                    id,
+                    face,
+                    *op,
+                    &target,
+                    last,
+                    st.face_ids.get(&bid),
+                    pivot,
+                )?;
                 replace_body(&mut st, id, bid, out.body);
                 st.face_ids.insert(bid, out.ids);
                 if let (FaceRole::Imported { face: index, .. }, Some(t)) =
