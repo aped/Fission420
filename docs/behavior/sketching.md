@@ -134,6 +134,45 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
   `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
 
+## Sketch text — run 6
+
+A sketch can hold text items (`Sketch.texts`) next to its lines/arcs/circles. Each glyph contour
+is a closed loop of the sketch and takes part in region extraction like any other loop.
+
+* **Font.** A family name (`Liberation Sans`, case-insensitive, with bold/italic) is looked up in
+  the installed fonts (`RCAD_FONT_DIRS`, `~/.local/share/fonts`, `~/.fonts`,
+  `/usr/local/share/fonts`, `/usr/share/fonts`; no fontconfig), or an explicit font file path is
+  given. A missing family is an error, never a silent substitute. TrueType (quadratic) and CFF
+  (cubic) outlines are read with `ttf-parser`. Layout: one line, advance widths only (no kerning,
+  ligatures, complex-script shaping or right-to-left). Control characters (line breaks) and
+  characters the font has no glyph for are refused, naming them.
+* **Stored outlines.** The glyph outlines (exact Béziers in font units), pen positions, cap
+  height and the font's family/style/file name/FNV-1a 64 hash are stored in the document. Reload,
+  regeneration and placement edits never need the font. Changing the string or font needs it
+  installed; without it the edit is refused ("font not found") and the text is unchanged.
+* **Height = cap height.** `height` mm is the font's cap height (OS/2 `sCapHeight`, else the top
+  of `H`): a 10 mm `B8` has 10 mm tall capitals/digits. Anchor: `position` or a sketch point
+  (`anchor`, follows the solved point); `halign` Left/Center/Right of the total advance, `valign`
+  Baseline/Middle (half cap height)/Top (cap height); `rotation` radians CCW about the anchor.
+* **Geometry.** Contours become polygons within 0.01 mm of the font curves (docs/TOLERANCES.md);
+  the solids are exact extrusions of those polygons. Counters (holes of `B`, `8`, `O`, `A`) are
+  found by geometric containment, not by the font's winding: `B` is one region with two holes and
+  each counter is an island region. Text inside a rectangle gives the plate region (rectangle
+  minus glyph outlines), the glyph regions and the counter regions.
+* **Refusals.** Self-intersecting contours, contours that touch or cross other loops (overlapping
+  letters, overlapping contours in some variable fonts, text crossing a sketch line) make
+  `regions()` fail with the glyph named; such text can be moved or resized.
+* **Identity.** A glyph loop's identity is (text id, character position, contour index), so a
+  picked glyph region survives moves, height/rotation edits and solving, and string edits that
+  keep that character's position and contour count; changing `8` to `9` (two counters to one)
+  breaks references to that glyph region (`BrokenReference`, edit refused). Side faces of extruded
+  text are named per polygon edge and break when the edge count changes (e.g. a height edit).
+* API/commands: `Sketch::add_text` / `edit_text` / `remove_text` / `text_loops`,
+  `rcad_sketch::font`; commands `add_sketch_text`, `edit_sketch_text`, `remove_sketch_text`
+  (docs/COMMANDS.md). Tests: `crates/rcad-sketch/tests/text.rs`,
+  `crates/rcad-commands/tests/sketch_text.rs` (need the installed font Liberation Sans;
+  `RCAD_SKIP_FONT_TESTS=1` skips them explicitly).
+
 ## Offset (Offset tool, `O`) — run 4
 
 Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from

@@ -218,6 +218,33 @@ fn inside(x: [f64; 2], g: &[Prim]) -> bool {
     odd
 }
 
+/// Axis-aligned box `[xmin, ymin, xmax, ymax]` of a loop's primitives (arcs by
+/// their full circle), widened by `pad`.
+fn bbox(g: &[Prim], pad: f64) -> [f64; 4] {
+    let mut b = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    let mut add = |p: [f64; 2], r: f64| {
+        b[0] = b[0].min(p[0] - r);
+        b[1] = b[1].min(p[1] - r);
+        b[2] = b[2].max(p[0] + r);
+        b[3] = b[3].max(p[1] + r);
+    };
+    for x in g {
+        match *x {
+            Prim::Seg { a, b } => {
+                add(a, 0.0);
+                add(b, 0.0);
+            }
+            Prim::Arc { c, r, .. } => add(c, r),
+        }
+    }
+    [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]
+}
+
 /// The closed loops of a sketch (each with its generating entities), their
 /// boundary primitives, and the containing loop of each (`parent`: the
 /// smallest loop containing it, `None` at depth 0). Loops must be disjoint.
@@ -232,6 +259,7 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
     let tol = solve_tolerance(s.scale());
     // Extract each loop on its own: every other entity is masked as construction.
     let mut loops = Vec::with_capacity(groups.len());
+    let mut names: Vec<String> = Vec::with_capacity(groups.len());
     for g in groups {
         let mut sub = s.clone();
         sub.construction = s
@@ -246,17 +274,41 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
                 g.iter().map(|i| i.0).collect::<Vec<_>>()
             ))
         })?;
+        names.push(format!(
+            "loop {} (entities {:?})",
+            loops.len(),
+            g.iter().map(|i| i.0).collect::<Vec<_>>()
+        ));
         loops.push((p, ents));
     }
+    // Text glyph contours (run 6): closed polygons with synthetic edge ids.
+    for t in s.text_loops()? {
+        names.push(format!(
+            "text {} glyph '{}' (character {}) contour {}",
+            t.text,
+            t.ch,
+            t.glyph + 1,
+            t.contour
+        ));
+        loops.push((Profile::Polygon(t.polygon), t.edges));
+    }
     let geo: Vec<Vec<Prim>> = loops.iter().map(|(p, _)| prims(p)).collect();
+    // Bounding boxes (widened by tol): disjoint boxes cannot touch, and a loop
+    // can only contain loops whose box lies inside its own.
+    let boxes: Vec<[f64; 4]> = geo.iter().map(|g| bbox(g, tol)).collect();
     for i in 0..geo.len() {
         for j in (i + 1)..geo.len() {
+            let (a, b) = (boxes[i], boxes[j]);
+            if a[0] > b[2] || b[0] > a[2] || a[1] > b[3] || b[1] > a[3] {
+                continue;
+            }
             if geo[i]
                 .iter()
                 .any(|x| geo[j].iter().any(|y| touch(x, y, tol)))
             {
                 return Err(SketchError::UnsupportedProfile(format!(
-                    "loops {i} and {j} touch or cross; loops of one profile must be disjoint"
+                    "{} and {} touch or cross; loops of one profile must be disjoint",
+                    names[i], names[j]
                 )));
             }
         }
@@ -266,7 +318,15 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
         .map(|i| {
             let x = boundary_point(&geo[i]);
             (0..geo.len())
-                .filter(|&j| j != i && inside(x, &geo[j]))
+                .filter(|&j| {
+                    let (a, b) = (boxes[j], boxes[i]);
+                    j != i
+                        && a[0] <= b[0]
+                        && a[1] <= b[1]
+                        && a[2] >= b[2]
+                        && a[3] >= b[3]
+                        && inside(x, &geo[j])
+                })
                 .collect()
         })
         .collect();
@@ -299,8 +359,9 @@ pub struct RegionRef {
 
 impl RegionRef {
     fn of(outer: &[EntityId], holes: &[&[EntityId]]) -> Self {
+        // Text loops reduce to their contour id (the edge count is not identity).
         let sorted = |v: &[EntityId]| {
-            let mut v = v.to_vec();
+            let mut v: Vec<EntityId> = v.iter().map(|&e| crate::text::text_loop_key(e)).collect();
             v.sort();
             v.dedup();
             v
@@ -316,6 +377,9 @@ impl RegionRef {
     /// Short label, e.g. `E1-4 − E5-8` (entity ids of the outer loop, minus holes).
     pub fn label(&self) -> String {
         let ids = |v: &[EntityId]| {
+            if let Some((t, g, c, _)) = v.first().and_then(|e| crate::text::text_edge_parts(*e)) {
+                return format!("T{t}.{}.{c}", g + 1);
+            }
             let n: Vec<u32> = v.iter().map(|e| e.0).collect();
             let contiguous = n.windows(2).all(|w| w[1] == w[0] + 1);
             match (n.first(), n.last()) {
@@ -359,7 +423,7 @@ fn loop_area(p: &Profile) -> f64 {
 pub(crate) fn regions(s: &Sketch) -> Result<Vec<SketchRegion>, SketchError> {
     s.validate()?;
     let groups = groups(s);
-    if groups.is_empty() {
+    if groups.is_empty() && s.texts.is_empty() {
         // Same diagnostic as the single-profile extraction.
         crate::profile::extract_with_entities(s)?;
     }
@@ -458,7 +522,7 @@ pub(crate) fn extract_region(s: &Sketch) -> Result<Region, SketchError> {
     // `groups` indexes points by id: dangling references must be refused first.
     s.validate()?;
     let groups = groups(s);
-    if groups.len() <= 1 {
+    if groups.len() <= 1 && s.texts.is_empty() {
         let (outer, outer_entities) = crate::profile::extract_with_entities(s)?;
         return Ok(Region {
             outer,
@@ -467,6 +531,11 @@ pub(crate) fn extract_region(s: &Sketch) -> Result<Region, SketchError> {
         });
     }
     let l = analyse(s, &groups)?;
+    if l.loops.is_empty() {
+        return Err(SketchError::UnsupportedProfile(
+            "no closed loops (only text without outlines)".into(),
+        ));
+    }
     let depth = &l.depth;
     let outers: Vec<usize> = (0..l.geo.len()).filter(|&i| depth[i] == 0).collect();
     if outers.len() != 1 {

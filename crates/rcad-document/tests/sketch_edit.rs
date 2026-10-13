@@ -213,7 +213,7 @@ fn v1_file_migrates_to_bodies_saves_as_v3_and_reloads_equal() {
     let raw2: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     assert_eq!(raw2["version"], 4);
-    assert_eq!(FORMAT_VERSION, 5);
+    assert_eq!(FORMAT_VERSION, 6);
     let nf2 = load_file(&out).unwrap();
     assert_eq!(nf2.document, nf.document);
     let m2 = Model::from_document(nf2.document).unwrap();

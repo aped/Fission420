@@ -24,6 +24,15 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 | bytemuck | 1.25 | Zlib OR Apache-2.0 OR MIT | rcad-viewport |
 | image | 0.25.10 (`png`) | MIT OR Apache-2.0 | rcad (screenshots) |
 
+## Added during run 6
+
+| crate | version | license | source | used by |
+|---|---|---|---|---|
+| ttf-parser | 0.25.1 (default-features off, `std`) | MIT OR Apache-2.0 | https://github.com/harfbuzz/ttf-parser | rcad-sketch (sketch text: glyph outlines and font names of installed TrueType/OpenType fonts; pure Rust, no dependencies) |
+
+Sketch text reads fonts installed on the user's system (`/usr/share/fonts`, …); no font file is
+committed or shipped. The resolved glyph outlines are stored in the user's document.
+
 External tools used only for validation (not linked, not shipped): FreeCAD 1.1.4 flatpak (LGPL-2.1).
 Full transitive license audit: see `artifacts/licenses.txt` (generated) / section below.
 

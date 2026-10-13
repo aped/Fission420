@@ -961,6 +961,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 pt(0, 0.3, -0.2),
                 pt(1, 4.1, 1.7),
@@ -1067,6 +1068,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 pt(0, 0.4, -0.3),
                 pt(1, 9.1, 1.2),
@@ -1183,6 +1185,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 SketchPoint {
                     id: PointId(0),

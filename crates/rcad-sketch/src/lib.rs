@@ -19,10 +19,12 @@
 mod arc;
 mod edit;
 pub mod fillet;
+pub mod font;
 pub mod offset;
 mod profile;
 mod region;
 mod solver;
+pub mod text;
 
 pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
 pub use edit::{DragOutcome, DragResult, fmt_mm};
@@ -34,6 +36,7 @@ pub use fillet::FilletResult;
 pub use offset::{OffsetPair, OffsetResult, offset_profile};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
+pub use text::{FontSpec, HAlign, SketchText, TextLoop, TextSpec, VAlign};
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -328,6 +331,13 @@ pub enum SketchError {
     /// radius beyond [`MAX_ARC_RADIUS_RATIO`] × chord).
     #[error("degenerate arc: {0}")]
     DegenerateArc(String),
+    /// Sketch text: the requested font is not installed or cannot be read
+    /// (run 6). Stored text keeps its outlines; only re-resolving needs it.
+    #[error("font not found: {0}")]
+    FontNotFound(String),
+    /// Sketch text: invalid string/height or an unusable font (run 6).
+    #[error("text: {0}")]
+    Text(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -349,6 +359,10 @@ pub struct Sketch {
     /// Only raised by [`Sketch::remove_entity`]; absent (0) otherwise.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retired_entity_ids: u32,
+    /// Text items (run 6, [`text`]): their glyph outlines are profile loops.
+    /// Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<SketchText>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -507,6 +521,7 @@ impl Sketch {
             origin: None,
             construction: BTreeSet::new(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 p(0, 0.0, 0.0),
                 p(1, -hw, -hh),
@@ -553,6 +568,7 @@ impl Sketch {
             origin: None,
             construction: BTreeSet::new(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 SketchPoint {
                     id: PointId(0),
@@ -824,6 +840,7 @@ impl Sketch {
         if let Some(c) = self.construction.iter().find(|c| !kinds.contains_key(c)) {
             return Err(SketchError::MissingEntity(*c));
         }
+        text::validate_texts(self)?;
         let unknowns = self.unknown_count();
         if unknowns > MAX_UNKNOWNS {
             return Err(SketchError::TooLarge {
@@ -861,6 +878,10 @@ impl Sketch {
             if let Constraint::FixedPoint { x, y, .. } = c {
                 s = s.max(x.abs()).max(y.abs());
             }
+        }
+        for t in &self.texts {
+            let p = t.spec.position;
+            s = s.max(p[0].abs()).max(p[1].abs()).max(t.spec.height.abs());
         }
         if s.is_finite() { s } else { 1.0 }
     }

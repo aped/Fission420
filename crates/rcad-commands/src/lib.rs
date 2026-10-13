@@ -248,6 +248,27 @@ pub enum Command {
         feature: FeatureId,
         sketch: Sketch,
     },
+    /// Add a text item to a sketch (run 6, docs/behavior/sketching.md "Sketch
+    /// text"): the font is resolved now from the installed fonts and the glyph
+    /// outlines are stored in the document. One undoable step. The response's
+    /// `text` is the new text id.
+    AddSketchText {
+        feature: FeatureId,
+        text: rcad_sketch::TextSpec,
+    },
+    /// Change a text item. A new string or font re-resolves the outlines and
+    /// needs the font installed (refused otherwise, nothing changes); height,
+    /// position, anchor, rotation and alignment edits reuse the stored outlines.
+    EditSketchText {
+        feature: FeatureId,
+        id: u32,
+        text: rcad_sketch::TextSpec,
+    },
+    /// Remove a text item from a sketch.
+    RemoveSketchText {
+        feature: FeatureId,
+        id: u32,
+    },
     RenameFeature {
         feature: FeatureId,
         name: String,
@@ -442,6 +463,9 @@ impl Command {
             Command::DeleteUserParameter { .. } => "delete_user_parameter",
             Command::SetExpression { .. } => "set_expression",
             Command::EditSketch { .. } => "edit_sketch",
+            Command::AddSketchText { .. } => "add_sketch_text",
+            Command::EditSketchText { .. } => "edit_sketch_text",
+            Command::RemoveSketchText { .. } => "remove_sketch_text",
             Command::RenameFeature { .. } => "rename_feature",
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
@@ -652,6 +676,9 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// `add_sketch_text`: the new text item's id (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<u32>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1472,6 +1499,45 @@ impl Session {
                     if src.is_empty() { "(unbound)" } else { &src },
                     v.map(|v| format!(" = {v}")).unwrap_or_default()
                 ));
+            }
+            Command::AddSketchText { feature, text } => {
+                let mut s = self.stored_sketch(*feature)?;
+                let id = s.add_text(text.clone()).map_err(sketch_err)?;
+                self.run(
+                    &Command::EditSketch {
+                        feature: *feature,
+                        sketch: s,
+                    },
+                    r,
+                )?;
+                r.text = Some(id);
+            }
+            Command::EditSketchText { feature, id, text } => {
+                let mut s = self.stored_sketch(*feature)?;
+                s.edit_text(*id, text.clone()).map_err(sketch_err)?;
+                self.run(
+                    &Command::EditSketch {
+                        feature: *feature,
+                        sketch: s,
+                    },
+                    r,
+                )?;
+                r.text = Some(*id);
+            }
+            Command::RemoveSketchText { feature, id } => {
+                let mut s = self.stored_sketch(*feature)?;
+                if !s.remove_text(*id) {
+                    return Err(DocError::Validation(format!(
+                        "sketch {feature} has no text {id}"
+                    )));
+                }
+                self.run(
+                    &Command::EditSketch {
+                        feature: *feature,
+                        sketch: s,
+                    },
+                    r,
+                )?;
             }
             Command::EditSketch { feature, sketch } => {
                 let (feature, new) = (*feature, solved(sketch.clone())?);
@@ -2400,6 +2466,24 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
 /// Entity ids are persistent names (face references use them, ADR 0003): an
 /// edit may keep, remove or add entities, but must not give an existing or
 /// removed id to different geometry. Ids removed by the edit are retired.
+fn sketch_err(e: rcad_sketch::SketchError) -> DocError {
+    DocError::Validation(e.to_string())
+}
+
+impl Session {
+    /// A copy of sketch feature `feature`'s stored definition.
+    fn stored_sketch(&self, feature: FeatureId) -> Result<Sketch, DocError> {
+        let m = self
+            .model
+            .as_ref()
+            .ok_or_else(|| DocError::Validation("no document is open".into()))?;
+        match &m.document().feature(feature)?.kind {
+            FeatureKind::Sketch { sketch, .. } => Ok(sketch.clone()),
+            _ => Err(DocError::Validation(format!("{feature} is not a sketch"))),
+        }
+    }
+}
+
 fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
     use rcad_sketch::Entity;
     // An entity keeps its identity when its endpoints change (the editor can

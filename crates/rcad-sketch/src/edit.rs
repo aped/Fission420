@@ -209,6 +209,17 @@ impl Sketch {
         dead.extend(candidates.difference(&alive).copied());
         self.constraints
             .retain(|c| !constraint_points(c).iter().any(|p| dead.contains(p)));
+        // Text anchored to a removed point stays where it is, unbound.
+        for i in 0..self.texts.len() {
+            if let Some(p) = self.texts[i].spec.anchor
+                && dead.contains(&p)
+            {
+                if let Some(xy) = self.point_xy(p) {
+                    self.texts[i].spec.position = xy;
+                }
+                self.texts[i].spec.anchor = None;
+            }
+        }
         self.points.retain(|q| !dead.contains(&q.id));
         true
     }
