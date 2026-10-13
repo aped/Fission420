@@ -82,7 +82,12 @@ pub fn font_dirs() -> Vec<PathBuf> {
     // Windows: per-user fonts, then the system Fonts folder.
     if cfg!(windows) {
         if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-            v.push(PathBuf::from(l).join("Microsoft").join("Windows").join("Fonts"));
+            v.push(
+                PathBuf::from(l)
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Fonts"),
+            );
         }
         let win = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
         v.push(PathBuf::from(win).join("Fonts"));

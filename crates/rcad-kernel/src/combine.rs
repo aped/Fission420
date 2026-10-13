@@ -10,7 +10,8 @@
 //!   tessellations (generalized winding number) must equal its state in the result.
 //!   Samples closer than [`CombineCheck::skip_distance`] to any input surface are
 //!   skipped (the result's surface lies on the inputs' surfaces, and a tessellation
-//!   only classifies points farther than its chord reliably);
+//!   only classifies points farther than its chord reliably). A sample the inputs
+//!   classify but the result does not (winding neither 0 nor 1) is a mismatch;
 //! * volume: the result's measured volume must agree with the grid estimate of the
 //!   expected region within the grid's stated resolution
 //!   ([`CombineCheck::volume_tolerance`]).
@@ -449,7 +450,11 @@ fn check_combine(
             CombineOp::Cut => a && !ins.iter().any(|&x| x),
             CombineOp::Intersect => a && ins.iter().all(|&x| x),
         };
-        Some((want, inside(&mo, p)?))
+        // Review run 6 #18b: the result's surface lies on the inputs'
+        // surfaces, so away from them its winding must be a clean 0 or 1. An
+        // unclassifiable result there (a spurious internal face, a gap)
+        // counts as a mismatch rather than a skipped sample.
+        Some((want, inside(&mo, p).unwrap_or(!want)))
     };
     let results: Vec<Option<(bool, bool)>> = guarded("combine check", || {
         let chunks = std::thread::available_parallelism()
@@ -531,5 +536,39 @@ mod tests {
         assert!((d([0.5, -2.0, 0.0]) - 2.0).abs() < 1e-15); // edge ab
         assert!((d([1.0, 1.0, 0.0]) - 0.5f64.sqrt()).abs() < 1e-15); // edge bc
         assert!((d([3.0, 0.0, 4.0]) - 20f64.sqrt()).abs() < 1e-12); // vertex b
+    }
+
+    /// Review run 6 #18b: a "join" result with an extra internal shell (a
+    /// box inside the overlap) has winding 2 inside it, away from every
+    /// input surface. Those samples used to be skipped and the result passed;
+    /// they are mismatches.
+    #[test]
+    fn unclassifiable_result_samples_are_mismatches() {
+        let boxed = |x0: f64, y0: f64, z0: f64| {
+            let p = crate::Profile::Polygon(vec![
+                [x0, y0],
+                [x0 + 40.0, y0],
+                [x0 + 40.0, y0 + 30.0],
+                [x0, y0 + 30.0],
+            ]);
+            crate::extrude(&p, &crate::Frame::XY.offset(z0), 20.0).unwrap()
+        };
+        let a = boxed(0.0, 0.0, 0.0);
+        let b = boxed(20.0, 10.0, 5.0);
+        let join = boolean(&a, &b, BoolOp::Join).unwrap();
+        // A separate closed shell strictly inside the overlap (x 20..40,
+        // y 10..30, z 5..20), away from every input surface.
+        let p =
+            crate::Profile::Polygon(vec![[25.0, 15.0], [35.0, 15.0], [35.0, 25.0], [25.0, 25.0]]);
+        let inter = crate::extrude(&p, &crate::Frame::XY.offset(8.0), 9.0).unwrap();
+        let good = verify_boolean_by_membership(&a, &b, &join, BoolOp::Join, 12).unwrap();
+        assert!(good.passed(), "{good:?}");
+        let mut shells = join.solid.boundaries().clone();
+        shells.extend(inter.solid.boundaries().iter().cloned());
+        let bad = Body {
+            solid: crate::Solid::new(shells),
+        };
+        let rep = verify_boolean_by_membership(&a, &b, &bad, BoolOp::Join, 12).unwrap();
+        assert!(rep.mismatches > 0 && !rep.passed(), "{rep:?}");
     }
 }
