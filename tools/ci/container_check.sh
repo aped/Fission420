@@ -19,7 +19,7 @@ exec podman run --rm --memory "${CI_MEMORY:-12g}" \
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-  ca-certificates curl git build-essential pkg-config liblzma-dev >/dev/null
+  ca-certificates curl git build-essential pkg-config liblzma-dev fonts-liberation >/dev/null
 export CARGO_HOME=/cache/cargo RUSTUP_HOME=/cache/rustup CARGO_TARGET_DIR=/cache/target
 export PATH=/cache/cargo/bin:$PATH CARGO_TERM_COLOR=never CARGO_INCREMENTAL=0 RUST_BACKTRACE=1
 [ -x /cache/cargo/bin/rustup ] || curl -sSf https://sh.rustup.rs |
