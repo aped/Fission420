@@ -30,7 +30,7 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// stays v4, byte for byte as before, so older builds keep reading it and
 /// refuse (rather than misread) a v5 file.
 /// v6 (run 6): sketch text (`Sketch::texts`, stored glyph outlines); see
-/// [`sketch_text_v6_feature`]. Written only when used.
+/// [`sketch_v6_feature`]. Written only when used.
 pub const FORMAT_VERSION: u32 = 6;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
@@ -165,20 +165,37 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
         .and_then(scan)
 }
 
-/// Sketch text (run 6): a sketch with text items needs format v6 (a run-5
-/// build would silently drop the unknown `texts` field). Separate from the
-/// other v6 checks so it can be folded into `v6_feature`.
-pub fn sketch_text_v6_feature(doc: &Document) -> Option<&'static str> {
-    doc.features
-        .iter()
-        .any(|f| matches!(&f.kind, crate::FeatureKind::Sketch { sketch, .. } if !sketch.texts.is_empty()))
-        .then_some("sketch text")
+/// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and
+/// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
+/// a run-5 build would silently drop unknown fields or refuse with a misleading
+/// message. Separate from the other v6 checks so it can be folded into
+/// `v6_feature`.
+pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
+    let sketches = doc.features.iter().filter_map(|f| match &f.kind {
+        crate::FeatureKind::Sketch { sketch, .. } => Some(sketch),
+        _ => None,
+    });
+    for s in sketches {
+        if !s.texts.is_empty() {
+            return Some("sketch text");
+        }
+        if s.constraints.iter().any(|c| {
+            matches!(
+                c,
+                rcad_sketch::Constraint::PatternStep { .. }
+                    | rcad_sketch::Constraint::PatternRotate { .. }
+            )
+        }) {
+            return Some("sketch patterns");
+        }
+    }
+    None
 }
 
 /// The oldest format version that can hold `doc`: 6 for a run-6 feature, 5
 /// for a run-5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if sketch_text_v6_feature(doc).is_some() {
+    if sketch_v6_feature(doc).is_some() {
         6
     } else if v5_feature(doc).is_some() {
         5
@@ -312,7 +329,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         )));
     }
     if nf.version < 6
-        && let Some(what) = sketch_text_v6_feature(&nf.document)
+        && let Some(what) = sketch_v6_feature(&nf.document)
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v6 feature)",

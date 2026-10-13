@@ -580,6 +580,9 @@ impl RcadApp {
                 }
                 ui.separator();
                 // Constraint actions live in the inspector ("Constrain selection").
+                if action(ui, "Pattern…", ed.pattern_disabled_reason()) {
+                    ed.begin_pattern();
+                }
                 if action(ui, "Construction", ed.construction_disabled_reason()) {
                     ed.toggle_construction();
                 }

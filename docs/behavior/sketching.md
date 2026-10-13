@@ -193,6 +193,31 @@ geometry (`crates/rcad-sketch/src/shapes.rs`).
   (centre and rotation). Areas (N/2)R² sin(2π/N) and N a² tan(π/N) are checked in the tests.
 * Center rectangle already existed (Center Rect tool, run 2).
 
+## Sketch patterns (Pattern… action) — run 6
+
+Select curves (lines, arcs, circles) and press **Pattern…** in the sketch toolbar: *Rectangular*
+(instances and a step vector, optionally a second direction for a grid) or *Circular* (instances,
+angle between instances, centre; the origin when the centre is (0, 0)). The copies are ordinary
+geometry tied to their sources (`crates/rcad-sketch/src/pattern.rs`):
+
+* `PatternStep {from, to, a, b, k}`: `to − from = k (b − a)`; the step is a construction line
+  from the first source point whose length is the `pattern_spacing` dimension (its direction is
+  1 free DOF: constrain it horizontal/vertical). Grid copies chain from the first direction.
+* `PatternRotate {from, to, center, k, dim}`: `to = c + R(k θ)(from − c)`, θ = `pattern_angle`
+  degrees (0 < θ < 360); all copies of one pattern share the one dimension (listed once, edited
+  together; a feature parameter like any dimension).
+* Copies are exact rigid images, so source constraints are not duplicated; circles copy their
+  radius with `EqualRadius`. A copied arc would get one equation too many (the arc implies equal
+  radii), so one of its exclusive points (the centre when possible) is tied along one axis only,
+  chosen per copy where that equation is best conditioned. Copies follow source edits
+  (dimension, drag); a pattern whose copies would overlap fails region extraction like any
+  overlapping geometry, and a document edit causing it is refused (transaction).
+* Changing the count means deleting the copies and patterning again (no count parameter).
+* A sketch with pattern constraints is saved as format v6. Tests: `pattern.rs` unit tests (DOF,
+  no redundancy, spacing/angle edits, per-copy axis choice at 90°),
+  `crates/rcad-commands/tests/sketch_patterns.rs` (bolt circle, analytic volume, v6, parameter
+  edit and refused overlap), `crates/rcad/tests/sketch_pattern_ui.rs` (dialog).
+
 ## Offset (Offset tool, `O`) — run 4
 
 Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from

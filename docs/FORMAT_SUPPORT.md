@@ -229,9 +229,9 @@ documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/
 re-save as an identical v4 document).
 
 **v6 (run 6)** = v5 plus sketch text (`Sketch.texts`: string, font request, placement and the
-resolved glyph outlines with the font's file name and FNV-1a 64 content hash). Written only when
-a sketch has text (`io.rs::sketch_text_v6_feature`); a file labelled v5 or older that contains
-sketch text is refused. Loading and regenerating never needs the font (the stored outlines are
+resolved glyph outlines with the font's file name and FNV-1a 64 content hash) and sketch pattern
+constraints (`PatternStep`, `PatternRotate`). Written only when a sketch uses one of them
+(`io.rs::sketch_v6_feature`); a file labelled v5 or older that contains them is refused. Loading and regenerating never needs the font (the stored outlines are
 authoritative); only changing a text's string or font does.
 
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before

@@ -107,3 +107,7 @@ be interrupted and still completes, and Undo removes it in one step.
   previews follow the cursor. Both create constrained, dimensioned ordinary geometry
   (docs/behavior/sketching.md "Slot and regular polygon"). UI test
   `crates/rcad/tests/sketch_shapes_ui.rs`.
+* **Pattern… (sketch toolbar):** enabled when curves are selected; dialog *Rectangular* /
+  *Circular*, *Instances*, *Step x/y (mm)* (+ *Second direction*), or *Angle between (°)* and
+  *Centre x/y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
+  the spacing/angle become dimensions. UI test `crates/rcad/tests/sketch_pattern_ui.rs`.

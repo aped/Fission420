@@ -268,6 +268,27 @@ pub struct TextEdit {
     pub anchor: Option<PointId>,
 }
 
+/// Open sketch pattern dialog (run 6): the selected entities and the typed
+/// fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternEdit {
+    pub entities: Vec<EntityId>,
+    pub circular: bool,
+    /// Linear: instances and step (mm) of direction 1, optional direction 2.
+    pub count: String,
+    pub dx: String,
+    pub dy: String,
+    pub two_directions: bool,
+    pub count2: String,
+    pub dx2: String,
+    pub dy2: String,
+    /// Circular: instances, angle between them (degrees), centre (origin or x/y).
+    pub ccount: String,
+    pub angle: String,
+    pub cx: String,
+    pub cy: String,
+}
+
 /// Default font family of new text (installed on Fedora/Bazzite by default).
 pub const DEFAULT_TEXT_FAMILY: &str = "Liberation Sans";
 
@@ -318,6 +339,8 @@ pub struct SketchEditor {
     pub fillet_edit: Option<FilletEdit>,
     /// Text tool: text dialog open.
     pub text_edit: Option<TextEdit>,
+    /// Pattern dialog open (selected entities).
+    pub pattern_edit: Option<PatternEdit>,
     /// Polygon tool: number of sides (3..=64).
     pub polygon_sides: usize,
     /// Polygon tool: size convention.
@@ -591,6 +614,7 @@ impl SketchEditor {
             offset_edit: None,
             fillet_edit: None,
             text_edit: None,
+            pattern_edit: None,
             polygon_sides: 6,
             polygon_fit: rcad_sketch::PolygonFit::Inscribed,
             feedback: None,
@@ -1023,6 +1047,7 @@ impl SketchEditor {
         if self.offset_edit.take().is_some()
             || self.fillet_edit.take().is_some()
             || self.text_edit.take().is_some()
+            || self.pattern_edit.take().is_some()
         {
             return true;
         }
@@ -2560,7 +2585,7 @@ impl SketchEditor {
         });
     }
 
-    fn selected_entities(&self) -> Vec<EntityId> {
+    pub fn selected_entities(&self) -> Vec<EntityId> {
         self.selection
             .iter()
             .filter_map(|i| match i {
@@ -3177,6 +3202,113 @@ fn line_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
         return dist(p, a);
     }
     ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])).abs() / l
+}
+
+/// Sketch patterns (run 6): rectangular / circular constrained copies.
+impl SketchEditor {
+    pub fn pattern_disabled_reason(&self) -> Option<&'static str> {
+        self.selected_entities()
+            .is_empty()
+            .then_some("Select the lines, arcs or circles to pattern first")
+    }
+
+    /// Open the pattern dialog on the selected curves.
+    pub fn begin_pattern(&mut self) {
+        let entities = self.selected_entities();
+        if entities.is_empty() {
+            return;
+        }
+        self.pattern_edit = Some(PatternEdit {
+            entities,
+            circular: false,
+            count: "3".into(),
+            dx: "10".into(),
+            dy: "0".into(),
+            two_directions: false,
+            count2: "2".into(),
+            dx2: "0".into(),
+            dy2: "10".into(),
+            ccount: "6".into(),
+            angle: "60".into(),
+            cx: "0".into(),
+            cy: "0".into(),
+        });
+    }
+
+    /// Apply the dialog (one undo step); a refusal keeps it open with the reason.
+    pub fn apply_pattern(&mut self) -> bool {
+        let Some(p) = self.pattern_edit.clone() else {
+            return false;
+        };
+        let num = |v: &str, what: &str| -> Result<f64, String> {
+            let t = v
+                .trim()
+                .trim_end_matches("mm")
+                .trim_end_matches('°')
+                .trim()
+                .replace('−', "-");
+            t.parse::<f64>()
+                .ok()
+                .filter(|x| x.is_finite())
+                .ok_or(format!("'{v}' is not a number ({what})"))
+        };
+        let count = |v: &str| -> Result<usize, String> {
+            v.trim()
+                .parse::<usize>()
+                .map_err(|_| format!("'{v}' is not a whole number of instances"))
+        };
+        let parsed: Result<_, String> = (|| {
+            if p.circular {
+                Ok((
+                    true,
+                    vec![],
+                    count(&p.ccount)?,
+                    num(&p.angle, "angle")?,
+                    [num(&p.cx, "centre x")?, num(&p.cy, "centre y")?],
+                ))
+            } else {
+                let mut steps = vec![(
+                    [num(&p.dx, "step x")?, num(&p.dy, "step y")?],
+                    count(&p.count)?,
+                )];
+                if p.two_directions {
+                    steps.push((
+                        [num(&p.dx2, "step 2 x")?, num(&p.dy2, "step 2 y")?],
+                        count(&p.count2)?,
+                    ));
+                }
+                Ok((false, steps, 0, 0.0, [0.0, 0.0]))
+            }
+        })();
+        let (circular, steps, n, angle, c) = match parsed {
+            Ok(v) => v,
+            Err(m) => {
+                self.fail(m);
+                return false;
+            }
+        };
+        let mut names = vec![];
+        let ok = self.try_change(true, |sk| {
+            let r = if circular {
+                // The origin when the centre is (0, 0) and the sketch has one.
+                let center = sk.origin.filter(|o| sk.point_xy(*o) == Some(c));
+                sk.pattern_circular(&p.entities, center, c, n, angle)
+            } else {
+                sk.pattern_linear(&p.entities, &steps)
+            }
+            .map_err(|e| format!("Pattern refused: {e}"))?;
+            names = r.dimensions;
+            Ok(())
+        });
+        if ok {
+            self.pattern_edit = None;
+            self.info(format!(
+                "Pattern added; edit {} to move the copies (copies follow their sources).",
+                names.join(", ")
+            ));
+        }
+        ok
+    }
 }
 
 #[cfg(test)]

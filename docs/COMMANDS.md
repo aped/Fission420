@@ -137,7 +137,9 @@ docs/behavior/sketching.md "Offset"), `PointOnCircle` (`{point, circle}`, run 4)
 one of them); dimensions carry `{"name", "value"}`, names unique per sketch), optional `origin`
 (the point fixed at (0, 0)), optional `construction` (array of entity ids: construction geometry,
 solved and constrained like any entity but ignored by profile extraction, so a construction
-centre line or reference circle does not break the profile; omitted when empty), optional
+centre line or reference circle does not break the profile; omitted when empty), constraints
+`PatternStep` (`{from, to, a, b, k, axis?}`) / `PatternRotate` (`{from, to, center, k, dim,
+axis?}`) (run 6, sketch patterns, docs/behavior/sketching.md), optional
 `texts` (run 6, omitted when empty): `{id, text, font: {family, bold?, italic?, path?}, height,
 position: [x, y], anchor?: point id, rotation (rad), halign: "Left"|"Center"|"Right", valign:
 "Baseline"|"Middle"|"Top", resolved: {font: {family, style, file, index, hash, units_per_em,

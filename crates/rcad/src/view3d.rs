@@ -429,6 +429,7 @@ impl RcadApp {
             self.sketch_fillet_input(ui);
             if let Some(s) = self.sketch.as_mut() {
                 crate::text_ui::text_window(ui.ctx(), &mut s.editor);
+                crate::pattern_ui::pattern_window(ui.ctx(), &mut s.editor);
             }
         } else {
             self.model_input(ui, &resp);

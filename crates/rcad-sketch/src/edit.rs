@@ -275,6 +275,18 @@ impl Sketch {
                 format!("{} (diameter of C{})", dim(d), circle.0)
             }
             Constraint::Coincident { a, b } => format!("Coincident {} · {}", p(a), p(b)),
+            Constraint::PatternStep { from, to, k, .. } => {
+                format!("Pattern copy {} of {} (step {k})", p(to), p(from))
+            }
+            Constraint::PatternRotate {
+                from, to, k, dim, ..
+            } => format!(
+                "{} = {}° (pattern copy {} of {}, step {k})",
+                dim.name,
+                fmt_mm(dim.value),
+                p(to),
+                p(from)
+            ),
             Constraint::Radius { entity, dim: d } => {
                 let prefix = match self.entity(*entity) {
                     Some(Entity::Circle { .. }) => "C",
@@ -475,6 +487,10 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => vec![*a, *b],
         Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
+        Constraint::PatternStep { from, to, a, b, .. } => vec![*from, *to, *a, *b],
+        Constraint::PatternRotate {
+            from, to, center, ..
+        } => vec![*from, *to, *center],
         Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
             vec![*point]
         }
