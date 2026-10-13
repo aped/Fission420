@@ -217,6 +217,23 @@ pub fn paint_sketch(
         };
         fade(c, st.alpha)
     };
+    // Text outlines (run 6): the flattened glyph contours that become profile
+    // loops; a text whose outlines cannot be placed is skipped (its error is
+    // reported by the region/profile status).
+    for t in &s.texts {
+        let Ok(polys) = t.polylines(s) else {
+            continue;
+        };
+        for (_, _, v) in polys {
+            let pts: Option<Vec<Pos2>> = v.iter().map(|p| pr.screen(*p)).collect();
+            if let Some(pts) = pts {
+                painter.add(egui::Shape::closed_line(
+                    pts,
+                    Stroke::new(1.5, fade(base, st.alpha)),
+                ));
+            }
+        }
+    }
     // Curves.
     for e in &s.entities {
         let item = Item::Entity(e.id());
@@ -852,7 +869,8 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
             | SketchTool::Trim
             | SketchTool::Extend
             | SketchTool::Offset
-            | SketchTool::Fillet => {}
+            | SketchTool::Fillet
+            | SketchTool::Text => {}
         }
     }
 }

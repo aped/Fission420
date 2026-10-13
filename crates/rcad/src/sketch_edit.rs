@@ -52,6 +52,8 @@ pub enum SketchTool {
     /// SKETCH corner fillet: round the corner where two lines (or a line and an
     /// arc) meet.
     Fillet,
+    /// Sketch text (run 6): click to place (or click a text to edit it).
+    Text,
 }
 
 impl SketchTool {
@@ -68,6 +70,7 @@ impl SketchTool {
             SketchTool::Extend => "Extend",
             SketchTool::Offset => "Offset",
             SketchTool::Fillet => "Fillet",
+            SketchTool::Text => "Text",
         }
     }
 
@@ -84,6 +87,7 @@ impl SketchTool {
             SketchTool::Extend => "E",
             SketchTool::Offset => "O",
             SketchTool::Fillet => "toolbar",
+            SketchTool::Text => "toolbar",
         }
     }
 
@@ -120,6 +124,11 @@ impl SketchTool {
                  arc) meet, type the radius, Enter: both curves are trimmed and a tangent arc \
                  with an editable radius dimension is added (2D sketch only; solid edges cannot \
                  be filleted) · Esc cancels"
+            }
+            SketchTool::Text => {
+                "Click to place text (on a point: the text follows it), or click a text to edit \
+                 it · set string, font, height (cap height, mm), rotation and alignment, then \
+                 Apply · glyph outlines become profile regions (counters are holes) · Esc cancels"
             }
             SketchTool::Offset => {
                 "Click a curve of a closed loop, type the distance (+ outward, − inward), Enter: adds the \
@@ -216,6 +225,28 @@ pub struct FilletEdit {
     pub buffer: String,
 }
 
+/// Open text dialog of the Text tool (run 6): a new text (`id` None) or an
+/// existing one, with the editable fields as typed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextEdit {
+    pub id: Option<u32>,
+    pub text: String,
+    pub family: String,
+    pub bold: bool,
+    pub italic: bool,
+    /// Cap height, mm (as typed).
+    pub height: String,
+    /// Degrees counter-clockwise (as typed).
+    pub rotation: String,
+    pub halign: rcad_sketch::HAlign,
+    pub valign: rcad_sketch::VAlign,
+    pub position: [f64; 2],
+    pub anchor: Option<PointId>,
+}
+
+/// Default font family of new text (installed on Fedora/Bazzite by default).
+pub const DEFAULT_TEXT_FAMILY: &str = "Liberation Sans";
+
 /// Open offset entry: the loop (through `entity`) and the typed distance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OffsetEdit {
@@ -261,6 +292,8 @@ pub struct SketchEditor {
     pub offset_edit: Option<OffsetEdit>,
     /// Fillet tool: corner picked, radius being typed.
     pub fillet_edit: Option<FilletEdit>,
+    /// Text tool: text dialog open.
+    pub text_edit: Option<TextEdit>,
     pub feedback: Option<Feedback>,
     undo: Vec<Sketch>,
     redo: Vec<Sketch>,
@@ -529,6 +562,7 @@ impl SketchEditor {
             dim_edit: None,
             offset_edit: None,
             fillet_edit: None,
+            text_edit: None,
             feedback: None,
             undo: vec![],
             redo: vec![],
@@ -931,7 +965,10 @@ impl SketchEditor {
     /// Escape cascade: inline edit → active gesture → tool. Returns true if
     /// something was cancelled (false = nothing left to cancel in the editor).
     pub fn escape(&mut self) -> bool {
-        if self.offset_edit.take().is_some() || self.fillet_edit.take().is_some() {
+        if self.offset_edit.take().is_some()
+            || self.fillet_edit.take().is_some()
+            || self.text_edit.take().is_some()
+        {
             return true;
         }
         if self.dim_edit.is_some() {
@@ -1143,6 +1180,7 @@ impl SketchEditor {
             SketchTool::Extend => self.extend_click(pos, screen, view),
             SketchTool::Offset => self.offset_click(pos, screen, view),
             SketchTool::Fillet => self.fillet_click(pos, screen, view),
+            SketchTool::Text => self.text_click(pos, view),
         }
     }
 
@@ -1336,6 +1374,12 @@ impl SketchEditor {
 
     /// Double click: edit a dimension under the cursor.
     pub fn double_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if self.pick(pos, screen, view).is_none()
+            && let Some(id) = self.text_at(pos, view)
+        {
+            self.begin_text_edit(id);
+            return;
+        }
         if let Some(Item::Constraint(i)) = self.pick(pos, screen, view)
             && self
                 .sketch
@@ -2745,6 +2789,198 @@ impl SketchEditor {
             self.selection = kept;
         }
     }
+}
+
+/// Sketch text (run 6): the Text tool and its dialog state.
+impl SketchEditor {
+    /// The text whose outline box (widened by the pick tolerance) contains `pos`.
+    pub fn text_at(&self, pos: [f64; 2], view: &View) -> Option<u32> {
+        let pad = view.mm(PICK_PX);
+        self.sketch.texts.iter().rev().find_map(|t| {
+            let polys = t.polylines(&self.sketch).ok()?;
+            let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+            for (_, _, v) in &polys {
+                for p in v {
+                    b = [
+                        b[0].min(p[0]),
+                        b[1].min(p[1]),
+                        b[2].max(p[0]),
+                        b[3].max(p[1]),
+                    ];
+                }
+            }
+            (pos[0] >= b[0] - pad
+                && pos[0] <= b[2] + pad
+                && pos[1] >= b[1] - pad
+                && pos[1] <= b[3] + pad)
+                .then_some(t.id)
+        })
+    }
+
+    fn text_click(&mut self, pos: [f64; 2], view: &View) {
+        if let Some(id) = self.text_at(pos, view) {
+            self.begin_text_edit(id);
+            return;
+        }
+        let s = self.snap(pos, None, None, view);
+        let anchor = match s.kind {
+            SnapKind::Point(p) => Some(p),
+            _ => None,
+        };
+        let (family, height) = self
+            .text_edit
+            .as_ref()
+            .map(|t| (t.family.clone(), t.height.clone()))
+            .unwrap_or_else(|| (DEFAULT_TEXT_FAMILY.to_string(), "5".to_string()));
+        self.text_edit = Some(TextEdit {
+            id: None,
+            text: "Text".into(),
+            family,
+            bold: false,
+            italic: false,
+            height,
+            rotation: "0".into(),
+            halign: rcad_sketch::HAlign::Left,
+            valign: rcad_sketch::VAlign::Baseline,
+            position: s.pos,
+            anchor,
+        });
+        self.info(
+            "Type the text, font and height (cap height, mm), then Apply. Glyph outlines become \
+             profile regions."
+                .into(),
+        );
+    }
+
+    /// Open the dialog on existing text `id`.
+    pub fn begin_text_edit(&mut self, id: u32) {
+        let Some(t) = self.sketch.text_item(id) else {
+            return;
+        };
+        let sp = &t.spec;
+        self.text_edit = Some(TextEdit {
+            id: Some(id),
+            text: sp.text.clone(),
+            family: sp.font.family.clone(),
+            bold: sp.font.bold,
+            italic: sp.font.italic,
+            height: fmt_num(sp.height),
+            rotation: fmt_num(sp.rotation.to_degrees()),
+            halign: sp.halign,
+            valign: sp.valign,
+            position: sp.position,
+            anchor: sp.anchor,
+        });
+    }
+
+    /// The typed fields as a text specification, or why they are invalid.
+    #[allow(clippy::type_complexity)]
+    pub fn text_spec(&self) -> Option<Result<(Option<u32>, rcad_sketch::TextSpec), String>> {
+        let t = self.text_edit.as_ref()?;
+        let num = |v: &str| {
+            v.trim()
+                .trim_end_matches("mm")
+                .trim_end_matches('°')
+                .trim()
+                .replace('−', "-")
+                .parse::<f64>()
+        };
+        let height = match num(&t.height) {
+            Ok(h) if h.is_finite() && h > 0.0 => h,
+            _ => return Some(Err(format!("'{}' is not a height > 0 mm", t.height))),
+        };
+        let rot = match num(&t.rotation) {
+            Ok(r) if r.is_finite() => r.to_radians(),
+            _ => return Some(Err(format!("'{}' is not an angle in degrees", t.rotation))),
+        };
+        // An explicit font file of existing text is kept (the dialog edits families).
+        let path =
+            t.id.and_then(|id| self.sketch.text_item(id))
+                .and_then(|x| x.spec.font.path.clone());
+        Some(Ok((
+            t.id,
+            rcad_sketch::TextSpec {
+                text: t.text.clone(),
+                font: rcad_sketch::FontSpec {
+                    family: t.family.trim().to_string(),
+                    bold: t.bold,
+                    italic: t.italic,
+                    path,
+                },
+                height,
+                position: t.position,
+                anchor: t.anchor,
+                rotation: rot,
+                halign: t.halign,
+                valign: t.valign,
+            },
+        )))
+    }
+
+    /// Apply the dialog (one undo step): add or change the text. A refusal
+    /// (missing font, missing glyph, overlapping outlines…) keeps the dialog
+    /// open with the reason and the sketch unchanged.
+    pub fn apply_text(&mut self) -> bool {
+        let Some(parsed) = self.text_spec() else {
+            return false;
+        };
+        let (id, spec) = match parsed {
+            Ok(v) => v,
+            Err(m) => {
+                self.fail(m);
+                return false;
+            }
+        };
+        let mut new_id = id;
+        let ok = self.try_change(false, |sk| {
+            match id {
+                Some(i) => sk.edit_text(i, spec),
+                None => sk.add_text(spec).map(|n| new_id = Some(n)),
+            }
+            .map_err(|e| format!("Text refused: {e}"))?;
+            // Overlaps with other loops are reported now, not at extrusion.
+            sk.regions()
+                .map(|_| ())
+                .map_err(|e| format!("Text refused: {e}"))
+        });
+        if ok {
+            self.text_edit = None;
+            let n = new_id.and_then(|i| self.sketch.text_item(i)).map(|t| {
+                format!(
+                    "Text {} set with {} {} ({}); outlines stored in the sketch.",
+                    t.id, t.resolved.font.family, t.resolved.font.style, t.resolved.font.file
+                )
+            });
+            self.info(n.unwrap_or_default());
+        }
+        ok
+    }
+
+    /// Delete the text open in the dialog (one undo step).
+    pub fn delete_text(&mut self) -> bool {
+        let Some(id) = self.text_edit.as_ref().and_then(|t| t.id) else {
+            return false;
+        };
+        let ok = self.try_change(false, |sk| {
+            if sk.remove_text(id) {
+                Ok(())
+            } else {
+                Err(format!("no text {id}"))
+            }
+        });
+        if ok {
+            self.text_edit = None;
+            self.info(format!("Text {id} deleted."));
+        }
+        ok
+    }
+}
+
+/// Short decimal for dialog fields (no trailing zeros).
+fn fmt_num(v: f64) -> String {
+    let s = format!("{v:.6}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".into() } else { s.into() }
 }
 
 #[cfg(test)]

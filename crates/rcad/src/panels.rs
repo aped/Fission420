@@ -548,6 +548,7 @@ impl RcadApp {
                     SketchTool::Extend,
                     SketchTool::Offset,
                     SketchTool::Fillet,
+                    SketchTool::Text,
                 ] {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))

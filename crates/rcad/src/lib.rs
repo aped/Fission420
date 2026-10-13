@@ -21,6 +21,7 @@ pub mod scenes;
 pub mod section;
 pub mod sketch_edit;
 pub mod sketch_view;
+pub mod text_ui;
 pub mod view3d;
 
 pub use app::{
