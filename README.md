@@ -48,13 +48,16 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 
 | | |
 |---|---|
-| **Sketching** | Lines, rectangles, circles, three-point arcs, fillets, offsets, trim/extend; dimensions and geometric constraints; a solver that reports residuals, remaining degrees of freedom and conflicts |
-| **Solids** | Extrude (new body / join / cut, blind or through-all), revolve, holes with counterbores, linear/circular patterns, mirror, edge chamfer, shell; multi-body documents |
+| **Sketching** | Lines, rectangles, circles, three-point arcs, slots, regular polygons, sketch patterns, fillets, offsets, trim/extend, text from installed fonts; associative projection of faces and other sketches; dimensions and geometric constraints; a solver that reports residuals, remaining degrees of freedom and conflicts |
+| **Solids** | Extrude (new body / join / cut / intersect; symmetric, two sides, start offset, up to a plane, thin, taper, several regions), revolve about any sketch axis or line, multi-section loft, sweep, holes with counterbores and countersinks, modeled threads (faceted), linear/circular patterns, mirror, convex and concave solid fillets, chamfers, shell from a face, ribs, sheet-metal contour flange with flat pattern; body move/copy/scale/align/split/combine; direct edits of imported STEP faces and holes |
+| **History** | Suppression, timeline rollback marker, safe reorder, re-attach and unlink repairs, configurations (named variants with part numbers) |
+| **Assemblies** | Components with linked occurrences, rigid/revolute/slider joints with limits, BOM, static interference, assembly export |
+| **Drawings** | Base, projected, section and detail views (first/third angle), hidden lines, automatic dimensions and hole callouts, title block; SVG, PDF and DXF |
 | **Parameters** | Named user parameters with units and expressions (`outer_length - 2 * wall`); each change is one undo step; impossible values are refused with the model unchanged |
-| **Inspection** | Face-to-face measurement, per-body volume, bounds and topology, section view |
+| **Inspection** | Exact face measurements (distances, angles, radii, axes), per-body volume, materials and mass properties (mass, centre of mass, inertia), bounds and topology, section view |
 | **Print export** | STL / 3MF with chord control, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.rcad.json` (v4) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
+| **Native format** | Versioned `.rcad.json` (v6; v4/v5 written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
 
 ## Screenshots
 
@@ -178,9 +181,11 @@ cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptan
 
 ## Status and limits
 
-R-CAD is a **prototype**. It is useful for simple prismatic parts and printable
-enclosures. It does not have solid fillets, countersinks, assemblies or drawings. Some
-coplanar or coincident boolean cases are refused (a Truck 0.6 limitation). Every Join/Cut
+R-CAD is a **prototype**. It is useful for prismatic and lofted parts and printable
+enclosures. Solid fillets are limited to straight edges of bodies prismatic along the edge
+(no corner blends); threads are faceted (within 0.01 mm), not exact helicoids; revolved
+Join/Cut and some coplanar or coincident boolean cases are refused (Truck 0.6 limitations);
+assemblies are flat (no nesting) and drawings use sampled hidden-line removal. Every Join/Cut
 result is independently checked before it commits (ADR 0005), so an unsupported case
 fails loudly instead of producing wrong geometry. Example exports are validated in CAD and
 slicer software but have **not** been physically printed.
@@ -201,6 +206,7 @@ The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | [`docs/behavior/sketching.md`](docs/behavior/sketching.md) | sketch editor behaviour |
 | [`docs/TOLERANCES.md`](docs/TOLERANCES.md) | every tolerance and why |
 | [`docs/CI.md`](docs/CI.md) | CI matrix, toolchain pin, platform refactor plan |
+| [`docs/ASSEMBLIES.md`](docs/ASSEMBLIES.md), [`docs/DRAWINGS.md`](docs/DRAWINGS.md), [`docs/SHEET_METAL.md`](docs/SHEET_METAL.md), [`docs/MATERIALS.md`](docs/MATERIALS.md) | assemblies, drawings, sheet metal, materials (supported subsets) |
 | [`docs/adr/`](docs/adr) | architecture decisions |
 | [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) | dependency licences |
 

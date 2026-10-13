@@ -612,23 +612,6 @@ impl RcadApp {
                 if action(ui, "Delete", del) {
                     ed.delete_selection();
                 }
-                ui.separator();
-                if ui
-                    .add_enabled(ed.can_undo(), egui::Button::new("Undo step"))
-                    .probe("Undo step")
-                    .on_hover_text("Undo inside this sketch (Ctrl+Z)")
-                    .clicked()
-                {
-                    ed.undo();
-                }
-                if ui
-                    .add_enabled(ed.can_redo(), egui::Button::new("Redo step"))
-                    .probe("Redo step")
-                    .on_hover_text("Ctrl+Shift+Z")
-                    .clicked()
-                {
-                    ed.redo();
-                }
             });
             ui.separator();
             if ui
@@ -653,6 +636,31 @@ impl RcadApp {
             }
             if ui.button("Help").probe("Help").clicked() {
                 self.show_help = !self.show_help;
+            }
+            // Undo/Redo sit on this row so the tool row stays one line at
+            // 1280 px (a wrapped tool row moves the viewport between frames).
+            ui.separator();
+            if ui
+                .add_enabled(
+                    !committing && s.editor.can_undo(),
+                    egui::Button::new("Undo step"),
+                )
+                .probe("Undo step")
+                .on_hover_text("Undo inside this sketch (Ctrl+Z)")
+                .clicked()
+            {
+                s.editor.undo();
+            }
+            if ui
+                .add_enabled(
+                    !committing && s.editor.can_redo(),
+                    egui::Button::new("Redo step"),
+                )
+                .probe("Redo step")
+                .on_hover_text("Ctrl+Shift+Z")
+                .clicked()
+            {
+                s.editor.redo();
             }
             if committing {
                 ui.spinner();
@@ -2412,6 +2420,12 @@ pub(crate) fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
 
 pub(crate) fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
     field(ui, label, buf, 320.0);
+}
+
+/// A narrow text field for the Browser column (keeps it from widening and
+/// squeezing the 3D view; run 6 live-walkthrough regression).
+pub(crate) fn short_text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
+    field(ui, label, buf, 120.0);
 }
 
 /// Opening a document waits for pending work (other commands just queue).

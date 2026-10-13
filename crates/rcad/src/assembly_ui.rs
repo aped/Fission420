@@ -103,8 +103,8 @@ impl RcadApp {
                     if f.component_name.is_empty() {
                         f.component_name = bs.name.clone();
                     }
-                    crate::panels::text_field(ui, "Component name", &mut f.component_name);
-                    crate::panels::text_field(ui, "Part number", &mut f.part_number);
+                    crate::panels::short_text_field(ui, "Component name", &mut f.component_name);
+                    crate::panels::short_text_field(ui, "Part number", &mut f.part_number);
                     if ui
                         .button("Create component from selected body")
                         .probe("Create component from selected body")
