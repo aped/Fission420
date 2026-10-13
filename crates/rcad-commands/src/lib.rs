@@ -514,6 +514,20 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
         index: usize,
     },
+    /// Run 7: redefine a joint's axis (`origin`/`axis`, or `axis_from` faces of
+    /// the parent, and `dir2`), keeping its values and the child's current pose
+    /// (as-built: the rest pose is recaptured, nothing moves).
+    SetJointAxis {
+        joint: rcad_document::assembly::JointId,
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_from: Option<assembly::AxisFrom>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir2: Option<[f64; 3]>,
+    },
     /// Run 7: set all values of a multi-DOF joint at once (atomic).
     SetJointValues {
         joint: rcad_document::assembly::JointId,
@@ -1216,6 +1230,7 @@ impl Command {
             Command::Interference { .. } => "interference",
             Command::ExportAssembly { .. } => "export_assembly",
             Command::SetJointValues { .. } => "set_joint_values",
+            Command::SetJointAxis { .. } => "set_joint_axis",
             Command::InsertExternalComponent { .. } => "insert_external_component",
             Command::UpdateExternalComponent { .. } => "update_external_component",
             Command::CheckExternalComponents => "check_external_components",
@@ -3458,6 +3473,7 @@ impl Session {
             | Command::Interference { .. }
             | Command::ExportAssembly { .. }
             | Command::SetJointValues { .. }
+            | Command::SetJointAxis { .. }
             | Command::InsertExternalComponent { .. }
             | Command::UpdateExternalComponent { .. }
             | Command::CheckExternalComponents

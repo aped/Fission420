@@ -337,6 +337,10 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     )));
                 }
                 d.assembly.occurrences.retain(|o| !occ.contains(&o.id));
+                // Review run 7 #6: configurations forget deleted occurrences.
+                for cfg in &mut d.configurations {
+                    cfg.excluded_occurrences.retain(|o| !occ.contains(o));
+                }
                 d.assembly.components.retain(|x| x.id != c);
                 for x in &mut d.assembly.components {
                     if x.derived_from == Some(c) {
@@ -500,6 +504,10 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             }
             m.transact(&format!("Delete {name}"), |d| {
                 d.assembly.occurrences.retain(|x| x.id != o);
+                // Review run 7 #6: configurations forget the deleted occurrence.
+                for cfg in &mut d.configurations {
+                    cfg.excluded_occurrences.remove(&o);
+                }
                 prune_explode(&mut d.assembly);
                 Ok(())
             })?;
@@ -564,6 +572,14 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                 max: *max,
                 rest: Pose::from(Rigid::IDENTITY),
                 extra: if kind.dof() > 1 {
+                    if extra.len() > kind.dof() as usize - 1 {
+                        return Err(v(format!(
+                            "a {kind:?} joint has {} values: at most {} extra value(s), got {}",
+                            kind.dof(),
+                            kind.dof() - 1,
+                            extra.len()
+                        )));
+                    }
                     let mut e = extra.clone();
                     e.resize(kind.dof() as usize - 1, Default::default());
                     e
@@ -654,6 +670,46 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             }
             vals[i] = value;
             set_values(m, id, vals)?;
+            out.joint = Some(id);
+        }
+        Command::SetJointAxis {
+            joint,
+            origin,
+            axis,
+            axis_from,
+            dir2,
+        } => {
+            let id = *joint;
+            let old = m.document().assembly.joint(id)?.clone();
+            let (origin, axis) = match axis_from {
+                Some(f) => {
+                    let (o, a) = axis_from_faces(m, old.parent, f)?;
+                    (o, a)
+                }
+                None => (*origin, axis.unwrap_or([0.0, 0.0, 1.0])),
+            };
+            let mut j = Joint {
+                origin,
+                axis,
+                dir2: *dir2,
+                ..old.clone()
+            };
+            if j.kind != JointKind::Rigid {
+                j.frame()?;
+            }
+            // Keep the child where it is: rest = (L_p ∘ M_new(values))⁻¹ ∘ L_c.
+            let l = locals(m)?;
+            let get = |o: OccurrenceId| {
+                l.get(&o)
+                    .copied()
+                    .ok_or_else(|| v(format!("occurrence {o} is not solved")))
+            };
+            let (tp, tc) = (get(j.parent)?, get(j.child)?);
+            j.rest = Pose::from(inverse(&tp.after(&j.current_motion()?)).after(&tc));
+            m.transact(&format!("Set axis of {}", old.name), |d| {
+                *d.assembly.joint_mut(id)? = j.clone();
+                Ok(())
+            })?;
             out.joint = Some(id);
         }
         Command::SetJointValues { joint, values } => {
@@ -843,18 +899,50 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
 
 /// An external native document's evaluated solids as one STEP text (named
 /// by instance path / body name), with the source bytes' identity.
-fn external_step(
-    path: &std::path::Path,
-) -> Result<(String, rcad_document::assembly::ExternalSource, usize), DocError> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| DocError::File(format!("external component {}: {e}", path.display())))?;
-    if bytes.len() as u64 > rcad_document::MAX_FILE_BYTES {
+/// The bytes of a regular file of at most `MAX_FILE_BYTES` (one bounded read).
+fn read_source(path: &std::path::Path) -> Result<Vec<u8>, DocError> {
+    use std::io::Read as _;
+    let e =
+        |x: std::io::Error| DocError::File(format!("external component {}: {x}", path.display()));
+    let meta = std::fs::metadata(path).map_err(e)?;
+    if !meta.is_file() {
         return Err(DocError::File(format!(
-            "external component {}: file too large",
+            "external component {}: not a regular file",
             path.display()
         )));
     }
+    let max = rcad_document::MAX_FILE_BYTES;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(e)?
+        .take(max + 1)
+        .read_to_end(&mut bytes)
+        .map_err(e)?;
+    if bytes.len() as u64 > max {
+        return Err(DocError::File(format!(
+            "external component {}: file larger than {max} bytes",
+            path.display()
+        )));
+    }
+    Ok(bytes)
+}
+
+fn source_identity(bytes: &[u8]) -> String {
+    rcad_document::Blob::new(rcad_document::BlobId(1), "", bytes).fnv64
+}
+
+fn external_step(
+    path: &std::path::Path,
+) -> Result<(String, rcad_document::assembly::ExternalSource, usize), DocError> {
+    let bytes = read_source(path)?;
     let nf = rcad_document::load_file(path)?;
+    // The parsed document must be the bytes that were hashed.
+    if read_source(path)? != bytes {
+        return Err(DocError::File(format!(
+            "external component {}: the file changed while it was read; try again",
+            path.display()
+        )));
+    }
     let model = Model::from_document(nf.document)?;
     let ev = model.evaluation();
     let mut items: Vec<(String, Body)> = Vec::new();
@@ -898,7 +986,7 @@ fn external_step(
     let refs: Vec<(&str, &Body)> = items.iter().map(|(n, b)| (n.as_str(), b)).collect();
     let text = k::export_step_bodies(&refs, "R-CAD")
         .map_err(|e| v(format!("external component {}: {e}", path.display())))?;
-    let id = rcad_document::Blob::new(rcad_document::BlobId(1), "", &bytes);
+    let fnv64 = source_identity(&bytes);
     let file_name = path
         .file_name()
         .map_or("external".to_string(), |f| f.to_string_lossy().into_owned());
@@ -907,7 +995,7 @@ fn external_step(
         rcad_document::assembly::ExternalSource {
             file_name,
             path: None,
-            fnv64: id.fnv64,
+            fnv64,
             len: bytes.len() as u64,
         },
         items.len(),
@@ -922,7 +1010,9 @@ fn insert_external(
 ) -> Result<(ComponentId, OccurrenceId), DocError> {
     let (text, mut src, n) = external_step(path)?;
     if linked {
-        src.path = Some(path.to_string_lossy().into_owned());
+        // Absolute, so later checks do not depend on the process directory.
+        let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        src.path = Some(abs.to_string_lossy().into_owned());
     }
     let stem = path.file_stem().map_or("External".to_string(), |f| {
         f.to_string_lossy().trim_end_matches(".rcad").to_string()
@@ -1039,7 +1129,28 @@ fn update_external(m: &mut Model, c: ComponentId) -> Result<String, DocError> {
             comp.name
         )));
     }
-    let blob_name = d.blob(blob)?.file_name.clone();
+    // The existing bodies map to the solids by order: the solid names must
+    // be the same, in the same order, or bodies would silently swap geometry.
+    let old_blob = d.blob(blob)?;
+    let old_bytes = old_blob
+        .bytes()
+        .map_err(|e| v(format!("embedded copy of '{}': {e}", comp.name)))?;
+    let names = |b: &[u8]| -> Result<Vec<Option<String>>, DocError> {
+        Ok(rcad_document::import::step(b, None)?
+            .solids
+            .into_iter()
+            .map(|s| s.name)
+            .collect())
+    };
+    let (was, now) = (names(&old_bytes)?, names(text.as_bytes())?);
+    if was != now {
+        return Err(DocError::ProductLimit(format!(
+            "'{}': the source's solids changed names or order ({was:?} -> {now:?}); insert it \
+             again as a new component",
+            comp.name
+        )));
+    }
+    let blob_name = old_blob.file_name.clone();
     m.transact(&format!("Update {}", comp.name), |d| {
         let b = d
             .blobs
@@ -1066,10 +1177,10 @@ pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
             let src = c.external.as_ref()?;
             let (status, detail) = match &src.path {
                 None => ("embedded", "embedded copy; not linked to a file".to_string()),
-                Some(p) => match std::fs::read(p) {
+                Some(p) => match read_source(std::path::Path::new(p)) {
                     Err(e) => ("missing", format!("{p}: {e}; the embedded copy is used")),
                     Ok(bytes) => {
-                        let f = rcad_document::Blob::new(rcad_document::BlobId(1), "", &bytes).fnv64;
+                        let f = source_identity(&bytes);
                         if f == src.fnv64 && bytes.len() as u64 == src.len {
                             ("up_to_date", format!("{p} matches the pinned copy (fnv {f})"))
                         } else {
@@ -1199,6 +1310,21 @@ fn align_placement(
         return Err(DocError::ProductLimit(
             "alignment works between occurrences with the same owner".into(),
         ));
+    }
+    // The target must not follow `o` through joints (it would move with it).
+    let mut cur = t;
+    for _ in 0..=a.joints.len() {
+        match a.joint_of_child(cur) {
+            Some(j) if j.parent == o => {
+                return Err(v(format!(
+                    "{} follows {} through joint {} ({}): it would move with it; align to an \
+                     occurrence that does not depend on it",
+                    to_occ.name, oo.name, j.id, j.name
+                )));
+            }
+            Some(j) => cur = j.parent,
+            None => break,
+        }
     }
     let own = |occ: &rcad_document::assembly::Occurrence, p: &crate::measure_faces::FacePick| {
         let c = a.component(occ.component)?;
@@ -1646,6 +1772,19 @@ pub fn interference(
     let ids: Vec<usize> = (0..ev.occurrences.len())
         .filter(|&i| list.is_none_or(|l| ev.occurrences[i].path.iter().any(|p| l.contains(p))))
         .collect();
+    // Review run 7 #22: a listed occurrence without any evaluated instance
+    // (suppressed, or no bodies anywhere below it) is an error, not "clear".
+    if let Some(l) = list {
+        for o in l {
+            if !ids.iter().any(|&i| ev.occurrences[i].path.contains(o)) {
+                let n = m.document().assembly.occurrence(*o)?.name.clone();
+                return Err(v(format!(
+                    "{n} has no evaluated instance with bodies (suppressed, or nothing to \
+                     check): interference cannot be computed for it"
+                )));
+            }
+        }
+    }
     let mut cache: BTreeMap<usize, Vec<Body>> = BTreeMap::new();
     for i in &ids {
         cache.insert(*i, placed(m, *i)?);
@@ -1772,10 +1911,33 @@ fn export_step_tree(m: &Model, path: &std::path::Path) -> Result<String, DocErro
             children: vec![],
         });
     }
+    // Review run 7 #21: a component is exportable when it has solids or a
+    // non-suppressed child that is (bottom-up over the acyclic graph).
+    fn nonempty(
+        a: &rcad_document::assembly::Assembly,
+        c: ComponentId,
+        memo: &mut BTreeMap<ComponentId, bool>,
+        level: usize,
+    ) -> bool {
+        if let Some(x) = memo.get(&c) {
+            return *x;
+        }
+        let x = level <= rcad_document::assembly::MAX_DEPTH
+            && (a.component(c).is_ok_and(|x| !x.bodies.is_empty())
+                || a.children_of(Some(c))
+                    .filter(|o| !o.suppressed)
+                    .map(|o| o.component)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .any(|k| nonempty(a, k, memo, level + 1)));
+        memo.insert(c, x);
+        x
+    }
+    let mut full: BTreeMap<ComponentId, bool> = BTreeMap::new();
     let mut skipped = Vec::new();
     for (owner, c, n, t) in usages {
         let ci = index[&c];
-        if products[ci].solids.is_empty() && !a.children_of(Some(c)).any(|o| !o.suppressed) {
+        if !nonempty(a, c, &mut full, 0) {
             skipped.push(n);
             continue;
         }

@@ -181,6 +181,17 @@ fn tree_activation_and_joint_dialog() {
             .t
     };
     assert!((pin_world(&h)[0] - 25.0).abs() < 1e-12);
+    // The drive slider (keyboard step) commits a new value within the limits
+    // and the child follows it exactly.
+    h.get_by_label("Drive Joint1").focus();
+    let _ = h.try_run();
+    h.key_press(Key::ArrowRight);
+    settle(&mut h);
+    let v = h.state().summary().assembly.joints[0].value;
+    assert!(v > 25.0 && v <= 40.0, "{v}");
+    assert!((pin_world(&h)[0] - v).abs() < 1e-12);
+    type_into(&mut h, "Joint value", "25");
+    click(&mut h, "Set value");
     type_into(&mut h, "Joint value", "50");
     click(&mut h, "Set value");
     assert_eq!(h.state().summary().assembly.joints[0].value, 25.0);
@@ -351,4 +362,112 @@ fn viewport_pick_selects_the_occurrence() {
     pointer_click(&mut h, p);
     settle(&mut h);
     assert_eq!(h.state().assembly_highlight(), vec!["O1".to_string()]);
+}
+
+/// Part number and component deletion from the rename panel; joint axis
+/// redefinition from the joint editor (the child does not move).
+#[test]
+fn part_number_delete_component_and_joint_axis() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let a = block(&mut h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let b = block(&mut h, 2.0, 2.0, 2.0, [20.0, 0.0]);
+    let c = block(&mut h, 2.0, 2.0, 2.0, [-20.0, 0.0]);
+    component(&mut h, "A", a);
+    component(&mut h, "B", b);
+    component(&mut h, "C", c);
+    click(&mut h, "Occurrence A#1");
+    click(&mut h, "Rename A#1");
+    type_into(&mut h, "Part number ", "PN-A");
+    click(&mut h, "Set part number");
+    assert_eq!(
+        h.state().summary().assembly.components[0].part_number,
+        "PN-A"
+    );
+    click(&mut h, "Occurrence C#1");
+    click(&mut h, "Rename C#1");
+    click(&mut h, "Delete component C");
+    assert_eq!(h.state().summary().assembly.components.len(), 2);
+    send(
+        &mut h,
+        Command::AddJoint {
+            name: None,
+            kind: JointKind::Revolute,
+            parent: OccurrenceId(1),
+            child: OccurrenceId(2),
+            origin: [0.0; 3],
+            axis: Some([0.0, 0.0, 1.0]),
+            axis_from: None,
+            value: 90.0,
+            min: None,
+            max: None,
+            extra: vec![],
+            dir2: None,
+        },
+    );
+    let world = |h: &Harness<'_, RcadApp>| {
+        h.state()
+            .summary()
+            .assembly
+            .occurrences
+            .iter()
+            .find(|o| o.id == OccurrenceId(2))
+            .unwrap()
+            .world
+    };
+    let before = world(&h);
+    click(&mut h, "Edit Joint1");
+    type_into(&mut h, "Joint axis X", "1");
+    type_into(&mut h, "Joint axis Z", "0");
+    click(&mut h, "Set axis");
+    assert_eq!(h.state().summary().assembly.joints[0].axis, [1.0, 0.0, 0.0]);
+    assert_eq!(world(&h), before, "nothing moves");
+}
+
+/// Review run 7: a nudge keeps a non-Z rotation axis; the joint dialog stays
+/// open (inputs kept) when the engine refuses the joint, and closes on success.
+#[test]
+fn nudge_keeps_axis_and_dialog_survives_refusal() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let a = block(&mut h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let b = block(&mut h, 2.0, 2.0, 2.0, [20.0, 0.0]);
+    component(&mut h, "A", a);
+    component(&mut h, "B", b);
+    send(
+        &mut h,
+        Command::SetOccurrenceTransform {
+            occurrence: OccurrenceId(2),
+            translate: [0.0, 0.0, 0.0],
+            axis: Some([1.0, 0.0, 0.0]),
+            angle_deg: 90.0,
+        },
+    );
+    click(&mut h, "Occurrence B#1");
+    click(&mut h, "Move B#1");
+    click(&mut h, "+X");
+    let o = h.state().summary().assembly.occurrences[1].clone();
+    assert_eq!(o.translate, [5.0, 0.0, 0.0]);
+    assert_eq!(o.axis, [1.0, 0.0, 0.0]);
+    assert!((o.angle_deg - 90.0).abs() < 1e-12);
+    // Joint dialog: initial value outside its own limits → refused, kept open.
+    click(&mut h, "Occurrence A#1");
+    click(&mut h, "Joint from A#1");
+    h.get_by_label("Joint child").click();
+    settle(&mut h);
+    h.get_by_label("B#1").click();
+    settle(&mut h);
+    type_into(&mut h, "Initial value", "50");
+    type_into(&mut h, "Upper limit", "40");
+    click(&mut h, "Create joint");
+    assert!(h.state().summary().assembly.joints.is_empty());
+    assert!(h.state().diagnostics().last().unwrap().error);
+    h.get_by_label("Create joint");
+    type_into(&mut h, "Initial value", "30");
+    click(&mut h, "Create joint");
+    assert_eq!(h.state().summary().assembly.joints.len(), 1);
+    assert!(
+        h.query_by_label("Create joint").is_none(),
+        "closed on success"
+    );
 }

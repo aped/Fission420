@@ -38,6 +38,8 @@ pub struct JointDialog {
     /// Value, min, max per DOF (up to 3).
     pub values: [[String; 3]; 3],
     pub name: String,
+    /// The joint command was sent; the reply decides whether to close.
+    pub pending: bool,
 }
 
 impl JointDialog {
@@ -54,6 +56,7 @@ impl JointDialog {
             face_b: None,
             values: std::array::from_fn(|_| ["0".into(), String::new(), String::new()]),
             name: String::new(),
+            pending: false,
         }
     }
 
@@ -325,9 +328,13 @@ pub(crate) fn joint_dialog(
         ui.horizontal(|ui| {
             match &cmd {
                 Ok(c) => {
-                    if ui.button("Create joint").probe("Create joint").clicked() {
+                    if ui
+                        .add_enabled(!d.pending, egui::Button::new("Create joint"))
+                        .probe("Create joint")
+                        .clicked()
+                    {
                         send.push(c.clone());
-                        close = true;
+                        d.pending = true;
                     }
                 }
                 Err(e) => {

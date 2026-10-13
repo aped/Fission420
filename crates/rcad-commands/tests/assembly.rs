@@ -173,8 +173,8 @@ fn ownership_and_edit_refusals() {
         json!({"cmd": "create_component", "name": "Ghost", "bodies": [9]}),
         json!({"cmd": "add_occurrence", "component": 7}),
         json!({"cmd": "set_occurrence_transform", "occurrence": 9, "translate": [1.0, 0.0, 0.0]}),
-        // Deleting the definition body's creator is refused while a component uses it.
-        json!({"cmd": "delete_feature", "feature": 2}),
+        // (Run 7: deleting the definition body's creator is allowed; the body
+        // leaves the component's definition, see below.)
     ] {
         let r = tray::exec(&mut s, &bad);
         assert!(!r.ok, "{bad}");
@@ -190,6 +190,14 @@ fn ownership_and_edit_refusals() {
     );
     assert!(!r.ok, "a grounded occurrence cannot be moved");
     assert_eq!(s.summary().assembly.total_dof, 0);
+    // Run 7 (review): deleting the creator of a definition body removes the
+    // body from the definition (the component and its occurrence stay).
+    ok(&mut s, json!({"cmd": "delete_feature", "feature": 2}));
+    let a = s.summary().assembly;
+    assert!(a.components[0].bodies.is_empty());
+    assert_eq!(a.occurrences.len(), 1);
+    ok(&mut s, json!({"cmd": "undo"}));
+    assert_eq!(s.summary().assembly.components[0].bodies.len(), 1);
 }
 
 #[test]
