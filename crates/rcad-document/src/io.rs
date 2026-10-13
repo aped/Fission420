@@ -201,6 +201,33 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
             }
         }
     }
+    sketch_v6_feature(doc)
+}
+
+/// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and
+/// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
+/// a run-5 build would silently drop unknown fields or refuse with a misleading
+/// message. Separate from the other v6 checks so it can be folded into
+/// `v6_feature`.
+pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
+    let sketches = doc.features.iter().filter_map(|f| match &f.kind {
+        crate::FeatureKind::Sketch { sketch, .. } => Some(sketch),
+        _ => None,
+    });
+    for s in sketches {
+        if !s.texts.is_empty() {
+            return Some("sketch text");
+        }
+        if s.constraints.iter().any(|c| {
+            matches!(
+                c,
+                rcad_sketch::Constraint::PatternStep { .. }
+                    | rcad_sketch::Constraint::PatternRotate { .. }
+            )
+        }) {
+            return Some("sketch patterns");
+        }
+    }
     None
 }
 

@@ -60,6 +60,9 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `delete_user_parameter` | `name` | refused while used (users named) |
 | `set_expression` | `feature`, `name`, `expression` | bind a feature parameter to an expression; a plain number sets it and unbinds; `""` unbinds keeping the value. A bound slot refuses `set_parameter` |
 | `edit_sketch` | `feature`, `sketch` | replace a sketch feature's definition (the editor's Finish Sketch); one undo step; plane and downstream references kept; the sketch is validated and solved first (conflicts are refused, naming the constraints); downstream features must still regenerate, otherwise nothing changes |
+| `add_sketch_text` | `feature`, `text` (`TextSpec`) | run 6: add a text item to a sketch; resolves the font from the installed fonts now and stores the glyph outlines (docs/behavior/sketching.md "Sketch text"); response `text` = new text id; one undo step; the document is then saved as format v6 |
+| `edit_sketch_text` | `feature`, `id`, `text` | change a text item; a new string or font re-resolves (refused with "font not found" when the font is not installed, nothing changes); height/position/anchor/rotation/alignment edits reuse the stored outlines; downstream region references must survive (transaction) |
+| `remove_sketch_text` | `feature`, `id` | remove a text item; refused when a downstream feature uses one of its glyph regions |
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
 | `rename_body` | `body`, `name` | 1-128 printable characters, unique among bodies; undoable |
 | `set_body_visible` | `body`, `visible` | undoable; hidden bodies stay evaluated and measurable; default exports skip them |
@@ -140,7 +143,16 @@ docs/behavior/sketching.md "Offset"), `PointOnCircle` (`{point, circle}`, run 4)
 one of them); dimensions carry `{"name", "value"}`, names unique per sketch), optional `origin`
 (the point fixed at (0, 0)), optional `construction` (array of entity ids: construction geometry,
 solved and constrained like any entity but ignored by profile extraction, so a construction
-centre line or reference circle does not break the profile; omitted when empty).
+centre line or reference circle does not break the profile; omitted when empty), constraints
+`PatternStep` (`{from, to, a, b, k, axis?}`) / `PatternRotate` (`{from, to, center, k, dim,
+axis?}`) (run 6, sketch patterns, docs/behavior/sketching.md), optional
+`texts` (run 6, omitted when empty): `{id, text, font: {family, bold?, italic?, path?}, height,
+position: [x, y], anchor?: point id, rotation (rad), halign: "Left"|"Center"|"Right", valign:
+"Baseline"|"Middle"|"Top", resolved: {font: {family, style, file, index, hash, units_per_em,
+cap_height}, advance, glyphs: [{ch, x, contours: [{start, segs: [{"Line":{to}} | {"Quad":{c,to}}
+| {"Cubic":{c1,c2,to}}]}]}]}}` (font units). `TextSpec` (commands) is the same object without
+`id` and `resolved`, e.g. `{"text":"B8","font":{"family":"Liberation Sans"},"height":8,
+"position":[0,0]}`.
 
 Arcs: an `Arc` runs counter-clockwise from `start` to `end` about `center` (sweep in
 (0, 2π)); all three are ordinary points. The entity always implies

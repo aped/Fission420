@@ -88,3 +88,26 @@ be interrupted and still completes, and Undo removes it in one step.
   no preview and says OK will be refused.
 * **Templates › Organizer tray** (after the blank-document workflow, which is the acceptance path).
 * Live walkthrough of the tray from New: `tools/live/t_organizer_tray.txt`.
+
+## Run 6 additions (sketch)
+
+* **Text tool (sketch toolbar "Text"):** click to place a text (on an existing point the text is
+  anchored to it and follows it), or click an existing text to edit it (double-click in Select
+  does the same). The dialog sets *Text string*, *Font family* (typed, or picked from the
+  installed families), Bold/Italic, *Height (mm, cap height)*, *Rotation (°)* and the
+  horizontal/vertical alignment; *Apply text* adds/changes it as one local undo step, *Delete
+  text* removes it, *Cancel text* closes the dialog. A refusal (font not installed, character
+  without a glyph, outline touching other geometry) keeps the dialog open with the reason and
+  the sketch unchanged. For stored text whose font is missing the dialog says so (placement edits
+  still work). Glyph outlines are drawn as thin closed curves and become profile regions
+  (counters are holes; docs/behavior/sketching.md "Sketch text"). Code: `sketch_edit.rs`
+  (`text_*`), `text_ui.rs`, `sketch_view.rs`; UI test `crates/rcad/tests/sketch_text_ui.rs`.
+* **Slot / Polygon tools:** Slot = three clicks (centre, centre, width point); Polygon = centre +
+  vertex, with *Sides* and *Across flats* shown in the toolbar while the tool is active. Dashed
+  previews follow the cursor. Both create constrained, dimensioned ordinary geometry
+  (docs/behavior/sketching.md "Slot and regular polygon"). UI test
+  `crates/rcad/tests/sketch_shapes_ui.rs`.
+* **Pattern… (sketch toolbar):** enabled when curves are selected; dialog *Rectangular* /
+  *Circular*, *Instances*, *Step x/y (mm)* (+ *Second direction*), or *Angle between (°)* and
+  *Centre x/y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
+  the spacing/angle become dimensions. UI test `crates/rcad/tests/sketch_pattern_ui.rs`.

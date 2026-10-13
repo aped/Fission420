@@ -239,6 +239,11 @@ open, analytic volume, re-save as an identical v5 document).
 **v6 (run 6)** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
 written only when present (`io::v6_feature`); otherwise the file stays v5/v4 as before.
 Imported bodies edited this way regenerate from the embedded STEP bytes plus the edit list.
+**v6 (run 6)** = v5 plus sketch text (`Sketch.texts`: string, font request, placement and the
+resolved glyph outlines with the font's file name and FNV-1a 64 content hash) and sketch pattern
+constraints (`PatternStep`, `PatternRotate`). Written only when a sketch uses one of them
+(`io.rs::sketch_v6_feature`, folded into `v6_feature`); a file labelled v5 or older that contains them is refused. Loading and regenerating never needs the font (the stored outlines are
+authoritative); only changing a text's string or font does.
 
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named

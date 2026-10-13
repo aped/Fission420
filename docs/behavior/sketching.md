@@ -134,6 +134,90 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
   `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
 
+## Sketch text — run 6
+
+A sketch can hold text items (`Sketch.texts`) next to its lines/arcs/circles. Each glyph contour
+is a closed loop of the sketch and takes part in region extraction like any other loop.
+
+* **Font.** A family name (`Liberation Sans`, case-insensitive, with bold/italic) is looked up in
+  the installed fonts (`RCAD_FONT_DIRS`, `~/.local/share/fonts`, `~/.fonts`,
+  `/usr/local/share/fonts`, `/usr/share/fonts`; no fontconfig), or an explicit font file path is
+  given. A missing family is an error, never a silent substitute. TrueType (quadratic) and CFF
+  (cubic) outlines are read with `ttf-parser`. Layout: one line, advance widths only (no kerning,
+  ligatures, complex-script shaping or right-to-left). Control characters (line breaks) and
+  characters the font has no glyph for are refused, naming them.
+* **Stored outlines.** The glyph outlines (exact Béziers in font units), pen positions, cap
+  height and the font's family/style/file name/FNV-1a 64 hash are stored in the document. Reload,
+  regeneration and placement edits never need the font. Changing the string or font needs it
+  installed; without it the edit is refused ("font not found") and the text is unchanged.
+* **Height = cap height.** `height` mm is the font's cap height (OS/2 `sCapHeight`, else the top
+  of `H`): a 10 mm `B8` has 10 mm tall capitals/digits. Anchor: `position` or a sketch point
+  (`anchor`, follows the solved point); `halign` Left/Center/Right of the total advance, `valign`
+  Baseline/Middle (half cap height)/Top (cap height); `rotation` radians CCW about the anchor.
+* **Geometry.** Contours become polygons within 0.01 mm of the font curves (docs/TOLERANCES.md);
+  the solids are exact extrusions of those polygons. Counters (holes of `B`, `8`, `O`, `A`) are
+  found by geometric containment, not by the font's winding: `B` is one region with two holes and
+  each counter is an island region. Text inside a rectangle gives the plate region (rectangle
+  minus glyph outlines), the glyph regions and the counter regions.
+* **Refusals.** Self-intersecting contours, contours that touch or cross other loops (overlapping
+  letters, overlapping contours in some variable fonts, text crossing a sketch line) make
+  `regions()` fail with the glyph named; such text can be moved or resized.
+* **Identity.** A glyph loop's identity is (text id, character position, contour index), so a
+  picked glyph region survives moves, height/rotation edits and solving, and string edits that
+  keep that character's position and contour count; changing `8` to `9` (two counters to one)
+  breaks references to that glyph region (`BrokenReference`, edit refused). Side faces of extruded
+  text are named per polygon edge and break when the edge count changes (e.g. a height edit).
+* API/commands: `Sketch::add_text` / `edit_text` / `remove_text` / `text_loops`,
+  `rcad_sketch::font`; commands `add_sketch_text`, `edit_sketch_text`, `remove_sketch_text`
+  (docs/COMMANDS.md). Tests: `crates/rcad-sketch/tests/text.rs`,
+  `crates/rcad-commands/tests/sketch_text.rs` (need the installed font Liberation Sans;
+  `RCAD_SKIP_FONT_TESTS=1` skips them explicitly).
+
+## Slot and regular polygon (Slot / Polygon tools) — run 6
+
+Both tools add ordinary lines/arcs with constraints, so the result stays editable like drawn
+geometry (`crates/rcad-sketch/src/shapes.rs`).
+
+* **Slot** (centre to centre): click the first arc centre, the second, then a point beside the
+  centre line (its distance is half the width). Adds a bottom line, an end arc, a top line and an
+  end arc joined by four `Tangent` constraints and `EqualRadius`, with dimensions `slot_length`
+  (aligned distance between the arc centres, L) and `slot_width` (between the two tangent points
+  at the first end, W). Clicking an existing point reuses it as a centre. 3 DOF remain (position
+  and direction). Profile area L·W + π(W/2)² (tests: `shapes.rs` unit tests,
+  `crates/rcad/tests/sketch_shapes_ui.rs` extrudes it to that area × depth).
+* **Regular polygon:** set *Sides* (3–64) and *Across flats* in the toolbar, click the centre,
+  then a vertex (inscribed: diameter across corners `polygon_d`) or an edge midpoint
+  (circumscribed: diameter across flats `polygon_flats`). N lines with vertices on a
+  construction circle (`PointOnCircle`) and N−1 `EqualLength`; circumscribed adds an inner
+  construction circle carrying the dimension and the first edge's midpoint on it. 3 DOF remain
+  (centre and rotation). Areas (N/2)R² sin(2π/N) and N a² tan(π/N) are checked in the tests.
+* Center rectangle already existed (Center Rect tool, run 2).
+
+## Sketch patterns (Pattern… action) — run 6
+
+Select curves (lines, arcs, circles) and press **Pattern…** in the sketch toolbar: *Rectangular*
+(instances and a step vector, optionally a second direction for a grid) or *Circular* (instances,
+angle between instances, centre; the origin when the centre is (0, 0)). The copies are ordinary
+geometry tied to their sources (`crates/rcad-sketch/src/pattern.rs`):
+
+* `PatternStep {from, to, a, b, k}`: `to − from = k (b − a)`; the step is a construction line
+  from the first source point whose length is the `pattern_spacing` dimension (its direction is
+  1 free DOF: constrain it horizontal/vertical). Grid copies chain from the first direction.
+* `PatternRotate {from, to, center, k, dim}`: `to = c + R(k θ)(from − c)`, θ = `pattern_angle`
+  degrees (0 < θ < 360); all copies of one pattern share the one dimension (listed once, edited
+  together; a feature parameter like any dimension).
+* Copies are exact rigid images, so source constraints are not duplicated; circles copy their
+  radius with `EqualRadius`. A copied arc would get one equation too many (the arc implies equal
+  radii), so one of its exclusive points (the centre when possible) is tied along one axis only,
+  chosen per copy where that equation is best conditioned. Copies follow source edits
+  (dimension, drag); a pattern whose copies would overlap fails region extraction like any
+  overlapping geometry, and a document edit causing it is refused (transaction).
+* Changing the count means deleting the copies and patterning again (no count parameter).
+* A sketch with pattern constraints is saved as format v6. Tests: `pattern.rs` unit tests (DOF,
+  no redundancy, spacing/angle edits, per-copy axis choice at 90°),
+  `crates/rcad-commands/tests/sketch_patterns.rs` (bolt circle, analytic volume, v6, parameter
+  edit and refused overlap), `crates/rcad/tests/sketch_pattern_ui.rs` (dialog).
+
 ## Offset (Offset tool, `O`) — run 4
 
 Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from

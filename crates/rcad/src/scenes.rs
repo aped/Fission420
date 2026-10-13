@@ -38,6 +38,8 @@ pub const SCENES: &[&str] = &[
     "tray_finished",
     "tray_export",
     "tray_refusal",
+    "sketch_text",
+    "sketch_text_edit",
 ];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -127,6 +129,31 @@ fn two_bodies() -> Vec<SceneStep> {
             body_name: None,
             region: None,
             options: Default::default(),
+        }),
+    ]
+}
+
+/// Run 6: plate 60 x 30 x 3 with a "B8" sketch text (12 mm, centred) on its
+/// top face (sketch F3, not yet extruded).
+fn text_plate() -> Vec<SceneStep> {
+    use SceneStep::*;
+    let mut empty = rcad_sketch::Sketch::default();
+    empty.ensure_origin();
+    let mut t = rcad_sketch::TextSpec::new("B8", "Liberation Sans", 12.0, [0.0, 0.0]);
+    t.halign = rcad_sketch::HAlign::Center;
+    t.valign = rcad_sketch::VAlign::Middle;
+    vec![
+        Cmd(Command::NewDocument),
+        Cmd(rect(60.0, 30.0, [0.0, 0.0], SketchPlane::WorldXY)),
+        Cmd(Command::extrude(None, FeatureId(1), 3.0)),
+        Cmd(Command::CreateSketch {
+            name: Some("Label".into()),
+            plane: end_cap_of(FeatureId(2)),
+            template: SketchTemplate::Custom { sketch: empty },
+        }),
+        Cmd(Command::AddSketchText {
+            feature: FeatureId(3),
+            text: t,
         }),
     ]
 }
@@ -433,6 +460,52 @@ impl RcadApp {
                 }),
             ],
             // Run 5: an impossible divider count refused, model unchanged.
+            // Run 6: raised "B8" (each glyph region joined 1 mm; counters stay open).
+            "sketch_text" => {
+                let mut v = text_plate();
+                v.push(Ui(|a| {
+                    let sk = a
+                        .summary
+                        .features
+                        .iter()
+                        .find(|f| f.id == FeatureId(3))
+                        .and_then(|f| f.sketch.clone());
+                    let Some(mut sk) = sk else { return };
+                    sk.solve();
+                    for r in sk.regions().unwrap_or_default() {
+                        if r.depth == 0 {
+                            a.request(Command::Extrude {
+                                name: None,
+                                sketch: FeatureId(3),
+                                distance: 1.0,
+                                op: ExtrudeOp::Join,
+                                target: None,
+                                through_all: false,
+                                reverse: false,
+                                body_name: None,
+                                region: Some(r.id),
+                                options: Default::default(),
+                            });
+                        }
+                    }
+                }));
+                v.push(Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)));
+                v
+            }
+            // Run 6: the sketch editor with the Text tool's dialog on "B8".
+            "sketch_text_edit" => {
+                let mut v = text_plate();
+                v.push(Ui(|a| {
+                    a.begin_sketch(crate::app::SketchTarget::Existing(FeatureId(3)))
+                }));
+                v.push(Ui(|a| {
+                    if let Some(s) = a.sketch_session_mut() {
+                        s.editor.set_tool(crate::sketch_edit::SketchTool::Text);
+                        s.editor.begin_text_edit(1);
+                    }
+                }));
+                v
+            }
             "tray_refusal" => vec![
                 tray(false),
                 Cmd(Command::SetUserParameter {
