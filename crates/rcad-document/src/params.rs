@@ -688,6 +688,7 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         }
         FeatureKind::DirectEdit { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "diameter" => Some(SlotKind::Length),
+        FeatureKind::Thread { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "angle_deg" => Some(SlotKind::Angle),
         FeatureKind::Hole { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         _ => None,

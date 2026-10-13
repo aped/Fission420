@@ -21,6 +21,7 @@ mod step;
 mod step_in;
 mod sweep;
 mod taper;
+mod thread;
 mod transform;
 mod validate;
 
@@ -55,6 +56,7 @@ pub use step_in::{
 };
 pub use sweep::{PathSegment, sweep};
 pub use taper::{taper_section, tapered_boolean, tapered_tool};
+pub use thread::{ThreadReport, ThreadSpec, threaded_nut, threaded_rod};
 pub use transform::{Rigid, transform_body};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,

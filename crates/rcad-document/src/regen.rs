@@ -981,6 +981,56 @@ fn regen_impl(
                 replace_body(&mut st, id, body, out);
                 r.body = Some(body);
             }
+            FeatureKind::Thread {
+                plane,
+                center,
+                diameter,
+                pitch,
+                length,
+                left_hand,
+                chord_tol,
+                nut,
+                body,
+            } => {
+                let (frame, rf) = plane_frame(id, plane, &st)?;
+                r.resolved_face = rf;
+                let frame = Frame {
+                    origin: frame.to_world(*center),
+                    ..frame
+                };
+                r.frame = Some(frame);
+                let spec = k::ThreadSpec {
+                    major_diameter: *diameter,
+                    pitch: *pitch,
+                    length: *length,
+                    left_hand: *left_hand,
+                    chord_tol: *chord_tol,
+                };
+                let built = match nut {
+                    None => k::threaded_rod(&frame, &spec),
+                    Some(n) => k::threaded_nut(&frame, &spec, n.width, n.clearance),
+                };
+                let (solid, report) = built.map_err(|e| match e {
+                    k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
+                    other => DocError::Kernel {
+                        feature: id,
+                        detail: other.to_string(),
+                    },
+                })?;
+                r.notes = vec![format!(
+                    "faceted thread: {} segments per turn, {} planar faces, largest facet \
+                     deviation {:.4} mm (tolerance {} mm); not an exact helicoid",
+                    report.segments_per_turn, report.faces, report.max_facet_deviation, chord_tol
+                )];
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
             FeatureKind::Countersink {
                 hole,
                 diameter,

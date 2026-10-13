@@ -182,6 +182,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::Countersink { .. }) {
             return Some("countersinks");
         }
+        if matches!(f.kind, crate::FeatureKind::Thread { .. }) {
+            return Some("modeled threads");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }

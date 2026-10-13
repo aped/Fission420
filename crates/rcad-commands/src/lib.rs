@@ -202,6 +202,31 @@ pub enum Command {
         #[serde(default = "default_csink_angle")]
         angle_deg: f64,
     },
+    /// Modeled thread (run 6, ADR 0011) as a new body: a threaded rod, or a
+    /// square nut when `nut_width` is given (internal thread with radial
+    /// `clearance`, default 0.1). Axis along the normal of `plane` through
+    /// `center`; `length` a whole number of pitches; faceted with chord
+    /// tolerance `chord_tol` (default 0.01 mm).
+    Thread {
+        #[serde(default)]
+        name: Option<String>,
+        plane: SketchPlane,
+        #[serde(default)]
+        center: [f64; 2],
+        diameter: f64,
+        pitch: f64,
+        length: f64,
+        #[serde(default)]
+        left_hand: bool,
+        #[serde(default = "default_chord_tol")]
+        chord_tol: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nut_width: Option<f64>,
+        #[serde(default = "default_clearance")]
+        clearance: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
     /// Query (run 6): the faces of imported body `body` that direct edits can
     /// name, as JSON in `message`: `[{"face": FaceRef, "kind": DirectFace}]`
     /// in current B-rep order. Fails when the body is not an imported body
@@ -549,6 +574,7 @@ impl Command {
             Command::Fillet { .. } => "fillet",
             Command::DirectEdit { .. } => "direct_edit",
             Command::Countersink { .. } => "countersink",
+            Command::Thread { .. } => "thread",
             Command::ImportedFaces { .. } => "imported_faces",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
@@ -1129,6 +1155,42 @@ impl Session {
                             body,
                         },
                     ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::Thread {
+                name,
+                plane,
+                center,
+                diameter,
+                pitch,
+                length,
+                left_hand,
+                chord_tol,
+                nut_width,
+                clearance,
+                body_name,
+            } => {
+                let (name, body_name) = (name.clone(), body_name.clone());
+                let kind = |body| FeatureKind::Thread {
+                    plane: *plane,
+                    center: *center,
+                    diameter: *diameter,
+                    pitch: *pitch,
+                    length: *length,
+                    left_hand: *left_hand,
+                    chord_tol: *chord_tol,
+                    nut: nut_width.map(|width| rcad_document::NutSpec {
+                        width,
+                        clearance: *clearance,
+                    }),
+                    body,
+                };
+                let what = if nut_width.is_some() { "Nut" } else { "Thread" };
+                let id = self.model_mut()?.transact(what, |d| {
+                    let body = d.add_body(body_name.unwrap_or_else(|| d.default_body_name()));
+                    let n = name.unwrap_or_else(|| d.default_name(what));
+                    Ok(d.push(n, kind(body)))
                 })?;
                 r.feature = Some(id);
             }
@@ -2675,6 +2737,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
+                FeatureKind::Thread { plane, .. } => ("thread", Some(*plane)),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {
@@ -2741,6 +2804,14 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
 
 fn default_csink_angle() -> f64 {
     90.0
+}
+
+fn default_chord_tol() -> f64 {
+    0.01
+}
+
+fn default_clearance() -> f64 {
+    0.1
 }
 
 /// [`BodySummary::imported_faces`] (empty when the body has no valid import
