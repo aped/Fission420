@@ -9,7 +9,7 @@ use crate::sketches::{self, RectIds};
 use crate::{Command, SketchTemplate, end_cap_of};
 use rcad_document::{FeatureId, SketchPlane};
 use rcad_sketch::{Constraint, Dimension, DragOutcome, Entity, EntityId, PointId, Sketch};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Scenario B profile vertices (mm), counter-clockwise; (50, 40) is the
 /// chamfer's top end.
@@ -181,6 +181,13 @@ pub struct Step {
     pub expect_ok: bool,
 }
 
+/// `out/name` joined with `/` on every OS: workflow paths are portable document
+/// data (the committed workflows say `artifacts/scenario_a.stl`), not OS paths;
+/// `Path::join` would serialise `artifacts\\scenario_a.stl` on Windows (CI F1).
+fn portable(out: &Path, name: &str) -> PathBuf {
+    PathBuf::from(format!("{}/{name}", out.display()))
+}
+
 fn ok(cmd: Command) -> Step {
     Step {
         cmd,
@@ -242,13 +249,13 @@ pub fn scenario_a_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::Close),
         ok(Command::Open { path: doc.into() }),
         ok(Command::ExportStl {
-            path: out.join("scenario_a.stl"),
+            path: portable(out, "scenario_a.stl"),
             chord: Some(0.01),
             bodies: None,
             print: Default::default(),
         }),
         ok(Command::ExportStep {
-            path: out.join("scenario_a.step"),
+            path: portable(out, "scenario_a.step"),
             bodies: None,
         }),
         ok(Command::Inspect),
@@ -294,13 +301,13 @@ pub fn scenario_b_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::Close),
         ok(Command::Open { path: doc.into() }),
         ok(Command::ExportStl {
-            path: out.join("scenario_b.stl"),
+            path: portable(out, "scenario_b.stl"),
             chord: Some(0.01),
             bodies: None,
             print: Default::default(),
         }),
         ok(Command::ExportStep {
-            path: out.join("scenario_b.step"),
+            path: portable(out, "scenario_b.step"),
             bodies: None,
         }),
         ok(Command::Inspect),
@@ -416,13 +423,13 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::Close),
         ok(Command::Open { path: doc.into() }),
         ok(Command::ExportStl {
-            path: out.join("scenario_r.stl"),
+            path: portable(out, "scenario_r.stl"),
             chord: Some(0.01),
             bodies: None,
             print: Default::default(),
         }),
         ok(Command::ExportStep {
-            path: out.join("scenario_r.step"),
+            path: portable(out, "scenario_r.step"),
             bodies: None,
         }),
         ok(Command::Inspect),
@@ -438,13 +445,13 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
             st,
         )),
         ok(Command::ExportStl {
-            path: out.join("scenario_r_slot.stl"),
+            path: portable(out, "scenario_r_slot.stl"),
             chord: Some(0.01),
             bodies: None,
             print: Default::default(),
         }),
         ok(Command::ExportStep {
-            path: out.join("scenario_r_slot.step"),
+            path: portable(out, "scenario_r_slot.step"),
             bodies: None,
         }),
         ok(Command::NewDocument),
