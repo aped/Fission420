@@ -56,10 +56,11 @@ interchange does not carry another application's feature history.
 | SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
 | SVG / PDF | export (sketch, drawings) | lines/arcs (PDF: Béziers ≤ 2.8e-4·r) | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
 
-Qualification corpus (run 7, Run-8 §3 first slice): `tools/fixtures/corpus/` (23 manifest entries:
-6 STEP parts, 3 STEP assemblies, 2 STL meshes, 5 hand-authored 3MF/DXF/SVG/STL cases and
-malformed STEP/STL/3MF/DXF/SVG files; provenance in `tools/fixtures/corpus/MANIFEST.md`;
-below the Run-8 target of 12 parts, so the corpus is a first slice), checked by
+Qualification corpus (run 7, Run-8 §3 first slice): `tools/fixtures/corpus/` (29 manifest entries:
+12 STEP parts (mm and inch, rotated placements, holes, counterbore, chamfer, fillet, cone,
+sphere, torus, tube, open shell), 3 STEP assemblies (nested, repeated links, rotated parts),
+2 STL meshes, hand-authored 3MF/DXF/SVG/STL cases and malformed STEP/STL/3MF/DXF/SVG files;
+provenance in `tools/fixtures/corpus/MANIFEST.md`. No file from another CAD vendor yet.), checked by
 `crates/rcad-commands/tests/format_corpus.rs` against FreeCAD read-back or closed-form values;
 malformed files must fail with a bounded error and leave no partial document. A curved
 STEP solid's tessellation-estimated volume (sphere) is compared within its stated error;

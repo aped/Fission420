@@ -77,6 +77,54 @@
   "solid": true,
   "volume": 2096.568604
  },
+ "p10_triangle_prism_mm.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   40.0,
+   30.0,
+   10.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 6000.0,
+  "volumes": [
+   6000.0
+  ]
+ },
+ "p11_holed_frustum_mm.step": {
+  "bbox": [
+   -10.0,
+   -10.0,
+   0.0,
+   10.0,
+   10.0,
+   20.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 3413.864017,
+  "volumes": [
+   3413.864017
+  ]
+ },
+ "p12_rotated_cylinder_inch.step": {
+  "bbox": [
+   25.4,
+   12.7,
+   12.7,
+   76.2,
+   38.1,
+   38.1
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 25740.739938,
+  "volumes": [
+   25740.739938
+  ]
+ },
  "p1_bracket_holes_mm.step": {
   "bbox": [
    0.0,
@@ -163,5 +211,53 @@
   "area": 900.0,
   "faces": 2,
   "solids": 0
+ },
+ "p7_chamfer_block_mm.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   40.0,
+   30.0,
+   20.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 23750.0,
+  "volumes": [
+   23750.0
+  ]
+ },
+ "p8_fillet_block_mm.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   40.0,
+   30.0,
+   20.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 23931.327412,
+  "volumes": [
+   23931.327412
+  ]
+ },
+ "p9_tube_mm.step": {
+  "bbox": [
+   -15.0,
+   -15.0,
+   0.0,
+   15.0,
+   15.0,
+   30.0
+  ],
+  "solids": 1,
+  "valid": true,
+  "volume": 11780.972451,
+  "volumes": [
+   11780.972451
+  ]
  }
 }

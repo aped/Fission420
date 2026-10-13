@@ -88,6 +88,31 @@ back = Part.read(p("p6_open_shell_mm.step"))
 res["p6_open_shell_mm.step"] = {"solids": len(back.Solids), "faces": len(back.Faces),
                                 "area": round(back.Area, 6)}
 
+# P7-P12 (run 7, second slice): closed-form volumes.
+# P7: 40x30x20 block, one vertical edge chamfered 5 mm: 24000 - 12.5*20 = 23750.
+blk = Part.makeBox(40, 30, 20)
+e = [x for x in blk.Edges if abs(x.Vertexes[0].X - 40) < 1e-9 and abs(x.Vertexes[0].Y - 30) < 1e-9
+     and abs(x.Vertexes[1].X - 40) < 1e-9 and abs(x.Vertexes[1].Y - 30) < 1e-9][0]
+shape_step(blk.makeChamfer(5, [e]), "p7_chamfer_block_mm.step")
+# P8: same block, that edge filleted r 4: 24000 - (16 - 4 pi) * 20.
+blk = Part.makeBox(40, 30, 20)
+e = [x for x in blk.Edges if abs(x.Vertexes[0].X - 40) < 1e-9 and abs(x.Vertexes[0].Y - 30) < 1e-9
+     and abs(x.Vertexes[1].X - 40) < 1e-9 and abs(x.Vertexes[1].Y - 30) < 1e-9][0]
+shape_step(blk.makeFillet(4, [e]), "p8_fillet_block_mm.step")
+# P9: tube Ro 15, Ri 10, h 30: 3750 pi.
+shape_step(Part.makeCylinder(15, 30).cut(Part.makeCylinder(10, 40, V(0, 0, -5))).removeSplitter(),
+           "p9_tube_mm.step")
+# P10: right-triangle prism (0,0)-(40,0)-(0,30), h 10: 6000.
+tri = Part.Face(Part.makePolygon([V(0, 0, 0), V(40, 0, 0), V(0, 30, 0), V(0, 0, 0)]))
+shape_step(tri.extrude(V(0, 0, 10)), "p10_triangle_prism_mm.step")
+# P11: frustum R 10, r 5, h 20 with a coaxial r 2 through hole: pi (3500/3 - 80).
+fr = Part.makeCone(10, 5, 20).cut(Part.makeCylinder(2, 30, V(0, 0, -5))).removeSplitter()
+shape_step(fr, "p11_holed_frustum_mm.step")
+# P12: inch file, cylinder r 0.5 in, h 2 in rotated 90 deg about Y: 0.5 pi in^3.
+cy = Part.makeCylinder(0.5, 2)
+cy.Placement = App.Placement(V(1, 1, 1), App.Rotation(V(0, 1, 0), 90))
+shape_step(cy, "p12_rotated_cylinder_inch.step", unit="INCH")
+
 # A1: nested assembly Top{ Sub{box @ (10,0,0)} @ rot 90° Z + (0,50,0), cylinder }.
 doc = App.newDocument("corpus")
 top = doc.addObject("App::Part", "Top")
