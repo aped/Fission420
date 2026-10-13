@@ -380,7 +380,7 @@ impl RcadApp {
                 }
             }
         });
-        egui::CollapsingHeader::new("Dimension / note")
+        let annotate = egui::CollapsingHeader::new("Dimension / note")
             .id_salt(("drawing_annotate", d.id.0))
             .show(ui, |ui| {
                 let refs = references(&self.summary);
@@ -436,16 +436,13 @@ impl RcadApp {
                     })
                     .response
                     .probe("Dimension to");
-                egui::ComboBox::from_label("Dimension tolerance")
-                    .selected_text(TOL_KINDS[st.tol_kind.min(3)])
-                    .show_ui(ui, |ui| {
-                        for (i, k) in TOL_KINDS.iter().enumerate() {
-                            ui.selectable_value(&mut st.tol_kind, i, *k)
-                                .probe(&format!("Dimension tolerance option {k}"));
-                        }
-                    })
-                    .response
-                    .probe("Dimension tolerance");
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Tolerance");
+                    for (i, k) in TOL_KINDS.iter().enumerate() {
+                        ui.selectable_value(&mut st.tol_kind, i, *k)
+                            .named(&format!("Tolerance {k}"));
+                    }
+                });
                 if st.tol_kind > 0 {
                     ui.horizontal(|ui| {
                         ui.label(if st.tol_kind == 1 { "±" } else { "Upper" });
@@ -523,6 +520,9 @@ impl RcadApp {
                     });
                 }
             });
+        annotate
+            .header_response
+            .probe(&format!("Dimension / note {}", d.name));
     }
 
     /// Issue count of the last drawing export if it belongs to the current

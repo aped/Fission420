@@ -1,0 +1,95 @@
+# Run 7 (SESSION_7 acceptance 3/5 UI): drawings and configurations through real
+# pointer/keyboard input on examples/drawing_set.rcad.json (holed plate part drawing
+# with section/detail/toleranced dimensions/note; pinned-plate assembly sheet with
+# BOM and balloons; configurations Std (hole_d 8) and Large (hole_d 10)).
+# Export the part sheet; switch configuration; edit the configuration table (one
+# undo step); add a toleranced hole diameter through the dimension editor; an
+# undrawable dimension is refused; add a note; toggle the BOM table; save/reopen.
+key ctrl+o
+typew File path | @ROOT@/examples/drawing_set.rcad.json
+key Return
+wait_idle
+expect drawings 2
+expect configurations 2
+expect active_configuration Std
+expect params.hole_d 8
+expect occurrences 3
+clickw Drawings header
+typew Drawing export path | @OUT@/part_std.pdf
+clickw Export Plate
+wait_idle
+expect last_reply.ok true
+expect drawing_issues 0
+shot
+clickw Configurations header
+clickw Activate Large
+wait_idle
+expect active_configuration Large
+expect params.hole_d 10
+typew Drawing export path | @OUT@/part_large.pdf
+clickw Export Plate
+wait_idle
+expect drawing_issues 0
+clickw Configuration table header
+typew Configuration 1 hole_d | 12
+clickw Apply configuration table
+wait_idle
+expect last_reply.ok true
+expect params.hole_d 12
+shot
+key ctrl+z
+wait_idle
+expect params.hole_d 10
+clickw Configuration table header
+clickw Configurations header
+clickw Dimension / note Plate
+clickw Dimension view
+clickw Dimension view option V2
+clickw Dimension from
+clickw Dimension from option F3 Hole A: hole axis
+clickw Tolerance ± symmetric
+clickw Add dimension to Plate
+wait_idle
+expect last_reply.ok true
+clickw Dimension view
+clickw Dimension view option V1
+clickw Add dimension to Plate
+wait_idle
+expect last_reply.ok false
+# The browser is taller than the window here: scroll it (pointer over the browser).
+scroll 180 500 5
+sleep 1000
+typew Drawing note text | CHECK FIT
+clickw Add note to Plate
+wait_idle
+expect last_reply.ok true
+typew Drawing export path | @OUT@/part_annotated.pdf
+clickw Export Plate
+wait_idle
+expect drawing_issues 0
+shot
+clickw BOM table of Assembly
+wait_idle
+expect last_reply.ok true
+key ctrl+z
+wait_idle
+key ctrl+shift+s
+typew File path | @OUT@/drawing_set.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/drawing_set.rcad.json
+key Return
+wait_idle
+expect drawings 2
+expect active_configuration Large
+expect params.hole_d 10
+scroll 180 500 10
+sleep 1000
+typew Drawing export path | @OUT@/assembly_reopened.pdf
+clickw Export Assembly
+wait_idle
+expect drawing_issues 0
+shot
