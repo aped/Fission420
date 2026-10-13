@@ -345,3 +345,47 @@ fn recessed_b8_in_one_feature_keeps_counter_islands() {
             .all(|m| *m == Some(true))
     );
 }
+
+/// Run 6: the text's cap height is a parameter (`text<N>_height`), bindable
+/// to a user parameter; glyph areas scale with the square of the height.
+#[test]
+fn text_height_is_a_bindable_parameter() {
+    if !have_font() {
+        return;
+    }
+    let mut s = Session::new();
+    let label = enclosure(&mut s);
+    add_b8(&mut s, label);
+    let g = glyphs(&s, label);
+    let ids: Vec<RegionRef> = g.iter().map(|r| r.id.clone()).collect();
+    ok(&mut s, extrude(label, 1.0, ExtrudeOp::Join, &ids));
+    let a0: f64 = g.iter().map(|r| r.area).sum();
+    let f = s
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.id == label)
+        .unwrap()
+        .clone();
+    let (name, h0) = f
+        .parameters
+        .iter()
+        .find(|(n, _)| n.starts_with("text") && n.ends_with("_height"))
+        .cloned()
+        .expect("text height parameter");
+    let p: Command = serde_json::from_value(serde_json::json!({"cmd": "set_user_parameter",
+        "name": "label_h", "expression": (h0 * 1.5).to_string(), "unit": "mm"}))
+    .unwrap();
+    ok(&mut s, p);
+    let b: Command = serde_json::from_value(serde_json::json!({"cmd": "set_expression",
+        "feature": label, "name": name, "expression": "label_h"}))
+    .unwrap();
+    ok(&mut s, b);
+    let a1: f64 = glyphs(&s, label).iter().map(|r| r.area).sum();
+    // The outlines are re-flattened at the new size with the same 0.01 mm
+    // chord tolerance, so the area scales by h² only within that tolerance
+    // (≈ tolerance × perimeter); the solid follows the regions exactly.
+    assert!((a1 - a0 * 2.25).abs() < 1e-3 * a1, "{a1} vs {}", a0 * 2.25);
+    let expect = BOX - CAVITY + a1;
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect);
+}

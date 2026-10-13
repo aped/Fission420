@@ -915,6 +915,10 @@ impl Feature {
         match &self.kind {
             FeatureKind::Sketch { sketch, plane, .. } => {
                 let mut p = sketch.dimensions();
+                // Run 6: each text's cap height (stored outlines are rescaled).
+                for t in &sketch.texts {
+                    p.push((format!("text{}_height", t.id), t.spec.height));
+                }
                 if let Some((x, y)) = anchor(sketch) {
                     p.push(("center_x".into(), x));
                     p.push(("center_y".into(), y));
@@ -1227,6 +1231,26 @@ impl Feature {
                     )));
                 }
                 *distance = value;
+                Ok(())
+            }
+            FeatureKind::Sketch { sketch, .. }
+                if name
+                    .strip_prefix("text")
+                    .and_then(|r| r.strip_suffix("_height"))
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .is_some_and(|n| sketch.texts.iter().any(|t| t.id == n)) =>
+            {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.{name}: text height must be > 0 mm, got {value}"
+                    )));
+                }
+                let n: u32 = name["text".len()..name.len() - "_height".len()]
+                    .parse()
+                    .unwrap_or(0);
+                if let Some(t) = sketch.texts.iter_mut().find(|t| t.id == n) {
+                    t.spec.height = value;
+                }
                 Ok(())
             }
             FeatureKind::Sketch { sketch, .. } => {

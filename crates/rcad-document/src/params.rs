@@ -651,6 +651,9 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
             if name == "center_x" || name == "center_y" {
                 return Some(SlotKind::Length);
             }
+            if name.starts_with("text") && name.ends_with("_height") && kind_has(kind, name) {
+                return Some(SlotKind::Length);
+            }
             let c = sketch.constraints.iter().find_map(|c| {
                 c.dimension()
                     .filter(|d| d.name == name)
