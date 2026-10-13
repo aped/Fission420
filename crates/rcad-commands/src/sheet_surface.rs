@@ -140,7 +140,22 @@ pub struct ThickenArgs {
     pub hide_source: bool,
 }
 
-fn new_body(d: &mut Document, name: &Option<String>, default: &str) -> Result<BodyId, DocError> {
+/// Who owns a new body (review #16): a modelled body joins the active
+/// component; a display body (flat pattern) joins none; a derived body
+/// (stitch / fill / thicken) takes its source's place in its component.
+#[derive(Clone, Copy)]
+enum Owner {
+    Active,
+    Display,
+    Derived(BodyId),
+}
+
+fn new_body(
+    d: &mut Document,
+    name: &Option<String>,
+    default: &str,
+    owner: Owner,
+) -> Result<BodyId, DocError> {
     let n = match name {
         Some(n) => crate::valid_name(n, "body")?,
         None => crate::unique_body_name(d, default),
@@ -150,7 +165,11 @@ fn new_body(d: &mut Document, name: &Option<String>, default: &str) -> Result<Bo
             "another body is already named '{n}'"
         )));
     }
-    Ok(d.add_body(n))
+    Ok(match owner {
+        Owner::Active => d.add_body(n),
+        Owner::Display => d.add_body_unowned(n),
+        Owner::Derived(src) => d.add_derived_body(n, src),
+    })
 }
 
 /// The sheet base feature `base` and its body.
@@ -273,7 +292,7 @@ impl Session {
                     relief_depth: a.relief_depth.unwrap_or(a.thickness),
                 };
                 let id = self.model_mut()?.transact("Sheet base face", |d| {
-                    let body = new_body(d, &a.body_name, "Sheet")?;
+                    let body = new_body(d, &a.body_name, "Sheet", Owner::Active)?;
                     let n = a.name.clone().unwrap_or_else(|| d.default_name("Sheet"));
                     Ok(d.push(
                         n,
@@ -373,7 +392,7 @@ impl Session {
                                     "{} (flat)",
                                     d.body(folded).map(|b| b.name.clone()).unwrap_or_default()
                                 );
-                                let body = new_body(d, &None, &fname)?;
+                                let body = new_body(d, &None, &fname, Owner::Display)?;
                                 let n = d.default_name("Flat pattern");
                                 let fid = d.push(n, FeatureKind::SheetFlat { base: a.base, body });
                                 (fid, body)
@@ -436,7 +455,7 @@ impl Session {
                     .model_mut()?
                     .transact(&format!("Import surfaces {file}"), |d| {
                         let blob = d.add_blob(&file, &bytes);
-                        let body = new_body(d, &None, &label)?;
+                        let body = new_body(d, &None, &label, Owner::Active)?;
                         let n = d.default_name("Surfaces");
                         Ok(d.push(
                             n,
@@ -503,6 +522,7 @@ impl Session {
                             d,
                             &a.body_name,
                             &format!("{src} {}", if stitch { "stitched" } else { "filled" }),
+                            Owner::Derived(a.body),
                         )?;
                         if a.hide_source {
                             d.body_mut(a.body)?.visible = false;
@@ -531,7 +551,12 @@ impl Session {
                 let a = a.clone();
                 let id = self.model_mut()?.transact("Thicken", |d| {
                     let src = d.body(a.body)?.name.clone();
-                    let body = new_body(d, &a.body_name, &format!("{src} thickened"))?;
+                    let body = new_body(
+                        d,
+                        &a.body_name,
+                        &format!("{src} thickened"),
+                        Owner::Derived(a.body),
+                    )?;
                     if a.hide_source {
                         d.body_mut(a.body)?.visible = false;
                     }

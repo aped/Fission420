@@ -751,3 +751,34 @@ fn relief_into_a_hole_is_refused() {
                 "start_offset": 20.0, "end_offset": 10.0}),
     );
 }
+
+/// Review #16: the flat-pattern display body never joins the active component.
+#[test]
+fn flat_body_does_not_join_the_active_component() {
+    let mut s = channel();
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "create_component", "name": "C", "bodies": [1]}),
+    );
+    let comp = r.assembly.and_then(|a| a.component).expect("component id");
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "activate_component", "component": comp}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": true}),
+    );
+    let c = s
+        .summary()
+        .assembly
+        .components
+        .into_iter()
+        .find(|c| c.id == comp)
+        .unwrap();
+    assert_eq!(
+        c.bodies,
+        vec![BodyId(1)],
+        "flat display body joined the component"
+    );
+}
