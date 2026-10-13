@@ -3,7 +3,7 @@
 # blank, compartment pocket + pattern (count = divider_count + 1), rim
 # notch; then edits (size, divider count 3/0, invalid), section view,
 # measurement, save/close/reopen and exports. Expected volumes are the
-# spec's formula (runs/run-5/SESSION_5.md §7).
+# spec's formula (run-5 specification §7).
 clickw New
 wait_idle
 typew New parameter name | tray_length

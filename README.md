@@ -184,8 +184,7 @@ slicer software but have **not** been physically printed.
 Linux (Bazzite / Fedora atomic) is the primary development platform. Windows and macOS
 builds are produced by CI and are being brought up to the same test bar.
 
-The latest development run's report is in [`runs/`](runs); the roadmap is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Documentation
 

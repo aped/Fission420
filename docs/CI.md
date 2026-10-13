@@ -20,7 +20,7 @@ are free; they also keep a private fork or a future switch to private affordable
 - **Routine pushes run Linux only.** Windows and macOS, and the binary archives, come from
   `main`, tags, PRs into `main` and manual runs (*Actions → CI → Run workflow*, which runs all
   four legs and publishes).
-- **Docs-only changes do not trigger CI:** `**.md`, `docs/**`, `runs/**` and `LICENSE-*`
+- **Docs-only changes do not trigger CI:** `**.md`, `docs/**` and `LICENSE-*`
   are ignored. Path filters do not apply to tag pushes.
 - **Superseded runs are cancelled** on work branches and PRs. Runs on `main` and tags always
   finish.

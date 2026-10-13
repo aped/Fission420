@@ -316,7 +316,7 @@ LOG_BENIGN = [
     # clipping a concentric line against the floating (unsupported) area; the path is still
     # merged and used. 2026-10-12: the same bracket 3MF bytes sliced 6x logged it in 1 run;
     # 2 of the 6 runs (that one and another) produced different toolpaths at a few layers
-    # (slicer-side nondeterminism, not input geometry); runs/run-4/ADDENDUM_2026-10-12.md.
+    # (slicer-side nondeterminism, not input geometry); see the run-4 addendum (local run records).
     # Only this exact variant is benign; the other ZFiller messages stay findings.
     (re.compile(r"ZFiller: encounter idx from clip: \d+$"),
      "Bambu-internal log-only check in floating concentric fill (nondeterministic on identical input)"),

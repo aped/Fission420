@@ -1,4 +1,4 @@
-//! Run-3 review findings on `regen.rs` (runs/run-3/REVIEW_FINDINGS.md,
+//! Run-3 review findings on `regen.rs` (run-3 review,
 //! "Backend: regen.rs"). Expected volumes are derived by hand from box
 //! arithmetic, not from the implementation's output.
 use f420_document::*;

@@ -236,7 +236,7 @@ values from the analytic formulas (never from the export report). Results
   the slicer's output varies on identical input; the message is a symptom of that, not of the
   input geometry.
   `analyze_gcode.py` classifies exactly this message as benign; other `ZFiller` messages
-  remain findings. Evidence: `runs/run-4/ADDENDUM_2026-10-12.md`.
+  remain findings. Evidence: the run-4 addendum (2026-10-12; local run records).
 
 This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
 says nothing about fit, strength or print quality.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one heavy job (cargo build/test/clippy, FreeCAD or slicer validation) at a time
-# across the coordinator and workers (runs/run-4/SESSION_4.md resource budget).
+# across the coordinator and workers (the run specification's resource budget).
 # Usage: tools/heavy.sh cargo test -p f420-document --release
 # Waits for the lock; builds use 4 jobs and the shared disk-backed target dir.
 set -euo pipefail

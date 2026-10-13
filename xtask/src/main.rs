@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-/// Run records belong under `runs/` (see `runs/README.md`), not in the root.
+/// Run records belong under `runs/` (local, git-ignored; see AGENTS.md), not in the root.
 /// Returns the offending root entries.
 fn stray_run_files(root: &Path) -> std::io::Result<Vec<String>> {
     const EXACT: &[&str] = &["GOAL.md", "PLAN.md", "KICKOFF.md", "STATUS.md", "plan"];
@@ -31,7 +31,7 @@ fn check_layout() -> bool {
         Ok(stray) => {
             eprintln!(
                 "<== layout: FAILED: run files in the repository root: {}\n    \
-                 move them to runs/run-N/ (status: runs/STATUS.md); see runs/README.md",
+                 move them to runs/run-N/ (status: runs/STATUS.md); see AGENTS.md",
                 stray.join(", ")
             );
             false

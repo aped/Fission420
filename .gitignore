@@ -1,4 +1,6 @@
 target/
+# Agent run records (specs, status, reports) are kept locally, never committed.
+/runs/
 artifacts/
 .claude/
 spikes/*/Cargo.lock

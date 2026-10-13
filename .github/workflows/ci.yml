@@ -10,9 +10,9 @@ on:
   push:
     branches: [main, "work/**", "ci/**"]
     tags: ["v*"]
-    paths-ignore: ["**.md", "docs/**", "runs/**", "LICENSE-*"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE-*"]
   pull_request:
-    paths-ignore: ["**.md", "docs/**", "runs/**", "LICENSE-*"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE-*"]
   workflow_dispatch:
 
 concurrency:
