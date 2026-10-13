@@ -86,6 +86,9 @@ pub struct MassReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OccurrenceMass {
     pub occurrence: OccurrenceId,
+    /// Run 7: instance path ("O3/O7"); `name` is the path of names.
+    #[serde(default)]
+    pub path: String,
     pub name: String,
     pub component: ComponentId,
     /// mm³ (None when a body has no properties).
@@ -191,14 +194,18 @@ pub fn report(
             .map(|b| b.id)
             .collect(),
     };
-    let occ_ids: Vec<OccurrenceId> = match (occurrences, bodies) {
+    // Run 7 (nesting): one entry per evaluated instance; a listed occurrence
+    // selects every instance whose path passes through it.
+    let occ_ids: Vec<usize> = match (occurrences, bodies) {
         (Some(list), _) => {
             for o in list {
                 asm.occurrence(*o)?;
             }
-            list.to_vec()
+            (0..ev.occurrences.len())
+                .filter(|&i| ev.occurrences[i].path.iter().any(|p| list.contains(p)))
+                .collect()
         }
-        (None, None) => ev.occurrences.iter().map(|o| o.id).collect(),
+        (None, None) => (0..ev.occurrences.len()).collect(),
         (None, Some(_)) => vec![],
     };
     // Geometry properties per body, computed once (occurrences share them).
@@ -260,8 +267,8 @@ pub fn report(
         })
         .collect();
     let mut occ_out = Vec::new();
-    for oid in occ_ids {
-        let Some(eo) = ev.occurrences.iter().find(|o| o.id == oid) else {
+    for oi in occ_ids {
+        let Some(eo) = ev.occurrences.get(oi) else {
             continue;
         };
         let t = eo.transform;
@@ -327,7 +334,8 @@ pub fn report(
         }
         occ_out.push(OccurrenceMass {
             occurrence: eo.id,
-            name: eo.name.clone(),
+            path: eo.path_string(),
+            name: eo.path_name.clone(),
             component: eo.component,
             volume: (!vol_only.is_empty()).then_some(volume),
             mass: whole.map(|w| w.mass),

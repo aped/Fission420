@@ -114,6 +114,8 @@ fn components_section_create_move_ground_bom_interference_joint() {
         value: 0.0,
         min: Some(0.0),
         max: Some(40.0),
+        extra: vec![],
+        dir2: None,
     });
     settle(&mut h);
     assert_eq!(h.state().summary().assembly.joints.len(), 1);
@@ -142,10 +144,12 @@ fn display_scene_draws_each_occurrence_placed() {
             name: "Block".into(),
             bodies: vec![body],
             part_number: None,
+            occurrences: vec![],
         },
         Command::AddOccurrence {
             component: rcad_document::assembly::ComponentId(1),
             name: None,
+            owner: None,
             translate: [100.0, 0.0, 0.0],
             axis: None,
             angle_deg: 0.0,
