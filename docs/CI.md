@@ -18,7 +18,7 @@ Each leg runs these steps:
 1. `cargo fetch --locked`: the lockfile must be current.
 2. `cargo build --release --locked -p f420-app -p f420-cli`.
 3. `cargo xtask check`: layout, `fmt --check`, `clippy -D warnings`, `test --workspace --release`, headless acceptance, the example replays.
-4. Package and upload the binaries plus `README.md`, the committed `examples/` and `BUILD_INFO.txt`. `BUILD_INFO.txt` records the commit, platform, toolchain and the outcome of the xtask check.
+4. Package and upload the binaries plus `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_LICENSES.txt`, the committed `examples/` and `BUILD_INFO.txt`. `BUILD_INFO.txt` records the commit, platform, toolchain and the outcome of the xtask check.
 
 The Ubuntu leg also warns (it does not fail) when the replays rewrite committed `examples/`.
 
@@ -62,6 +62,17 @@ All `f420-app` tests use `egui_kittest` without wgpu and run on the app's fallba
 so they are pure CPU: no display, no GPU, no `WAYLAND_DISPLAY`/`DISPLAY`. The one GPU test,
 `f420-viewport/src/gpu_tests.rs`, is `#[ignore]` and skips when no adapter is present. Never
 set `F420_WRITE_EXAMPLES` in CI, because it overwrites `examples/`.
+
+### Licences in the archives
+
+Fission420 is MIT OR Apache-2.0. The binaries also embed about 250 third-party crates, all
+permissive or used under a permissive option (docs/DEPENDENCIES.md). Among them are Truck,
+nalgebra and winit under Apache-2.0 only, and egui's bundled fonts under OFL-1.1, the Ubuntu
+Font Licence and Hack's licence. Redistributing them requires their notices.
+`tools/ci/third_party_licenses.py <target> <out>` writes `THIRD_PARTY_LICENSES.txt` for
+each platform from `cargo metadata`. It lists every crate linked into `f420-app`/`f420-cli`
+and includes the licence texts each one ships, plus the canonical texts for the 30 or so
+crates (Truck, egui) whose packages ship none.
 
 ## Reproducing locally
 

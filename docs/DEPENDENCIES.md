@@ -36,6 +36,9 @@ Full transitive license audit: see `artifacts/licenses.txt` (generated) / sectio
 - Fonts in `epaint_default_fonts`: OFL-1.1 / Ubuntu Font Licence (font licences, permissive for embedding).
 - `self_cell` (Apache-2.0 OR GPL-2.0-only) and `r-efi` (MIT OR Apache-2.0 OR LGPL) are used under their permissive option.
 No package lacks a permissive option (`artifacts/licenses.txt`).
+Binary distributions (CI artifacts) carry `THIRD_PARTY_LICENSES.txt`, generated per target by
+`tools/ci/third_party_licenses.py` (crate list, shipped licence and font texts, canonical texts
+for crates without licence files); see docs/CI.md.
 | egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | f420-app UI interaction tests |
 | kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | f420-app UI interaction tests |
 

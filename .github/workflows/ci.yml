@@ -119,7 +119,10 @@ jobs:
           exe=""
           if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
           cp "target/release/f420-app$exe" "target/release/f420-cli$exe" "dist/$name/"
-          cp README.md "dist/$name/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          py=python3; command -v python3 >/dev/null || py=python
+          "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
+            "dist/$name/THIRD_PARTY_LICENSES.txt"
           git checkout -- examples   # ship the committed examples, not replay output
           cp -r examples "dist/$name/examples"
           {
