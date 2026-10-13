@@ -93,7 +93,24 @@ def tree():
 
 
 def patch():
-    sys.stdout.write(transform(sys.stdin.read()))
+    """Like `tree`, but on a `git diff`/`format-patch` stream: paths are always renamed, and
+    hunk content is rewritten except in files whose contents `tree` keeps (KEEP_CONTENT),
+    so frozen fixtures added on the old history keep their original bytes."""
+    out = []
+    keep = False
+    for line in sys.stdin.read().splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(\S+) b/(\S+)", line)
+            paths = [transform(x) for x in m.groups()] if m else []
+            keep = any(r.search(q) for q in paths for r in KEEP_CONTENT)
+            out.append(transform(line))
+        elif keep and not line.startswith(
+            ("--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to ")
+        ):
+            out.append(line)
+        else:
+            out.append(transform(line))
+    sys.stdout.write("".join(out))
 
 
 def check():
