@@ -656,6 +656,46 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             set_values(m, id, vals)?;
             out.joint = Some(id);
         }
+        Command::SetJointAxis {
+            joint,
+            origin,
+            axis,
+            axis_from,
+            dir2,
+        } => {
+            let id = *joint;
+            let old = m.document().assembly.joint(id)?.clone();
+            let (origin, axis) = match axis_from {
+                Some(f) => {
+                    let (o, a) = axis_from_faces(m, old.parent, f)?;
+                    (o, a)
+                }
+                None => (*origin, axis.unwrap_or([0.0, 0.0, 1.0])),
+            };
+            let mut j = Joint {
+                origin,
+                axis,
+                dir2: *dir2,
+                ..old.clone()
+            };
+            if j.kind != JointKind::Rigid {
+                j.frame()?;
+            }
+            // Keep the child where it is: rest = (L_p ∘ M_new(values))⁻¹ ∘ L_c.
+            let l = locals(m)?;
+            let get = |o: OccurrenceId| {
+                l.get(&o)
+                    .copied()
+                    .ok_or_else(|| v(format!("occurrence {o} is not solved")))
+            };
+            let (tp, tc) = (get(j.parent)?, get(j.child)?);
+            j.rest = Pose::from(inverse(&tp.after(&j.current_motion()?)).after(&tc));
+            m.transact(&format!("Set axis of {}", old.name), |d| {
+                *d.assembly.joint_mut(id)? = j.clone();
+                Ok(())
+            })?;
+            out.joint = Some(id);
+        }
         Command::SetJointValues { joint, values } => {
             set_values(m, *joint, values.clone())?;
             out.joint = Some(*joint);

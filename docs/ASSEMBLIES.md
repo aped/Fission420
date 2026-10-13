@@ -67,7 +67,10 @@ document without them still saves as v6 (frozen fixtures in
 captured when the joint is made, so nothing jumps (every joint is *as-built*; there is no
 snap-to-origin joint). `origin`/`axis` are in the parent's definition coordinates, given
 explicitly or taken exactly from the parent's faces (`axis_from`: cylinder face axis, or the
-line where two planar faces meet; captured at creation, not re-derived after edits).
+line where two planar faces meet; captured at creation, not re-derived after edits;
+`set_joint_axis` redefines it later without moving the child). The joint editor also has a
+drive slider between the limits (each release commits one solved value; a motion preview of
+the joint solver, not a simulation).
 
 | kind | DOF | values (units) | motion `M` |
 |---|---|---|---|

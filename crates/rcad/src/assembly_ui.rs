@@ -114,6 +114,10 @@ pub struct AssemblyUi {
     pub align_from: Option<(FacePick, OccurrenceId, String)>,
     /// Joint value / limit buffers: values, (min, max) per value.
     pub joint_edit: Option<JointEdit>,
+    /// Axis buffers of the joint being edited: origin, axis.
+    pub joint_axis: [String; 6],
+    /// Part number buffer (rename panel).
+    pub part_number_edit: String,
     pub bom: Option<(u64, u64, Vec<BomRow>, Vec<StructuredBomRow>)>,
     /// Show the structured BOM (else flattened).
     pub structured: bool,
@@ -614,6 +618,7 @@ impl RcadApp {
                 let l = format!("Rename {}", o.name);
                 if ui.small_button("Rename…").named(&l).probe(&l).clicked() {
                     self.assembly_ui.rename = Some((o.id, o.name.clone(), comp.name.clone()));
+                    self.assembly_ui.part_number_edit = comp.part_number.clone();
                 }
                 let l = format!("Make {} independent", o.name);
                 if comp.children.is_empty()
@@ -795,6 +800,31 @@ impl RcadApp {
                         });
                     }
                 });
+                let pn = &mut self.assembly_ui.part_number_edit;
+                ui.horizontal(|ui| {
+                    crate::panels::short_text_field(ui, "Part number ", pn);
+                    if ui
+                        .small_button("Set part number")
+                        .probe("Set part number")
+                        .clicked()
+                    {
+                        send.push(Command::SetPartNumber {
+                            component: comp.id,
+                            part_number: pn.clone(),
+                        });
+                    }
+                });
+                let l = format!("Delete component {}", comp.name);
+                if ui
+                    .small_button("Delete component")
+                    .on_hover_text("Remove the component and all its occurrences (its bodies become loose bodies); refused while a joint or another component uses it")
+                    .named(&l)
+                    .probe(&l)
+                    .clicked()
+                {
+                    send.push(Command::DeleteComponent { component: comp.id });
+                    self.assembly_ui.selected = None;
+                }
             }
             // Exploded offset.
             if let Some((p, buf)) = &mut self.assembly_ui.explode
@@ -1016,6 +1046,14 @@ impl RcadApp {
                 ));
                 let l = format!("Edit {}", j.name);
                 if j.kind.dof() > 0 && ui.small_button("Edit…").named(&l).probe(&l).clicked() {
+                    self.assembly_ui.joint_axis = [
+                        fmt(j.origin[0]),
+                        fmt(j.origin[1]),
+                        fmt(j.origin[2]),
+                        fmt(j.axis[0]),
+                        fmt(j.axis[1]),
+                        fmt(j.axis[2]),
+                    ];
                     self.assembly_ui.joint_edit = Some((
                         j.id,
                         vals.iter().map(|v| fmt(*v)).collect(),
@@ -1039,6 +1077,40 @@ impl RcadApp {
             if let Some((id, vals, lims)) = &mut self.assembly_ui.joint_edit
                 && *id == j.id
             {
+                // Axis (parent definition coordinates); the child keeps its pose.
+                let ax = &mut self.assembly_ui.joint_axis;
+                ui.horizontal(|ui| {
+                    for (k, l) in ["Joint origin X", "Joint origin Y", "Joint origin Z"]
+                        .iter()
+                        .enumerate()
+                    {
+                        crate::panels::num_field(ui, l, &mut ax[k]);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    for (k, l) in ["Joint axis X", "Joint axis Y", "Joint axis Z"]
+                        .iter()
+                        .enumerate()
+                    {
+                        crate::panels::num_field(ui, l, &mut ax[3 + k]);
+                    }
+                    let nums: Vec<Option<f64>> = ax.iter().map(|t| parse(t)).collect();
+                    if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..]
+                        && ui
+                            .small_button("Set axis")
+                            .on_hover_text("Redefine the joint axis; nothing moves now, later values move about the new axis")
+                            .probe("Set axis")
+                            .clicked()
+                    {
+                        send.push(Command::SetJointAxis {
+                            joint: j.id,
+                            origin: [a, b, c],
+                            axis: Some([d, e, f]),
+                            axis_from: None,
+                            dir2: j.dir2,
+                        });
+                    }
+                });
                 for i in 0..vals.len() {
                     let sfx = if i == 0 {
                         String::new()

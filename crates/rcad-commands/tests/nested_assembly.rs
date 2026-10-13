@@ -901,3 +901,61 @@ fn step_assembly_export_keeps_the_product_structure() {
     assert!(msg.contains("6 solid(s)"), "{msg}");
     assert!(msg.contains("assembly structure flattened"), "{msg}");
 }
+
+/// `set_joint_axis` redefines the axis without moving the child; later values
+/// move it about the new axis (closed form).
+#[test]
+fn joint_axis_redefinition_keeps_the_pose() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let (a, _) = block(&mut s, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let (b, _) = block(&mut s, 2.0, 2.0, 2.0, [20.0, 0.0]);
+    let oa = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "A", "bodies": [a]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let ob = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "B", "bodies": [b]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let j = out(ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "revolute", "parent": oa, "child": ob,
+               "axis": [0.0, 0.0, 1.0], "value": 0.0}),
+    ))
+    .joint
+    .unwrap()
+    .0;
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_value", "joint": j, "value": 90.0}),
+    );
+    let p = |s: &Session| instance_point(s, &format!("O{ob}"), [20.0, 0.0, 0.0]);
+    assert!(near3(p(&s), [0.0, 20.0, 0.0], 1e-12));
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_axis", "joint": j, "axis": [1.0, 0.0, 0.0]}),
+    );
+    assert!(near3(p(&s), [0.0, 20.0, 0.0], 1e-12), "nothing moves");
+    // Back to 0: a −90° turn about +x takes (0, 20, 0) to (0, 0, −20).
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_value", "joint": j, "value": 0.0}),
+    );
+    assert!(near3(p(&s), [0.0, 0.0, -20.0], 1e-12), "{:?}", p(&s));
+    // A zero axis is refused; undo restores the old axis and pose.
+    refused(
+        &mut s,
+        json!({"cmd": "set_joint_axis", "joint": j, "axis": [0.0, 0.0, 0.0]}),
+    );
+    ok(&mut s, json!({"cmd": "undo"}));
+    ok(&mut s, json!({"cmd": "undo"}));
+    assert_eq!(s.summary().assembly.joints[0].axis, [0.0, 0.0, 1.0]);
+    assert!(near3(p(&s), [0.0, 20.0, 0.0], 1e-12));
+}
