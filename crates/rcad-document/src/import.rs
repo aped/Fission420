@@ -9,6 +9,8 @@ pub use rcad_kernel::{ImportedPlanarFace, ImportedSolid, LengthUnit, StepStats};
 
 pub struct StepResult {
     pub solids: Vec<ImportedSolid>,
+    /// Surface models (open shells) of the file, as one surface body (run 7).
+    pub surfaces: Option<rcad_kernel::ImportedSurfaces>,
     pub unit: LengthUnit,
     pub stats: StepStats,
     /// Units, counts and warnings for the import summary.
@@ -50,6 +52,7 @@ pub fn step(bytes: &[u8], unit_override_to_mm: Option<f64>) -> Result<StepResult
     notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
     Ok(StepResult {
         solids: imp.solids,
+        surfaces: imp.surfaces,
         unit: imp.length_unit,
         stats: imp.stats,
         notes,

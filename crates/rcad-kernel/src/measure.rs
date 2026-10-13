@@ -493,16 +493,24 @@ pub fn measure(body: &Body) -> Result<Measurements> {
     let s = &body.solid;
     guarded("measure", || -> Result<Measurements> {
         let shells = s.boundaries();
+        let closed = shells
+            .iter()
+            .all(|sh| sh.shell_condition() == ShellCondition::Closed);
         Ok(Measurements {
             shell_count: shells.len(),
-            all_shells_closed: shells
-                .iter()
-                .all(|sh| sh.shell_condition() == ShellCondition::Closed),
+            all_shells_closed: closed,
             face_count: s.face_iter().count(),
             edge_count: s.edge_iter().count() / 2,
             vertex_count: unique_vertices(s),
             bounds: raw_bounds(s)?,
-            volume: volume(body),
+            // Run 7: an open shell (surface body) encloses nothing.
+            volume: if closed {
+                volume(body)
+            } else {
+                VolumeResult::Unavailable {
+                    reason: "open shell (surface body): no enclosed volume".into(),
+                }
+            },
         })
     })?
 }

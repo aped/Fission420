@@ -50,9 +50,14 @@ struct B<'a> {
     vertex_loop_faces: Vec<(usize, usize)>,
 }
 
-pub(super) fn build_shell(geo: &Geo, shell_id: u64, tol: f64) -> Result<Built, StepError> {
+pub(super) fn build_shell(
+    geo: &Geo,
+    shell_id: u64,
+    tol: f64,
+    allow_open: bool,
+) -> Result<Built, StepError> {
     let (ty, p) = geo.idx.simple(shell_id, &["CLOSED_SHELL", "OPEN_SHELL"])?;
-    if ty == "OPEN_SHELL" {
+    if ty == "OPEN_SHELL" && !allow_open {
         return Err(fail(format!("OPEN_SHELL #{shell_id}: not a solid")));
     }
     let mut b = B {
@@ -74,7 +79,7 @@ pub(super) fn build_shell(geo: &Geo, shell_id: u64, tol: f64) -> Result<Built, S
         b.face(fid)?;
     }
     if b.sh.faces.is_empty() {
-        return Err(fail(format!("CLOSED_SHELL #{shell_id} has no faces")));
+        return Err(fail(format!("{ty} #{shell_id} has no faces")));
     }
     b.check_edges_on_faces()?;
     b.split_periodic()?;

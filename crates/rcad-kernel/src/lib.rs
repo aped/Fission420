@@ -21,8 +21,10 @@ pub mod prismatic;
 mod project;
 mod step;
 mod step_in;
+mod stitch;
 mod sweep;
 mod taper;
+mod thicken;
 mod thread;
 mod transform;
 mod validate;
@@ -62,8 +64,12 @@ pub use ops::{
 pub use project::{Curve2, face_boundary_curves};
 pub use step::{export_step, export_step_bodies};
 pub use step_in::{
-    ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
-    import_step,
+    ImportedPlanarFace, ImportedSolid, ImportedSurfaces, LengthUnit, StepImport, StepImportOptions,
+    StepStats, import_step,
+};
+pub use stitch::{
+    BoundaryLoop, FillReport, FreeEdge, Gap, MergeStats, ShellAnalysis, StitchReport, analyze,
+    fill_planar, glue, stitch, thicken,
 };
 pub use sweep::{PathSegment, sweep};
 pub use taper::{taper_section, tapered_boolean, tapered_tool};
