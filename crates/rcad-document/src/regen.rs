@@ -331,6 +331,9 @@ struct ExtrudeOut {
     plain: bool,
     /// Several regions in one feature (patterns/mirrors do not copy it).
     multi: bool,
+    /// Run 6: draft angle (radians) of a tapered Join/Cut (patterns/mirrors
+    /// do not copy it: their copies would be straight).
+    taper: f64,
     body: BodyId,
 }
 
@@ -1498,14 +1501,15 @@ fn extrude_feature(
         joined: false,
         intersect: false,
         plain: opts.is_plain(),
+        taper: opts.taper,
         multi: false,
         body: BodyId(0),
     };
     if opts.taper != 0.0 {
-        if !matches!(operation, Operation::NewBody { .. }) {
+        if matches!(operation, Operation::Intersect { .. }) || !extra.is_empty() {
             return Err(limit(
-                "a tapered extrusion is only available as New Body so far (Join/Cut/Intersect \
-                 with a taper: not yet supported)"
+                "a tapered Intersect or multi-region extrusion is not supported (New Body, Join \
+                 and Cut of one region can be tapered)"
                     .into(),
             ));
         }
@@ -1554,7 +1558,12 @@ fn extrude_feature(
                     });
                 }
             }
-            let (mut joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut joined, used) = if opts.taper != 0.0 {
+                let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Join)?;
+                (r, (a, b))
+            } else {
+                apply_tool(&t, &out, &frame, None, id, None)?
+            };
             (a, b) = used;
             for (i, (p, ents, h)) in extra.iter().enumerate() {
                 let o = ExtrudeOut {
@@ -1581,7 +1590,12 @@ fn extrude_feature(
                     "{id}: the cut points away from the material of {target}; clear 'reverse'"
                 )));
             }
-            let (mut cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut cut, used) = if opts.taper != 0.0 {
+                let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Cut)?;
+                (r, (a, b))
+            } else {
+                apply_tool(&t, &out, &frame, None, id, None)?
+            };
             (a, b) = used;
             for (i, (p, ents, h)) in extra.iter().enumerate() {
                 let o = ExtrudeOut {
@@ -1609,6 +1623,82 @@ fn extrude_feature(
     }
     out.span = (a, b);
     Ok(out)
+}
+
+/// Join/Cut with a drafted tool (run 6, kernel worker): the exact frustum of
+/// the profile over `(a, b)` along the sketch normal, exact at the near end
+/// (along `dir`) and offset inward by `w·tan(taper)` at distance `w` from it,
+/// applied with Truck's boolean and checked against that nominal tool
+/// (`rcad_kernel::tapered_boolean`; the slab construction only handles walls
+/// parallel to the axis). When the near end lies on a face of the target the
+/// tool starts `min(0.5 mm, length / 2)` behind it (outside the material for a
+/// Cut, inside the support for a Join), continuing the same draft, so no
+/// boolean faces are coplanar; the check still uses the nominal span.
+fn tapered_apply(
+    id: FeatureId,
+    t: &Body,
+    out: &ExtrudeOut,
+    (a, b): (f64, f64),
+    dir: f64,
+    taper: f64,
+    op: k::PrismOp,
+) -> Result<Body> {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: taper: {m}"));
+    let kp = to_kernel(&out.profile);
+    let len = b - a;
+    let frame = out.start;
+    // Law frame: at the near end, z along the direction (right-handed: a
+    // reversed direction also flips y, and the profile is mirrored in y).
+    let (lf, lp) = if dir > 0.0 {
+        (frame.offset(a), kp)
+    } else {
+        let f = frame.offset(b);
+        let flipped = Frame {
+            origin: f.origin,
+            x: f.x,
+            y: [-f.y[0], -f.y[1], -f.y[2]],
+            z: [-f.z[0], -f.z[1], -f.z[2]],
+        };
+        let mirrored = match kp {
+            k::Profile::Polygon(v) => {
+                k::Profile::Polygon(v.iter().rev().map(|p| [p[0], -p[1]]).collect())
+            }
+            k::Profile::Circle { center, radius } => k::Profile::Circle {
+                center: [center[0], -center[1]],
+                radius,
+            },
+            k::Profile::Loop(_) => {
+                return Err(limit(
+                    "rounded (line/arc) profiles cannot be tapered exactly yet; polygons and \
+                     circles only"
+                        .into(),
+                ));
+            }
+        };
+        (flipped, mirrored)
+    };
+    let near = if dir > 0.0 { a } else { b };
+    let on_face = out.side.is_some() && near.abs() <= k::tol::FACE_MATCH;
+    let back = if on_face {
+        JOIN_OVERLAP.min(len / 2.0)
+    } else {
+        0.0
+    };
+    k::tapered_boolean(t, &lp, &lf, len, (-back, len), taper, op)
+        .map(|(body, _)| body)
+        .map_err(|e| match e {
+            k::KernelError::InvalidInput(m) => limit(m),
+            other => DocError::Kernel {
+                feature: id,
+                detail: format!(
+                    "tapered {}: {other}",
+                    match op {
+                        k::PrismOp::Join => "join",
+                        k::PrismOp::Cut => "cut",
+                    }
+                ),
+            },
+        })
 }
 
 /// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:
@@ -1689,6 +1779,7 @@ fn intersect_tool(t: &Body, e: &ExtrudeOut, frame: &Frame, id: FeatureId) -> Res
         joined: false,
         intersect: false,
         plain: true,
+        taper: 0.0,
         multi: false,
         body: e.body,
     };
@@ -2346,6 +2437,7 @@ fn shell_tool(
             joined: false,
             intersect: false,
             plain: true,
+            taper: 0.0,
             multi: false,
             body: e.body,
         },
@@ -2454,6 +2546,7 @@ fn hole_tools(
             joined: false,
             intersect: false,
             plain: true,
+            taper: 0.0,
             multi: false,
             body: target,
         }
@@ -2513,6 +2606,12 @@ fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<Extrud
             from: id,
             detail: format!("{seed} is not an evaluated extrusion or hole"),
         })?;
+    if e.taper != 0.0 {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: patterns and mirrors do not copy tapered extrusions ({seed}); their copies \
+             would not be drafted"
+        )));
+    }
     if e.intersect || e.multi {
         return Err(DocError::ProductLimit(format!(
             "{id}: patterns and mirrors copy single-region Extrude Join or Cut features ({seed} \

@@ -53,6 +53,18 @@ check csink_block_d16.step "$(blk 20 4 1 1)$CONE" 0 $TOL
 # Countersink feature through the command API (rcad-commands tests/countersink.rs): plate
 # 60x40x10, D8 hole at (30,20), D12 x 82 deg countersink from the top.
 check csink_plate_d8_d12_82.step "h=2/math.tan(math.radians(41)); b=Part.makeBox(60,40,10).cut(Part.makeCylinder(4,20,V(30,20,-5))); exp=b.cut(Part.makeCone(4,4+(h+1)*2/h,h+1,V(30,20,10-h)))" 0 $TOL
+# Tapered tools (kernel taper::tests, RCAD_EVIDENCE_DIR=DIR): block 40x30x10; a 10x10
+# pocket at (20,15) 5 deep drafted 10 deg (side 10 - 2 w tan10 at depth w), and a 10x10
+# boss on top 5 tall drafted 5 deg. FreeCAD lofts the expected frusta (extended past the
+# faces along the same draft so no faces coincide).
+SQ="def sq(z,s,c=(20,15)): return Part.makePolygon([V(c[0]-s/2,c[1]-s/2,z),V(c[0]+s/2,c[1]-s/2,z),V(c[0]+s/2,c[1]+s/2,z),V(c[0]-s/2,c[1]+s/2,z),V(c[0]-s/2,c[1]-s/2,z)])
+b=Part.makeBox(40,30,10)"
+if [ -f "$DIR/taper_cut_pocket.step" ]; then
+  check taper_cut_pocket.step "$SQ
+t=math.tan(math.radians(10)); exp=b.cut(Part.makeLoft([sq(5,10-10*t),sq(11,10+2*t)],True))" 0 $TOL
+  check taper_join_boss.step "$SQ
+t=math.tan(math.radians(5)); exp=b.fuse(Part.makeLoft([sq(9.5,10+t),sq(15,10-10*t)],True)).removeSplitter()" 0 $TOL
+fi
 # Control: the countersunk export against the block WITHOUT the countersink must differ
 # by the countersink's volume, 256 pi / 3 = 268.08 mm^3.
 check csink_block_d16.step "$(blk 20 4 1 1)" 266 270
