@@ -15,6 +15,7 @@ mod measure;
 mod mesh;
 mod ops;
 pub mod prismatic;
+mod project;
 mod step;
 mod step_in;
 mod sweep;
@@ -38,6 +39,7 @@ pub use ops::{
     bounds, coplanar_face_side, cut_prism, cut_region, extent_along, has_implicit_edges,
     join_prism, join_region, plane_has_face, profile_within_face, through_all_margin,
 };
+pub use project::{Curve2, face_boundary_curves};
 pub use step::{export_step, export_step_bodies};
 pub use step_in::{
     ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,

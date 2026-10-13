@@ -6,6 +6,7 @@ use crate::{
     BodyId, CopiedRole, DocError, Document, Extent, ExtrudeOptions, FaceRef, FaceRole, FeatureId,
     FeatureKind, Operation, Result, SketchPlane,
 };
+use crate::{LinkedCurve, ProjectSource, ProjectionLink};
 use rcad_kernel::{self as k, Body, Frame, Measurements};
 use rcad_sketch::{EntityId, Profile as SketchProfile, SolveReport};
 use serde::{Deserialize, Serialize};
@@ -517,9 +518,29 @@ fn brep_target(st: &Snapshot, id: FeatureId, target: BodyId) -> Result<Body> {
 /// `EvalBody::measurements == None` (deferred measurement).
 pub fn regenerate_cached_opts(
     doc: &Document,
-    mut cache: Option<&mut RegenCache>,
+    cache: Option<&mut RegenCache>,
     measure_body: bool,
 ) -> Result<Evaluation> {
+    match regen_impl(doc, cache, measure_body, None)? {
+        Regen::Done(e) => Ok(*e),
+        Regen::Stopped(_) => Err(DocError::Validation(
+            "internal: regeneration stopped early".into(),
+        )),
+    }
+}
+
+/// A full evaluation, or the state just before feature `stop`.
+enum Regen {
+    Done(Box<Evaluation>),
+    Stopped(Box<Snapshot>),
+}
+
+fn regen_impl(
+    doc: &Document,
+    mut cache: Option<&mut RegenCache>,
+    measure_body: bool,
+    stop: Option<FeatureId>,
+) -> Result<Regen> {
     let order = doc.evaluation_order()?;
     doc.validate_bodies()?;
     doc.check_suppression()?;
@@ -540,6 +561,9 @@ pub fn regenerate_cached_opts(
     }
 
     for (i, id) in order.iter().copied().enumerate().skip(start) {
+        if stop == Some(id) {
+            return Ok(Regen::Stopped(Box::new(st)));
+        }
         let f = doc.feature(id)?;
         let mut r = FeatureResult {
             id,
@@ -567,9 +591,17 @@ pub fn regenerate_cached_opts(
             continue;
         }
         match &f.kind {
-            FeatureKind::Sketch { plane, sketch } => {
+            FeatureKind::Sketch {
+                plane,
+                sketch,
+                links,
+            } => {
                 let (frame, resolved) = plane_frame(id, plane, &st)?;
                 let mut s = sketch.clone();
+                for (li, link) in links.iter().enumerate() {
+                    let curves = link_curves(id, &frame, &link.source, &st)?;
+                    bind_link(id, li, link, &curves, &mut s)?;
+                }
                 let report = s.solve();
                 if !report.is_success() {
                     let culprits: Vec<String> = report
@@ -990,7 +1022,7 @@ pub fn regenerate_cached_opts(
         measurements: None,
     };
     eval.refresh_legacy_view();
-    Ok(eval)
+    Ok(Regen::Done(Box::new(eval)))
 }
 
 /// Every semantic planar face (extrusion caps and line sides, pattern/mirror
@@ -3093,6 +3125,293 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
+/// Projection source curves, loop by loop, each with its source entity.
+pub type SourceCurves = Vec<Vec<(k::Curve2, Option<EntityId>)>>;
+
+/// Source curves of a projection into the sketch on `frame` (2-D sketch
+/// coordinates), loop by loop, each with its source entity (sketch sources).
+/// The source plane must be parallel to the sketch plane (projection along
+/// the sketch normal is then a translation: lines and arcs stay exact).
+fn link_curves(
+    id: FeatureId,
+    frame: &Frame,
+    source: &ProjectSource,
+    st: &Snapshot,
+) -> Result<SourceCurves> {
+    let broken = |detail: String| DocError::BrokenReference { from: id, detail };
+    let (src_frame, loops): (Frame, SourceCurves) = match source {
+        ProjectSource::Face(r) => {
+            let rf = resolve_face(id, r, st)?;
+            let body = brep_target(st, id, rf.body)?;
+            let loops = k::face_boundary_curves(&body, &rf.frame)
+                .map_err(|e| broken(format!("projection of {} {:?}: {e}", r.feature, r.role)))?;
+            (
+                rf.frame,
+                loops
+                    .into_iter()
+                    .map(|l| l.into_iter().map(|c| (c, None)).collect())
+                    .collect(),
+            )
+        }
+        ProjectSource::Sketch(f) => {
+            let so = st.sketches.get(f).ok_or_else(|| {
+                broken(format!("projection source {f} is not an evaluated sketch"))
+            })?;
+            let sk = &so.solved;
+            let pt = |p: rcad_sketch::PointId| -> Result<[f64; 2]> {
+                sk.points
+                    .iter()
+                    .find(|q| q.id == p)
+                    .map(|q| [q.x, q.y])
+                    .ok_or_else(|| broken(format!("sketch {f} lost point {p:?}")))
+            };
+            let mut out = Vec::new();
+            for e in sk
+                .entities
+                .iter()
+                .filter(|e| !sk.construction.contains(&e.id()))
+            {
+                let c = match e {
+                    rcad_sketch::Entity::Line { a, b, .. } => k::Curve2::Line {
+                        a: pt(*a)?,
+                        b: pt(*b)?,
+                    },
+                    rcad_sketch::Entity::Arc {
+                        center, start, end, ..
+                    } => k::Curve2::Arc {
+                        c: pt(*center)?,
+                        a: pt(*start)?,
+                        b: pt(*end)?,
+                        ccw: true,
+                    },
+                    rcad_sketch::Entity::Circle { center, radius, .. } => k::Curve2::Circle {
+                        c: pt(*center)?,
+                        r: *radius,
+                    },
+                };
+                out.push((c, Some(e.id())));
+            }
+            (so.frame, vec![out])
+        }
+    };
+    if dot(src_frame.z, frame.z).abs() < 1.0 - 1e-9 {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: projection needs a source parallel to the sketch plane (an oblique source \
+             would project arcs to ellipses)"
+        )));
+    }
+    let to2 = |p: [f64; 2]| {
+        let w = sub(src_frame.to_world(p), frame.origin);
+        [dot(w, frame.x), dot(w, frame.y)]
+    };
+    // A mirrored in-plane orientation flips arc directions.
+    let flip = dot(src_frame.z, frame.z) < 0.0;
+    Ok(loops
+        .into_iter()
+        .map(|l| {
+            l.into_iter()
+                .map(|(c, e)| {
+                    let c = match c {
+                        k::Curve2::Line { a, b } => k::Curve2::Line {
+                            a: to2(a),
+                            b: to2(b),
+                        },
+                        k::Curve2::Arc { c, a, b, ccw } => k::Curve2::Arc {
+                            c: to2(c),
+                            a: to2(a),
+                            b: to2(b),
+                            ccw: ccw != flip,
+                        },
+                        k::Curve2::Circle { c, r } => k::Curve2::Circle { c: to2(c), r },
+                    };
+                    (c, e)
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// The points a curve pins: line a, b; arc centre, start, end (sketch arcs
+/// run counter-clockwise from start to end); circle centre and rim point.
+fn curve_points(c: &k::Curve2) -> Vec<[f64; 2]> {
+    match *c {
+        k::Curve2::Line { a, b } => vec![a, b],
+        k::Curve2::Arc { c, a, b, ccw } => {
+            if ccw {
+                vec![c, a, b]
+            } else {
+                vec![c, b, a]
+            }
+        }
+        k::Curve2::Circle { c, r } => vec![c, [c[0] + r, c[1]]],
+    }
+}
+
+fn curve_kind(c: &k::Curve2) -> u8 {
+    match c {
+        k::Curve2::Line { .. } => 0,
+        k::Curve2::Arc { .. } => 1,
+        k::Curve2::Circle { .. } => 2,
+    }
+}
+
+/// Move the pinned points of `link` in `s` to the source curves. Sketch
+/// sources match by source entity; face sources loop by loop (same count and
+/// sequence of curve kinds, up to where the loop starts), choosing the
+/// rotation nearest to the stored positions. Anything else is a
+/// BrokenReference naming the link.
+fn bind_link(
+    id: FeatureId,
+    li: usize,
+    link: &ProjectionLink,
+    curves: &[Vec<(k::Curve2, Option<EntityId>)>],
+    s: &mut rcad_sketch::Sketch,
+) -> Result<()> {
+    let broken = |why: String| DocError::BrokenReference {
+        from: id,
+        detail: format!(
+            "projection {} (from {}) no longer matches its source: {why}; unlink it or project \
+             again",
+            li + 1,
+            link.source_feature()
+        ),
+    };
+    let stored = |p: rcad_sketch::PointId, s: &rcad_sketch::Sketch| {
+        s.constraints.iter().find_map(|c| match c {
+            rcad_sketch::Constraint::FixedPoint { p: q, x, y } if *q == p => Some([*x, *y]),
+            _ => None,
+        })
+    };
+    // Assignment: for every linked curve, its new geometry.
+    let mut assigned: Vec<(&LinkedCurve, k::Curve2)> = Vec::new();
+    match link.source {
+        ProjectSource::Sketch(_) => {
+            let all: Vec<&(k::Curve2, Option<EntityId>)> = curves.iter().flatten().collect();
+            for lc in link.loops.iter().flatten() {
+                let from = lc
+                    .from
+                    .ok_or_else(|| broken("no source entity recorded".into()))?;
+                let (c, _) = all
+                    .iter()
+                    .find(|(_, e)| *e == Some(from))
+                    .ok_or_else(|| broken(format!("source entity {from:?} was removed")))?;
+                assigned.push((lc, *c));
+            }
+        }
+        ProjectSource::Face(_) => {
+            if curves.len() != link.loops.len() {
+                return Err(broken(format!(
+                    "the face had {} boundary loop(s), now {}",
+                    link.loops.len(),
+                    curves.len()
+                )));
+            }
+            let mut used = vec![false; curves.len()];
+            let entity_kind = |e: EntityId| match s.entities.iter().find(|x| x.id() == e) {
+                Some(rcad_sketch::Entity::Line { .. }) => Some(0u8),
+                Some(rcad_sketch::Entity::Arc { .. }) => Some(1),
+                Some(rcad_sketch::Entity::Circle { .. }) => Some(2),
+                None => None,
+            };
+            for ll in &link.loops {
+                let kinds: Vec<Option<u8>> = ll.iter().map(|lc| entity_kind(lc.entity)).collect();
+                let mut best: Option<(f64, usize, usize)> = None;
+                for (ci, cl) in curves.iter().enumerate() {
+                    if used[ci] || cl.len() != ll.len() {
+                        continue;
+                    }
+                    let n = cl.len();
+                    for rot in 0..n {
+                        let ok = (0..n).all(|j| Some(curve_kind(&cl[(j + rot) % n].0)) == kinds[j]);
+                        if !ok {
+                            continue;
+                        }
+                        let mut d = 0.0;
+                        for j in 0..n {
+                            let pts = curve_points(&cl[(j + rot) % n].0);
+                            for (p, q) in pts.iter().zip(&ll[j].points) {
+                                if let Some(o) = stored(*q, s) {
+                                    d += (p[0] - o[0]).hypot(p[1] - o[1]);
+                                }
+                            }
+                        }
+                        if best.is_none_or(|(bd, _, _)| d < bd) {
+                            best = Some((d, ci, rot));
+                        }
+                    }
+                }
+                let (_, ci, rot) = best.ok_or_else(|| {
+                    broken("a boundary loop changed its number or kinds of edges".into())
+                })?;
+                used[ci] = true;
+                let n = ll.len();
+                for (j, lc) in ll.iter().enumerate() {
+                    assigned.push((lc, curves[ci][(j + rot) % n].0));
+                }
+            }
+        }
+    }
+    for (lc, c) in assigned {
+        let pts = curve_points(&c);
+        if pts.len() != lc.points.len() {
+            return Err(broken(format!("{:?} changed kind", lc.entity)));
+        }
+        for (p, q) in pts.iter().zip(&lc.points) {
+            let fixed = s.constraints.iter_mut().find_map(|c| match c {
+                rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => Some((x, y)),
+                _ => None,
+            });
+            let Some((x, y)) = fixed else {
+                return Err(broken(format!(
+                    "pinned point {q:?} lost its fixed constraint"
+                )));
+            };
+            (*x, *y) = (p[0], p[1]);
+            if let Some(sp) = s.points.iter_mut().find(|sp| sp.id == *q) {
+                (sp.x, sp.y) = (p[0], p[1]);
+            }
+        }
+        if let k::Curve2::Circle { r, .. } = c
+            && let Some(rcad_sketch::Entity::Circle { radius, .. }) =
+                s.entities.iter_mut().find(|e| e.id() == lc.entity)
+        {
+            *radius = r;
+        }
+    }
+    Ok(())
+}
+
+/// Source curves for a new projection into sketch `sketch` (the history
+/// state just before it, in its frame).
+pub fn projection_curves(
+    doc: &Document,
+    sketch: FeatureId,
+    source: &ProjectSource,
+) -> Result<SourceCurves> {
+    let FeatureKind::Sketch { plane, .. } = &doc.feature(sketch)?.kind else {
+        return Err(DocError::Validation(format!("{sketch} is not a sketch")));
+    };
+    // The source must come first in history (no cycle).
+    let pos = |f: FeatureId| doc.features.iter().position(|x| x.id == f);
+    let src = match source {
+        ProjectSource::Face(r) => r.feature,
+        ProjectSource::Sketch(f) => *f,
+    };
+    if src == sketch || pos(src) > pos(sketch) || doc.with_dependents(sketch).contains(&src) {
+        return Err(DocError::Validation(format!(
+            "{sketch} cannot project {src}: it comes later in history or depends on the sketch \
+             (a cycle)"
+        )));
+    }
+    match regen_impl(doc, None, false, Some(sketch))? {
+        Regen::Stopped(st) => {
+            let (frame, _) = plane_frame(sketch, plane, &st)?;
+            link_curves(sketch, &frame, source, &st)
+        }
+        Regen::Done(_) => Err(DocError::Validation(format!("{sketch} was not evaluated"))),
+    }
+}
+
 fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<ResolvedFace> {
     // The generating tool and its extrusion role, for telling coplanar faces
     // apart by the tool's own footprint.

@@ -294,6 +294,11 @@ pub enum FeatureKind {
     Sketch {
         plane: SketchPlane,
         sketch: Sketch,
+        /// Projected geometry kept associative (run 6, format v6): each link
+        /// drives sketch entities pinned by `FixedPoint` constraints, updated
+        /// from the source at every regeneration.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        links: Vec<ProjectionLink>,
     },
     /// New-body revolve of a sketch profile about the sketch's local Y axis.
     /// `angle` is in radians (exposed as parameter `angle_deg`).
@@ -361,10 +366,7 @@ pub enum FeatureKind {
     },
     /// Base feature: mesh bodies from an embedded 3MF package, one per build item
     /// in file order (units declared by the file).
-    Import3mf {
-        blob: BlobId,
-        bodies: Vec<BodyId>,
-    },
+    Import3mf { blob: BlobId, bodies: Vec<BodyId> },
     /// Repeat the tool of `seed` (an Extrude Join/Cut or a Hole) `count - 1` more
     /// times (count 1 = the seed only, no copies; run 5), each
     /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
@@ -378,10 +380,7 @@ pub enum FeatureKind {
     /// Apply the reflection of `seed`'s tool (an Extrude Join or Cut) across
     /// `plane` (a world plane through the origin or a planar face) to the seed's
     /// target body. The seed itself stays; this adds the mirrored copy.
-    Mirror {
-        seed: FeatureId,
-        plane: SketchPlane,
-    },
+    Mirror { seed: FeatureId, plane: SketchPlane },
     /// Repeat the tool of `seed` (an Extrude Join/Cut) `count - 1` more times,
     /// each rotated by a further `angle` (radians; parameter `angle_deg`, counter-
     /// clockwise about the seed sketch's normal) about `center` (seed sketch-plane
@@ -404,11 +403,7 @@ pub enum FeatureKind {
     /// both. Scope (`rcad_kernel::fillet_edge`): the body is prismatic along
     /// the edge (planar faces parallel/perpendicular to it), end faces
     /// perpendicular; refused otherwise with the reason. Parameter "radius".
-    Fillet {
-        a: FaceRef,
-        b: FaceRef,
-        radius: f64,
-    },
+    Fillet { a: FaceRef, b: FaceRef, radius: f64 },
     /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
     /// `a` and `b` on parallel planes, as new body `body`: equal-count
     /// polygons whose corresponding edges are parallel (planar sides; vertex
@@ -504,6 +499,48 @@ impl ExtrudeOptions {
     }
 }
 
+/// What a sketch projection reads (run 6, SESSION_6 §B / SK03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectSource {
+    /// Every boundary edge of a planar face (parallel to the sketch plane),
+    /// all loops. Lines and circular arcs only (exact).
+    Face(FaceRef),
+    /// The non-construction lines, arcs and circles of another sketch on a
+    /// parallel plane, matched by entity id.
+    Sketch(FeatureId),
+}
+
+/// One projected curve: the sketch entity it drives and its pinned points
+/// (line: a, b; arc: centre, start, end; circle: centre, rim point).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedCurve {
+    pub entity: rcad_sketch::EntityId,
+    pub points: Vec<rcad_sketch::PointId>,
+    /// Sketch source: the source entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<rcad_sketch::EntityId>,
+}
+
+/// An associative projection into a sketch: the source and, loop by loop,
+/// the curves it drives. Regeneration recomputes the source curves and moves
+/// the pinned points; a source whose shape changed (loop count, curve kinds,
+/// a missing source entity) is a `BrokenReference` naming the link, never a
+/// silent rebinding. Unlinking keeps the geometry as plain fixed curves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectionLink {
+    pub source: ProjectSource,
+    pub loops: Vec<Vec<LinkedCurve>>,
+}
+
+impl ProjectionLink {
+    pub fn source_feature(&self) -> FeatureId {
+        match self.source {
+            ProjectSource::Face(r) => r.feature,
+            ProjectSource::Sketch(f) => f,
+        }
+    }
+}
+
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Counterbore {
@@ -552,9 +589,12 @@ impl Feature {
     /// Features this one depends on.
     pub fn dependencies(&self) -> Vec<FeatureId> {
         match &self.kind {
-            FeatureKind::Sketch { plane, .. } => {
-                plane.face().map(|r| r.feature).into_iter().collect()
-            }
+            FeatureKind::Sketch { plane, links, .. } => plane
+                .face()
+                .map(|r| r.feature)
+                .into_iter()
+                .chain(links.iter().map(ProjectionLink::source_feature))
+                .collect(),
             FeatureKind::Extrude {
                 sketch, options, ..
             } => std::iter::once(*sketch)
@@ -636,7 +676,7 @@ impl Feature {
     /// Editable named parameters (mm).
     pub fn parameters(&self) -> Vec<(String, f64)> {
         match &self.kind {
-            FeatureKind::Sketch { sketch, plane } => {
+            FeatureKind::Sketch { sketch, plane, .. } => {
                 let mut p = sketch.dimensions();
                 if let Some((x, y)) = anchor(sketch) {
                     p.push(("center_x".into(), x));

@@ -1010,6 +1010,7 @@ impl RcadApp {
                         });
                     }
                 });
+                self.projection_ui(ui, &f);
                 match &f.profile_error {
                     None => {
                         ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
@@ -2229,4 +2230,86 @@ pub(crate) fn feature_combo(
                 ui.selectable_value(sel, Some(f.id), format!("{}: {}", f.id, f.name));
             }
         });
+}
+
+impl RcadApp {
+    /// Run 6 (SK03): project a planar face or another sketch into this
+    /// sketch (associative), and unlink existing projections.
+    fn projection_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        let Some(z) = f.frame.map(|fr| fr.z) else {
+            return;
+        };
+        let pos = |id: FeatureId| self.summary.features.iter().position(|x| x.id == id);
+        let me = pos(f.id);
+        let parallel = |w: [f64; 3]| (w[0] * z[0] + w[1] * z[1] + w[2] * z[2]).abs() > 1.0 - 1e-9;
+        // Faces of earlier features parallel to the sketch, and earlier
+        // sketches on parallel planes.
+        let mut choices: Vec<(String, rcad_document::ProjectSource)> = Vec::new();
+        for g in &self.summary.features {
+            if pos(g.id) >= me {
+                continue;
+            }
+            for fc in &g.faces {
+                if parallel(fc.frame.z) {
+                    choices.push((
+                        format!("{} {:?}", g.name, fc.reference.role),
+                        rcad_document::ProjectSource::Face(fc.reference),
+                    ));
+                }
+            }
+            if g.kind == "sketch" && g.frame.is_some_and(|fr| parallel(fr.z)) {
+                choices.push((
+                    format!("Sketch {}", g.name),
+                    rcad_document::ProjectSource::Sketch(g.id),
+                ));
+            }
+        }
+        ui.collapsing("Project geometry into this sketch", |ui| {
+            if choices.is_empty() {
+                ui.weak("No earlier parallel face or sketch to project.");
+            }
+            for (label, src) in choices {
+                ui.horizontal(|ui| {
+                    ui.label(&label);
+                    if ui
+                        .small_button("Project")
+                        .named(&format!("Project {label}"))
+                        .clicked()
+                    {
+                        self.request(Command::Project {
+                            sketch: f.id,
+                            source: src,
+                            construction: false,
+                        });
+                    }
+                    if ui.small_button("as construction").clicked() {
+                        self.request(Command::Project {
+                            sketch: f.id,
+                            source: src,
+                            construction: true,
+                        });
+                    }
+                });
+            }
+            ui.small(
+                "Projected lines/arcs follow their source at every regeneration; if the source \
+                 changes shape the sketch reports a broken reference until you unlink it.",
+            );
+            for (i, p) in f.projections.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Link {}: {p:?}", i + 1));
+                    if ui
+                        .small_button("Unlink")
+                        .named(&format!("Unlink {}", i + 1))
+                        .clicked()
+                    {
+                        self.request(Command::UnlinkProjection {
+                            sketch: f.id,
+                            link: i,
+                        });
+                    }
+                });
+            }
+        });
+    }
 }

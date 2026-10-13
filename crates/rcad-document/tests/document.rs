@@ -13,6 +13,7 @@ fn plate(w: f64, h: f64, d: f64, hole: f64, role: FaceRole) -> (Model, [FeatureI
                 FeatureKind::Sketch {
                     plane: SketchPlane::WorldXY,
                     sketch: Sketch::centered_rectangle(w, h).unwrap(),
+                    links: Vec::new(),
                 },
             ))
         })
@@ -27,6 +28,7 @@ fn plate(w: f64, h: f64, d: f64, hole: f64, role: FaceRole) -> (Model, [FeatureI
                 FeatureKind::Sketch {
                     plane: SketchPlane::Face(FaceRef { feature: e1, role }),
                     sketch: Sketch::centered_circle(hole).unwrap(),
+                    links: Vec::new(),
                 },
             ))
         })
@@ -132,6 +134,7 @@ fn broken_and_cyclic_references_are_reported() {
                 role: FaceRole::ExtrudeEndCap,
             }),
             sketch: Sketch::centered_circle(5.0).unwrap(),
+            links: Vec::new(),
         },
     );
     assert!(matches!(
@@ -146,6 +149,7 @@ fn broken_and_cyclic_references_are_reported() {
         FeatureKind::Sketch {
             plane: SketchPlane::WorldXY,
             sketch: Sketch::centered_rectangle(10.0, 10.0).unwrap(),
+            links: Vec::new(),
         },
     );
     d.push(
@@ -156,6 +160,7 @@ fn broken_and_cyclic_references_are_reported() {
                 role: FaceRole::ExtrudeEndCap,
             }),
             sketch: Sketch::centered_circle(5.0).unwrap(),
+            links: Vec::new(),
         },
     );
     assert!(matches!(
@@ -175,6 +180,7 @@ fn broken_and_cyclic_references_are_reported() {
                 role: FaceRole::ExtrudeEndCap,
             }),
             sketch: Sketch::centered_rectangle(10.0, 10.0).unwrap(),
+            links: Vec::new(),
         },
         notes: vec![],
         expressions: Default::default(),
@@ -302,6 +308,7 @@ fn doc_with_cut(
         FeatureKind::Sketch {
             plane: SketchPlane::WorldXY,
             sketch: rect,
+            links: Vec::new(),
         },
     );
     let e1 = d.push_extrude("E1", s1, 5.0);
@@ -310,6 +317,7 @@ fn doc_with_cut(
         FeatureKind::Sketch {
             plane: plane(e1),
             sketch: circle,
+            links: Vec::new(),
         },
     );
     d.push(
@@ -386,6 +394,7 @@ fn review_feature_id_space_does_not_wrap() {
     let sk = || FeatureKind::Sketch {
         plane: SketchPlane::WorldXY,
         sketch: Sketch::centered_rectangle(1.0, 1.0).unwrap(),
+        links: Vec::new(),
     };
     assert_eq!(d.push("a", sk()), FeatureId(u32::MAX - 1));
     assert_eq!(d.next_id, u32::MAX);

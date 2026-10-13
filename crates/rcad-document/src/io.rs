@@ -176,6 +176,11 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         return Some("a rolled-back timeline marker");
     }
     for f in &doc.features {
+        if let crate::FeatureKind::Sketch { links, .. } = &f.kind
+            && !links.is_empty()
+        {
+            return Some("projected sketch geometry (projection links)");
+        }
         if let crate::FeatureKind::Extrude {
             options, operation, ..
         } = &f.kind

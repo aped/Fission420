@@ -210,3 +210,44 @@ fn timeline_marker_and_reorder_from_the_history() {
     assert_eq!(order, vec![s1, s2, block, hole]);
     assert!((h.state().volume().unwrap() - full).abs() < 1e-6);
 }
+
+#[test]
+fn project_a_face_into_a_sketch_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    let block = request(&mut h, Command::extrude(None, s1, 10.0));
+    let above = sketch(
+        &mut h,
+        SketchPlane::Offset {
+            base: rcad_document::PlaneBase::WorldXY,
+            distance: 20.0,
+            angle: 0.0,
+        },
+        SketchTemplate::Polygon {
+            vertices: vec![[30.0, 30.0], [31.0, 30.0], [30.0, 31.0]],
+        },
+    );
+    let n = fname(&h, above);
+    click(&mut h, &n);
+    click(&mut h, "Project geometry into this sketch");
+    let label = format!("Project {} ExtrudeEndCap", fname(&h, block));
+    click(&mut h, &label);
+    let f = |h: &Harness<'_, RcadApp>| {
+        h.state()
+            .summary()
+            .features
+            .iter()
+            .find(|f| f.id == above)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(f(&h).projections.len(), 1);
+    // 3 own lines + 4 projected.
+    assert_eq!(f(&h).sketch.unwrap().entities.len(), 7);
+    click(&mut h, "Unlink 1");
+    assert!(f(&h).projections.is_empty());
+    assert_eq!(f(&h).sketch.unwrap().entities.len(), 7);
+    click(&mut h, "Undo");
+    assert_eq!(f(&h).projections.len(), 1);
+}

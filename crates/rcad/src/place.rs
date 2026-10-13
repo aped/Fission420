@@ -461,6 +461,7 @@ mod tests {
             region: None,
             suppressed: false,
             rolled_back: false,
+            projections: vec![],
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

@@ -276,6 +276,26 @@ pub enum Command {
         #[serde(default)]
         with_dependents: bool,
     },
+    /// Project geometry into a sketch, associatively (run 6, SK03; one undo
+    /// step): every boundary edge of a planar `Face` parallel to the sketch,
+    /// or the non-construction curves of another `Sketch` on a parallel plane.
+    /// The projected lines/arcs/circles are pinned by fixed points that follow
+    /// the source at every regeneration (`ProjectionLink`); as `construction`
+    /// they stay out of profiles. Refused for a later or dependent source
+    /// (cycle), an oblique source, or edges other than lines and arcs.
+    Project {
+        sketch: FeatureId,
+        source: rcad_document::ProjectSource,
+        #[serde(default)]
+        construction: bool,
+    },
+    /// Break projection `link` (0-based) of `sketch` (one undo step): its
+    /// geometry stays where the last regeneration put it, as plain fixed
+    /// curves that no longer follow the source.
+    UnlinkProjection {
+        sketch: FeatureId,
+        link: usize,
+    },
     /// Timeline marker (run 6; one undo step): evaluate history up to and
     /// including `at`; later features are kept but not evaluated, and new
     /// features are inserted after the marker. `at: null` rolls to the end.
@@ -469,6 +489,8 @@ impl Command {
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
             Command::SetRollback { .. } => "set_rollback",
+            Command::Project { .. } => "project",
+            Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
             Command::SetBodyVisible { .. } => "set_body_visible",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
@@ -608,6 +630,10 @@ pub struct FeatureSummary {
     /// After the timeline marker: in history, not evaluated (run 6).
     #[serde(default)]
     pub rolled_back: bool,
+    /// Sketches: sources of their associative projections (run 6), in link
+    /// order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projections: Vec<rcad_document::ProjectSource>,
 }
 
 /// A named user parameter with its evaluated value and relationships.
@@ -896,7 +922,14 @@ impl Session {
                 let (name, plane) = (name.clone(), *plane);
                 let id = self.model_mut()?.transact("Create sketch", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Sketch"));
-                    Ok(d.push(n, FeatureKind::Sketch { plane, sketch }))
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Sketch {
+                            plane,
+                            sketch,
+                            links: Vec::new(),
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }
@@ -1667,6 +1700,138 @@ impl Session {
                         .join(", ")
                 ));
             }
+            Command::Project {
+                sketch,
+                source,
+                construction,
+            } => {
+                let (sk_id, source, construction) = (*sketch, *source, *construction);
+                let m = self.model_mut()?;
+                let curves = rcad_document::projection_curves(m.document(), sk_id, &source)?;
+                if curves.iter().all(Vec::is_empty) {
+                    return Err(DocError::Validation("nothing to project".into()));
+                }
+                let name = m.document().feature(sk_id)?.name.clone();
+                let n = curves.iter().map(Vec::len).sum::<usize>();
+                m.transact(&format!("Project into {name}"), |d| {
+                    let FeatureKind::Sketch { sketch, links, .. } = &mut d.feature_mut(sk_id)?.kind
+                    else {
+                        return Err(DocError::Validation(format!("{sk_id} is not a sketch")));
+                    };
+                    let mut made: Vec<([f64; 2], rcad_sketch::PointId)> = Vec::new();
+                    let mut point = |sk: &mut rcad_sketch::Sketch, p: [f64; 2]| {
+                        if let Some((_, id)) = made
+                            .iter()
+                            .find(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) <= 1e-7)
+                        {
+                            return *id;
+                        }
+                        let id = sk.add_point(p[0], p[1]);
+                        sk.constraints.push(rcad_sketch::Constraint::FixedPoint {
+                            p: id,
+                            x: p[0],
+                            y: p[1],
+                        });
+                        made.push((p, id));
+                        id
+                    };
+                    let mut loops = Vec::new();
+                    for l in &curves {
+                        let mut out = Vec::new();
+                        for (c, from) in l {
+                            let (entity, points) = match *c {
+                                rcad_kernel::Curve2::Line { a, b } => {
+                                    let (pa, pb) = (point(sketch, a), point(sketch, b));
+                                    (sketch.add_line(pa, pb), vec![pa, pb])
+                                }
+                                rcad_kernel::Curve2::Arc { c, a, b, ccw } => {
+                                    let (a, b) = if ccw { (a, b) } else { (b, a) };
+                                    let (pc, pa, pb) =
+                                        (point(sketch, c), point(sketch, a), point(sketch, b));
+                                    let id = sketch.next_entity_id();
+                                    sketch.entities.push(rcad_sketch::Entity::Arc {
+                                        id,
+                                        center: pc,
+                                        start: pa,
+                                        end: pb,
+                                    });
+                                    (id, vec![pc, pa, pb])
+                                }
+                                rcad_kernel::Curve2::Circle { c, r } => {
+                                    let pc = point(sketch, c);
+                                    let rim = point(sketch, [c[0] + r, c[1]]);
+                                    let id = sketch.add_circle(pc, r);
+                                    sketch.constraints.push(
+                                        rcad_sketch::Constraint::PointOnCircle {
+                                            point: rim,
+                                            circle: id,
+                                        },
+                                    );
+                                    (id, vec![pc, rim])
+                                }
+                            };
+                            if construction {
+                                sketch.construction.insert(entity);
+                            }
+                            out.push(rcad_document::LinkedCurve {
+                                entity,
+                                points,
+                                from: *from,
+                            });
+                        }
+                        loops.push(out);
+                    }
+                    links.push(rcad_document::ProjectionLink { source, loops });
+                    Ok(())
+                })?;
+                r.feature = Some(sk_id);
+                r.message = Some(format!("projected {n} curve(s) into {name}"));
+            }
+            Command::UnlinkProjection { sketch, link } => {
+                let (sk_id, li) = (*sketch, *link);
+                let m = self.model_mut()?;
+                // Freeze at the last regenerated positions.
+                let solved = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == sk_id)
+                    .and_then(|f| f.solved_sketch.clone());
+                let name = m.document().feature(sk_id)?.name.clone();
+                m.transact(&format!("Unlink projection {} of {name}", li + 1), |d| {
+                    let FeatureKind::Sketch { sketch, links, .. } = &mut d.feature_mut(sk_id)?.kind
+                    else {
+                        return Err(DocError::Validation(format!("{sk_id} is not a sketch")));
+                    };
+                    if li >= links.len() {
+                        return Err(DocError::Validation(format!(
+                            "{name} has {} projection(s); no link {}",
+                            links.len(),
+                            li + 1
+                        )));
+                    }
+                    let l = links.remove(li);
+                    if let Some(sv) = &solved {
+                        for q in l.loops.iter().flatten().flat_map(|c| c.points.iter()) {
+                            let Some(p) = sv.points.iter().find(|p| p.id == *q) else {
+                                continue;
+                            };
+                            for c in sketch.constraints.iter_mut() {
+                                if let rcad_sketch::Constraint::FixedPoint { p: r, x, y } = c
+                                    && r == q
+                                {
+                                    (*x, *y) = (p.x, p.y);
+                                }
+                            }
+                            if let Some(sp) = sketch.points.iter_mut().find(|sp| sp.id == *q) {
+                                (sp.x, sp.y) = (p.x, p.y);
+                            }
+                        }
+                    }
+                    Ok(())
+                })?;
+                r.feature = Some(sk_id);
+            }
             Command::SetRollback { at } => {
                 let at = *at;
                 let m = self.model_mut()?;
@@ -1840,7 +2005,14 @@ impl Session {
                     .model_mut()?
                     .transact(&format!("Import {stem}.dxf"), |d| {
                         let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
-                        let id = d.push(n, FeatureKind::Sketch { plane, sketch });
+                        let id = d.push(
+                            n,
+                            FeatureKind::Sketch {
+                                plane,
+                                sketch,
+                                links: Vec::new(),
+                            },
+                        );
                         d.feature_mut(id)?.notes = kept;
                         Ok(id)
                     })?;
@@ -1900,7 +2072,14 @@ impl Session {
                     .model_mut()?
                     .transact(&format!("Import {stem}.svg"), |d| {
                         let n = name.unwrap_or_else(|| d.default_name(&format!("{stem}-")));
-                        let id = d.push(n, FeatureKind::Sketch { plane, sketch });
+                        let id = d.push(
+                            n,
+                            FeatureKind::Sketch {
+                                plane,
+                                sketch,
+                                links: Vec::new(),
+                            },
+                        );
                         d.feature_mut(id)?.notes = kept;
                         Ok(id)
                     })?;
@@ -2297,6 +2476,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 expressions: f.expressions.clone(),
                 suppressed: f.suppressed,
                 rolled_back: doc.is_rolled_back(f.id),
+                projections: match &f.kind {
+                    FeatureKind::Sketch { links, .. } => links.iter().map(|l| l.source).collect(),
+                    _ => vec![],
+                },
             }
         })
         .collect()
