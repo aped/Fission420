@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod assembly;
 pub mod mass;
 pub mod measure_faces;
 pub mod print;
@@ -388,6 +389,100 @@ pub enum Command {
         #[serde(default)]
         keep_tools: bool,
     },
+    /// Components / occurrences / joints (run 6 pull-forward of Run-7 §1-2,
+    /// docs/ASSEMBLIES.md; format v6). A component groups bodies of this
+    /// document and gets a first occurrence at identity.
+    CreateComponent {
+        name: String,
+        bodies: Vec<BodyId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part_number: Option<String>,
+    },
+    /// Remove a component and its occurrences (its bodies become loose bodies).
+    DeleteComponent {
+        component: rcad_document::assembly::ComponentId,
+    },
+    SetPartNumber {
+        component: rcad_document::assembly::ComponentId,
+        part_number: String,
+    },
+    /// A further linked occurrence: rotate `angle_deg` about `axis` (default +Z)
+    /// through the world origin, then translate.
+    AddOccurrence {
+        component: rcad_document::assembly::ComponentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default)]
+        translate: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default)]
+        angle_deg: f64,
+    },
+    SetOccurrenceTransform {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        #[serde(default)]
+        translate: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default)]
+        angle_deg: f64,
+    },
+    DeleteOccurrence {
+        occurrence: rcad_document::assembly::OccurrenceId,
+    },
+    SetGrounded {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        grounded: bool,
+    },
+    /// Joint (`rigid`, `revolute` value in degrees, `slider` value in mm) moving
+    /// `child` with `parent`; `origin`/`axis` in the parent's definition
+    /// coordinates. The child keeps its current pose at `value`.
+    AddJoint {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        kind: rcad_document::assembly::JointKind,
+        parent: rcad_document::assembly::OccurrenceId,
+        child: rcad_document::assembly::OccurrenceId,
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default)]
+        value: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<f64>,
+    },
+    SetJointValue {
+        joint: rcad_document::assembly::JointId,
+        value: f64,
+    },
+    SetJointLimits {
+        joint: rcad_document::assembly::JointId,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+    },
+    DeleteJoint {
+        joint: rcad_document::assembly::JointId,
+    },
+    /// Flat bill of materials (`Response::assembly.bom`). Read-only.
+    Bom,
+    /// Pairwise interference between occurrences (`Response::assembly.interference`).
+    /// Read-only; a static check, not collision avoidance.
+    Interference {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<rcad_document::assembly::OccurrenceId>>,
+    },
+    /// Every occurrence's placed bodies (and loose visible bodies) as separate
+    /// named objects (STEP solids or 3MF objects).
+    ExportAssembly {
+        path: PathBuf,
+        format: assembly::AssemblyFormat,
+    },
     /// Exact geometry of face `a` (plane, or cylinder with radius/diameter)
     /// and, with `b`, the distance or angle between the two faces
     /// (`Response::face_measure`; read-only; world frame, mm, degrees).
@@ -401,6 +496,9 @@ pub enum Command {
     MassProperties {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bodies: Option<Vec<BodyId>>,
+        /// Occurrences to include (default: all when `bodies` is absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<rcad_document::assembly::OccurrenceId>>,
     },
     /// Suppress (or restore) a feature: kept in history, not evaluated (run
     /// 5; one undo step). With `with_dependents`, every feature depending on
@@ -744,6 +842,20 @@ impl Command {
             Command::MassProperties { .. } => "mass_properties",
             Command::Combine { .. } => "combine",
             Command::MeasureFaces { .. } => "measure_faces",
+            Command::CreateComponent { .. } => "create_component",
+            Command::DeleteComponent { .. } => "delete_component",
+            Command::SetPartNumber { .. } => "set_part_number",
+            Command::AddOccurrence { .. } => "add_occurrence",
+            Command::SetOccurrenceTransform { .. } => "set_occurrence_transform",
+            Command::DeleteOccurrence { .. } => "delete_occurrence",
+            Command::SetGrounded { .. } => "set_grounded",
+            Command::AddJoint { .. } => "add_joint",
+            Command::SetJointValue { .. } => "set_joint_value",
+            Command::SetJointLimits { .. } => "set_joint_limits",
+            Command::DeleteJoint { .. } => "delete_joint",
+            Command::Bom => "bom",
+            Command::Interference { .. } => "interference",
+            Command::ExportAssembly { .. } => "export_assembly",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -961,6 +1073,9 @@ pub struct DocSummary {
     /// Named user parameters in display order.
     #[serde(default)]
     pub parameters: Vec<ParameterSummary>,
+    /// Components, occurrences, joints and DOF (run 6, docs/ASSEMBLIES.md).
+    #[serde(default)]
+    pub assembly: assembly::AssemblySummary,
     /// Named configurations (run 6) and the active one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configurations: Vec<rcad_document::Configuration>,
@@ -987,6 +1102,9 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// Assembly commands: created ids, BOM, interference (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembly: Option<assembly::AssemblyOut>,
     /// `measure_faces`: exact face geometry and pair measurement (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_measure: Option<measure_faces::FaceMeasureReport>,
@@ -2761,13 +2879,34 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::CreateComponent { .. }
+            | Command::DeleteComponent { .. }
+            | Command::SetPartNumber { .. }
+            | Command::AddOccurrence { .. }
+            | Command::SetOccurrenceTransform { .. }
+            | Command::DeleteOccurrence { .. }
+            | Command::SetGrounded { .. }
+            | Command::AddJoint { .. }
+            | Command::SetJointValue { .. }
+            | Command::SetJointLimits { .. }
+            | Command::DeleteJoint { .. }
+            | Command::Bom
+            | Command::Interference { .. }
+            | Command::ExportAssembly { .. } => {
+                let m = self.model_mut()?;
+                assembly::run(m, cmd, r)?;
+            }
             Command::MeasureFaces { a, b } => {
                 let m = self.model_mut()?;
                 r.face_measure = Some(measure_faces::report(m, *a, *b)?);
             }
-            Command::MassProperties { bodies } => {
+            Command::MassProperties {
+                bodies,
+                occurrences,
+            } => {
                 let m = self.model_mut()?;
-                r.mass_properties = Some(mass::report(m, bodies.as_deref())?);
+                r.mass_properties =
+                    Some(mass::report(m, bodies.as_deref(), occurrences.as_deref())?);
             }
             Command::SetBodyVisible { body, visible } => {
                 let (body, visible) = (*body, *visible);
@@ -3276,6 +3415,7 @@ impl Session {
                 parameters: vec![],
                 configurations: vec![],
                 active_configuration: None,
+                assembly: Default::default(),
             };
         };
         DocSummary {
@@ -3324,6 +3464,7 @@ impl Session {
             parameters: parameter_summaries(m.document()),
             configurations: m.document().configurations.clone(),
             active_configuration: m.document().active_configuration.clone(),
+            assembly: assembly::summary(m),
         }
     }
 }

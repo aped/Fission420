@@ -5,9 +5,11 @@
 //! `rcad_kernel::volume_properties` (exact boundary integrals where the volume is
 //! exact, else a labelled tessellation estimate) or, for mesh bodies,
 //! `rcad_kernel::mesh_volume_properties` (exact for the mesh).
+use rcad_document::assembly::{ComponentId, OccurrenceId};
 use rcad_document::{BodyGeometry, BodyId, DocError, Evaluation, Material, Model};
 use rcad_kernel::{self as k, VolumeProperties};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub type M3 = [[f64; 3]; 3];
 
@@ -73,6 +75,28 @@ pub struct MassReport {
     /// Hidden bodies left out because no list was given.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded_hidden: Vec<BodyId>,
+    /// Component occurrences (docs/ASSEMBLIES.md): each counts its component's
+    /// visible evaluated definition bodies, placed. Component bodies are not
+    /// also counted as loose bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<OccurrenceMass>,
+}
+
+/// One occurrence's mass properties (world frame).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OccurrenceMass {
+    pub occurrence: OccurrenceId,
+    pub name: String,
+    pub component: ComponentId,
+    /// mm³ (None when a body has no properties).
+    pub volume: Option<f64>,
+    pub mass: Option<f64>,
+    pub mass_error: Option<f64>,
+    pub center_of_mass: Option<[f64; 3]>,
+    /// About `center_of_mass`, world axes, g·mm².
+    pub inertia: Option<M3>,
+    pub exact: bool,
+    pub error: Option<String>,
 }
 
 impl BodyMass {
@@ -82,14 +106,59 @@ impl BodyMass {
     }
 }
 
-/// Properties of `bodies` (None: every visible body of the evaluation).
-pub fn report(model: &Model, bodies: Option<&[BodyId]>) -> Result<MassReport, DocError> {
+/// One mass-carrying part for [`combine`].
+#[derive(Clone, Copy)]
+struct Part {
+    mass: f64,
+    mass_error: f64,
+    volume: f64,
+    com: [f64; 3],
+    inertia: M3,
+    exact: bool,
+}
+
+fn body_props(b: &rcad_document::EvalBody) -> Result<VolumeProperties, String> {
+    match &b.geometry {
+        BodyGeometry::Brep(g) => k::volume_properties(g).map_err(|e| e.to_string()),
+        BodyGeometry::Mesh(m) if m.diagnostics.closed => {
+            k::mesh_volume_properties(&m.mesh).map_err(|e| e.to_string())
+        }
+        BodyGeometry::Mesh(_) => Err("the mesh is not closed: no volume or centre of mass".into()),
+    }
+}
+
+/// Rotate a tensor: R S Rᵀ.
+fn rotate(r: &M3, s: &M3) -> M3 {
+    let mut out = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            let mut x = 0.0;
+            for a in 0..3 {
+                for b in 0..3 {
+                    x += r[i][a] * s[a][b] * r[j][b];
+                }
+            }
+            out[i][j] = x;
+        }
+    }
+    out
+}
+
+/// Properties of `bodies` (None: every visible body of the evaluation that is
+/// not a component body) and of `occurrences` (None with `bodies` None: every
+/// occurrence; None with `bodies` given: none), with their total.
+pub fn report(
+    model: &Model,
+    bodies: Option<&[BodyId]>,
+    occurrences: Option<&[OccurrenceId]>,
+) -> Result<MassReport, DocError> {
     let ev: &Evaluation = model.evaluation();
     let doc = model.document();
+    let asm = &doc.assembly;
     let mut excluded_hidden = Vec::new();
     let ids: Vec<BodyId> = match bodies {
         Some(list) => {
-            if list.is_empty() {
+            if list.is_empty() && occurrences.is_none_or(<[OccurrenceId]>::is_empty) {
                 return Err(DocError::Validation("no bodies listed".into()));
             }
             let mut out: Vec<BodyId> = Vec::new();
@@ -112,6 +181,7 @@ pub fn report(model: &Model, bodies: Option<&[BodyId]>) -> Result<MassReport, Do
         None => ev
             .bodies
             .iter()
+            .filter(|b| asm.component_of(b.id).is_none())
             .filter(|b| {
                 if !b.visible {
                     excluded_hidden.push(b.id);
@@ -121,20 +191,25 @@ pub fn report(model: &Model, bodies: Option<&[BodyId]>) -> Result<MassReport, Do
             .map(|b| b.id)
             .collect(),
     };
+    let occ_ids: Vec<OccurrenceId> = match (occurrences, bodies) {
+        (Some(list), _) => {
+            for o in list {
+                asm.occurrence(*o)?;
+            }
+            list.to_vec()
+        }
+        (None, None) => ev.occurrences.iter().map(|o| o.id).collect(),
+        (None, Some(_)) => vec![],
+    };
+    // Geometry properties per body, computed once (occurrences share them).
+    let mut cache: BTreeMap<BodyId, Result<VolumeProperties, String>> = BTreeMap::new();
+    let mut props_of =
+        |b: &rcad_document::EvalBody| cache.entry(b.id).or_insert_with(|| body_props(b)).clone();
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(b) = ev.body_by_id(id) else { continue };
         let material = doc.body(id).ok().and_then(|i| i.material.clone());
-        let props = match &b.geometry {
-            BodyGeometry::Brep(g) => k::volume_properties(g).map_err(|e| e.to_string()),
-            BodyGeometry::Mesh(m) if m.diagnostics.closed => {
-                k::mesh_volume_properties(&m.mesh).map_err(|e| e.to_string())
-            }
-            BodyGeometry::Mesh(_) => {
-                Err("the mesh is not closed: no volume or centre of mass".to_string())
-            }
-        };
-        let (properties, error) = match props {
+        let (properties, error) = match props_of(b) {
             Ok(p) => (Some(p), None),
             Err(e) => (None, Some(e)),
         };
@@ -170,56 +245,148 @@ pub fn report(model: &Model, bodies: Option<&[BodyId]>) -> Result<MassReport, Do
             total_missing.push(format!("{}: no material assigned", b.name));
         }
     }
-    let total = (total_missing.is_empty() && !out.is_empty()).then(|| combine(&out));
+    let mut parts: Vec<Part> = out
+        .iter()
+        .filter_map(|b| {
+            let p = b.properties.as_ref()?;
+            Some(Part {
+                mass: b.mass?,
+                mass_error: b.mass_error.unwrap_or(0.0),
+                volume: p.volume,
+                com: p.centroid,
+                inertia: b.inertia?,
+                exact: b.exact,
+            })
+        })
+        .collect();
+    let mut occ_out = Vec::new();
+    for oid in occ_ids {
+        let Some(eo) = ev.occurrences.iter().find(|o| o.id == oid) else {
+            continue;
+        };
+        let t = eo.transform;
+        let mut sub: Vec<Part> = Vec::new();
+        let mut volume = 0.0;
+        let mut errors = Vec::new();
+        let mut vol_only = Vec::new();
+        for bid in &eo.bodies {
+            let Some(b) = ev.body_by_id(*bid) else {
+                continue;
+            };
+            if !b.visible {
+                if !excluded_hidden.contains(bid) {
+                    excluded_hidden.push(*bid);
+                }
+                continue;
+            }
+            let p = match props_of(b) {
+                Ok(p) => p,
+                Err(e) => {
+                    errors.push(format!("{}: {e}", b.name));
+                    continue;
+                }
+            };
+            volume += p.volume;
+            let com = t.point(p.centroid);
+            vol_only.push((p.volume, com, p.is_exact()));
+            match doc.body(*bid).ok().and_then(|i| i.material.as_ref()) {
+                Some(mat) => {
+                    let r = mat.g_per_mm3();
+                    let ib = rotate(&t.r, &p.inertia(r));
+                    sub.push(Part {
+                        mass: r * p.volume,
+                        mass_error: r * p.volume_error,
+                        volume: p.volume,
+                        com,
+                        inertia: ib,
+                        exact: p.is_exact(),
+                    });
+                }
+                None => errors.push(format!("{}: no material assigned", b.name)),
+            }
+        }
+        let exact = vol_only.iter().all(|x| x.2);
+        let whole = (errors.is_empty() && !sub.is_empty())
+            .then(|| combine(&sub))
+            .flatten();
+        let center = match &whole {
+            Some(w) => Some(w.com),
+            None if !vol_only.is_empty() => {
+                let v: f64 = vol_only.iter().map(|x| x.0).sum();
+                Some(std::array::from_fn(|i| {
+                    vol_only.iter().map(|x| x.0 * x.1[i]).sum::<f64>() / v
+                }))
+            }
+            None => None,
+        };
+        if !errors.is_empty() {
+            total_missing.push(format!("{}: {}", eo.name, errors.join("; ")));
+        }
+        if let Some(w) = &whole {
+            parts.push(*w);
+        }
+        occ_out.push(OccurrenceMass {
+            occurrence: eo.id,
+            name: eo.name.clone(),
+            component: eo.component,
+            volume: (!vol_only.is_empty()).then_some(volume),
+            mass: whole.map(|w| w.mass),
+            mass_error: whole.map(|w| w.mass_error),
+            center_of_mass: center,
+            inertia: whole.map(|w| w.inertia),
+            exact,
+            error: (!errors.is_empty()).then(|| errors.join("; ")),
+        });
+    }
+    let total = (total_missing.is_empty() && !parts.is_empty())
+        .then(|| combine(&parts))
+        .flatten()
+        .map(|w| MassTotal {
+            bodies: out.iter().map(|b| b.body).collect(),
+            volume: w.volume,
+            mass: w.mass,
+            mass_error: w.mass_error,
+            center_of_mass: w.com,
+            inertia: w.inertia,
+            exact: w.exact,
+        });
     Ok(MassReport {
         frame: MASS_FRAME.into(),
         units: MASS_UNITS.into(),
         bodies: out,
-        total: total.flatten(),
+        total,
         total_missing,
         excluded_hidden,
+        occurrences: occ_out,
     })
 }
 
 /// Totals: masses add, the centre of mass is the mass-weighted mean, inertia tensors
 /// are moved to it with the parallel-axis theorem I += m (|d|² E − d dᵀ).
-fn combine(bodies: &[BodyMass]) -> Option<MassTotal> {
-    let mut mass = 0.0;
-    let mut mass_error = 0.0;
-    let mut volume = 0.0;
-    let mut mc = [0.0; 3];
-    for b in bodies {
-        let (m, p) = (b.mass?, b.properties.as_ref()?);
-        mass += m;
-        mass_error += b.mass_error.unwrap_or(0.0);
-        volume += p.volume;
-        for (acc, c) in mc.iter_mut().zip(p.centroid) {
-            *acc += m * c;
-        }
-    }
+fn combine(parts: &[Part]) -> Option<Part> {
+    let mass: f64 = parts.iter().map(|p| p.mass).sum();
     if mass.is_nan() || mass <= 0.0 {
         return None;
     }
-    let com = mc.map(|x| x / mass);
+    let com: [f64; 3] =
+        std::array::from_fn(|i| parts.iter().map(|p| p.mass * p.com[i]).sum::<f64>() / mass);
     let mut inertia = [[0.0; 3]; 3];
-    for b in bodies {
-        let (m, p, ib) = (b.mass?, b.properties.as_ref()?, b.inertia?);
-        let d = [0, 1, 2].map(|i| p.centroid[i] - com[i]);
+    for p in parts {
+        let d = [0, 1, 2].map(|i| p.com[i] - com[i]);
         let d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
         for i in 0..3 {
             for j in 0..3 {
                 let e = if i == j { d2 } else { 0.0 };
-                inertia[i][j] += ib[i][j] + m * (e - d[i] * d[j]);
+                inertia[i][j] += p.inertia[i][j] + p.mass * (e - d[i] * d[j]);
             }
         }
     }
-    Some(MassTotal {
-        bodies: bodies.iter().map(|b| b.body).collect(),
-        volume,
+    Some(Part {
         mass,
-        mass_error,
-        center_of_mass: com,
+        mass_error: parts.iter().map(|p| p.mass_error).sum(),
+        volume: parts.iter().map(|p| p.volume).sum(),
+        com,
         inertia,
-        exact: bodies.iter().all(|b| b.exact),
+        exact: parts.iter().all(|p| p.exact),
     })
 }

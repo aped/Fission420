@@ -288,42 +288,46 @@ pub fn display_scene_with(
             },
             BodyGeometry::Mesh(mb) => (mb.mesh.clone(), true),
         };
-        let rm = to_render_mesh(&tm);
-        let groups = if mesh_body {
-            1
-        } else {
-            rm.tri_group.iter().max().map_or(0, |g| g.saturating_add(1))
-        };
-        let base = u32::try_from(scene.mesh.positions.len())
-            .map_err(|_| "display mesh too large".to_string())?;
-        scene.mesh.positions.extend(&rm.positions);
-        if rm.normals.len() == rm.positions.len() {
-            scene.mesh.normals.extend(&rm.normals);
-        } else {
-            // Keep normals aligned with positions (flat shading fallback).
-            scene.mesh.normals.clear();
-        }
-        scene
-            .mesh
-            .indices
-            .extend(rm.indices.iter().map(|i| i + base));
-        scene.mesh.tri_group.extend(
-            rm.tri_group
-                .iter()
-                .map(|g| next_group + if mesh_body { 0 } else { *g }),
-        );
-        let end = next_group.saturating_add(groups.max(1));
-        scene.bodies.push(DisplayBody {
-            id: b.id,
-            mesh_body,
-            groups: next_group..end,
-            tint: if mesh_body {
-                MESH_TINT
+        // Component bodies are drawn once per occurrence, placed (run 6,
+        // docs/ASSEMBLIES.md); other bodies once, in place.
+        for tm in crate::assembly_ui::placed_meshes(ev, b.id, tm) {
+            let rm = to_render_mesh(&tm);
+            let groups = if mesh_body {
+                1
             } else {
-                (i % 6) as u8 + 1
-            },
-        });
-        next_group = end;
+                rm.tri_group.iter().max().map_or(0, |g| g.saturating_add(1))
+            };
+            let base = u32::try_from(scene.mesh.positions.len())
+                .map_err(|_| "display mesh too large".to_string())?;
+            scene.mesh.positions.extend(&rm.positions);
+            if rm.normals.len() == rm.positions.len() {
+                scene.mesh.normals.extend(&rm.normals);
+            } else {
+                // Keep normals aligned with positions (flat shading fallback).
+                scene.mesh.normals.clear();
+            }
+            scene
+                .mesh
+                .indices
+                .extend(rm.indices.iter().map(|i| i + base));
+            scene.mesh.tri_group.extend(
+                rm.tri_group
+                    .iter()
+                    .map(|g| next_group + if mesh_body { 0 } else { *g }),
+            );
+            let end = next_group.saturating_add(groups.max(1));
+            scene.bodies.push(DisplayBody {
+                id: b.id,
+                mesh_body,
+                groups: next_group..end,
+                tint: if mesh_body {
+                    MESH_TINT
+                } else {
+                    (i % 6) as u8 + 1
+                },
+            });
+            next_group = end;
+        }
     }
     if scene.mesh.normals.len() != scene.mesh.positions.len() {
         scene.mesh.normals.clear();

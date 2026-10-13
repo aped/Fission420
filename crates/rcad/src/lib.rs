@@ -5,6 +5,7 @@
 //! renders the last reported document summary and sends [`rcad_commands::Command`]s.
 
 pub mod app;
+pub mod assembly_ui;
 pub mod bodies;
 pub mod direct_edit_ui;
 #[cfg(test)]

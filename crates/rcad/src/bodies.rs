@@ -291,6 +291,7 @@ impl RcadApp {
                 focus: true,
             });
         }
+        self.components_browser(ui);
     }
 
     /// Inspector content for the selected body.
@@ -544,6 +545,7 @@ impl RcadApp {
             .clicked()
         {
             self.request(Command::MassProperties {
+                occurrences: None,
                 bodies: Some(vec![b.id]),
             });
         }
