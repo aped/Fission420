@@ -839,6 +839,10 @@ pub enum Command {
     FillSurface(sheet_surface::SurfaceRepairArgs),
     /// Run 7: thicken a single planar/cylindrical face into a solid (new body).
     ThickenSurface(sheet_surface::ThickenArgs),
+    /// Run 7: planar surface patch from a closed sketch profile.
+    SurfacePatch(sheet_surface::SurfaceFromSketchArgs),
+    /// Run 7: ruled surface: a sketch profile / open line chain extruded.
+    SurfaceExtrude(sheet_surface::SurfaceFromSketchArgs),
     /// Align the body of planar face `from` flush onto face `to` (run 6; see
     /// `FeatureKind::AlignBody`).
     AlignBody {
@@ -1247,6 +1251,8 @@ impl Command {
             Command::StitchSurface(_) => "stitch_surface",
             Command::FillSurface(_) => "fill_surface",
             Command::ThickenSurface(_) => "thicken_surface",
+            Command::SurfacePatch(_) => "surface_patch",
+            Command::SurfaceExtrude(_) => "surface_extrude",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
@@ -3283,7 +3289,9 @@ impl Session {
             | Command::AnalyzeSurface(_)
             | Command::StitchSurface(_)
             | Command::FillSurface(_)
-            | Command::ThickenSurface(_) => {
+            | Command::ThickenSurface(_)
+            | Command::SurfacePatch(_)
+            | Command::SurfaceExtrude(_) => {
                 return Err(DocError::Validation(format!(
                     "internal: {} was not dispatched",
                     cmd.name()
@@ -4182,6 +4190,8 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SurfaceStitch { .. } => ("surface_stitch", None),
                 FeatureKind::SurfaceFill { .. } => ("surface_fill", None),
                 FeatureKind::Thicken { .. } => ("thicken", None),
+                FeatureKind::SurfacePatch { .. } => ("surface_patch", None),
+                FeatureKind::SurfaceExtrude { .. } => ("surface_extrude", None),
                 FeatureKind::MeshRepair { .. } => ("mesh_repair", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),

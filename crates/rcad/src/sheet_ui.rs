@@ -16,7 +16,7 @@ use crate::probe::Probe;
 use eframe::egui::{self, Color32, RichText};
 use rcad_commands::sheet_surface::{
     AnalyzeSurfaceArgs, SheetBaseArgs, SheetFlangeArgs, SheetFlatArgs, SheetRuleArgs,
-    SurfaceRepairArgs, ThickenArgs,
+    SurfaceFromSketchArgs, SurfaceRepairArgs, ThickenArgs,
 };
 use rcad_commands::{Command, DocSummary, FeatureSummary, Response};
 use rcad_document::sheet::ReliefShape;
@@ -46,6 +46,8 @@ pub struct SheetSurfaceForm {
     pub tolerance: String,
     pub thickness: String,
     pub reverse: bool,
+    /// Surface extrusion distance (sketch inspector).
+    pub surface_distance: String,
     /// (doc_id, revision, body, report) of the last analysis reply.
     pub analysis: Option<(u64, u64, BodyId, rcad_kernel::ShellAnalysis)>,
 }
@@ -66,6 +68,7 @@ impl Default for SheetSurfaceForm {
             tolerance: "0.001".into(),
             thickness: "2".into(),
             reverse: false,
+            surface_distance: "10".into(),
             analysis: None,
         }
     }
@@ -164,6 +167,55 @@ impl RcadApp {
                 ui.small("Closed profile = a flat plate; the rule (thickness, inside radius, K = neutral axis at K·t, reliefs) is shared by every flange of the body.");
             });
         header.header_response.probe("Sheet metal base face");
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+
+    /// Sketch inspector: surface bodies from this sketch (planar patch of a
+    /// closed profile; ruled extrusion of a profile or open line chain).
+    pub(crate) fn surface_sketch_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        let mut send = None;
+        let closed = f.profile_error.is_none();
+        let header = egui::CollapsingHeader::new("Surface from sketch")
+            .id_salt(("surface_sketch_ui", f.id.0))
+            .show(ui, |ui| {
+                let form = &mut self.sheet_surface;
+                if ui
+                    .add_enabled(closed, egui::Button::new("Planar patch"))
+                    .probe("Planar patch")
+                    .on_hover_text("The closed profile (holes allowed) as a one-face surface body")
+                    .on_disabled_hover_text("Needs a closed profile")
+                    .clicked()
+                {
+                    send = Some(Command::SurfacePatch(SurfaceFromSketchArgs {
+                        name: None,
+                        sketch: f.id,
+                        distance: 0.0,
+                        reverse: false,
+                        body_name: None,
+                    }));
+                }
+                ui.horizontal(|ui| {
+                    num_field(ui, "Surface distance (mm)", &mut form.surface_distance);
+                    let d = parse(&form.surface_distance);
+                    if ui
+                        .add_enabled(d.is_some(), egui::Button::new("Extrude surface"))
+                        .probe("Extrude surface")
+                        .on_hover_text("Ruled surface: the profile (or open chain of lines) swept along the sketch normal, open (no caps)")
+                        .clicked()
+                    {
+                        send = Some(Command::SurfaceExtrude(SurfaceFromSketchArgs {
+                            name: None,
+                            sketch: f.id,
+                            distance: d.unwrap_or(10.0),
+                            reverse: false,
+                            body_name: None,
+                        }));
+                    }
+                });
+            });
+        header.header_response.probe("Surface from sketch");
         if let Some(c) = send {
             self.request(c);
         }

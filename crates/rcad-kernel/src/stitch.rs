@@ -158,6 +158,19 @@ fn merge(shells: Vec<CShell>, tol: f64, stats: &mut MergeStats) -> Result<CShell
         }
     }
     let vmap: Vec<usize> = (0..n).map(|i| find(&mut rep, i)).collect();
+    // Review S9: merging is transitive; a chain of close vertices must not
+    // move any vertex farther than the tolerance from where it merges.
+    if tol >= 0.0 {
+        for (i, &r) in vmap.iter().enumerate() {
+            let d = dist(out.vertices[i], out.vertices[r]);
+            if d > tol {
+                return Err(KernelError::InvalidInput(format!(
+                    "merging at {tol} mm chains vertices {d:.6} mm apart (more than the tolerance); use a smaller tolerance"
+                )));
+            }
+            stats.max_vertex_gap = stats.max_vertex_gap.max(d);
+        }
+    }
     // Edges: same (unordered) merged end vertices and midpoints within tol.
     let mut emap: Vec<(usize, bool)> = Vec::with_capacity(out.edges.len());
     let mut by_ends: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
@@ -1115,5 +1128,27 @@ mod piece_tests {
         // so check the kernel path directly through `stitch`.
         let e = stitch(&two, 1e-6).unwrap_err().to_string();
         assert!(e.contains("separate closed pieces"), "{e}");
+    }
+}
+
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+
+    /// Review S9: vertices 0.9·tol apart in a chain do not merge 1.8·tol.
+    #[test]
+    fn transitive_merge_chains_are_refused() {
+        let sh = CShell {
+            vertices: vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.9, 0.0, 0.0),
+                Point3::new(1.8, 0.0, 0.0),
+            ],
+            edges: Vec::new(),
+            faces: Vec::new(),
+        };
+        let mut st = MergeStats::default();
+        let e = merge(vec![sh], 1.0, &mut st).unwrap_err().to_string();
+        assert!(e.contains("chains vertices"), "{e}");
     }
 }

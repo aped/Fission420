@@ -127,3 +127,52 @@ pub fn thicken(
         )],
     ))
 }
+
+/// Run 7: surface body of a `SurfacePatch` / `SurfaceExtrude` feature from
+/// its sketch (closed profile region, or for an extrusion an open line chain).
+pub fn from_sketch(
+    id: FeatureId,
+    kind: &crate::FeatureKind,
+    region: Option<&rcad_sketch::Region>,
+    solved: &rcad_sketch::Sketch,
+    frame: &k::Frame,
+) -> Result<Body> {
+    match kind {
+        crate::FeatureKind::SurfacePatch { .. } => {
+            let r = region.ok_or_else(|| {
+                DocError::Validation(format!(
+                    "{id}: a planar patch needs a closed sketch profile"
+                ))
+            })?;
+            let holes: Vec<k::Profile> = r
+                .holes
+                .iter()
+                .map(|(p, _)| crate::hole::to_kernel(p))
+                .collect();
+            k::planar_patch(&crate::hole::to_kernel(&r.outer), &holes, frame).map_err(kerr(id))
+        }
+        crate::FeatureKind::SurfaceExtrude {
+            distance, reverse, ..
+        } => {
+            let path = match region {
+                Some(r) => {
+                    if !r.holes.is_empty() {
+                        return Err(DocError::Validation(format!(
+                            "{id}: a surface extrusion sweeps one loop; this profile has holes"
+                        )));
+                    }
+                    k::SurfacePath::Closed(crate::hole::to_kernel(&r.outer))
+                }
+                None => k::SurfacePath::Open(crate::sheet::line_chain(solved).map_err(|m| {
+                    DocError::Validation(format!(
+                        "{id}: surface extrusion needs a closed profile or one open chain of lines ({m})"
+                    ))
+                })?),
+            };
+            k::extrude_surface(&path, frame, *distance, *reverse).map_err(kerr(id))
+        }
+        _ => Err(DocError::Validation(format!(
+            "{id}: not a surface-from-sketch feature"
+        ))),
+    }
+}

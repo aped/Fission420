@@ -291,3 +291,105 @@ fn derived_and_display_bodies_do_not_join_the_active_component() {
         .unwrap();
     assert_eq!(c.bodies, vec![BodyId(2)]);
 }
+
+fn sketch(s: &mut Session, sk: rcad_sketch::Sketch) -> u32 {
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    r.feature.unwrap().0
+}
+
+/// Surfaces from sketches: a ruled (extruded) rectangle tube, filled into the
+/// box; an upstream distance edit regenerates the fill; an open L chain makes
+/// a non-planar boundary that fill refuses; a planar patch with a hole
+/// thickens to the exact plate.
+#[test]
+fn surfaces_from_sketches() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: Some([20.0, 15.0]),
+        },
+    });
+    assert!(r.ok);
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "surface_extrude", "sketch": 1, "distance": 20.0}),
+    );
+    let ext = r.feature.unwrap();
+    assert_eq!(body(&s, 1).kind, "surface");
+    let a = tray::ok(&mut s, &json!({"cmd": "analyze_surface", "body": 1}))
+        .surface_analysis
+        .unwrap();
+    assert_eq!(
+        (a.faces, a.free_edges.len(), a.boundary_loops.len()),
+        (4, 8, 2)
+    );
+    tray::ok(&mut s, &json!({"cmd": "fill_surface", "body": 1}));
+    assert!((volume(&s, 2).unwrap() - 24000.0).abs() < 1e-6);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": ext, "name": "distance", "value": 10.0}),
+    );
+    assert!((volume(&s, 2).unwrap() - 12000.0).abs() < 1e-6);
+    // Open L chain: a bent strip whose boundary is not planar.
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[100.0, 0.0], [130.0, 0.0], [130.0, 20.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    sk.add_line(p[0], p[1]);
+    sk.add_line(p[1], p[2]);
+    let l = sketch(&mut s, sk);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "surface_extrude", "sketch": l, "distance": 5.0}),
+    );
+    let lb = s.summary().bodies.last().unwrap().id.0;
+    assert_eq!(body(&s, lb).kind, "surface");
+    let r = tray::exec(&mut s, &json!({"cmd": "fill_surface", "body": lb}));
+    assert!(!r.ok);
+    assert!(format!("{:?}", r.error).contains("not planar"));
+    // Planar patch 40 x 30 with a Ø10 hole, thickened 2 mm.
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[0.0, 100.0], [40.0, 100.0], [40.0, 130.0], [0.0, 130.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..4 {
+        sk.add_line(p[i], p[(i + 1) % 4]);
+    }
+    let c = sk.add_point(20.0, 115.0);
+    sk.add_circle(c, 5.0);
+    let ps = sketch(&mut s, sk);
+    tray::ok(&mut s, &json!({"cmd": "surface_patch", "sketch": ps}));
+    let pb = s.summary().bodies.last().unwrap().id.0;
+    assert_eq!(volume(&s, pb), None);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "thicken_surface", "body": pb, "distance": 2.0}),
+    );
+    let tb = s.summary().bodies.last().unwrap().id.0;
+    let want = 2.0 * (1200.0 - PI * 25.0);
+    assert!(
+        (volume(&s, tb).unwrap() - want).abs() < 1e-6,
+        "{:?}",
+        volume(&s, tb)
+    );
+    // Save / reopen (format v7).
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.rcad.json");
+    tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
+    let mut t = Session::new();
+    tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
+    assert!((volume(&t, tb).unwrap() - want).abs() < 1e-6);
+    assert!((volume(&t, 2).unwrap() - 12000.0).abs() < 1e-6);
+}

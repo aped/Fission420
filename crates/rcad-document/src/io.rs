@@ -332,6 +332,8 @@ fn part_v7_feature(doc: &Document) -> Option<&'static str> {
         K::SurfaceStitch { .. } => Some("surface stitching"),
         K::SurfaceFill { .. } => Some("surface fills"),
         K::Thicken { .. } => Some("thickened surfaces"),
+        K::SurfacePatch { .. } => Some("planar surface patches"),
+        K::SurfaceExtrude { .. } => Some("extruded surfaces"),
         _ => None,
     })
 }

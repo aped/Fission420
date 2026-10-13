@@ -269,3 +269,31 @@ fn rule_editor_sends_only_changes() {
     );
     assert!(f.parameters.contains(&("k_factor".to_string(), 0.5)));
 }
+
+/// Surface from a sketch through the inspector: extrude the rectangle as an
+/// open tube, fill its two ends into the box.
+#[test]
+fn extrude_surface_from_the_sketch_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: Some([20.0, 15.0]),
+        },
+    });
+    settle(&mut h);
+    let sk = feature_name(&h, "sketch");
+    click(&mut h, &sk);
+    click(&mut h, "Surface from sketch");
+    type_into(&mut h, "Surface distance (mm)", "20");
+    click(&mut h, "Extrude surface");
+    let f = feature_name(&h, "surface_extrude");
+    assert_eq!(volume(&h, 1), None);
+    click(&mut h, &f);
+    click(&mut h, "Fill planar holes");
+    assert!((volume(&h, 2).unwrap() - 24000.0).abs() < 1e-6);
+}

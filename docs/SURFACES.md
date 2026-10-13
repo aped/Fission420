@@ -17,6 +17,15 @@ embedded). `import_step` on a file with only surface models is refused with a po
 surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside a
 `MANIFOLD_SOLID_BREP` stays an error (that is a malformed solid).
 
+## Surfaces from sketches
+
+* `surface_patch {sketch}` (UI: sketch inspector **Surface from sketch → Planar patch**): the
+  closed profile (holes allowed) as a one-face planar surface body.
+* `surface_extrude {sketch, distance, reverse?}` (**Extrude surface**): the closed profile, or
+  else the open chain of lines, swept along the sketch normal into an open ruled surface (planar
+  strips; exact cylindrical patches for arcs). No caps. Parameter `distance` (upstream edits
+  regenerate later stitch/fill/thicken).
+
 ## Analysis (before any repair)
 
 `analyze_surface {body, search = 0.1}` (UI: **Analyse**) reports, without changing anything:
@@ -44,7 +53,8 @@ within gap × face area of the ideal one; the gap-box test checks exactly that).
 no free edges is a closed solid (oriented outward by its signed volume); otherwise it stays an
 open shell (possibly several pieces; a result of several separate *closed* pieces is refused,
 because one body is one solid). A tolerance large enough to make an edge shared by three
-faces, or to collapse an edge, is refused. Tolerance range [0, 1] mm.
+faces, to collapse an edge, or to chain merges so a vertex moves farther than the tolerance, is
+refused. Tolerance range [0, 1] mm.
 
 ## Fill (patch)
 
@@ -64,7 +74,9 @@ must be stitched first. If the result is closed it is a solid.
 * cylindrical face bounded by circles perpendicular to the axis and 0 or 2 straight rulings
   (a full tube or a sector patch): the exact annular sector between radius r and r ± d, extruded
   along the axis. Thickening **toward the axis** by d ≥ r collapses the offset surface and is
-  refused with the largest possible thickness.
+  refused with the largest possible thickness. The cylinder (axis, radius) is fitted from the
+  face's samples and verified against all of them within the import consistency tolerance; a face
+  that is not a cylinder within it is refused.
 
 Other surfaces, several faces, trimmed cylinders, or a closed body are refused by name. The
 result's volume and orientation are checked in closed form and by FreeCAD.
@@ -85,7 +97,7 @@ positive volume = outward orientation, volume and bounding box).
 ## Not implemented (tracked)
 
 Non-planar patches (N-sided fill, boundary-blend), continuity (G1/G2) control, offset of general
-surfaces and multi-face thicken (offset with mitred joints), ruled/sweep/loft surface bodies,
+surfaces and multi-face thicken (offset with mitred joints), swept/lofted surface bodies (only straight extrusion of sketches),
 trimming and extending surfaces, surface-to-solid replace, sewing with geometry fitting (edges are
 merged, not re-fitted), T-splines / freeform modelling, export of surface bodies to STEP as
 `SHELL_BASED_SURFACE_MODEL` (STEP export of open bodies is not supported).
