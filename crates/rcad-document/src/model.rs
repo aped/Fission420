@@ -609,6 +609,75 @@ pub enum FeatureKind {
         nut: Option<NutSpec>,
         body: BodyId,
     },
+    /// Sheet-metal base face (run 7, format v7, `crate::sheet`): the closed
+    /// profile of `sketch` as a plate `rule.thickness` thick along the sketch
+    /// normal (against it with `flip`), new body `body`. `rule` is the sheet
+    /// rule of every sheet feature of the body. Parameters "thickness",
+    /// "radius", "k_factor", "relief_width", "relief_depth".
+    SheetBase {
+        sketch: FeatureId,
+        rule: crate::sheet::SheetRule,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        body: BodyId,
+    },
+    /// Straight edge flange (run 7, format v7) on body `body` of sheet base
+    /// `base`, along the base-profile line `edge` (sketch entity id): bend of
+    /// `angle` rad (parameter `angle_deg`) toward the sketch normal (`down`:
+    /// away from it), inside radius from the rule, straight `length` beyond
+    /// the bend (tangent line to flange end), over the edge minus
+    /// `start_offset`/`end_offset` (reliefs where it does not reach a corner).
+    SheetFlange {
+        base: FeatureId,
+        body: BodyId,
+        edge: u32,
+        angle: f64,
+        length: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        down: bool,
+        #[serde(default)]
+        start_offset: f64,
+        #[serde(default)]
+        end_offset: f64,
+    },
+    /// Flat pattern of the sheet body of `base` (run 7, format v7) as the
+    /// exact flat solid, new body `body` (a separate display state: the
+    /// folded body is unchanged).
+    SheetFlat { base: FeatureId, body: BodyId },
+    /// Surface body (run 7, format v7): every SHELL_BASED_SURFACE_MODEL shell
+    /// of an embedded STEP file as one open-shell body (no volume).
+    ImportSurfaces {
+        blob: BlobId,
+        #[serde(default)]
+        unit_override_to_mm: Option<f64>,
+        body: BodyId,
+    },
+    /// Stitch (run 7, format v7) the faces of surface body `source` within
+    /// healing `tolerance` mm into new body `body` (closed: a solid); the
+    /// source body is kept. Parameter "tolerance".
+    SurfaceStitch {
+        source: BodyId,
+        tolerance: f64,
+        body: BodyId,
+    },
+    /// Fill every planar boundary loop of open-shell body `source` with a
+    /// planar face (planarity within `tolerance`) as new body `body` (run 7,
+    /// format v7). Parameter "tolerance".
+    SurfaceFill {
+        source: BodyId,
+        tolerance: f64,
+        body: BodyId,
+    },
+    /// Thicken (run 7, format v7) the single planar or cylindrical face of
+    /// surface body `source` by `distance` mm along its normal (`reverse`:
+    /// against it) into new solid body `body`. Parameter "distance".
+    Thicken {
+        source: BodyId,
+        distance: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        body: BodyId,
+    },
 }
 
 /// Nut of a [`FeatureKind::Thread`]: square `width`, radial `clearance` (mm).
@@ -836,7 +905,16 @@ impl Feature {
             FeatureKind::SplitBody { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
-            FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
+            FeatureKind::SheetMetal { sketch, .. } | FeatureKind::SheetBase { sketch, .. } => {
+                vec![*sketch]
+            }
+            FeatureKind::SheetFlange { base, .. } | FeatureKind::SheetFlat { base, .. } => {
+                vec![*base]
+            }
+            FeatureKind::ImportSurfaces { .. }
+            | FeatureKind::SurfaceStitch { .. }
+            | FeatureKind::SurfaceFill { .. }
+            | FeatureKind::Thicken { .. } => vec![],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::ScaleBody { .. } => vec![],
             FeatureKind::AlignBody { from, to, .. } => vec![from.feature, to.feature],
@@ -871,7 +949,13 @@ impl Feature {
                 copy: Some(body), ..
             }
             | FeatureKind::SplitBody { new_body: body, .. }
-            | FeatureKind::SheetMetal { body, .. } => vec![*body],
+            | FeatureKind::SheetMetal { body, .. }
+            | FeatureKind::SheetBase { body, .. }
+            | FeatureKind::SheetFlat { body, .. }
+            | FeatureKind::ImportSurfaces { body, .. }
+            | FeatureKind::SurfaceStitch { body, .. }
+            | FeatureKind::SurfaceFill { body, .. }
+            | FeatureKind::Thicken { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -896,6 +980,7 @@ impl Feature {
             | FeatureKind::SplitBody { body: target, .. }
             | FeatureKind::ScaleBody { body: target, .. }
             | FeatureKind::Combine { target, .. }
+            | FeatureKind::SheetFlange { body: target, .. }
             | FeatureKind::Revolve {
                 merge:
                     Some(
@@ -921,6 +1006,10 @@ impl Feature {
     pub fn tool_bodies(&self) -> Vec<BodyId> {
         match &self.kind {
             FeatureKind::Combine { tools, .. } => tools.clone(),
+            // Run 7 surface operations read their source body (kept).
+            FeatureKind::SurfaceStitch { source, .. }
+            | FeatureKind::SurfaceFill { source, .. }
+            | FeatureKind::Thicken { source, .. } => vec![*source],
             _ => vec![],
         }
     }
@@ -930,7 +1019,8 @@ impl Feature {
         match &self.kind {
             FeatureKind::ImportStep { blob, .. }
             | FeatureKind::ImportMesh { blob, .. }
-            | FeatureKind::Import3mf { blob, .. } => Some(*blob),
+            | FeatureKind::Import3mf { blob, .. }
+            | FeatureKind::ImportSurfaces { blob, .. } => Some(*blob),
             _ => None,
         }
     }
@@ -1064,6 +1154,25 @@ impl Feature {
                 ("k_factor".into(), *k_factor),
                 ("width".into(), *width),
             ],
+            FeatureKind::SheetBase { rule, .. } => rule.parameters(),
+            FeatureKind::SheetFlange {
+                angle,
+                length,
+                start_offset,
+                end_offset,
+                ..
+            } => vec![
+                ("angle_deg".into(), angle.to_degrees()),
+                ("length".into(), *length),
+                ("start_offset".into(), *start_offset),
+                ("end_offset".into(), *end_offset),
+            ],
+            FeatureKind::SurfaceStitch { tolerance, .. }
+            | FeatureKind::SurfaceFill { tolerance, .. } => {
+                vec![("tolerance".into(), *tolerance)]
+            }
+            FeatureKind::Thicken { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::SheetFlat { .. } | FeatureKind::ImportSurfaces { .. } => vec![],
             FeatureKind::MoveBody {
                 translate, angle, ..
             } => vec![
@@ -1442,6 +1551,66 @@ impl Feature {
                     "k_factor" => k_factor,
                     _ => width,
                 } = value;
+                Ok(())
+            }
+            FeatureKind::SheetBase { rule, .. }
+                if matches!(
+                    name,
+                    "thickness" | "radius" | "k_factor" | "relief_width" | "relief_depth"
+                ) =>
+            {
+                rule.set(id, name, value)?;
+                Ok(())
+            }
+            FeatureKind::SheetFlange {
+                angle,
+                length,
+                start_offset,
+                end_offset,
+                ..
+            } if matches!(name, "angle_deg" | "length" | "start_offset" | "end_offset") => {
+                let ok = match name {
+                    "angle_deg" => value > 0.0 && value < 180.0,
+                    "length" => value > 0.0,
+                    _ => value >= 0.0,
+                };
+                if !ok {
+                    return Err(DocError::Validation(format!(
+                        "{id}.{name}: {}, got {value}",
+                        match name {
+                            "angle_deg" => "the bend angle must be in (0, 180) degrees",
+                            "length" => "must be > 0 mm",
+                            _ => "must be >= 0 mm",
+                        }
+                    )));
+                }
+                match name {
+                    "angle_deg" => *angle = value.to_radians(),
+                    "length" => *length = value,
+                    "start_offset" => *start_offset = value,
+                    _ => *end_offset = value,
+                }
+                Ok(())
+            }
+            FeatureKind::SurfaceStitch { tolerance, .. }
+            | FeatureKind::SurfaceFill { tolerance, .. }
+                if name == "tolerance" =>
+            {
+                if !(0.0..=1.0).contains(&value) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.tolerance: the healing tolerance must be in [0, 1] mm, got {value}"
+                    )));
+                }
+                *tolerance = value;
+                Ok(())
+            }
+            FeatureKind::Thicken { distance, .. } if name == "distance" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.distance: must be > 0 mm, got {value}"
+                    )));
+                }
+                *distance = value;
                 Ok(())
             }
             FeatureKind::MoveBody {

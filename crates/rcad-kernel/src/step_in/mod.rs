@@ -100,9 +100,25 @@ pub struct ImportedSolid {
     pub planar_faces: Vec<ImportedPlanarFace>,
 }
 
+/// The surfaces of a STEP file (run 7): every shell of every
+/// SHELL_BASED_SURFACE_MODEL, placed, gathered into one surface body (one
+/// shell per STEP shell). Open shells stay open: never reported as a solid.
+#[derive(Debug, Clone)]
+pub struct ImportedSurfaces {
+    /// First non-empty SHELL_BASED_SURFACE_MODEL / product name.
+    pub name: Option<String>,
+    pub body: Body,
+    /// STEP shells read (OPEN_SHELL and CLOSED_SHELL).
+    pub shells: usize,
+    pub open_shells: usize,
+    pub faces: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct StepImport {
     pub solids: Vec<ImportedSolid>,
+    /// Surface models (open shells), if the file has any (run 7).
+    pub surfaces: Option<ImportedSurfaces>,
     pub length_unit: LengthUnit,
     pub warnings: Vec<String>,
     pub stats: StepStats,
@@ -221,16 +237,13 @@ fn import_parsed(
         )));
     }
     let breps = idx.all_simple("MANIFOLD_SOLID_BREP");
-    if breps.is_empty() {
-        let other: Vec<String> = [
-            "SHELL_BASED_SURFACE_MODEL",
-            "FACETED_BREP",
-            "GEOMETRIC_CURVE_SET",
-        ]
-        .iter()
-        .filter(|n| !idx.all_with(n).is_empty())
-        .map(|n| n.to_string())
-        .collect();
+    let surface_models = idx.all_simple("SHELL_BASED_SURFACE_MODEL");
+    if breps.is_empty() && surface_models.is_empty() {
+        let other: Vec<String> = ["FACETED_BREP", "GEOMETRIC_CURVE_SET"]
+            .iter()
+            .filter(|n| !idx.all_with(n).is_empty())
+            .map(|n| n.to_string())
+            .collect();
         return Err(fail(if other.is_empty() {
             "no MANIFOLD_SOLID_BREP in file".into()
         } else {
@@ -241,6 +254,7 @@ fn import_parsed(
         }));
     }
     let placements = assembly::Placements::new(&idx, &geo)?;
+    let surfaces = import_surfaces(&idx, &geo, &placements, &surface_models, &mut warnings)?;
     // Scale-aware consistency tolerance (docs/formats/step.md).
     let tol = consistency_tol(&geo)?;
     let mut solids = Vec::new();
@@ -253,7 +267,7 @@ fn import_parsed(
             .map(str::trim)
             .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"));
         let shell_id = p.r(1)?;
-        let built = topo::build_shell(&geo, shell_id, tol)
+        let built = topo::build_shell(&geo, shell_id, tol, false)
             .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
         let instances = placements.instances_of_item(brep)?;
         if solids.len() + instances.len() > MAX_INSTANCES {
@@ -303,10 +317,81 @@ fn import_parsed(
     stats.solids = solids.len();
     Ok(StepImport {
         solids,
+        surfaces,
         length_unit,
         warnings,
         stats,
     })
+}
+
+/// All shells of the SHELL_BASED_SURFACE_MODELs `models` as one surface body.
+fn import_surfaces(
+    idx: &ast::Index,
+    geo: &geom::Geo,
+    placements: &assembly::Placements,
+    models: &[u64],
+    warnings: &mut Vec<String>,
+) -> std::result::Result<Option<ImportedSurfaces>, StepError> {
+    if models.is_empty() {
+        return Ok(None);
+    }
+    let tol = consistency_tol(geo)?;
+    let mut shells = Vec::new();
+    let mut name = None;
+    let (mut open, mut faces) = (0, 0);
+    for &m in models {
+        let (_, p) = idx.simple(m, &["SHELL_BASED_SURFACE_MODEL"])?;
+        if name.is_none() {
+            name = placements
+                .product_name_of_item(m)
+                .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
+                .or_else(|| {
+                    p.opt_s(0)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                });
+        }
+        let instances = placements.instances_of_item(m)?;
+        for sid in p.refs(1)? {
+            let built = topo::build_shell(geo, sid, tol, true)
+                .map_err(|e| fail(format!("SHELL_BASED_SURFACE_MODEL #{m}: {}", e.0)))?;
+            for inst in &instances {
+                let mut cs = built.shell.clone();
+                if let Some(t) = inst {
+                    transform_shell(&mut cs, *t)?;
+                }
+                let shell = Shell::extract(cs).map_err(|e| {
+                    fail(format!("SHELL_BASED_SURFACE_MODEL #{m}: shell #{sid}: {e}"))
+                })?;
+                if shells.len() >= MAX_INSTANCES {
+                    return Err(fail(format!("more than {MAX_INSTANCES} surface shells")));
+                }
+                faces += shell.len();
+                if shell.shell_condition() != truck_topology::shell::ShellCondition::Closed {
+                    open += 1;
+                }
+                shells.push(shell);
+            }
+        }
+    }
+    if shells.is_empty() {
+        return Ok(None);
+    }
+    warnings.push(format!(
+        "{} surface shell(s) ({open} open, {faces} face(s)) in SHELL_BASED_SURFACE_MODEL: not solids (no volume); import them as a surface body (import_surfaces)",
+        shells.len()
+    ));
+    let n = shells.len();
+    Ok(Some(ImportedSurfaces {
+        name,
+        body: Body {
+            solid: Solid::new_unchecked(shells),
+        },
+        shells: n,
+        open_shells: open,
+        faces,
+    }))
 }
 
 fn count_step_faces(idx: &ast::Index, shell_id: u64) -> std::result::Result<usize, StepError> {

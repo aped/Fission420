@@ -312,8 +312,18 @@ fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
 }
 
 /// Run-7 part-modeling additions (sheet metal, surfaces, ...).
-fn part_v7_feature(_doc: &Document) -> Option<&'static str> {
-    None
+fn part_v7_feature(doc: &Document) -> Option<&'static str> {
+    use crate::FeatureKind as K;
+    doc.features.iter().find_map(|f| match f.kind {
+        K::SheetBase { .. } => Some("sheet-metal base faces and sheet rules"),
+        K::SheetFlange { .. } => Some("sheet-metal edge flanges"),
+        K::SheetFlat { .. } => Some("sheet-metal flat patterns"),
+        K::ImportSurfaces { .. } => Some("surface bodies (open shells)"),
+        K::SurfaceStitch { .. } => Some("surface stitching"),
+        K::SurfaceFill { .. } => Some("surface fills"),
+        K::Thicken { .. } => Some("thickened surfaces"),
+        _ => None,
+    })
 }
 
 /// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and

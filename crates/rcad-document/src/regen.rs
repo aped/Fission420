@@ -372,6 +372,8 @@ struct Snapshot {
     /// Rigid moves of bodies (body, evaluation index of the move, transform),
     /// in order: faces made before a move are found moved with the body.
     moves: Vec<(BodyId, usize, k::Rigid)>,
+    /// Run 7: sheet-metal bodies (definition state for flanges / flat pattern).
+    sheets: BTreeMap<BodyId, crate::sheet::SheetModel>,
 }
 
 impl Snapshot {
@@ -408,6 +410,7 @@ impl Snapshot {
             results: Vec::new(),
             index: HashMap::new(),
             moves: Vec::new(),
+            sheets: BTreeMap::new(),
         }
     }
 }
@@ -539,13 +542,57 @@ fn kernel(feature: FeatureId) -> impl Fn(k::KernelError) -> DocError {
     }
 }
 
-/// Exact B-rep of `target`, or a structured error (missing body, mesh body).
+/// Run 7: the sheet model of body `body` made by base `base`, refused when
+/// another feature changed the body since its last sheet feature.
+fn sheet_of(
+    st: &Snapshot,
+    id: FeatureId,
+    base: FeatureId,
+    body: BodyId,
+) -> Result<crate::sheet::SheetModel> {
+    let m = st
+        .sheets
+        .get(&body)
+        .filter(|m| m.base == base)
+        .ok_or(DocError::BrokenReference {
+            from: id,
+            detail: format!("body {body} is not the sheet body of {base} at this point"),
+        })?;
+    let last = st.bodies.get(&body).map(|b| b.last_feature);
+    if last != Some(m.last_feature) {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: body {body} was changed by {} after its last sheet feature; sheet features must come before other edits of the body",
+            last.map(|f| f.to_string()).unwrap_or_default()
+        )));
+    }
+    Ok(m.clone())
+}
+
+/// Run 7: the B-rep of surface-operation source `source`.
+fn surface_source(st: &Snapshot, id: FeatureId, source: BodyId) -> Result<Body> {
+    match st.bodies.get(&source).map(|b| &b.geometry) {
+        Some(BodyGeometry::Brep(b)) => Ok(b.clone()),
+        Some(BodyGeometry::Mesh(_)) => Err(DocError::ProductLimit(format!(
+            "{id}: body {source} is a mesh; surface operations need an exact B-rep"
+        ))),
+        None => Err(DocError::BrokenReference {
+            from: id,
+            detail: format!("source body {source} does not exist at this point of the history"),
+        }),
+    }
+}
+
+/// Exact B-rep of `target`, or a structured error (missing body, mesh body,
+/// open surface body).
 fn brep_target(st: &Snapshot, id: FeatureId, target: BodyId) -> Result<Body> {
     let b = st.bodies.get(&target).ok_or(DocError::BrokenReference {
         from: id,
         detail: format!("target body {target} does not exist at this point of the history"),
     })?;
     match &b.geometry {
+        BodyGeometry::Brep(body) if body.is_open_shell() => Err(DocError::ProductLimit(format!(
+            "{id}: body {target} is an open surface body; solid operations need a closed solid (stitch, fill or thicken it first)"
+        ))),
         BodyGeometry::Brep(body) => Ok(body.clone()),
         BodyGeometry::Mesh(_) => Err(DocError::ProductLimit(format!(
             "{id}: body {target} is a mesh (STL) body; exact operations need a B-rep body"
@@ -1075,6 +1122,129 @@ fn regen_impl(
                     id,
                     *body,
                     BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            // Run 7 sheet metal (logic in `crate::sheet`).
+            FeatureKind::SheetBase {
+                sketch,
+                rule,
+                flip,
+                body,
+            } => {
+                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+                let region = so.usable(id, *sketch)?;
+                let model =
+                    crate::sheet::base_model(id, *body, so.frame, *flip, rule, region, &so.solved)?;
+                let built = crate::sheet::build(&model)?;
+                r.frame = Some(so.frame);
+                r.notes = crate::sheet::notes(&built, rule);
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(built.folded),
+                    BodySource::Modeled,
+                )?;
+                st.sheets.insert(*body, model);
+                r.body = Some(*body);
+            }
+            FeatureKind::SheetFlange { base, body, .. } => {
+                let mut model = sheet_of(&st, id, *base, *body)?;
+                model.flanges.extend(crate::sheet::flange_def(id, &f.kind));
+                let built = crate::sheet::build(&model)?;
+                r.notes = crate::sheet::notes(&built, &model.rule);
+                replace_body(&mut st, id, *body, built.folded);
+                model.last_feature = id;
+                st.sheets.insert(*body, model);
+                r.body = Some(*body);
+            }
+            FeatureKind::SheetFlat { base, body } => {
+                let sheet_body = doc
+                    .feature(*base)?
+                    .created_bodies()
+                    .first()
+                    .copied()
+                    .ok_or(DocError::BrokenReference {
+                        from: id,
+                        detail: format!("{base} is not a sheet base"),
+                    })?;
+                let model = sheet_of(&st, id, *base, sheet_body)?;
+                let built = crate::sheet::build(&model)?;
+                let flat = crate::sheet::flat_body(&built, &model.rule, id)?;
+                r.notes = crate::sheet::notes(&built, &model.rule);
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(flat),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            // Run 7 surfaces (logic in `crate::surface`).
+            FeatureKind::ImportSurfaces {
+                blob,
+                unit_override_to_mm,
+                body,
+            } => {
+                let b = doc.blob(*blob)?;
+                let (geom, name, notes) =
+                    crate::surface::import(id, &b.bytes()?, *unit_override_to_mm)?;
+                r.notes = notes;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(geom),
+                    BodySource::ImportedStep {
+                        file_name: b.file_name.clone(),
+                        solid_name: name,
+                    },
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::SurfaceStitch {
+                source,
+                tolerance,
+                body,
+            }
+            | FeatureKind::SurfaceFill {
+                source,
+                tolerance,
+                body,
+            } => {
+                let src = surface_source(&st, id, *source)?;
+                let (geom, notes) = if matches!(f.kind, FeatureKind::SurfaceStitch { .. }) {
+                    crate::surface::stitch(id, &src, *tolerance)?
+                } else {
+                    crate::surface::fill(id, &src, *tolerance)?
+                };
+                r.notes = notes;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(geom),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::Thicken {
+                source,
+                distance,
+                reverse,
+                body,
+            } => {
+                let src = surface_source(&st, id, *source)?;
+                let (geom, notes) = crate::surface::thicken(id, &src, *distance, *reverse)?;
+                r.notes = notes;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(geom),
                     BodySource::Modeled,
                 )?;
                 r.body = Some(*body);

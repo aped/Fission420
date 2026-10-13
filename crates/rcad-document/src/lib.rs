@@ -18,6 +18,7 @@ pub mod params;
 mod regen;
 mod session;
 pub mod sheet;
+pub mod surface;
 
 pub use direct::ImportedFaceIds;
 pub use io::{

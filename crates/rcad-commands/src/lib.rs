@@ -12,6 +12,7 @@ pub mod measure_faces;
 pub mod print;
 pub mod printables;
 pub mod scenarios;
+pub mod sheet_surface;
 pub mod sketches;
 
 use rcad_document::{
@@ -726,11 +727,31 @@ pub enum Command {
     },
     /// Write the flat pattern of sheet-metal feature `feature` as an R12 DXF
     /// (mm): outline on layer CUT, bend centre lines on layer BEND. The
-    /// response message carries the flat length.
+    /// response message carries the flat length. Run 7: for a sheet base /
+    /// flange / flat feature, bend lines on BEND_UP / BEND_DOWN with notes
+    /// (docs/SHEET_METAL.md).
     ExportFlatPattern {
         feature: FeatureId,
         path: PathBuf,
     },
+    /// Run 7 sheet metal (docs/SHEET_METAL.md): base face from a closed profile.
+    SheetBase(sheet_surface::SheetBaseArgs),
+    /// Run 7: straight edge flange on a base-profile line.
+    SheetFlange(sheet_surface::SheetFlangeArgs),
+    /// Run 7: edit the sheet rule of a base (all flanges regenerate).
+    EditSheetRule(sheet_surface::SheetRuleArgs),
+    /// Run 7: show the flat pattern / folded body (flat body made on first use).
+    SheetFlatState(sheet_surface::SheetFlatArgs),
+    /// Run 7 surfaces (docs/SURFACES.md): STEP surface models as a surface body.
+    ImportSurfaces(sheet_surface::ImportSurfacesArgs),
+    /// Run 7: free edges, gaps, boundary loops, orientation of a body.
+    AnalyzeSurface(sheet_surface::AnalyzeSurfaceArgs),
+    /// Run 7: stitch a surface body within a healing tolerance (new body).
+    StitchSurface(sheet_surface::SurfaceRepairArgs),
+    /// Run 7: fill the planar boundary loops of a surface body (new body).
+    FillSurface(sheet_surface::SurfaceRepairArgs),
+    /// Run 7: thicken a single planar/cylindrical face into a solid (new body).
+    ThickenSurface(sheet_surface::ThickenArgs),
     /// Align the body of planar face `from` flush onto face `to` (run 6; see
     /// `FeatureKind::AlignBody`).
     AlignBody {
@@ -1122,6 +1143,15 @@ impl Command {
             Command::AlignBody { .. } => "align_body",
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
+            Command::SheetBase(_) => "sheet_base",
+            Command::SheetFlange(_) => "sheet_flange",
+            Command::EditSheetRule(_) => "edit_sheet_rule",
+            Command::SheetFlatState(_) => "sheet_flat_state",
+            Command::ImportSurfaces(_) => "import_surfaces",
+            Command::AnalyzeSurface(_) => "analyze_surface",
+            Command::StitchSurface(_) => "stitch_surface",
+            Command::FillSurface(_) => "fill_surface",
+            Command::ThickenSurface(_) => "thicken_surface",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
@@ -1439,6 +1469,9 @@ pub struct Response {
     /// `export_drawing`: per-view report and issues (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawing_report: Option<drawings::DrawingReport>,
+    /// `analyze_surface`: free edges, gaps, loops, orientation (run 7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_analysis: Option<rcad_kernel::ShellAnalysis>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1609,6 +1642,9 @@ impl Session {
 
     fn run(&mut self, cmd: &Command, r: &mut Response) -> Result<(), DocError> {
         if self.run_drawing(cmd, r)? {
+            return Ok(());
+        }
+        if self.run_sheet_surface(cmd, r)? {
             return Ok(());
         }
         match cmd {
@@ -3105,6 +3141,21 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            // Handled by `run_sheet_surface` (run 7) before this match.
+            Command::SheetBase(_)
+            | Command::SheetFlange(_)
+            | Command::EditSheetRule(_)
+            | Command::SheetFlatState(_)
+            | Command::ImportSurfaces(_)
+            | Command::AnalyzeSurface(_)
+            | Command::StitchSurface(_)
+            | Command::FillSurface(_)
+            | Command::ThickenSurface(_) => {
+                return Err(DocError::Validation(format!(
+                    "internal: {} was not dispatched",
+                    cmd.name()
+                )));
+            }
             Command::ExportFlatPattern { feature, path } => {
                 let (feature, path) = (*feature, path.clone());
                 let m = self.model_mut()?;
@@ -3391,8 +3442,15 @@ impl Session {
                 let imp = rcad_document::import::step(&bytes, unit)?;
                 if imp.solids.is_empty() {
                     return Err(DocError::Validation(format!(
-                        "{}: no solids found",
-                        path.display()
+                        "{}: no solids found{}",
+                        path.display(),
+                        imp.surfaces
+                            .as_ref()
+                            .map(|s| format!(
+                                " ({} surface shell(s): import them with import_surfaces)",
+                                s.shells
+                            ))
+                            .unwrap_or_default()
                     )));
                 }
                 let names: Vec<Option<String>> =
@@ -3982,6 +4040,13 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
                 FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
+                FeatureKind::SheetBase { .. } => ("sheet_base", None),
+                FeatureKind::SheetFlange { .. } => ("sheet_flange", None),
+                FeatureKind::SheetFlat { .. } => ("sheet_flat", None),
+                FeatureKind::ImportSurfaces { .. } => ("import_surfaces", None),
+                FeatureKind::SurfaceStitch { .. } => ("surface_stitch", None),
+                FeatureKind::SurfaceFill { .. } => ("surface_fill", None),
+                FeatureKind::Thicken { .. } => ("thicken", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::AlignBody { .. } => ("align_body", None),

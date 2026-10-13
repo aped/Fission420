@@ -158,3 +158,22 @@ floor), fused with `makeCylinder(5,6,(45,25,19))` (Ø10 boss, top at z = 25),
 47161.19476149153, 11 STEP faces (8 planes, 3 cylinders; 14 faces after import, which
 splits each cylinder at its seam). FreeCAD's own re-import: 1 valid solid, volume
 47161.19476149152.
+
+## Surface / open-shell fixtures (run 7)
+
+Made by `tools/fixtures/step/open_shells.py` (FreeCADCmd 1.1.4, OCC 7.8.1; run
+`tools/heavy.sh tools/fixtures/step/open_shells.sh`) from `Part.makeBox(40,30,20)`
+without its top face, written as SHELL_BASED_SURFACE_MODEL / OPEN_SHELL:
+
+* `open_box_mm.step`: the 5 faces sewn into one open shell (4 free edges on z = 20).
+  Filling the top gives V = 24000 mm³.
+* `loose_faces_mm.step`: the same 5 faces as separate open shells (8 coincident
+  edge pairs to stitch, then the top loop).
+* `gap_box_mm.step`: the loose faces with the +X wall moved to x = 40.02 (a 0.02 mm
+  gap to three neighbours).
+* `plate_mm.step`: one planar face [0,50]x[0,20] at z = 0 (normal +Z).
+* `half_tube_mm.step`: cylinder surface r 10, axis Z, z 0..30, x >= 0 (normal away
+  from the axis).
+
+FreeCAD's own re-import (script output): no solids, open shells, areas 4000 / 4000 /
+4000 / 1000 / 942.477796077 mm² (= 300π).
