@@ -951,6 +951,9 @@ struct BodyData {
     mesh: k::TriMesh,
     /// (origin, unit axis, radius) of cylindrical faces, for exact silhouettes.
     cylinders: Vec<([f64; 3], [f64; 3], f64)>,
+    /// Run 7: (point on axis, unit axis, axial range) of each cylindrical
+    /// face, from its tessellation, for centre lines.
+    axes: Vec<([f64; 3], [f64; 3], (f64, f64))>,
     bounds: k::Bounds,
 }
 
@@ -968,25 +971,47 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
         .map(|e| e.curve)
         .collect();
     let mesh = k::tessellate_display(b, chord).map_err(kerr)?;
-    let cylinders = k::classify_faces(b)
-        .unwrap_or_default()
-        .into_iter()
+    let classes = k::classify_faces(b).unwrap_or_default();
+    let cylinders = classes
+        .iter()
         .filter_map(|f| match f {
             k::DirectFace::Cylinder {
                 origin,
                 axis,
                 radius,
                 ..
-            } => Some((origin, norm(axis), radius)),
+            } => Some((*origin, norm(*axis), *radius)),
             _ => None,
         })
         .collect();
+    let mut axes = Vec::new();
+    for (fi, f) in classes.iter().enumerate() {
+        let k::DirectFace::Cylinder { origin, axis, .. } = f else {
+            continue;
+        };
+        let ax = norm(*axis);
+        let (mut t0, mut t1) = (f64::INFINITY, f64::NEG_INFINITY);
+        for (ti, t) in mesh.triangles.iter().enumerate() {
+            if mesh.tri_face.get(ti) != Some(&(fi as u32)) {
+                continue;
+            }
+            for &v in t {
+                let x = dot(sub(mesh.positions[v as usize], *origin), ax);
+                t0 = t0.min(x);
+                t1 = t1.max(x);
+            }
+        }
+        if t0 < t1 {
+            axes.push((*origin, ax, (t0, t1)));
+        }
+    }
     let bounds = k::bounds(b).map_err(kerr)?;
     Ok(BodyData {
         edges,
         smooth,
         mesh,
         cylinders,
+        axes,
         bounds,
     })
 }
@@ -2398,6 +2423,51 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     b: [c[0], c[1] + e],
                     style: LineStyle::Center,
                 });
+            }
+            // Run 7: centre lines of cylinders seen side-on (hole and boss
+            // axes), 2 sheet mm past the cylinder; merged when coincident
+            // (split cylinder faces). Not in pictorial or detail views.
+            if frame.name() != "Iso" && !matches!(v.kind, ViewKind::Detail { .. }) {
+                let mut lines: Vec<([f64; 2], [f64; 2])> = Vec::new();
+                for d in &shown {
+                    for (o, ax, (t0, t1)) in &d.axes {
+                        if dot(*ax, frame.toward).abs() > 1e-9 {
+                            continue;
+                        }
+                        let ext = 2.0 / scale;
+                        let at = |t: f64| {
+                            let p = frame.project([0, 1, 2].map(|i| o[i] + ax[i] * t));
+                            [off[0] + p[0] * scale, off[1] + p[1] * scale]
+                        };
+                        let (a, b) = (at(t0 - ext), at(t1 + ext));
+                        let dir = [b[0] - a[0], b[1] - a[1]];
+                        let l = dir[0].hypot(dir[1]).max(1e-12);
+                        let u = [dir[0] / l, dir[1] / l];
+                        // Same carrier line: unite the extents.
+                        let same = lines.iter_mut().find(|(p, q)| {
+                            let w = [p[0] - a[0], p[1] - a[1]];
+                            let qd = [q[0] - p[0], q[1] - p[1]];
+                            (w[0] * u[1] - w[1] * u[0]).abs() < 1e-6
+                                && (qd[0] * u[1] - qd[1] * u[0]).abs() < 1e-6
+                        });
+                        match same {
+                            Some((p, q)) => {
+                                let s = |x: [f64; 2]| (x[0] - a[0]) * u[0] + (x[1] - a[1]) * u[1];
+                                let (lo, hi) = (s(*p).min(s(*q)).min(0.0), s(*p).max(s(*q)).max(l));
+                                *p = [a[0] + u[0] * lo, a[1] + u[1] * lo];
+                                *q = [a[0] + u[0] * hi, a[1] + u[1] * hi];
+                            }
+                            None => lines.push((a, b)),
+                        }
+                    }
+                }
+                for (a, b) in lines {
+                    prims.push(Prim::Line {
+                        a,
+                        b,
+                        style: LineStyle::Center,
+                    });
+                }
             }
             // Section hatching of the faces lying in the cutting plane.
             if let Some(plane) = &cut_plane {

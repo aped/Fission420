@@ -217,6 +217,10 @@ build refuses such a file instead of dropping the annotations).
 * **Tolerances** (`tolerance` on a dimension; `set_dimension_tolerance`): `symmetric`
   (`40 ±0.1`), `deviation` (`40 +0.05/-0.02`), `limits` (`40.1/39.95`, upper over lower
   as one line). Values to 3 decimals. No fit designations (H7/g6) or geometric tolerances.
+* **Centre lines** (automatic): every cylindrical face whose axis lies in the view plane
+  (holes and bosses seen side-on) gets a chain line along its axis over the face's axial
+  extent plus 2 sheet mm each side; coincident axes are merged into one line. Pictorial and
+  detail views get none. Computed from the current geometry at every render.
 * **Notes** (`add_drawing_note`, `remove_drawing_note`): free text at a sheet position,
   lines separated by `\n`, 1-500 characters, inside the sheet.
 * UI: browser Drawings section: **New assembly drawing**, per drawing **BOM table** and
