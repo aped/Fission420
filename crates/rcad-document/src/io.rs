@@ -29,7 +29,9 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// as v5 only when it uses one of them ([`required_version`]); otherwise it
 /// stays v4, byte for byte as before, so older builds keep reading it and
 /// refuse (rather than misread) a v5 file.
-pub const FORMAT_VERSION: u32 = 5;
+/// v6 (run 6): direct edits of imported bodies (`FeatureKind::DirectEdit`);
+/// written only when used ([`run6_feature`]), like v5.
+pub const FORMAT_VERSION: u32 = 6;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -163,10 +165,24 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
         .and_then(scan)
 }
 
-/// The oldest format version that can hold `doc`: 5 when it uses a run-5
-/// feature, else 4.
+/// What in `doc` needs format v6 (run 6, kernel worker), if anything.
+pub fn run6_feature(doc: &Document) -> Option<&'static str> {
+    doc.features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::DirectEdit { .. }))
+        .then_some("direct edits of imported bodies")
+}
+
+/// The oldest format version that can hold `doc`: 6 when it uses a run-6
+/// feature, 5 for a run-5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if v5_feature(doc).is_some() { 5 } else { 4 }
+    if run6_feature(doc).is_some() {
+        6
+    } else if v5_feature(doc).is_some() {
+        5
+    } else {
+        4
+    }
 }
 
 /// Save atomically (see [`write_atomic`]). On any error the previous file is untouched.
@@ -290,6 +306,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v5 feature)",
+            nf.version
+        )));
+    }
+    if nf.version < 6
+        && let Some(what) = run6_feature(&nf.document)
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain {what} (v6 feature)",
             nf.version
         )));
     }

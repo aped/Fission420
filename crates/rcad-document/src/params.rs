@@ -675,6 +675,7 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         }
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
         FeatureKind::Shell { .. } if name == "thickness" => Some(SlotKind::Length),
+        FeatureKind::DirectEdit { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Hole { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         _ => None,
     }

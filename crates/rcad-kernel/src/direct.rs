@@ -381,6 +381,32 @@ pub fn classify_face(body: &Body, face: usize) -> Result<DirectFace> {
     })
 }
 
+/// [`classify_face`] for every face of `body` (one pass over its topology).
+pub fn classify_faces(body: &Body) -> Result<Vec<DirectFace>> {
+    let sh = shell_of(body)?;
+    let tol = geo_tol(&sh);
+    sh.faces
+        .iter()
+        .map(|f| {
+            if let Some((o, n)) = plane_of(f) {
+                return Ok(DirectFace::Plane {
+                    origin: p3(o),
+                    normal: v3(n),
+                });
+            }
+            Ok(match cylinder_of(&sh, f, tol)? {
+                Some((c, a, r, hole)) => DirectFace::Cylinder {
+                    origin: p3(c),
+                    axis: v3(a),
+                    radius: r,
+                    hole,
+                },
+                None => DirectFace::Other,
+            })
+        })
+        .collect()
+}
+
 /// Whether a face is a wall along `n`: a plane containing `n`, or a curved
 /// face whose outward normal is perpendicular to `n` everywhere sampled.
 fn wall_along(sh: &CS, f: &CompressedFace<Surface>, n: Vector3) -> Result<bool> {

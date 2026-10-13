@@ -228,6 +228,10 @@ documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/
 (`suppression.rs::frozen_v4_fixtures_load_unchanged`: load, regenerate to the cached volume,
 re-save as an identical v4 document).
 
+**v6 (run 6)** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
+written only when present (`io::run6_feature`); otherwise the file stays v5/v4 as before.
+Imported bodies edited this way regenerate from the embedded STEP bytes plus the edit list.
+
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
 `*.f420.json`. They load unchanged; no version changed with the name, and the extension is

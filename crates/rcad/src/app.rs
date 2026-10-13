@@ -161,6 +161,8 @@ pub(crate) enum Dialog {
         open_end: bool,
         thickness: String,
     },
+    /// Run 6: direct edit of an imported body (crate::direct_edit_ui).
+    DirectEdit(crate::direct_edit_ui::DirectForm),
 }
 
 /// The pattern dialog's mode.
@@ -196,6 +198,7 @@ impl Dialog {
             Dialog::Hole { .. } => "Hole",
             Dialog::Shell { .. } => "Shell (scoped)",
             Dialog::OffsetPlane { .. } => "Sketch on offset plane",
+            Dialog::DirectEdit(f) => f.title(),
         }
     }
 }
@@ -1303,6 +1306,7 @@ impl RcadApp {
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
             Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
+            Dialog::DirectEdit(f) => (vec![f.face.feature], vec![]),
             Dialog::Shell { extrude, .. } => (vec![*extrude], vec![]),
             Dialog::OffsetPlane { face, .. } => {
                 (face.iter().map(|(r, _)| r.feature).collect(), vec![])
@@ -2381,6 +2385,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::OffsetPlane { .. } => {
             return Err("an offset plane starts a sketch session (no command)".into());
         }
+        Dialog::DirectEdit(f) => f.command()?,
         Dialog::Shell {
             extrude,
             open_end,

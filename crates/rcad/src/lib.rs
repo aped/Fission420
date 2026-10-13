@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod bodies;
+pub mod direct_edit_ui;
 #[cfg(test)]
 mod display_fault_tests;
 pub mod engine;
