@@ -12,7 +12,7 @@
 # Usage (repository root): tools/print/validate_examples.sh [outdir]
 #   default outdir artifacts/run4/print/examples; logs <outdir>/*.log, summary <outdir>/SUMMARY.txt.
 # All cargo, FreeCAD and slicer runs go through tools/heavy.sh; cargo uses
-# CARGO_TARGET_DIR (default <repo>/target-print).
+# CARGO_TARGET_DIR (default <main checkout>/target-print).
 # Exit 1 if any step fails (every step still runs).
 set -uo pipefail
 ROOT=$(pwd)
@@ -20,7 +20,8 @@ OUT=${1:-artifacts/run4/print/examples}
 mkdir -p "$OUT"
 OUT=$(readlink -f "$OUT")
 EXP=$OUT/out
-export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<repo>/target-print}
+MAIN="$(cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" && pwd)"
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$MAIN/target-print}
 FAIL=0
 SUM=$OUT/SUMMARY.txt
 : > "$SUM"

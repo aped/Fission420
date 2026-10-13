@@ -74,9 +74,9 @@ More in [`docs/screenshots/`](docs/screenshots).
 
 ### Prebuilt binaries
 
-Each CI run uploads unsigned builds for **Linux x86_64**, **Windows x64** and
-**macOS ARM64** (Actions → a run → *Artifacts*). Tagged versions (`v*`) produce a draft
-release with the same archives. Each archive holds `f420-app`, `f420-cli`, the example
+CI publishes unsigned builds for **Linux x86_64**, **Windows x64** and **macOS ARM64** from
+`main` and from manual runs (Actions → CI → a run → *Artifacts*; kept 7 days). Tagged
+versions (`v*`) produce a draft release with the same archives. Each archive holds `f420-app`, `f420-cli`, the example
 documents and a `BUILD_INFO.txt` that says whether that platform's tests passed.
 
 > Windows and macOS builds are produced on every run but are not yet test-gated; see

@@ -8,7 +8,7 @@
 set -euo pipefail
 IMAGE="${1:?usage: $0 <image> (e.g. debian:trixie)}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-TOOLCHAIN="$(sed -n 's/^  RUST_TOOLCHAIN: "\(.*\)"/\1/p' "$ROOT/.github/workflows/ci.yml")"
+TOOLCHAIN="$(sed -n 's/^  RUST_TOOLCHAIN: "\(.*\)"/\1/p' "$ROOT/.github/workflows/check.yml")"
 CACHE="${CI_CACHE:-$ROOT/target-ci-${IMAGE//[:\/]/-}}"
 case "$CACHE" in /tmp/*) echo "refusing tmpfs cache dir $CACHE" >&2; exit 2;; esac
 mkdir -p "$CACHE"

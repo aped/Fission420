@@ -1,24 +1,37 @@
 # Continuous integration
 
 `.github/workflows/ci.yml` runs the local gate, `cargo xtask check`, on four platforms and
-uploads release binaries. Linux (Bazzite/Fedora atomic) stays the primary development
+publishes release binaries. Each platform is one call of the reusable workflow
+`.github/workflows/check.yml`. Linux (Bazzite/Fedora atomic) stays the primary development
 environment: nothing in the workflow changes how the project is built or tested locally.
 
-## Matrix
+## Matrix and triggers
 
-| leg | runner | gating | artifact |
-|---|---|---|---|
-| ubuntu-24.04 | `ubuntu-24.04` | yes | `fission420-linux-x86_64.tar.gz` (glibc 2.39 baseline, so it also runs on Debian 13 and current Fedora) |
-| debian-13 | `ubuntu-24.04` + container `debian:trixie` | yes | none (it would need a newer glibc than the Ubuntu build; this leg only gates) |
-| windows-x64 | `windows-2025` (MSVC) | **not yet** | `fission420-windows-x86_64.zip` |
-| macos-arm64 | `macos-15` (Apple silicon) | **not yet** | `fission420-macos-arm64.tar.gz` |
+| leg | runner | runs on | gating | artifact |
+|---|---|---|---|---|
+| ubuntu-24.04 | `ubuntu-24.04` | every push to `main`, `work/**`, `ci/**`; every PR | yes | `fission420-linux-x86_64.tar.gz` (glibc 2.39 baseline, so it also runs on Debian 13 and current Fedora) |
+| debian-13 | `ubuntu-24.04` + container `debian:trixie` | same | yes | none (it would need a newer glibc than the Ubuntu build; this leg only gates) |
+| windows-x64 | `windows-2025` (MSVC) | `main`, `v*` tags, PRs into `main`, manual runs | **not yet** | `fission420-windows-x86_64.zip` |
+| macos-arm64 | `macos-15` (Apple silicon) | same | **not yet** | `fission420-macos-arm64.tar.gz` |
+
+**Cost controls.** These are kept although the repository is public, where standard runners
+are free; they also keep a private fork or a future switch to private affordable.
+
+- **Routine pushes run Linux only.** Windows and macOS, and the binary archives, come from
+  `main`, tags, PRs into `main` and manual runs (*Actions → CI → Run workflow*, which runs all
+  four legs and publishes).
+- **Docs-only changes do not trigger CI:** `**.md`, `docs/**`, `runs/**` and `LICENSE-*`
+  are ignored. Path filters do not apply to tag pushes.
+- **Superseded runs are cancelled** on work branches and PRs. Runs on `main` and tags always
+  finish.
+- **Retention:** binary archives and failure logs are kept for 7 days.
 
 Each leg runs these steps:
 
 1. `cargo fetch --locked`: the lockfile must be current.
 2. `cargo build --release --locked -p f420-app -p f420-cli`.
 3. `cargo xtask check`: layout, `fmt --check`, `clippy -D warnings`, `test --workspace --release`, headless acceptance, the example replays.
-4. Package and upload the binaries plus `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_LICENSES.txt`, the committed `examples/` and `BUILD_INFO.txt`. `BUILD_INFO.txt` records the commit, platform, toolchain and the outcome of the xtask check.
+4. When publishing: package and upload the binaries plus `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_LICENSES.txt`, the committed `examples/` and `BUILD_INFO.txt`. `BUILD_INFO.txt` records the commit, platform, toolchain and the outcome of the xtask check.
 
 The Ubuntu leg also warns (it does not fail) when the replays rewrite committed `examples/`.
 
@@ -28,14 +41,14 @@ succeeded, and `BUILD_INFO.txt` states whether its tests passed. Gating legs upl
 after a passing check.
 
 On a `v*` tag, the `release` job collects the artifacts into a **draft** GitHub release.
-Builds are unsigned and there are no installers, by design. Artifacts are kept for 30 days and failure logs (`artifacts/`) for 7.
+Builds are unsigned and there are no installers, by design.
 
-To make a leg gating, set `gate: true` in the matrix once the platform items below that
-block it are fixed and one run is green.
+To make a leg gating, set `gate: true` for it in `ci.yml` once the platform items below
+that block it are fixed and one run is green.
 
 ### Toolchain
 
-The toolchain is pinned to **1.99.0** (`RUST_TOOLCHAIN` in the workflow), which matches the
+The toolchain is pinned to **1.99.0** (`RUST_TOOLCHAIN` in `check.yml`), which matches the
 local toolchain (Homebrew `cargo`/`rustc` 1.99.0 is first on `PATH` on the dev machine). This
 keeps clippy's `-D warnings` the same in CI and locally.
 
@@ -148,7 +161,7 @@ Local evidence from base `f0bcf6c` plus this change (logs in `artifacts/ci/`, un
 | `tools/ci/container_check.sh debian:trixie` (`debian13_xtask.log`) | PASS: Debian 13, rustc 1.99.0; release build plus `cargo xtask check`, 576 / 0 / 13; 9m23s including the toolchain install; `examples/` unchanged |
 | `cargo check --workspace --all-targets --target aarch64-apple-darwin` (`crosscheck.log`) | PASS (type-check only; not linked or run) |
 | the same for `x86_64-pc-windows-msvc` | not verifiable from Linux: `lzma-sys` needs MSVC `lib.exe` |
-| `actionlint` 1.7.12 on `ci.yml` | clean (shellcheck integration not run: shellcheck is not installed) |
+| `actionlint` 1.7.12 on `ci.yml` and `check.yml` | clean (shellcheck integration not run: shellcheck is not installed) |
 | Ubuntu 24.04 leg | not run locally; covered by the Debian container run plus the runner image (`tools/ci/container_check.sh ubuntu:24.04` reproduces it) |
 
 Next, in value order:
@@ -171,13 +184,18 @@ is mechanical once that is decided.
 | **RustCad** | `runs/run-{2,3,4,5}` specs only (`RustCad / Fission420 — Session N`, `RUSTCAD_SESSION_4.md`) | 8 in 4 files | working name in the specs; not in code or user-facing text |
 | **Fission420** / **fission420** | README, docs, app title and window, licence holder, repo name, `FORMAT_NAME = "fission420"` (`crates/f420-document/src/io.rs:12`), recovery dir `fission420/recovery` (`crates/f420-app/src/recovery.rs`), archive names `fission420-<platform>` | 92 + 46 in 98 files | product name, plus the identifier written into every native file |
 | **f420** / **F420** | 9 crate names (`f420-*`) and both binaries, the `.f420.json` extension, `F420_*` environment variables (`F420_RECOVERY_DIR`, `F420_AUTOSAVE_SECS`, `F420_WRITE_EXAMPLES`, …), code identifiers (`F420App`) | 1311 + 344 in 289 files | short prefix; part of the file format and the CLI |
-| personal: `<user>` | `tools/heavy.sh:7` and `tools/print/validate_examples.sh:15,23` (hard-coded `ROOT` / target dir), `tools/live/g_enclosure_params_export.txt:6`, run reports (`cd <repo>/...`), and the status bar of `docs/screenshots/18-run4-params.png`, `19-run4-measure.png`, `21-run4-print_export.png` | 13 in 10 files + 3 images | the developer's machine paths leaked into tooling and published screenshots |
+| personal: `<user>` | `tools/heavy.sh:7` and `tools/print/validate_examples.sh:15,23` (hard-coded `ROOT` / target dir), `tools/live/g_enclosure_params_export.txt:6`, run reports (`cd <repo>/...`), and the status bar of `docs/screenshots/` 08, 18, 19, 20, 21 | 13 in 10 files + 5 images | the developer's machine paths leaked into tooling and published screenshots |
 | git identity | **all 256 commits** authored `Your GitHub Username <your-github-email@example.com>` (placeholder global git config; `runs/STATUS.md:244`) | 256 commits | GitHub cannot attribute the history to an account |
 | licence holder | `LICENSE-MIT`: "The Fission420 contributors" | 1 | placeholder until a name is chosen |
 
 ### Planned changes, in order
 
-1. **Machine-independence (do regardless of naming).**
+1. **Machine-independence. Done** (`ci/github-actions`, before the repository went public):
+   `tools/heavy.sh` and `tools/print/validate_examples.sh` find the main checkout through
+   `git rev-parse --git-common-dir`, so every worktree still shares one lock. The live script
+   uses an `@ROOT@` placeholder. The five screenshots that showed a home path in the status
+   bar (08, 18, 19, 20, 21) have it replaced by the repository-relative path. Older blobs
+   still contain the home path until history is rewritten (step 2). The original plan was:
    - `tools/heavy.sh` and `tools/print/validate_examples.sh` derive `ROOT` from the script location (`$(cd "$(dirname "$0")/.." && pwd)`), as `tools/ci/container_check.sh` already does.
    - The live-walkthrough script types a path relative to the repository.
    - Recapture or crop the three screenshots so the status bar shows no home path.

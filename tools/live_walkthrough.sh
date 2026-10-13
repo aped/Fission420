@@ -3,6 +3,7 @@
 # headless compositor (tools/headless_session.sh), with real pointer/keyboard
 # input injected through mutter's RemoteDesktop API (tools/live_input.py).
 # Each script asserts document state via the app's F420_PROBE output.
+# Scripts may use @OUT@ (the per-script output dir) and @ROOT@ (the repository root).
 # Exit status is non-zero if any script or expectation fails.
 #
 # usage: tools/live_walkthrough.sh [out-dir] [script-name-filter]
@@ -26,7 +27,7 @@ for script in "$ROOT"/tools/live/*.txt; do
     > "$dir/session.log" 2>&1 &
   session=$!
   for _ in $(seq 1 150); do [ -s "$dir/probe.json" ] && break; sleep 0.1; done
-  sed "s#@OUT@#$dir#g" "$script" > "$dir/script.txt"
+  sed -e "s#@OUT@#$dir#g" -e "s#@ROOT@#$ROOT#g" "$script" > "$dir/script.txt"
   SECONDS=0
   if /usr/bin/python3 "$ROOT/tools/live_input.py" "$dir" "$dir/script.txt" > "$dir/result.log" 2>&1; then
     status=PASS

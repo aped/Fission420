@@ -1,6 +1,8 @@
-# Cross-platform CI: the same `cargo xtask check` gate that is run locally (layout, fmt,
-# clippy -D warnings, release tests, headless acceptance, example replays) on four
-# platforms, plus release binaries uploaded as downloadable artifacts.
+# Cross-platform CI: the local gate (`cargo xtask check`: layout, fmt, clippy -D warnings,
+# release tests, headless acceptance, example replays) plus release binaries.
+#
+# Linux legs run on every push and PR. Windows and macOS, and binary publishing, run on main,
+# v* tags, PRs into main and manual runs. Docs-only changes do not trigger CI.
 # Platform notes, known failures and how to promote a leg to gating: docs/CI.md.
 name: CI
 
@@ -8,33 +10,22 @@ on:
   push:
     branches: [main, "work/**", "ci/**"]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**", "runs/**", "LICENSE-*"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "runs/**", "LICENSE-*"]
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Superseded pushes to work branches and PRs are cancelled; main and tags always finish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
-  RUST_BACKTRACE: "1"
-  # Match the local development toolchain so clippy lints agree (egui 0.36 needs >= 1.95).
-  # Bump together with the local toolchain; see docs/CI.md.
-  RUST_TOOLCHAIN: "1.99.0"
-
 jobs:
-  check:
+  linux:
     name: check (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
-    timeout-minutes: 120
-    # Non-gating legs still run everything and show red when they fail; they just do not
-    # fail the workflow until the platform refactors in docs/CI.md land.
-    continue-on-error: ${{ !matrix.gate }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,126 +33,52 @@ jobs:
           - name: ubuntu-24.04
             os: ubuntu-24.04
             container: ""
-            gate: true
             artifact: linux-x86_64
           - name: debian-13
             os: ubuntu-24.04
             container: debian:trixie
-            gate: true
             # Built against Debian 13's newer glibc; the Ubuntu 24.04 build is the
             # portable Linux artifact, so this leg only gates.
             artifact: ""
+    uses: ./.github/workflows/check.yml
+    with:
+      name: ${{ matrix.name }}
+      os: ${{ matrix.os }}
+      container: ${{ matrix.container }}
+      gate: true
+      artifact: ${{ matrix.artifact }}
+      publish: >-
+        ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/v') || github.base_ref == 'main' }}
+
+  cross:
+    name: check (${{ matrix.name }})
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/v') || github.base_ref == 'main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - name: windows-x64
             os: windows-2025
-            container: ""
-            gate: false
             artifact: windows-x86_64
           - name: macos-arm64
             os: macos-15
-            container: ""
-            gate: false
             artifact: macos-arm64
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Debian system packages
-        if: matrix.container != ''
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        # C compiler for lzma-sys (truck-meshalgo -> vtkio -> xz2); nothing else is linked
-        # at build time (wayland/x11/xkbcommon are dlopen'ed at runtime).
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config liblzma-dev
-
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.name }}
-
-      - name: Lockfile is current
-        run: cargo fetch --locked
-
-      - name: Build release binaries
-        id: build
-        run: cargo build --release --locked -p f420-app -p f420-cli
-
-      - name: cargo xtask check
-        id: check
-        run: cargo xtask check
-
-      - name: Committed examples unchanged by the replays
-        if: matrix.name == 'ubuntu-24.04'
-        # Warning only: cached measurements may differ in the last digit between libm
-        # versions (developer glibc vs the runner's); a real drift shows up in the diff.
-        run: |
-          if ! git diff --quiet -- examples; then
-            git diff --stat -- examples
-            echo "::warning title=examples drift::cargo xtask check rewrote committed examples; regenerate and commit them"
-          fi
-
-      - name: Package
-        id: package
-        if: >-
-          matrix.artifact != '' && !cancelled() && steps.build.outcome == 'success'
-          && (steps.check.outcome == 'success' || !matrix.gate)
-        run: |
-          name="fission420-${{ matrix.artifact }}"
-          mkdir -p "dist/$name"
-          exe=""
-          if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
-          cp "target/release/f420-app$exe" "target/release/f420-cli$exe" "dist/$name/"
-          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          py=python3; command -v python3 >/dev/null || py=python
-          "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
-            "dist/$name/THIRD_PARTY_LICENSES.txt"
-          git checkout -- examples   # ship the committed examples, not replay output
-          cp -r examples "dist/$name/examples"
-          {
-            echo "commit: ${GITHUB_SHA}"
-            echo "platform: ${{ matrix.name }}"
-            echo "toolchain: ${RUST_TOOLCHAIN}"
-            echo "xtask check: ${{ steps.check.outcome }}"
-            echo "Unsigned prototype build. Not an installer."
-          } > "dist/$name/BUILD_INFO.txt"
-          cd dist
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a -tzip "$name.zip" "$name" > /dev/null
-          else
-            # tar keeps the executable bit, which a plain artifact upload drops.
-            tar czf "$name.tar.gz" "$name"
-          fi
-
-      - uses: actions/upload-artifact@v7
-        if: steps.package.outcome == 'success'
-        with:
-          name: fission420-${{ matrix.artifact }}
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
-          if-no-files-found: error
-          retention-days: 30
-
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: logs-${{ matrix.name }}
-          path: artifacts/
-          if-no-files-found: ignore
-          retention-days: 7
+    uses: ./.github/workflows/check.yml
+    with:
+      name: ${{ matrix.name }}
+      os: ${{ matrix.os }}
+      # Not gating until the platform items in docs/CI.md (F1, F3) are fixed.
+      gate: false
+      artifact: ${{ matrix.artifact }}
+      publish: true
 
   release:
     name: release (tag)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
+    needs: [linux, cross]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
