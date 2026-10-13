@@ -116,3 +116,38 @@ fn left_hand_and_refusals() {
     }
     assert_eq!(s.summary().bodies.len(), 1);
 }
+
+/// SESSION_6 project 5: changing the pitch regenerates the thread (finer
+/// pitch: shallower profile, so more material, still between the core and
+/// major cylinders); an impossible pitch for the diameter is refused.
+#[test]
+fn pitch_change_and_impossible_profile() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let rod = ok(
+        &mut s,
+        json!({"cmd": "thread", "plane": "WorldXY", "diameter": 20.0, "pitch": 2.0, "length": 12.0}),
+    )
+    .feature
+    .unwrap();
+    let v2 = vol(&s, 1);
+    ok(
+        &mut s,
+        json!({"cmd": "set_parameter", "feature": rod.0, "name": "pitch", "value": 1.5}),
+    );
+    let v15 = vol(&s, 1);
+    let depth = 5.0 / 8.0 * 1.5 * 3f64.sqrt() / 2.0;
+    let core = std::f64::consts::PI * (10.0 - depth).powi(2) * 12.0;
+    let major = std::f64::consts::PI * 100.0 * 12.0;
+    assert!(
+        v15 > v2 && v15 > core && v15 < major,
+        "{v2} {v15} {core} {major}"
+    );
+    // A pitch whose profile depth reaches the axis: refused, unchanged.
+    let r = exec(
+        &mut s,
+        json!({"cmd": "set_parameter", "feature": rod.0, "name": "pitch", "value": 12.0}),
+    );
+    assert!(!r.ok, "pitch 12 on Ø20 accepted");
+    assert!((vol(&s, 1) - v15).abs() < 1e-9);
+}
