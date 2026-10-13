@@ -43,6 +43,7 @@ pub use measure::{
     face_count, face_planes, measure, mesh_volume_properties, planar_faces_on, volume_properties,
     z_face_inner_loops,
 };
+pub use measure::{FacePairMeasure, PARALLEL_SIN, face_geometry, measure_face_pair};
 pub use mesh::{
     CANONICAL_GRID, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh,
     canonical_mesh, check_mesh, max_facet_angle_deg, tessellate, tessellate_display, weld_exact,

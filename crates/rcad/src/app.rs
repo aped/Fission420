@@ -401,6 +401,8 @@ pub struct RcadApp {
     pub(crate) move_form: crate::bodies::MoveForm,
     /// Body material form and last mass-properties report (run 6).
     pub(crate) body_props: crate::bodies::BodyProps,
+    /// Exact face measurement state (run 6).
+    pub(crate) exact_measure: crate::face_measure::ExactMeasure,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -490,6 +492,7 @@ impl RcadApp {
             body_rename: None,
             move_form: Default::default(),
             body_props: Default::default(),
+            exact_measure: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -1063,6 +1066,7 @@ impl RcadApp {
             self.last_export = response.mesh_check.clone();
         }
         self.body_props.on_reply(&response, &summary);
+        self.exact_measure.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;
