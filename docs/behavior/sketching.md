@@ -170,7 +170,10 @@ is a closed loop of the sketch and takes part in region extraction like any othe
 * API/commands: `Sketch::add_text` / `edit_text` / `remove_text` / `text_loops`,
   `rcad_sketch::font`; commands `add_sketch_text`, `edit_sketch_text`, `remove_sketch_text`
   (docs/COMMANDS.md). Tests: `crates/rcad-sketch/tests/text.rs`,
-  `crates/rcad-commands/tests/sketch_text.rs` (need the installed font Liberation Sans;
+  `crates/rcad-commands/tests/sketch_text.rs`, `crates/rcad-commands/tests/text_emboss.rs`
+  (raised/recessed "B8" on an enclosure top face in one multi-region feature, membership
+  probes of strokes and counters, string edits that re-resolve or are refused by region name)
+  (need the installed font Liberation Sans;
   `RCAD_SKIP_FONT_TESTS=1` skips them explicitly).
 
 ## Slot and regular polygon (Slot / Polygon tools) — run 6
