@@ -35,6 +35,37 @@ Not supported, by design: renaming a file to another extension, a hidden externa
 (FreeCAD/OpenCascade is used only as an independent validator, never at runtime), mesh to
 B-rep reconstruction, recovered feature history from STEP.
 
+## Direction matrix (run 7)
+
+Checked against the code at run 7; "no" means the information is not read or not written
+(dropped, never invented). Native-history fidelity is never claimed for foreign files: STEP
+interchange does not carry another application's feature history.
+
+| Format | Direction | Entities | Units | Hierarchy | Names / colours | Fidelity | Known losses |
+|---|---|---|---|---|---|---|---|
+| STEP | import (`import_step`) | exact B-rep subset (planes, cylinders, cones, spheres, tori, B-splines per formats/step.md); open shells as surface bodies on request | declared unit honoured; override only when none | **flattened** (one body per placed solid; reported) | solid names kept; colours no | exact surfaces; volumes exact or labelled estimates | assembly structure (use `import_step_assembly`), colours, PMI |
+| STEP | import (`import_step_assembly`, run 7) | as above | as above | **products and usages preserved** as components and linked occurrences | product names kept; colours no | as above | colours, PMI, external references |
+| STEP | export (`export_step`) | one solid per exact body | mm | none (flat bodies) | body names; colours no | exact B-rep | mesh bodies and open surface bodies refused |
+| STEP | export (`export_assembly` `step_assembly`, run 7) | per occurrence | mm | PRODUCT per component, NAUO + CDSR per occurrence (FreeCAD-checked) | names; colours no | exact | suppressed occurrences omitted (by design) |
+| STL | import | triangles (ASCII, binary) | none in file: unit choice required | none | no / no | mesh as stored (f32 exact) | everything but triangles |
+| STL | export | triangles (B-rep tessellated at chord) | mm | none | no / no | tessellation (stated chord) | exactness, units, names |
+| 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit | flattened | object names; object-level colour only | mesh as stored | per-triangle colours, textures, production extension (refused) |
+| 3MF | export | one object per body | selectable (default mm) | none | names; object colours | tessellation | exactness |
+| DXF | import | LINE, ARC, CIRCLE, LWPOLYLINE/POLYLINE subset → unconstrained sketch; splines refused by name | `$INSUNITS`, else choice | none | no | exact lines/arcs | splines, text, blocks beyond the subset |
+| DXF | export (sketch / flat pattern / drawing) | R12 LINE/ARC/CIRCLE(+TEXT, SOLID for drawings) | mm, `$INSUNITS` 4 | layers only | layer names | exact lines/arcs | splines (none produced) |
+| SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
+| SVG / PDF | export (sketch, drawings) | lines/arcs (PDF: Béziers ≤ 2.8e-4·r) | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
+
+Qualification corpus (run 7, Run-8 §3 first slice): `tools/fixtures/corpus/` (23 manifest entries:
+6 STEP parts, 3 STEP assemblies, 2 STL meshes, 5 hand-authored 3MF/DXF/SVG/STL cases and
+malformed STEP/STL/3MF/DXF/SVG files; provenance in `tools/fixtures/corpus/MANIFEST.md`;
+below the Run-8 target of 12 parts, so the corpus is a first slice), checked by
+`crates/rcad-commands/tests/format_corpus.rs` against FreeCAD read-back or closed-form values;
+malformed files must fail with a bounded error and leave no partial document. A curved
+STEP solid's tessellation-estimated volume (sphere) is compared within its stated error;
+the binary STL's volume against the exact rational sum over its float32 vertices (FreeCAD's
+figure differs by 2e-6 relative from float accumulation).
+
 ## Geometry contract per format
 
 | | B-rep (exact) | Mesh | 2D sketch |
