@@ -49,6 +49,17 @@ document without them still saves as v6 (frozen fixtures in
   the single document history (the definition is "the history of those bodies"). Display: the
   instances outside the active component and loose bodies are drawn dimmed.
 * **Grounding**: a grounded occurrence cannot be moved, aligned or driven by a joint.
+* **External components** (`insert_external_component {path, linked}`): another native
+  document is loaded and regenerated; its visible solids (placed instances named by path, plus
+  loose bodies) are written to one STEP text that is **embedded** in this document as an import
+  feature, and those bodies become a new component (one occurrence at the origin). The source
+  file's FNV-1a 64 hash and size are pinned (`ExternalSource`; change detection, not security).
+  The model never reads the source again on its own: `check_external_components` reports
+  `embedded`, `up_to_date`, `modified` or `missing`; `update_external_component` (linked only)
+  replaces the embedded copy from the file in one undoable step, is a no-op when unchanged, and
+  is refused with the copy kept when the file is missing or its solid count changed. A document
+  with external components opens without their sources. The external document's own
+  components/joints are not imported as structure (its solids are). Mesh bodies are refused.
 
 ## Joints (as-built tree solver)
 
@@ -160,7 +171,8 @@ materials** (flattened), **Structured BOM**, **Check interference** (selectable 
 
 ## Not supported (refused or absent)
 
-* External / linked component files (no pinned external revisions).
+* External components keep no feature history or structure of the source (solids only);
+  updates that change the number of solids are refused.
 * Joints between occurrences of different (sub-)assemblies; flexible sub-assemblies (a
   sub-assembly's internal joints have one value for all its instances).
 * Joint loops / closed-chain solving, over-constrained systems, contact, gear/rack/screw

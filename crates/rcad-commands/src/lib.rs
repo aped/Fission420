@@ -524,6 +524,27 @@ pub enum Command {
         path: PathBuf,
         format: assembly::AssemblyFormat,
     },
+    /// Run 7: insert another native document as a component: its evaluated
+    /// solids (placed instances and loose bodies) are embedded as a STEP copy
+    /// (an import feature) and become the definition bodies; one occurrence at
+    /// the origin. `linked` keeps the path so `update_external_component` can
+    /// re-read it on request; the model never changes otherwise.
+    InsertExternalComponent {
+        path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default)]
+        linked: bool,
+    },
+    /// Run 7: re-read a linked component's source file (explicit update):
+    /// missing → refused with the embedded copy kept; unchanged → no-op;
+    /// changed → the embedded copy is replaced (same solid count required).
+    UpdateExternalComponent {
+        component: rcad_document::assembly::ComponentId,
+    },
+    /// Run 7: status of every external component's source (read-only):
+    /// `embedded`, `up_to_date`, `modified` or `missing`.
+    CheckExternalComponents,
     /// Run 7: rename a component (definition name; BOM row).
     RenameComponent {
         component: rcad_document::assembly::ComponentId,
@@ -1175,6 +1196,9 @@ impl Command {
             Command::Interference { .. } => "interference",
             Command::ExportAssembly { .. } => "export_assembly",
             Command::SetJointValues { .. } => "set_joint_values",
+            Command::InsertExternalComponent { .. } => "insert_external_component",
+            Command::UpdateExternalComponent { .. } => "update_external_component",
+            Command::CheckExternalComponents => "check_external_components",
             Command::RenameComponent { .. } => "rename_component",
             Command::RenameOccurrence { .. } => "rename_occurrence",
             Command::ActivateComponent { .. } => "activate_component",
@@ -3384,6 +3408,9 @@ impl Session {
             | Command::Interference { .. }
             | Command::ExportAssembly { .. }
             | Command::SetJointValues { .. }
+            | Command::InsertExternalComponent { .. }
+            | Command::UpdateExternalComponent { .. }
+            | Command::CheckExternalComponents
             | Command::RenameComponent { .. }
             | Command::RenameOccurrence { .. }
             | Command::ActivateComponent { .. }
