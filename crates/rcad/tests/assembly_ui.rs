@@ -110,6 +110,7 @@ fn components_section_create_move_ground_bom_interference_joint() {
         child: OccurrenceId(2),
         origin: [0.0; 3],
         axis: Some([1.0, 0.0, 0.0]),
+        axis_from: None,
         value: 0.0,
         min: Some(0.0),
         max: Some(40.0),

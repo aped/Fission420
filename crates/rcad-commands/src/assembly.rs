@@ -321,11 +321,20 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             child,
             origin,
             axis,
+            axis_from,
             value,
             min,
             max,
         } => {
             let (kind, parent, child) = (*kind, *parent, *child);
+            let (origin, axis) = match axis_from {
+                Some(f) => {
+                    let (o, a) = axis_from_faces(m, parent, f)?;
+                    (o, Some(a))
+                }
+                None => (*origin, *axis),
+            };
+            let (origin, axis) = (&origin, &axis);
             let a = &m.document().assembly;
             let pn = a.occurrence(parent)?.name.clone();
             let cocc = a.occurrence(child)?;
@@ -451,6 +460,95 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
     }
     r.assembly = Some(out);
     Ok(())
+}
+
+/// Where a joint axis comes from (faces of the parent's definition bodies,
+/// definition coordinates).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisFrom {
+    /// The axis of a circular cylinder face (hole or boss).
+    Cylinder {
+        face: crate::measure_faces::FacePick,
+    },
+    /// The line where two non-parallel planar faces meet (an edge line).
+    Edge {
+        a: crate::measure_faces::FacePick,
+        b: crate::measure_faces::FacePick,
+    },
+}
+
+fn axis_from_faces(
+    m: &Model,
+    parent: OccurrenceId,
+    f: &AxisFrom,
+) -> Result<([f64; 3], [f64; 3]), DocError> {
+    use rcad_kernel::DirectFace;
+    let a = &m.document().assembly;
+    let comp = a.component(a.occurrence(parent)?.component)?;
+    let own = |p: &crate::measure_faces::FacePick| {
+        if comp.bodies.contains(&p.body) {
+            Ok(())
+        } else {
+            Err(v(format!(
+                "face {} of body {} is not on the parent's component '{}'",
+                p.face, p.body, comp.name
+            )))
+        }
+    };
+    match f {
+        AxisFrom::Cylinder { face } => {
+            own(face)?;
+            match crate::measure_faces::classify(m, *face)? {
+                DirectFace::Cylinder { origin, axis, .. } => Ok((origin, axis)),
+                _ => Err(v("the joint axis face is not a circular cylinder")),
+            }
+        }
+        AxisFrom::Edge { a: fa, b: fb } => {
+            own(fa)?;
+            own(fb)?;
+            let (
+                DirectFace::Plane {
+                    origin: p,
+                    normal: n,
+                },
+                DirectFace::Plane {
+                    origin: q,
+                    normal: k,
+                },
+            ) = (
+                crate::measure_faces::classify(m, *fa)?,
+                crate::measure_faces::classify(m, *fb)?,
+            )
+            else {
+                return Err(v("an edge axis needs two planar faces"));
+            };
+            let d = [
+                n[1] * k[2] - n[2] * k[1],
+                n[2] * k[0] - n[0] * k[2],
+                n[0] * k[1] - n[1] * k[0],
+            ];
+            let dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if dd < 1e-18 {
+                return Err(v("the two planar faces are parallel: no edge line"));
+            }
+            // Point on both planes: x = ((h1 k − h2 n) × d) / |d|² ... solved as
+            // x = (h1 (k × d) + h2 (d × n)) / |d|².
+            let dot = |x: [f64; 3], y: [f64; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+            let cross = |x: [f64; 3], y: [f64; 3]| {
+                [
+                    x[1] * y[2] - x[2] * y[1],
+                    x[2] * y[0] - x[0] * y[2],
+                    x[0] * y[1] - x[1] * y[0],
+                ]
+            };
+            let (h1, h2) = (dot(n, p), dot(k, q));
+            let (u, w) = (cross(k, d), cross(d, n));
+            let o: [f64; 3] = std::array::from_fn(|i| (h1 * u[i] + h2 * w[i]) / dd);
+            let len = dd.sqrt();
+            Ok((o, d.map(|x| x / len)))
+        }
+    }
 }
 
 /// Flat BOM: one row per component with at least one occurrence (quantity =

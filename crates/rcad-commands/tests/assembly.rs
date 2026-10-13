@@ -485,3 +485,116 @@ fn revolute_hinge_limits_and_loop_refusal() {
     ok(&mut s, json!({"cmd": "delete_joint", "joint": j}));
     assert!(near3(world_point(&s, ob, [40.0, 0.0, 0.0]), p, 1e-9));
 }
+
+/// Face index (current evaluation) of body `b` matching `pick`.
+fn face_of(s: &mut Session, b: u32, pick: impl Fn(&rcad_kernel::DirectFace) -> bool) -> u32 {
+    let n = s
+        .summary()
+        .bodies
+        .iter()
+        .find(|x| x.id.0 == b)
+        .unwrap()
+        .measurements
+        .as_ref()
+        .unwrap()
+        .face_count as u32;
+    (0..n)
+        .find(|&i| {
+            tray::exec(
+                s,
+                &json!({"cmd": "measure_faces", "a": {"body": b, "face": i}}),
+            )
+            .face_measure
+            .is_some_and(|r| pick(&r.a))
+        })
+        .expect("face")
+}
+
+/// Revolute axes taken from the parent's faces: the edge line of two planar
+/// faces, and a hole's cylinder axis.
+#[test]
+fn joint_axis_from_an_edge_and_from_a_hole() {
+    use rcad_kernel::DirectFace;
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let a = block(&mut s, 40.0, 30.0, 4.0, [-20.0, 0.0]);
+    let b = block(&mut s, 40.0, 30.0, 4.0, [20.0, 0.0]);
+    let oa = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "A", "bodies": [a]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let ob = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "B", "bodies": [b]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let plane = |n: [f64; 3]| move |f: &DirectFace| matches!(f, DirectFace::Plane { normal, .. } if near3(*normal, n, 1e-9));
+    let side = face_of(&mut s, a, plane([1.0, 0.0, 0.0]));
+    let top = face_of(&mut s, a, plane([0.0, 0.0, 1.0]));
+    let j = out(ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "revolute", "parent": oa, "child": ob,
+               "axis_from": {"edge": {"a": {"body": a, "face": side}, "b": {"body": a, "face": top}}}}),
+    ))
+    .joint
+    .unwrap()
+    .0;
+    let jt = s.summary().assembly.joints[0].clone();
+    // Edge line x = 0, z = 4 along −Y (n_side × n_top = X × Z = −Y).
+    assert!(near3(jt.axis, [0.0, -1.0, 0.0], 1e-12), "{:?}", jt.axis);
+    assert!(jt.origin[0].abs() < 1e-12 && (jt.origin[2] - 4.0).abs() < 1e-12);
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_value", "joint": j, "value": 90.0}),
+    );
+    // +90° about −Y through (0, ·, 4): (40, 0, 4) → (0, 0, 44).
+    assert!(near3(
+        world_point(&s, ob, [40.0, 0.0, 4.0]),
+        [0.0, 0.0, 44.0],
+        1e-9
+    ));
+    // A face of another component is refused.
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "add_joint", "kind": "revolute", "parent": oa, "child": ob,
+                "axis_from": {"cylinder": {"face": {"body": b, "face": 0}}}}),
+    );
+    assert!(!r.ok);
+    ok(&mut s, json!({"cmd": "delete_joint", "joint": j}));
+    ok(
+        &mut s,
+        json!({"cmd": "set_occurrence_transform", "occurrence": ob}),
+    );
+    // A Ø6 hole through A at (−20, 0): revolute about its axis.
+    let f = s.summary().features.len() as u32 + 1;
+    ok(
+        &mut s,
+        json!({"cmd": "create_sketch", "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+               "template": "centered_circle", "diameter": 6.0, "center": [-20.0, 0.0]}),
+    );
+    ok(&mut s, json!({"cmd": "cut_through_all", "sketch": f}));
+    let hole = face_of(&mut s, a, |f| matches!(f, DirectFace::Cylinder { .. }));
+    let j = out(ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "revolute", "parent": oa, "child": ob,
+               "axis_from": {"cylinder": {"face": {"body": a, "face": hole}}}}),
+    ))
+    .joint
+    .unwrap()
+    .0;
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_value", "joint": j, "value": 90.0}),
+    );
+    // (40, 0, 0) is 60 from the axis (−20, 0): a quarter turn puts it at (−20, ±60, 0).
+    let p = world_point(&s, ob, [40.0, 0.0, 0.0]);
+    assert!(
+        near3(p, [-20.0, 60.0, 0.0], 1e-9) || near3(p, [-20.0, -60.0, 0.0], 1e-9),
+        "{p:?}"
+    );
+}

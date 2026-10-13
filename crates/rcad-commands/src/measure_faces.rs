@@ -31,7 +31,7 @@ pub struct FaceMeasureReport {
     pub pair: Option<FacePairMeasure>,
 }
 
-fn classify(model: &Model, p: FacePick) -> Result<DirectFace, DocError> {
+pub(crate) fn classify(model: &Model, p: FacePick) -> Result<DirectFace, DocError> {
     let ev = model.evaluation();
     let b = ev.body_by_id(p.body).ok_or_else(|| {
         DocError::Validation(format!("body {} is not in the evaluated model", p.body))
