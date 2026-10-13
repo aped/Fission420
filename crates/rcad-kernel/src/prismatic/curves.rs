@@ -147,6 +147,14 @@ fn arc_cover(loops: &[ELoop], circles: &[Circ], k: usize) -> Vec<(f64, f64)> {
 
 /// Whether `p` (near circle `c`) lies within `slack` radians of a span of
 /// `cover`.
+/// Angular half-width (rad) of a near-tangent contact on `c`: a line or
+/// circle within [`TANGENT`] of tangency crosses `c` up to √(2r·TANGENT) from
+/// the foot, so a used arc ending that close may still be crossed (review
+/// run 6 #17).
+fn tangent_slack(c: &Circ) -> f64 {
+    (CIRCLE_MATCH + (2.0 * c.r * TANGENT).sqrt()) / c.r
+}
+
 fn covered(cover: &[(f64, f64)], c: &Circ, p: P2, slack: f64) -> bool {
     use std::f64::consts::TAU;
     let ap = angle(c, p);
@@ -349,7 +357,7 @@ impl Rings {
                                 && (d[0] * u[1] - d[1] * u[0]).abs() <= 1e-9 * lu
                         })
                     };
-                    let used = |p: P2| covered(&cover[k], c, p, CIRCLE_MATCH / c.r);
+                    let used = |p: P2| covered(&cover[k], c, p, tangent_slack(c));
                     for x in line_circle(a, b, c, &special[k], &tangent_ok, &used)? {
                         special[k].push(x);
                     }
@@ -373,8 +381,8 @@ impl Rings {
                     let s = if ext || a.r >= b.r { 1.0 } else { -1.0 };
                     let t = [a.c[0] + s * a.r * u[0], a.c[1] + s * a.r * u[1]];
                     if !junction(i, Some(j), t)
-                        && covered(&cover[i], a, t, CIRCLE_MATCH / a.r)
-                        && covered(&cover[j], b, t, CIRCLE_MATCH / b.r)
+                        && covered(&cover[i], a, t, tangent_slack(a))
+                        && covered(&cover[j], b, t, tangent_slack(b))
                     {
                         return Err(Fail::Refuse(format!(
                             "two circles (r {:.6} and {:.6} mm) are tangent at ({:.6}, {:.6}); \
@@ -798,5 +806,39 @@ impl Partition {
     /// Partition index of point `p` (a vertex) on circle `k`.
     pub fn index(&self, k: usize, p: P2) -> Option<usize> {
         self.pts[k].iter().position(|q| key(q.1) == key(p))
+    }
+}
+
+#[cfg(test)]
+mod tangent_tests {
+    use super::*;
+
+    /// Review run 6 #17: a line 5e-7 mm inside tangency of r = 100 crosses the
+    /// circle about ±0.01 mm from the foot; an arc ending 5e-3 mm before the
+    /// foot is crossed, so the contact must be refused, not ignored.
+    #[test]
+    fn near_tangent_crossing_inside_a_used_arc_is_refused() {
+        let c = Circ {
+            c: [0.0, 0.0],
+            r: 100.0,
+        };
+        let y = 100.0 - 5.0e-7;
+        let (a, b) = ([-50.0, y], [50.0, y]);
+        let start = std::f64::consts::FRAC_PI_2 + 5.0e-3 / 100.0;
+        let cover = [(start, 1.0)];
+        let used = |p: P2| covered(&cover, &c, p, tangent_slack(&c));
+        let r = line_circle(a, b, &c, &[], &|_| false, &used);
+        assert!(
+            matches!(r, Err(Fail::Refuse(ref m)) if m.contains("tangent")),
+            "{r:?}"
+        );
+        // An arc ending well clear of the contact (0.5 mm) is not touched.
+        let far = [(std::f64::consts::FRAC_PI_2 + 0.5 / 100.0, 1.0)];
+        let used = |p: P2| covered(&far, &c, p, tangent_slack(&c));
+        assert!(
+            line_circle(a, b, &c, &[], &|_| false, &used)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
