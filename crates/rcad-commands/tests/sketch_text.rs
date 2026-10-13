@@ -140,6 +140,27 @@ fn raised_b8_joins_glyphs_with_counters() {
     let v = volume(&s);
     assert!((v - expect).abs() < 1e-6 * expect, "{v} vs {expect}");
     assert_eq!(s.summary().bodies.len(), 1);
+    // STEP export of the raised text (independent validation: copy it out with
+    // RCAD_EVIDENCE_DIR=<dir> and check it with tools/freecad_check_step.py).
+    let dir = tempfile::tempdir().unwrap();
+    let step = dir.path().join("raised_b8.step");
+    ok(
+        &mut s,
+        Command::ExportStep {
+            path: step.clone(),
+            bodies: None,
+        },
+    );
+    assert!(std::fs::metadata(&step).unwrap().len() > 0);
+    if let Ok(out) = std::env::var("RCAD_EVIDENCE_DIR") {
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::copy(&step, std::path::Path::new(&out).join("raised_b8.step")).unwrap();
+        std::fs::write(
+            std::path::Path::new(&out).join("raised_b8.expected.txt"),
+            format!("volume {expect}\n"),
+        )
+        .unwrap();
+    }
 
     // Placement edit (height): the same glyph regions regenerate, scaled.
     let mut t = text_spec("B8", 12.0);
