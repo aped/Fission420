@@ -1107,6 +1107,27 @@ fn regen_impl(
                 r.frame = Some(frame);
                 r.body = Some(target);
             }
+            FeatureKind::Combine {
+                target,
+                tools,
+                op,
+                keep_tools,
+            } => {
+                let a = brep_target(&st, id, *target)?;
+                let bs = tools
+                    .iter()
+                    .map(|t| brep_target(&st, id, *t))
+                    .collect::<Result<Vec<_>>>()?;
+                let (out, notes) = crate::combine::evaluate(id, *target, tools, &a, &bs, *op)?;
+                replace_body(&mut st, id, *target, out);
+                if !keep_tools {
+                    for t in tools {
+                        st.bodies.remove(t);
+                    }
+                }
+                r.notes = notes;
+                r.body = Some(*target);
+            }
             FeatureKind::DirectEdit { face, op } => {
                 let bid = doc.face_body(face).ok_or_else(|| {
                     DocError::Validation(format!("{id}: a direct edit needs an imported face"))

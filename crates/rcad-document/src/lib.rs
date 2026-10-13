@@ -5,10 +5,12 @@
 //! ([`Evaluation`]) is a disposable cache produced by [`regenerate`].
 
 mod blob;
+mod combine;
 pub mod direct;
 mod hole;
 pub mod import;
 mod io;
+pub mod material;
 mod model;
 pub mod params;
 mod regen;
@@ -20,6 +22,7 @@ pub use io::{
     FORMAT_NAME, FORMAT_VERSION, LEGACY_FORMAT_NAMES, MAX_FILE_BYTES, MIN_FORMAT_VERSION,
     NativeFile, load_file, migrate_to_v3, save_file, write_atomic,
 };
+pub use material::{DensityUnit, Material};
 pub use model::*;
 pub use params::{ParamUnit, Parameter, SlotKind};
 pub use regen::{

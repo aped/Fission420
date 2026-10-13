@@ -410,6 +410,8 @@ pub struct RcadApp {
     pub(crate) split_form: (u8, String),
     /// Configuration name / part number being typed (run 6).
     pub(crate) config_form: (String, String),
+    /// Body material form and last mass-properties report (run 6).
+    pub(crate) body_props: crate::bodies::BodyProps,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -504,6 +506,7 @@ impl RcadApp {
             flat_path: String::new(),
             split_form: (0, "0".into()),
             config_form: Default::default(),
+            body_props: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -1076,6 +1079,7 @@ impl RcadApp {
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
         }
+        self.body_props.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;

@@ -3,7 +3,10 @@ use crate::{Body, Frame, KernelError, Result, guarded, tol};
 use serde::{Deserialize, Serialize};
 use truck_modeling::*;
 
+mod mass;
 mod revolution;
+
+pub use mass::{VolumeProperties, mesh_volume_properties, volume_properties};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Bounds {
@@ -45,6 +48,10 @@ pub enum VolumeMethod {
     /// two levels. An estimate, not an exact or bounded value (see
     /// `tessellation_volume` in measure.rs).
     TessellationEstimate,
+    /// Mesh bodies (imported STL/3MF): the divergence-theorem integral over the
+    /// body's own closed triangle mesh, exact for that mesh (which is the body's
+    /// geometry; there is no B-rep). Used by [`mesh_volume_properties`] only.
+    TriangleMesh,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -382,14 +389,7 @@ const FALLBACK_REFINE: f64 = 4.0;
 /// -4.4e-3 / -1.1e-3 / -3.3e-4 relative (linear in the chord), estimate / error ~3,
 /// ~180 ms for revolve + measure (revolve measures once itself) at the chosen 1e-4.
 fn tessellation_volume(body: &Body) -> std::result::Result<(f64, f64), String> {
-    let b = raw_bounds(&body.solid).map_err(|e| e.to_string())?;
-    let diag = (0..3)
-        .map(|i| (b.max[i] - b.min[i]).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    let min_chord = tol::MIN_MESH_CHORD_ABS.max(diag * tol::MIN_MESH_CHORD_REL);
-    let coarse = (diag * FALLBACK_CHORD_REL).max(FALLBACK_REFINE * min_chord);
-    let fine = coarse / FALLBACK_REFINE;
+    let [coarse, fine] = fallback_chords(body)?;
     let level = |chord: f64| -> std::result::Result<f64, String> {
         let m = crate::mesh::tessellate(body, chord).map_err(|e| e.to_string())?;
         let c = crate::mesh::check_mesh(&m);
@@ -411,6 +411,18 @@ fn tessellation_volume(body: &Body) -> std::result::Result<(f64, f64), String> {
     });
     let (vc, vf) = (vc?, vf?);
     Ok((vf, (vc - vf).abs()))
+}
+
+/// The (coarse, fine) chords of the tessellation fallback (see [`tessellation_volume`]).
+fn fallback_chords(body: &Body) -> std::result::Result<[f64; 2], String> {
+    let b = raw_bounds(&body.solid).map_err(|e| e.to_string())?;
+    let diag = (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let min_chord = tol::MIN_MESH_CHORD_ABS.max(diag * tol::MIN_MESH_CHORD_REL);
+    let coarse = (diag * FALLBACK_CHORD_REL).max(FALLBACK_REFINE * min_chord);
+    Ok([coarse, coarse / FALLBACK_REFINE])
 }
 
 /// Volume of `body`: the exact boundary integral about the first axis (Z, X, Y) whose

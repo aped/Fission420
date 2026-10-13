@@ -504,3 +504,217 @@ pub(super) fn revolution_volume(solid: &Solid, n: usize) -> Res<(f64, f64)> {
     let r2 = (4.0 * c - b) / 3.0;
     Ok((r2, (r2 - r1).abs()))
 }
+
+// ---------------------------------------------------------------------------
+// Moments (mass properties): the same faces with the axial field F = G a of
+// `mass.rs` (dG/dz = monomial). The flux 2-form of G a is G dx ^ dy in the axis
+// frame: on a surface of revolution G rho drho ^ dphi = d(H dphi) with
+// H = int G rho drho along the meridian at fixed phi; on a circular cylinder about
+// (c, d) it is -R G (u . a) ds ^ dpsi = d(K dpsi) with K = int_0^s -R G (u . a) ds'.
+// Planar faces are fanned into triangles (exact cubature for cubic G).
+
+use super::mass::{Mom, MomFrame, add_scaled, fan_flux, richardson};
+use std::sync::OnceLock;
+
+/// Gauss-Legendre nodes and weights on [-1, 1] (Newton on the Legendre recurrence).
+fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+        let mut dp = 1.0;
+        for _ in 0..100 {
+            let (mut p0, mut p1) = (1.0, x);
+            for j in 2..=n {
+                let p2 = ((2 * j - 1) as f64 * x * p1 - (j - 1) as f64 * p0) / j as f64;
+                p0 = p1;
+                p1 = p2;
+            }
+            dp = n as f64 * (x * p1 - p0) / (x * x - 1.0);
+            let dx = p1 / dp;
+            x -= dx;
+            if dx.abs() < 1e-16 {
+                break;
+            }
+        }
+        out.push((x, 2.0 / ((1.0 - x * x) * dp * dp)));
+    }
+    out
+}
+
+/// 3 points: exact for polynomials of degree 5 (the line and annulus integrands are
+/// at most quartic in their parameter).
+fn gl3() -> &'static [(f64, f64)] {
+    static R: OnceLock<Vec<(f64, f64)>> = OnceLock::new();
+    R.get_or_init(|| gauss_legendre(3))
+}
+
+/// 8 points per segment of at most 0.5 rad for the (trigonometric) torus integrand.
+fn gl8() -> &'static [(f64, f64)] {
+    static R: OnceLock<Vec<(f64, f64)>> = OnceLock::new();
+    R.get_or_init(|| gauss_legendre(8))
+}
+
+/// int_a^b f(t) dt with `segs` equal segments of the rule.
+fn quad(a: f64, b: f64, segs: usize, rule: &[(f64, f64)], f: impl Fn(f64) -> Mom) -> Mom {
+    let mut acc = [0.0; 10];
+    let h = (b - a) / segs as f64;
+    for s in 0..segs {
+        let (lo, half) = (a + h * s as f64, 0.5 * h);
+        for &(x, w) in rule {
+            add_scaled(&mut acc, &f(lo + half * (x + 1.0)), w * half);
+        }
+    }
+    acc
+}
+
+impl Meridian {
+    /// H at the point (rho, z, phi) of the face: int G rho drho along the meridian at
+    /// azimuth phi from its reference point (apex / axis / `theta_ref`).
+    fn h_moments(&self, ax: &AxisFrame, fr: &MomFrame, rho: f64, z: f64, phi: f64) -> Mom {
+        let u = ax.e1 * phi.cos() + ax.e2 * phi.sin();
+        let at = |r: f64, zz: f64| ax.o + u * r + ax.a * zz;
+        let scale = |mut m: Mom, s: f64| {
+            m.iter_mut().for_each(|x| *x *= s);
+            m
+        };
+        match *self {
+            Meridian::Flat => quad(0.0, rho, 1, gl3(), |r| scale(fr.g(at(r, z)), r)),
+            Meridian::Line { rho0, z0, k } => quad(z0, z, 1, gl3(), |t| {
+                let r = rho0 + k * (t - z0);
+                scale(fr.g(at(r, t)), r * k)
+            }),
+            Meridian::Circle {
+                rc,
+                zc,
+                r,
+                theta_ref,
+            } => {
+                let th = wrap_near((z - zc).atan2(rho - rc), theta_ref);
+                let segs = (((th - theta_ref).abs() / 0.5).ceil() as usize).max(1);
+                quad(theta_ref, th, segs, gl8(), |t| {
+                    let (s, c) = t.sin_cos();
+                    let rr = rc + r * c;
+                    scale(fr.g(at(rr, zc + r * s)), rr * (-r * s))
+                })
+            }
+        }
+    }
+}
+
+fn face_moments(
+    face: &Face,
+    plan: &Plan,
+    ax: &AxisFrame,
+    fr: &MomFrame,
+    tol: f64,
+    n: usize,
+) -> Res<Mom> {
+    match plan {
+        Plan::Plane { .. } => fan_flux(face, fr, n),
+        Plan::Revolution(mer) => {
+            let mut acc = [0.0; 10];
+            let mut bad = false;
+            for_chords(face, n, |p, q| {
+                let (r0, z0, f0) = ax.cyl(p);
+                let (r1, z1, f1) = ax.cyl(q);
+                if let Meridian::Circle {
+                    rc, zc, theta_ref, ..
+                } = mer
+                {
+                    let t0 = wrap_near((z0 - zc).atan2(r0 - rc), *theta_ref);
+                    let t1 = wrap_near((z1 - zc).atan2(r1 - rc), *theta_ref);
+                    if (t0 - theta_ref).abs() > 3.0 || (t1 - t0).abs() > 1.0 {
+                        bad = true;
+                    }
+                }
+                let dphi = if r0 <= tol || r1 <= tol {
+                    0.0
+                } else {
+                    wrap_delta(f1 - f0)
+                };
+                if dphi != 0.0 {
+                    add_scaled(&mut acc, &mer.h_moments(ax, fr, r0, z0, f0), 0.5 * dphi);
+                    add_scaled(&mut acc, &mer.h_moments(ax, fr, r1, z1, f1), 0.5 * dphi);
+                }
+            })?;
+            if bad {
+                return Err("torus face spans the meridian branch cut".into());
+            }
+            Ok(acc)
+        }
+        Plan::Cylinder(c) => {
+            let k = |p: Point3| -> (Mom, f64) {
+                let w = p - c.c;
+                let s = w.dot(c.d);
+                let psi = w.dot(c.e2).atan2(w.dot(c.e1));
+                let u = c.e1 * psi.cos() + c.e2 * psi.sin();
+                let ua = u.dot(fr.a);
+                let base = c.c + u * c.r;
+                let m = quad(0.0, s, 1, gl3(), |t| {
+                    let mut g = fr.g(base + c.d * t);
+                    g.iter_mut().for_each(|x| *x *= -c.r * ua);
+                    g
+                });
+                (m, psi)
+            };
+            let mut acc = [0.0; 10];
+            for_chords(face, n, |p, q| {
+                let ((k0, s0), (k1, s1)) = (k(p), k(q));
+                let d = wrap_delta(s1 - s0);
+                add_scaled(&mut acc, &k0, 0.5 * d);
+                add_scaled(&mut acc, &k1, 0.5 * d);
+            })?;
+            Ok(acc)
+        }
+    }
+}
+
+/// Moments of a body the revolution volume method accepts, in a frame along the
+/// common axis with its origin at the projection of `center` on it: (frame, best,
+/// second-best Richardson extrapolants).
+pub(super) fn revolution_moments(
+    solid: &Solid,
+    n: usize,
+    center: Point3,
+) -> Res<(MomFrame, Mom, Mom)> {
+    let (ax, plans, tol) = plan(solid)?;
+    let fr = MomFrame {
+        o: ax.o + ax.a * ax.a.dot(center - ax.o),
+        e1: ax.e1,
+        e2: ax.e2,
+        a: ax.a,
+    };
+    let (ax, plans, fr2) = (&ax, &plans[..], &fr);
+    let (best, other) = richardson(n, |k| {
+        let mut acc = [0.0; 10];
+        for (f, p) in solid.face_iter().zip(plans) {
+            add_scaled(&mut acc, &face_moments(f, p, ax, fr2, tol, k)?, 1.0);
+        }
+        Ok(acc)
+    })?;
+    Ok((fr, best, other))
+}
+
+#[cfg(test)]
+mod moment_tests {
+    use super::*;
+
+    #[test]
+    fn gauss_legendre_is_exact_to_degree_2n_minus_1() {
+        for n in [3usize, 8] {
+            let r = gauss_legendre(n);
+            for deg in 0..(2 * n) {
+                let got: f64 = r.iter().map(|&(x, w)| w * x.powi(deg as i32)).sum();
+                let want = if deg % 2 == 1 {
+                    0.0
+                } else {
+                    2.0 / (deg as f64 + 1.0)
+                };
+                assert!(
+                    (got - want).abs() < 1e-14,
+                    "n {n} deg {deg}: {got} vs {want}"
+                );
+            }
+        }
+    }
+}

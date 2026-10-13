@@ -178,6 +178,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if !doc.configurations.is_empty() || doc.active_configuration.is_some() {
         return Some("configurations");
     }
+    if doc.bodies.iter().any(|b| b.material.is_some()) {
+        return Some("body materials");
+    }
     for f in &doc.features {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");
@@ -198,6 +201,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
+        }
+        if matches!(f.kind, crate::FeatureKind::Combine { .. }) {
+            return Some("body combines");
         }
         if let crate::FeatureKind::Sketch { links, sketch, .. } = &f.kind {
             if !links.is_empty() {

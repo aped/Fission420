@@ -36,6 +36,10 @@ pub struct BodyInfo {
     pub name: String,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// Physical material for mass properties (run 6, format v6); None: not
+    /// assigned. Separate from appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<crate::Material>,
 }
 
 fn yes() -> bool {
@@ -531,6 +535,20 @@ pub enum FeatureKind {
         diameter: f64,
         angle: f64,
     },
+    /// Body Combine (run 6, format v6, SO04): `target` joined with / cut by /
+    /// intersected with the `tools` bodies, in order (`rcad_kernel::combine`:
+    /// Truck booleans plus an independent membership/volume check against the
+    /// inputs). Without `keep_tools` the tool bodies are consumed: they leave
+    /// the evaluated model (their creators stay in history; later features
+    /// using them are broken references). Faces of consumed tools are not
+    /// referencable afterwards.
+    Combine {
+        target: BodyId,
+        tools: Vec<BodyId>,
+        op: rcad_kernel::CombineOp,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_tools: bool,
+    },
 }
 
 /// (Split body variant lives in FeatureKind; see `SplitBody`.)
@@ -745,6 +763,8 @@ impl Feature {
             FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
+            // Body creators (target and tools) come from `Document::dependencies_of`.
+            FeatureKind::Combine { .. } => vec![],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -788,7 +808,8 @@ impl Feature {
             | FeatureKind::Pocket { target, .. }
             | FeatureKind::Hole { target, .. }
             | FeatureKind::MoveBody { body: target, .. }
-            | FeatureKind::SplitBody { body: target, .. } => Some(*target),
+            | FeatureKind::SplitBody { body: target, .. }
+            | FeatureKind::Combine { target, .. } => Some(*target),
             FeatureKind::DirectEdit {
                 face:
                     FaceRef {
@@ -798,6 +819,14 @@ impl Feature {
                 ..
             } => Some(*body),
             _ => None,
+        }
+    }
+
+    /// Bodies a [`FeatureKind::Combine`] reads besides its target.
+    pub fn tool_bodies(&self) -> Vec<BodyId> {
+        match &self.kind {
+            FeatureKind::Combine { tools, .. } => tools.clone(),
+            _ => vec![],
         }
     }
 
@@ -885,6 +914,7 @@ impl Feature {
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
+            FeatureKind::Combine { .. } => vec![],
             FeatureKind::Countersink {
                 diameter, angle, ..
             } => vec![
@@ -1592,6 +1622,7 @@ impl Document {
             id,
             name: name.into(),
             visible: true,
+            material: None,
         });
         id
     }
@@ -1650,6 +1681,14 @@ impl Document {
             && !d.contains(&c)
         {
             d.push(c);
+        }
+        // A combine also reads its tool bodies.
+        for t in f.tool_bodies() {
+            if let Some(c) = self.body_creator(t)
+                && !d.contains(&c)
+            {
+                d.push(c);
+            }
         }
         d
     }
@@ -1833,6 +1872,11 @@ impl Document {
                     info.id
                 )));
             }
+            if let Some(m) = &info.material {
+                m.validate().map_err(|e| {
+                    DocError::Validation(format!("body {} ({}): {e}", info.id, info.name))
+                })?;
+            }
             if !created.contains_key(&info.id) {
                 return Err(DocError::Validation(format!(
                     "body {} ({}) is not created by any feature",
@@ -1855,6 +1899,14 @@ impl Document {
                     from: f.id,
                     detail: format!("target body {t} does not exist"),
                 });
+            }
+            for t in f.tool_bodies() {
+                if !created.contains_key(&t) {
+                    return Err(DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!("tool body {t} does not exist"),
+                    });
+                }
             }
             if let Some(b) = f.blob() {
                 self.blob(b).map_err(|_| DocError::BrokenReference {

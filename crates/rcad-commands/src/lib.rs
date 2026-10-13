@@ -5,6 +5,7 @@
 //! See docs/COMMANDS.md.
 
 pub mod acceptance;
+pub mod mass;
 pub mod print;
 pub mod printables;
 pub mod scenarios;
@@ -324,6 +325,43 @@ pub enum Command {
     SetBodyVisible {
         body: BodyId,
         visible: bool,
+    },
+    /// Physical material of a body for mass properties (run 6, format v6; one
+    /// undo step). `material`: a catalog key (`rcad_document::material::CATALOG`,
+    /// e.g. "pla"); or `density` (in `density_unit`, default g/cm³) with an
+    /// optional `name` for a user-defined material; neither: clear it. Both
+    /// `material` and `density` is refused (ambiguous provenance).
+    SetBodyMaterial {
+        body: BodyId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        material: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        density: Option<f64>,
+        #[serde(default)]
+        density_unit: rcad_document::DensityUnit,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Body Combine (run 6, format v6; one undo step): join `tools` to,
+    /// cut them from, or intersect them with `target`
+    /// (`FeatureKind::Combine`). Without `keep_tools` the tool bodies are
+    /// consumed (they leave the model; their creators stay in history).
+    /// Refused (document unchanged) when Truck fails, the result is not one
+    /// closed solid, or the independent check disagrees (`GeometryCheck`).
+    Combine {
+        #[serde(default)]
+        name: Option<String>,
+        target: BodyId,
+        tools: Vec<BodyId>,
+        op: k::CombineOp,
+        #[serde(default)]
+        keep_tools: bool,
+    },
+    /// Volume, mass, centre of mass and inertia of `bodies` (default: every
+    /// visible body) and their total (`Response::mass_properties`). Read-only.
+    MassProperties {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bodies: Option<Vec<BodyId>>,
     },
     /// Suppress (or restore) a feature: kept in history, not evaluated (run
     /// 5; one undo step). With `with_dependents`, every feature depending on
@@ -662,6 +700,9 @@ impl Command {
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
             Command::SetBodyVisible { .. } => "set_body_visible",
+            Command::SetBodyMaterial { .. } => "set_body_material",
+            Command::MassProperties { .. } => "mass_properties",
+            Command::Combine { .. } => "combine",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -753,6 +794,13 @@ pub struct BodySummary {
     /// kind, for direct editing (ADR 0010). Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imported_faces: Vec<ImportedFace>,
+    /// Run 6: physical material (None: not assigned).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<rcad_document::Material>,
+    /// Run 6: mass in g = density × the measured volume (None without a
+    /// material or a volume). Labelled like the volume (exact or estimate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
 }
 
 /// One face of [`BodySummary::imported_faces`].
@@ -898,6 +946,9 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// `mass_properties`: per-body and total mass properties (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_properties: Option<mass::MassReport>,
     /// `add_sketch_text`: the new text item's id (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<u32>,
@@ -2184,7 +2235,10 @@ impl Session {
                                     "another body is already named '{n}'"
                                 )));
                             }
-                            Some(d.add_body(n))
+                            let mat = d.body(body)?.material.clone();
+                            let id = d.add_body(n);
+                            d.body_mut(id)?.material = mat;
+                            Some(id)
                         } else {
                             None
                         };
@@ -2541,6 +2595,76 @@ impl Session {
                 let name = m.document().feature(feature)?.name.clone();
                 m.transact(&format!("Move {name}"), |d| d.move_feature(feature, before))?;
                 r.feature = Some(feature);
+            }
+            Command::SetBodyMaterial {
+                body,
+                material,
+                density,
+                density_unit,
+                name,
+            } => {
+                let body = *body;
+                let mat = match (material, density) {
+                    (Some(_), Some(_)) => {
+                        return Err(DocError::Validation(
+                            "give a catalog material or a density, not both (a changed density is a user-defined material: density + name)".into(),
+                        ));
+                    }
+                    (Some(key), None) => Some(rcad_document::Material::from_catalog(key)?),
+                    (None, Some(d)) => Some(rcad_document::Material::user(
+                        name.as_deref(),
+                        *d,
+                        *density_unit,
+                    )?),
+                    (None, None) => None,
+                };
+                let m = self.model_mut()?;
+                let bname = m.document().body(body)?.name.clone();
+                let label = match &mat {
+                    Some(x) => format!("Set material of {bname} to {}", x.name),
+                    None => format!("Clear material of {bname}"),
+                };
+                m.transact(&label, |d| {
+                    d.body_mut(body)?.material = mat.clone();
+                    Ok(())
+                })?;
+            }
+            Command::Combine {
+                name,
+                target,
+                tools,
+                op,
+                keep_tools,
+            } => {
+                let (target, tools, op, keep_tools) = (*target, tools.clone(), *op, *keep_tools);
+                let name = name.clone();
+                let m = self.model_mut()?;
+                let tname = m.document().body(target)?.name.clone();
+                for t in &tools {
+                    m.document().body(*t)?;
+                }
+                let verb = match op {
+                    k::CombineOp::Join => "Join",
+                    k::CombineOp::Cut => "Cut",
+                    k::CombineOp::Intersect => "Intersect",
+                };
+                let id = m.transact(&format!("Combine ({verb}) into {tname}"), |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Combine"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Combine {
+                            target,
+                            tools,
+                            op,
+                            keep_tools,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::MassProperties { bodies } => {
+                let m = self.model_mut()?;
+                r.mass_properties = Some(mass::report(m, bodies.as_deref())?);
             }
             Command::SetBodyVisible { body, visible } => {
                 let (body, visible) = (*body, *visible);
@@ -3082,6 +3206,12 @@ impl Session {
                     planes: b.geometry.brep().map(k::face_planes).unwrap_or_default(),
                     measure_error: b.measure_error.clone(),
                     imported_faces: imported_faces(m.evaluation(), b.id),
+                    material: m
+                        .document()
+                        .body(b.id)
+                        .ok()
+                        .and_then(|i| i.material.clone()),
+                    mass: body_mass(m, b),
                     bounds: match &b.measurements {
                         Some(m) => Some(m.bounds),
                         None => b.geometry.brep().and_then(|g| k::bounds(g).ok()),
@@ -3093,6 +3223,23 @@ impl Session {
             active_configuration: m.document().active_configuration.clone(),
         }
     }
+}
+
+/// Density × measured (or mesh) volume, g.
+fn body_mass(m: &Model, b: &rcad_document::EvalBody) -> Option<f64> {
+    let mat = m.document().body(b.id).ok()?.material.as_ref()?;
+    let v = match (&b.measurements, b.geometry.mesh()) {
+        (
+            Some(Measurements {
+                volume: k::VolumeResult::Value { volume, .. },
+                ..
+            }),
+            _,
+        ) => *volume,
+        (_, Some(mb)) if mb.diagnostics.closed => mb.diagnostics.signed_volume?,
+        _ => return None,
+    };
+    (v > 0.0).then(|| v * mat.g_per_mm3())
 }
 
 fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
@@ -3124,6 +3271,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
                 FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
+                FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
             };
             let (operation, extent, reverse) = match &f.kind {

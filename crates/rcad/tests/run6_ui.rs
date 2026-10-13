@@ -384,14 +384,22 @@ fn sheet_metal_flange_and_flat_pattern_from_the_inspector() {
     for i in 0..3 {
         sk.add_line(p[i], p[i + 1]);
     }
-    let s1 = sketch(&mut h, SketchPlane::WorldXY, SketchTemplate::Custom { sketch: sk });
+    let s1 = sketch(
+        &mut h,
+        SketchPlane::WorldXY,
+        SketchTemplate::Custom { sketch: sk },
+    );
     let n = fname(&h, s1);
     click(&mut h, &n);
     click(&mut h, "Sheet metal flange");
     type_into(&mut h, "K-factor", "0.4");
     click(&mut h, "Create flange");
     let want = 40.0 * 100.0 + 40.0 * 2.0 * (PI / 4.0) * (9.0 - 4.0);
-    assert!((h.state().volume().unwrap() - want).abs() < 1e-6, "{:?}", h.state().volume());
+    assert!(
+        (h.state().volume().unwrap() - want).abs() < 1e-6,
+        "{:?}",
+        h.state().volume()
+    );
     let f = h.state().summary().features.last().unwrap().clone();
     click(&mut h, &f.name);
     let dir = tempfile::tempdir().unwrap();

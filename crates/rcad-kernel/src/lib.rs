@@ -7,6 +7,7 @@
 
 mod build;
 mod chamfer;
+mod combine;
 mod direct;
 mod exact;
 mod faceref;
@@ -26,6 +27,10 @@ mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
+pub use combine::{
+    BoolOp, CHECK_GRID, CombineCheck, CombineOp, MembershipReport, boolean, combine,
+    verify_boolean_by_membership, verify_combine_by_membership,
+};
 pub use direct::{
     CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, countersink,
     cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,
@@ -34,8 +39,9 @@ pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
 pub use loft::loft;
 pub use measure::{
-    Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count,
-    face_planes, measure, planar_faces_on, z_face_inner_loops,
+    Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeProperties, VolumeResult,
+    face_count, face_planes, measure, mesh_volume_properties, planar_faces_on, volume_properties,
+    z_face_inner_loops,
 };
 pub use mesh::{
     CANONICAL_GRID, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh,
