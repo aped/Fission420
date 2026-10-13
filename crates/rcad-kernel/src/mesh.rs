@@ -48,7 +48,20 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
         // start varies between runs like everything keyed by pointer ids.
         let solid = canonical_wires(&body.solid);
         let solid = solid.as_ref().unwrap_or(&body.solid);
-        let meshed = solid.triangulation(chord);
+        // Run 7: an open surface body cannot go through `Solid` triangulation
+        // (Truck rebuilds a closed solid and panics); mesh its shells instead.
+        // Face order is the same (the solid's faces are its shells' in order).
+        let open = body.is_open_shell();
+        let shells: Vec<_> = if open {
+            solid
+                .boundaries()
+                .iter()
+                .map(|sh| sh.triangulation(chord))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let meshed_solid = (!open).then(|| solid.triangulation(chord));
         let mut out = TriMesh {
             chord_tolerance: chord,
             ..Default::default()
@@ -60,7 +73,10 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
         // sample a shared edge ~1e-7 mm apart, so the visiting order decided the
         // welded coordinates: the same document tessellated differently each run.
         let order = canonical_face_order(solid);
-        let faces: Vec<_> = meshed.face_iter().collect();
+        let faces: Vec<_> = match &meshed_solid {
+            Some(m) => m.face_iter().collect(),
+            None => shells.iter().flat_map(|sh| sh.face_iter()).collect(),
+        };
         for fi in order {
             if fi >= faces.len() {
                 continue;

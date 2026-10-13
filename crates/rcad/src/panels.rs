@@ -732,7 +732,9 @@ impl RcadApp {
                 "chamfer" => "Chamfer",
                 "fillet" => "Fillet",
                 "hole" => "Hole",
-                "import_step" | "import_mesh" => "Import",
+                "import_step" | "import_mesh" | "import_surfaces" => "Import",
+                "sheet_base" | "sheet_flange" | "sheet_flat" => "Sheet",
+                "surface_stitch" | "surface_fill" | "thicken" => "Surface",
                 k => k,
             };
             ui.horizontal(|ui| {
@@ -1136,6 +1138,7 @@ impl RcadApp {
                 });
                 self.projection_ui(ui, &f);
                 self.sheet_ui(ui, &f);
+                self.sheet_base_ui(ui, &f);
                 match &f.profile_error {
                     None => {
                         ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
@@ -1153,6 +1156,10 @@ impl RcadApp {
                 }
             }
             "sheet_metal" => self.flat_pattern_ui(ui, &f),
+            "sheet_base" | "sheet_flange" | "sheet_flat" => self.sheet_feature_ui(ui, &f),
+            "import_surfaces" | "surface_stitch" | "surface_fill" | "thicken" => {
+                self.surface_feature_ui(ui, &f)
+            }
             "extrude" => {
                 // Scoped shell of a New Body extrusion (dialog: extrude.rs).
                 if matches!(f.operation, Some(rcad_document::Operation::NewBody { .. }))

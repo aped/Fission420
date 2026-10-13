@@ -54,6 +54,9 @@ fn open_box_is_open_and_fills_to_the_box() {
     assert!((v - 24000.0).abs() < 1e-6, "{v}");
     let b = measure(&solid).unwrap().bounds;
     assert_eq!((b.min, b.max), ([0.0; 3], [40.0, 30.0, 20.0]));
+    // Open shells tessellate for display (per shell, not as a solid).
+    let mesh = rcad_kernel::tessellate_display(&s.body, 0.01).unwrap();
+    assert!(!mesh.triangles.is_empty());
     // The input stays open (fill builds a new body).
     assert!(s.body.is_open_shell());
 }

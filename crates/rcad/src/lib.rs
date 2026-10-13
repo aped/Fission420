@@ -24,6 +24,7 @@ pub mod reattach;
 pub mod recovery;
 pub mod scenes;
 pub mod section;
+pub mod sheet_ui;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod text_ui;
