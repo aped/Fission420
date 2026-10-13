@@ -121,6 +121,11 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// External component insertion: path, linked.
+    pub external_path: String,
+    pub external_linked: bool,
+    /// Last external status reply.
+    pub external_status: Option<(u64, u64, Vec<rcad_commands::assembly::ExternalStatus>)>,
 }
 
 impl AssemblyUi {
@@ -136,6 +141,9 @@ impl AssemblyUi {
                 b.clone(),
                 a.structured_bom.clone().unwrap_or_default(),
             ));
+        }
+        if let Some(x) = &a.external {
+            self.external_status = Some((summary.doc_id, summary.revision, x.clone()));
         }
         if let Some(i) = &a.interference {
             self.interference = Some((summary.doc_id, summary.revision, i.clone()));
@@ -191,6 +199,17 @@ fn link_text(a: &AssemblySummary, c: ComponentId) -> String {
     }
     if !comp.children.is_empty() {
         parts.push("sub-assembly".into());
+    }
+    if let Some(x) = &comp.external {
+        parts.push(format!(
+            "external {} ({})",
+            x.file_name,
+            if x.path.is_some() {
+                "linked"
+            } else {
+                "embedded"
+            }
+        ));
     }
     parts.join(" · ")
 }
@@ -377,6 +396,49 @@ impl RcadApp {
                 self.assembly_ui.empty_name.clear();
             }
         });
+        crate::panels::short_text_field(
+            ui,
+            "External document",
+            &mut self.assembly_ui.external_path,
+        );
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.assembly_ui.external_linked, "Linked");
+            let p = self.assembly_ui.external_path.trim().to_string();
+            if ui
+                .add_enabled(!p.is_empty(), egui::Button::new("Insert"))
+                .on_hover_text("Insert another .rcad.json as a component: an embedded copy of its solids with a pinned content hash. Linked copies update only when you press Update from file.")
+                .named("Insert external component")
+                .clicked()
+            {
+                send.push(Command::InsertExternalComponent {
+                    path: p.into(),
+                    name: None,
+                    linked: self.assembly_ui.external_linked,
+                });
+            }
+        });
+        if asm.components.iter().any(|c| c.external.is_some()) {
+            if ui
+                .small_button("Check external files")
+                .probe("Check external files")
+                .clicked()
+            {
+                send.push(Command::CheckExternalComponents);
+            }
+            let (doc, rev) = (self.summary.doc_id, self.summary.revision);
+            if let Some((d, r, list)) = &self.assembly_ui.external_status
+                && (*d, *r) == (doc, rev)
+            {
+                for x in list {
+                    let t = format!("{}: {} — {}", x.name, x.status, x.detail);
+                    if x.status == "up_to_date" || x.status == "embedded" {
+                        ui.small(t);
+                    } else {
+                        ui.colored_label(Color32::from_rgb(255, 190, 90), t);
+                    }
+                }
+            }
+        }
     }
 
     fn tree_ui(&mut self, ui: &mut egui::Ui, asm: &AssemblySummary) {
@@ -542,6 +604,17 @@ impl RcadApp {
                         occurrence: o.id,
                         name: None,
                     });
+                }
+                let l = format!("Update {} from file", comp.name);
+                if comp.external.as_ref().is_some_and(|x| x.path.is_some())
+                    && ui
+                        .small_button("Update from file")
+                        .on_hover_text("Re-read the linked source; refused (copy kept) when it is missing or its solids changed in number")
+                        .named(&l)
+                        .probe(&l)
+                        .clicked()
+                {
+                    send.push(Command::UpdateExternalComponent { component: comp.id });
                 }
                 let l = format!("Add occurrence of {}", comp.name);
                 if ui

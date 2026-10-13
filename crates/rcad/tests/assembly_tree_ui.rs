@@ -242,3 +242,65 @@ fn interference_highlight_structured_bom_and_explode() {
     click(&mut h, "Bill of materials");
     h.get_by_label("1. Block ×2");
 }
+
+/// Save a 10 × 10 × `h` box document to `path` (headless session).
+fn cube_source(path: &std::path::Path, h: f64) {
+    let mut s = rcad_commands::Session::new();
+    s.execute(&Command::NewDocument);
+    for c in [
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: 10.0,
+                height: 10.0,
+                center: Some([0.0, 0.0]),
+            },
+        },
+        Command::extrude(None, FeatureId(1), h),
+        Command::Save {
+            path: path.to_path_buf(),
+        },
+    ] {
+        let r = s.execute(&c);
+        assert!(r.ok, "{:?}", r.error);
+    }
+}
+
+#[test]
+fn external_component_insert_check_and_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("cube.rcad.json");
+    cube_source(&src, 10.0);
+    let mut h = harness();
+    click(&mut h, "New");
+    type_into(&mut h, "External document", src.to_str().unwrap());
+    h.get_by_label("Linked").click();
+    settle(&mut h);
+    click(&mut h, "Insert external component");
+    let a = h.state().summary().assembly.clone();
+    assert_eq!(
+        a.components.len(),
+        1,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    assert!(a.components[0].external.as_ref().unwrap().path.is_some());
+    let vol = |h: &Harness<'_, RcadApp>| match h.state().summary().bodies[0]
+        .measurements
+        .as_ref()
+        .unwrap()
+        .volume
+    {
+        rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+        ref v => panic!("{v:?}"),
+    };
+    assert!((vol(&h) - 1000.0).abs() < 1e-6);
+    cube_source(&src, 30.0);
+    click(&mut h, "Check external files");
+    h.get_by_label_contains("cube: modified");
+    assert!((vol(&h) - 1000.0).abs() < 1e-6, "pinned until updated");
+    click(&mut h, "Occurrence cube#1");
+    click(&mut h, "Update cube from file");
+    assert!((vol(&h) - 3000.0).abs() < 1e-6);
+}

@@ -63,7 +63,17 @@ impl<'a> Placements<'a> {
                     }
                 }
             }
-            if let Some(rr) = e.part("REPRESENTATION_RELATIONSHIP") {
+            // A simple `SHAPE_REPRESENTATION_RELATIONSHIP(...)` instance has the
+            // same attributes as its supertype (run 7: OCCT and R-CAD's
+            // hierarchical export link a part's B-rep representation to its
+            // shape representation with it).
+            let simple_srr = e.parts.len() == 1 && e.has("SHAPE_REPRESENTATION_RELATIONSHIP");
+            let rr = e.part("REPRESENTATION_RELATIONSHIP").or_else(|| {
+                simple_srr
+                    .then(|| e.part("SHAPE_REPRESENTATION_RELATIONSHIP"))
+                    .flatten()
+            });
+            if let Some(rr) = rr {
                 let p = P::new(id, "REPRESENTATION_RELATIONSHIP", rr);
                 let (r1, r2) = (p.r(2)?, p.r(3)?);
                 if let Some(t) = e.part("REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION") {

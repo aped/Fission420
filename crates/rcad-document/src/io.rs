@@ -288,6 +288,9 @@ fn assembly_v7_feature(doc: &Document) -> Option<&'static str> {
     if a.components.iter().any(|c| c.derived_from.is_some()) {
         return Some("independent component copies");
     }
+    if a.components.iter().any(|c| c.external.is_some()) {
+        return Some("external components");
+    }
     if a.occurrences.iter().any(|o| o.hidden) {
         return Some("hidden occurrences");
     }

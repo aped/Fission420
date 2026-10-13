@@ -217,7 +217,7 @@ fn annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser() {
         "Dimension from",
         &format!("{} {}: hole axis", hole.id, hole.name),
     );
-    combo(&mut h, "Dimension tolerance", "± symmetric");
+    click(&mut h, "Tolerance ± symmetric");
     click(&mut h, &format!("Add dimension to {dname}"));
     let d = h.state().summary().drawings[0].clone();
     let v2 = d.views.iter().find(|v| v.id == ViewId(2)).unwrap();

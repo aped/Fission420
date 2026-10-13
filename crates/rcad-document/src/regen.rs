@@ -2394,8 +2394,56 @@ pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Bod
                 other => other,
             })
     };
-    let behind = cut((0.0, hi[2] + m), "part behind the plane")?;
-    let front = cut((lo[2] - m, 0.0), "part in front of the plane")?;
+    // Run 7: the same half-space box extruded along an in-plane axis instead
+    // of the plane normal. When the body's curved faces (holes, bosses) are
+    // parallel to that axis the exact slab construction applies where Truck's
+    // boolean fails (e.g. a section plane crossing a hole off its axis).
+    // `normal_side`: (u0, u1) along the plane normal.
+    let in_plane = |normal_side: (f64, f64), what: &str| -> Result<Body> {
+        let mut last: Option<DocError> = None;
+        // (extrusion axis, in-profile axis, its index in lo/hi, extrusion index)
+        for (ax, other, oi, ei) in [(pf.y, pf.x, 0usize, 1usize), (pf.x, pf.y, 1, 0)] {
+            // Right-handed frame with z = ax and the plane normal in it.
+            let (fx, fy) = if ei == 1 {
+                (pf.z, other)
+            } else {
+                (other, pf.z)
+            };
+            let f2 = Frame {
+                origin: pf.origin,
+                x: fx,
+                y: fy,
+                z: ax,
+            };
+            let (n0, n1) = normal_side;
+            let (o0, o1) = (lo[oi] - m, hi[oi] + m);
+            let pts = if ei == 1 {
+                // x = normal, y = other in-plane axis.
+                vec![[n0, o0], [n1, o0], [n1, o1], [n0, o1]]
+            } else {
+                // x = other in-plane axis, y = normal.
+                vec![[o0, n0], [o1, n0], [o1, n1], [o0, n1]]
+            };
+            let span = (lo[ei] - m, hi[ei] + m);
+            let tool = ExtrudeOut {
+                start: f2,
+                distance: span.1 - span.0,
+                profile: SketchProfile::Polygon(pts),
+                span,
+                nominal: span,
+                ..piece(span)
+            };
+            match apply_tool(t, &tool, &f2, Some(what), id, None) {
+                Ok((b, _)) => return Ok(b),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| DocError::Validation(format!("{id}: split failed"))))
+    };
+    let behind = cut((0.0, hi[2] + m), "part behind the plane")
+        .or_else(|e| in_plane((0.0, hi[2] + m), "part behind the plane").map_err(|_| e))?;
+    let front = cut((lo[2] - m, 0.0), "part in front of the plane")
+        .or_else(|e| in_plane((lo[2] - m, 0.0), "part in front of the plane").map_err(|_| e))?;
     Ok((behind, front))
 }
 

@@ -166,6 +166,9 @@ impl RcadApp {
         ui.label(RichText::new(format!("Bodies ({})", bodies.len())).strong());
         if bodies.is_empty() {
             ui.weak("No bodies yet. Extrude a sketch or File › Import….");
+            // Run 7: empty components and external components can be made
+            // in an empty document (an assembly file).
+            self.components_browser(ui);
             return;
         }
         let mut select = None;
