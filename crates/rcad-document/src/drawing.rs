@@ -993,7 +993,9 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
 
 /// Front-facing triangles in view coordinates with a uniform grid.
 struct Occluder {
-    tris: Vec<([[f64; 2]; 3], [f64; 3])>,
+    /// (projected corners, depths, edge `i` (opposite corner `i`) shared
+    /// with another front-facing triangle).
+    tris: Vec<([[f64; 2]; 3], [f64; 3], [bool; 3])>,
     lo: [f64; 2],
     cell: f64,
     nx: usize,
@@ -1006,19 +1008,44 @@ struct Occluder {
 impl Occluder {
     fn new(meshes: &[&k::TriMesh], f: &ViewFrame, margin: f64, depth_eps: f64) -> Self {
         let mut tris = Vec::new();
+        // Edges between two front-facing triangles are interior to the
+        // occluding surface (a triangulation diagonal, or a convex edge
+        // between two faces both seen from the front): a point near them is
+        // still covered. Keyed by the exact 3D end points.
+        type EdgeKey = ([u64; 3], [u64; 3]);
+        let key = |a: [f64; 3], b: [f64; 3]| -> EdgeKey {
+            let (a, b) = (a.map(f64::to_bits), b.map(f64::to_bits));
+            if a <= b { (a, b) } else { (b, a) }
+        };
+        let mut corners: Vec<[[f64; 3]; 3]> = Vec::new();
+        let mut count: HashMap<EdgeKey, u32> = HashMap::new();
         for m in meshes {
             for t in &m.triangles {
-                let p = t.map(|i| f.project(m.positions[i as usize]));
+                let w = t.map(|i| m.positions[i as usize]);
+                let p = w.map(|x| f.project(x));
                 let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
                     - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
                 if area > 1e-12 {
-                    tris.push((p.map(|q| [q[0], q[1]]), p.map(|q| q[2])));
+                    tris.push((p.map(|q| [q[0], q[1]]), p.map(|q| q[2]), [false; 3]));
+                    corners.push(w);
+                    for i in 0..3 {
+                        *count
+                            .entry(key(w[(i + 1) % 3], w[(i + 2) % 3]))
+                            .or_default() += 1;
+                    }
                 }
+            }
+        }
+        for (t, w) in tris.iter_mut().zip(&corners) {
+            for i in 0..3 {
+                t.2[i] = count
+                    .get(&key(w[(i + 1) % 3], w[(i + 2) % 3]))
+                    .is_some_and(|c| *c >= 2);
             }
         }
         let mut lo = [f64::INFINITY; 2];
         let mut hi = [f64::NEG_INFINITY; 2];
-        for (p, _) in &tris {
+        for (p, _, _) in &tris {
             for q in p {
                 for i in 0..2 {
                     lo[i] = lo[i].min(q[i]);
@@ -1035,7 +1062,7 @@ impl Occluder {
         let nx = (((hi[0] - lo[0]) / cell).ceil() as usize).max(1);
         let ny = (((hi[1] - lo[1]) / cell).ceil() as usize).max(1);
         let mut grid = vec![Vec::new(); nx * ny];
-        for (ti, (p, _)) in tris.iter().enumerate() {
+        for (ti, (p, _, _)) in tris.iter().enumerate() {
             let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
             for q in p {
                 for i in 0..2 {
@@ -1072,8 +1099,12 @@ impl Occluder {
         }
         let cell = &self.grid[gy as usize * self.nx + gx as usize];
         cell.iter().any(|&ti| {
-            let (p, z) = &self.tris[ti as usize];
-            // Signed distances to the three edges (counter-clockwise triangle).
+            let (p, z, shared) = &self.tris[ti as usize];
+            // Signed distances to the three edges (counter-clockwise
+            // triangle): strictly inside by the margin across outline edges;
+            // across an edge shared with another front-facing triangle (a
+            // triangulation diagonal) no margin: a point on such an edge is
+            // covered by the surface, not near its outline.
             let mut bary = [0.0; 3];
             let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
                 - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
@@ -1082,7 +1113,14 @@ impl Occluder {
                 let e = [b[0] - a[0], b[1] - a[1]];
                 let len = e[0].hypot(e[1]);
                 let c = e[0] * (q[1] - a[1]) - e[1] * (q[0] - a[0]);
-                if c / len <= self.margin {
+                // Across a shared edge the neighbour continues the surface:
+                // inside (or on) this triangle is enough there.
+                let inside = if shared[i] {
+                    c / len >= 0.0
+                } else {
+                    c / len > self.margin
+                };
+                if !inside {
                     return false;
                 }
                 bary[i] = c / area;
@@ -1668,6 +1706,8 @@ fn linear_dim(
         [mid[0], mid[1] - 1.0 - TEXT]
     } else if normal[0] > 0.0 {
         [mid[0] + 1.0, mid[1] - TEXT / 2.0]
+    } else if normal[0] < 0.0 {
+        [mid[0] - 1.0, mid[1] - TEXT / 2.0]
     } else {
         [mid[0], mid[1] + 1.0]
     };
@@ -1677,6 +1717,8 @@ fn linear_dim(
         text: text.to_string(),
         anchor: if normal[0] > 0.0 {
             Anchor::Start
+        } else if normal[0] < 0.0 {
+            Anchor::End
         } else {
             Anchor::Middle
         },
@@ -2123,6 +2165,16 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
     let mut reports: Vec<ViewReport> = Vec::new();
     let mut placed: BTreeMap<ViewId, Placed> = BTreeMap::new();
     let mut dimensioned = [false; 3];
+    // Balloons are laid out after every view is placed (they must avoid the
+    // other views): (view, anchors, view box, clearance left/right/below).
+    #[allow(clippy::type_complexity)]
+    let mut pending_balloons: Vec<(
+        ViewId,
+        Vec<(usize, [f64; 2])>,
+        [f64; 2],
+        [f64; 2],
+        [f64; 3],
+    )> = Vec::new();
 
     for v in &dr.views {
         let (frame, scale, base) = dr.resolve(v.id)?;
@@ -2499,6 +2551,8 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             }
         }
         // Run 7: driven dimensions between semantic references, and balloons.
+        // Rows of user dimensions below the view (the view label goes under them).
+        let mut user_rows_below = 0usize;
         if let Some(g) = &geom {
             let auto_h = dims.iter().any(|d| d.kind == "horizontal");
             let auto_v = dims.iter().any(|d| d.kind == "vertical");
@@ -2552,7 +2606,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                                     &mut dims,
                                     &mut issues,
                                     (dr.id, v.id),
-                                    [lo[0], lo[1] - 30.0 - TEXT * nflag as f64],
+                                    [lo[0], hi[1] + 3.0 + (TEXT + 1.0) * (nflag - 1) as f64],
                                     kind,
                                     why,
                                 );
@@ -2570,6 +2624,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                         if horizontal {
                             let off_y = if auto_h { 16.0 } else { 8.0 } + 8.0 * nh as f64;
                             nh += 1;
+                            user_rows_below = nh;
                             let xa = off[0] + sign * ta * scale;
                             let xb = off[0] + sign * tb * scale;
                             linear_dim(
@@ -2608,7 +2663,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                             &mut dims,
                             &mut issues,
                             (dr.id, v.id),
-                            [lo[0], lo[1] - 30.0 - TEXT * nflag as f64],
+                            [lo[0], hi[1] + 3.0 + (TEXT + 1.0) * (nflag - 1) as f64],
                             kind,
                             why,
                         );
@@ -2642,7 +2697,12 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     let c = frame.project(c3);
                     anchors.push((row.item, [off[0] + c[0] * scale, off[1] + c[1] * scale]));
                 }
-                balloons(&mut dims_prims, &anchors, lo, hi);
+                // Clear the dimensions on each side: automatic vertical
+                // dimensions stand right of the view, user ones left of it.
+                let right = if auto_v { 18.0 } else { 0.0 };
+                let left = if nv > 0 { 8.0 * nv as f64 + 14.0 } else { 0.0 };
+                let below = if auto_h { 22.0 } else { 10.0 } + 8.0 * nh as f64;
+                pending_balloons.push((v.id, anchors.clone(), lo, hi, [left, right, below]));
                 for (item, _) in &anchors {
                     dims.push(DimensionReport {
                         kind: "balloon".into(),
@@ -2674,6 +2734,16 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                         18.0
                     } else {
                         6.0
+                    }
+                    - if user_rows_below > 0 {
+                        8.0 * user_rows_below as f64
+                            + if dims.iter().any(|d| d.kind == "horizontal") {
+                                0.0
+                            } else {
+                                4.0
+                            }
+                    } else {
+                        0.0
                     },
             ],
             size: 2.5,
@@ -2777,6 +2847,48 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 dr.id
             ));
         }
+    }
+    let table_box = dr.bom.as_ref().map(|t| {
+        let (_, lo, hi) = bom_table(&bom, t, w, h);
+        (lo, hi)
+    });
+    for (vid, anchors, lo, hi, clear) in &pending_balloons {
+        let mut others: Vec<([f64; 2], [f64; 2])> = placed
+            .iter()
+            .filter(|(id, _)| *id != vid)
+            .map(|(_, p)| (p.lo, p.hi))
+            .collect();
+        others.extend(table_box);
+        let free = |b: &([f64; 2], [f64; 2])| {
+            b.0[0] >= 10.0
+                && b.0[1] >= 10.0
+                && b.1[0] <= w - 10.0
+                && b.1[1] <= h - 10.0
+                && others.iter().all(|o| {
+                    b.1[0] <= o.0[0] || b.0[0] >= o.1[0] || b.1[1] <= o.0[1] || b.0[1] >= o.1[1]
+                })
+        };
+        let layouts: Vec<(Vec<Prim>, ([f64; 2], [f64; 2]))> = [
+            BalloonSide::Right,
+            BalloonSide::Left,
+            BalloonSide::Above,
+            BalloonSide::Below,
+        ]
+        .into_iter()
+        .map(|side| balloons(anchors, *lo, *hi, *clear, side))
+        .collect();
+        let pick = layouts.iter().position(|(_, b)| free(b));
+        if pick.is_none() {
+            issues.push(format!(
+                "{} view {vid}: the balloons overlap another view or the BOM table on every side",
+                dr.id
+            ));
+        }
+        groups.push(Group {
+            id: format!("balloons-{}", vid.0),
+            label: format!("{vid} balloons"),
+            prims: layouts[pick.unwrap_or(0)].0.clone(),
+        });
     }
     if let Some(t) = &dr.bom {
         let (g, lo, hi) = bom_table(&bom, t, w, h);
@@ -3112,60 +3224,93 @@ fn dangling_dim(
 /// Balloon radius (sheet mm).
 const BALLOON_R: f64 = 4.0;
 
-/// Balloons right or left of the view (by anchor side), stacked at least
-/// 2.25 balloon radii apart, each with a leader ending in a dot at its anchor.
-fn balloons(out: &mut Vec<Prim>, anchors: &[(usize, [f64; 2])], lo: [f64; 2], hi: [f64; 2]) {
-    let cx = (lo[0] + hi[0]) / 2.0;
-    for right in [true, false] {
-        let mut side: Vec<&(usize, [f64; 2])> = anchors
-            .iter()
-            .filter(|(_, a)| (a[0] >= cx) == right)
-            .collect();
-        side.sort_by(|a, b| b.1[1].total_cmp(&a.1[1]).then(a.0.cmp(&b.0)));
-        let x = if right {
-            hi[0] + 3.0 * BALLOON_R
-        } else {
-            lo[0] - 3.0 * BALLOON_R
-        };
-        let mut last = f64::INFINITY;
-        for (item, a) in side {
+#[derive(Clone, Copy, PartialEq)]
+enum BalloonSide {
+    Right,
+    Left,
+    Above,
+    Below,
+}
+
+/// Balloons in a column right or left of the view, or a row above or below
+/// it, past `clear` (left, right, below) sheet mm of dimensions, at least
+/// 2.25 balloon radii apart, each with a leader ending in a dot at its
+/// anchor. Returns the primitives and the box of the balloon circles.
+fn balloons(
+    anchors: &[(usize, [f64; 2])],
+    lo: [f64; 2],
+    hi: [f64; 2],
+    clear: [f64; 3],
+    side: BalloonSide,
+) -> (Vec<Prim>, ([f64; 2], [f64; 2])) {
+    let mut out = Vec::new();
+    let mut sorted: Vec<&(usize, [f64; 2])> = anchors.iter().collect();
+    let column = matches!(side, BalloonSide::Right | BalloonSide::Left);
+    if column {
+        sorted.sort_by(|a, b| b.1[1].total_cmp(&a.1[1]).then(a.0.cmp(&b.0)));
+    } else {
+        sorted.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]).then(a.0.cmp(&b.0)));
+    }
+    let fixed = match side {
+        BalloonSide::Right => hi[0] + clear[1] + 3.0 * BALLOON_R,
+        BalloonSide::Left => lo[0] - clear[0] - 3.0 * BALLOON_R,
+        BalloonSide::Above => hi[1] + 2.5 * BALLOON_R,
+        BalloonSide::Below => lo[1] - clear[2] - 2.0 * BALLOON_R,
+    };
+    let (mut blo, mut bhi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let mut last = if column {
+        f64::INFINITY
+    } else {
+        f64::NEG_INFINITY
+    };
+    for (item, a) in sorted {
+        let c = if column {
             let y = a[1].min(last - 2.25 * BALLOON_R);
             last = y;
-            out.push(Prim::Arc {
-                c: [x, y],
-                r: BALLOON_R,
-                start: 0.0,
-                sweep: TAU,
-                style: LineStyle::Thin,
-            });
-            out.push(Prim::Text {
-                at: [x, y - TEXT / 3.0],
-                size: TEXT,
-                text: item.to_string(),
-                anchor: Anchor::Middle,
-                style: LineStyle::Thin,
-            });
-            let d = [a[0] - x, a[1] - y];
-            let l = d[0].hypot(d[1]).max(1e-9);
-            let start = [x + d[0] / l * BALLOON_R, y + d[1] / l * BALLOON_R];
-            out.push(Prim::Line {
-                a: start,
-                b: *a,
-                style: LineStyle::Thin,
-            });
-            let r = 0.6;
-            out.push(Prim::Polygon {
-                pts: vec![
-                    [a[0] - r, a[1]],
-                    [a[0], a[1] - r],
-                    [a[0] + r, a[1]],
-                    [a[0], a[1] + r],
-                ],
-                fill: true,
-                style: LineStyle::Thin,
-            });
+            [fixed, y]
+        } else {
+            let x = a[0].max(last + 2.25 * BALLOON_R);
+            last = x;
+            [x, fixed]
+        };
+        for i in 0..2 {
+            blo[i] = blo[i].min(c[i] - BALLOON_R);
+            bhi[i] = bhi[i].max(c[i] + BALLOON_R);
         }
+        out.push(Prim::Arc {
+            c,
+            r: BALLOON_R,
+            start: 0.0,
+            sweep: TAU,
+            style: LineStyle::Thin,
+        });
+        out.push(Prim::Text {
+            at: [c[0], c[1] - TEXT / 3.0],
+            size: TEXT,
+            text: item.to_string(),
+            anchor: Anchor::Middle,
+            style: LineStyle::Thin,
+        });
+        let d = [a[0] - c[0], a[1] - c[1]];
+        let l = d[0].hypot(d[1]).max(1e-9);
+        out.push(Prim::Line {
+            a: [c[0] + d[0] / l * BALLOON_R, c[1] + d[1] / l * BALLOON_R],
+            b: *a,
+            style: LineStyle::Thin,
+        });
+        let r = 0.6;
+        out.push(Prim::Polygon {
+            pts: vec![
+                [a[0] - r, a[1]],
+                [a[0], a[1] - r],
+                [a[0] + r, a[1]],
+                [a[0], a[1] + r],
+            ],
+            fill: true,
+            style: LineStyle::Thin,
+        });
     }
+    (out, (blo, bhi))
 }
 
 /// Column titles and widths (mm) of the BOM table.

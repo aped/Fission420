@@ -518,7 +518,9 @@ fn assembly_drawing_bom_balloons_and_notes() {
         .map(|x| x.2)
         .collect();
     assert_eq!(balloons, vec!["1", "2"]);
-    assert!(tx["dims-1"].contains(&"1".to_string()) && tx["dims-1"].contains(&"2".to_string()));
+    assert!(
+        tx["balloons-1"].contains(&"1".to_string()) && tx["balloons-1"].contains(&"2".to_string())
+    );
     // The assembly views draw every occurrence: the front view is as wide as
     // the plate (the screws are within it) and 8 mm high (the screws stand
     // on z = 0 like the plate).
@@ -629,4 +631,59 @@ fn assembly_drawing_bom_balloons_and_notes() {
         r.drawing_report.as_ref().unwrap().bom,
         r2.drawing_report.as_ref().unwrap().bom
     );
+}
+
+/// Regression (run 7): a hole silhouette hidden behind a front face that is
+/// triangulated with a diagonal crossing it was drawn with a 0.03 mm visible
+/// speck where the diagonal crossed (each triangle was tested alone with the
+/// outline margin). 80 × 50 × 10 plate, Ø8 at (20, 25) and Ø6 at (60, 25):
+/// front and right views each show exactly four hidden lines, the full
+/// plate thickness long.
+#[test]
+fn hidden_hole_silhouettes_have_no_visible_specks() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let sk = sketch_rect(&mut s, 80.0, 50.0, [40.0, 25.0]);
+    let e = ok(&mut s, Command::extrude(None, sk, 10.0))
+        .feature
+        .unwrap();
+    for (c, d) in [([20.0, 25.0], 8.0), ([60.0, 25.0], 6.0)] {
+        ok(
+            &mut s,
+            Command::Hole {
+                name: None,
+                plane: SketchPlane::Face(FaceRef {
+                    feature: e,
+                    role: FaceRole::ExtrudeEndCap,
+                }),
+                center: c,
+                diameter: d,
+                depth: None,
+                counterbore: None,
+                target: None,
+            },
+        );
+    }
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: None,
+            assembly: false,
+        },
+    )
+    .drawing
+    .unwrap();
+    let (r, _) = export(&mut s, d, "specks.svg");
+    let views = &r.drawing_report.as_ref().unwrap().views;
+    assert_eq!(views[0].hidden_curves, 4, "front: {:?}", views[0]);
+    assert_eq!(views[2].hidden_curves, 4, "right: {:?}", views[2]);
+    // Front: 4 outline edges + nothing else visible.
+    assert_eq!(views[0].visible_curves, 4, "front: {:?}", views[0]);
 }
