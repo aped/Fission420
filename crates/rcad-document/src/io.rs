@@ -184,6 +184,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if doc.bodies.iter().any(|b| b.material.is_some()) {
         return Some("body materials");
     }
+    if !doc.drawings.is_empty() {
+        return Some("drawings");
+    }
     for f in &doc.features {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");

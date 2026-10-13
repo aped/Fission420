@@ -425,6 +425,8 @@ pub struct RcadApp {
     pub(crate) split_form: (u8, String),
     /// Configuration name / part number being typed (run 6).
     pub(crate) config_form: (String, String),
+    /// Browser Drawings section: export path, last export report (run 6).
+    pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
     /// Body material form and last mass-properties report (run 6).
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state (run 6).
@@ -487,6 +489,7 @@ impl RcadApp {
                 configurations: vec![],
                 active_configuration: None,
                 assembly: Default::default(),
+                drawings: vec![],
             },
             measurements: None,
             selected: None,
@@ -528,6 +531,7 @@ impl RcadApp {
             scale_factor: "1".into(),
             split_form: (0, "0".into()),
             config_form: Default::default(),
+            drawing_ui: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
             assembly_ui: Default::default(),
@@ -1106,6 +1110,7 @@ impl RcadApp {
         self.body_props.on_reply(&response, &summary);
         self.exact_measure.on_reply(&response, &summary);
         self.assembly_ui.on_reply(&response, &summary);
+        self.drawing_ui.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;

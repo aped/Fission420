@@ -10,6 +10,7 @@ pub mod bodies;
 pub mod direct_edit_ui;
 #[cfg(test)]
 mod display_fault_tests;
+pub mod drawing_ui;
 pub mod engine;
 pub mod exchange;
 pub mod extrude;

@@ -1752,6 +1752,10 @@ pub struct Document {
     /// format v6; docs/ASSEMBLIES.md).
     #[serde(default, skip_serializing_if = "crate::assembly::Assembly::is_empty")]
     pub assembly: crate::assembly::Assembly,
+    /// Drawing sheets (run 6, format v6; docs/DRAWINGS.md). Views reference
+    /// bodies by id; geometry is computed at export from the evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drawings: Vec<crate::drawing::Drawing>,
 }
 
 /// A named variant of a document (see [`Document::configurations`]).
@@ -1791,6 +1795,7 @@ impl Document {
             configurations: Vec::new(),
             active_configuration: None,
             assembly: Default::default(),
+            drawings: Vec::new(),
         }
     }
 

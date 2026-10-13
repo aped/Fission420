@@ -8,6 +8,7 @@ pub mod assembly;
 mod blob;
 mod combine;
 pub mod direct;
+pub mod drawing;
 mod hole;
 pub mod import;
 mod io;

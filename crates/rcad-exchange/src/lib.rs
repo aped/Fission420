@@ -6,6 +6,9 @@
 //!   sketch's lines, arcs and circles.
 //! * [`svg`]: SVG planar paths (lines, rects, circles, circular arcs) to an unconstrained
 //!   sketch with explicit units/transforms, and sketch export.
+//! * [`drawing`] / [`pdf`] / [`drawing_dxf`]: drawing sheets (plotted 2-D primitives in mm)
+//!   written as SVG, R12 DXF
+//!   and a one-page vector PDF (docs/DRAWINGS.md).
 //! * [`threemf`]: 3MF core-subset multi-object mesh import (units, item/component
 //!   transforms, object colours) and export, over a bounded ZIP reader/writer.
 //!
@@ -15,8 +18,11 @@
 //! the conversion factor is always reported back. Supported subsets, limits and known
 //! losses: `docs/formats/stl.md`, `docs/formats/dxf.md`, `docs/formats/threemf.md`.
 
+pub mod drawing;
+pub mod drawing_dxf;
 pub mod dxf;
 pub mod mesh;
+pub mod pdf;
 pub mod stl;
 pub mod svg;
 pub mod threemf;

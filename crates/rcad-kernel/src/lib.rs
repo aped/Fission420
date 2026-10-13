@@ -9,6 +9,7 @@ mod build;
 mod chamfer;
 mod combine;
 mod direct;
+mod edges;
 mod exact;
 mod faceref;
 mod fillet;
@@ -36,6 +37,9 @@ pub use direct::{
     CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, countersink,
     cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, replace_face,
     resize_cylinder, tilt_offset_frame,
+};
+pub use edges::{
+    DrawingEdge, EDGE_FIT_TOL, EdgeCurve, POLY_SAMPLES, SMOOTH_COS, drawing_edges, sharp_edges,
 };
 pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
