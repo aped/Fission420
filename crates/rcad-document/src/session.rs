@@ -38,6 +38,18 @@ pub struct Model {
 /// Cap on undo depth; documents are small, so this is generous.
 const MAX_UNDO: usize = 256;
 
+/// Document, evaluation, undo/redo history and dirty flag of a [`Model`],
+/// taken before temporary changes (e.g. activating each configuration to
+/// export it) and put back with [`Model::restore`].
+#[derive(Debug, Clone)]
+pub struct ModelSnapshot {
+    doc: Document,
+    eval: Evaluation,
+    undo: Vec<(String, Document)>,
+    redo: Vec<(String, Document)>,
+    dirty: bool,
+}
+
 impl Model {
     pub fn new() -> Self {
         let doc = Document::new();
@@ -259,6 +271,30 @@ impl Model {
     }
     pub fn redo_label(&self) -> Option<&str> {
         self.redo.last().map(|(l, _)| l.as_str())
+    }
+
+    /// Copy of the state that [`Model::restore`] puts back.
+    pub fn snapshot(&self) -> ModelSnapshot {
+        ModelSnapshot {
+            doc: self.doc.clone(),
+            eval: self.eval.clone(),
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+            dirty: self.dirty,
+        }
+    }
+
+    /// Put back a [`ModelSnapshot`] exactly (no regeneration: the evaluation
+    /// is the one taken with it). Undo/redo and the dirty flag are as they
+    /// were, so temporary changes leave no history; `revision` still advances
+    /// so clients refresh their caches.
+    pub fn restore(&mut self, s: ModelSnapshot) {
+        self.doc = s.doc;
+        self.eval = s.eval;
+        self.undo = s.undo;
+        self.redo = s.redo;
+        self.dirty = s.dirty;
+        self.revision += 1;
     }
 
     /// Undo the last committed change. Returns its label.

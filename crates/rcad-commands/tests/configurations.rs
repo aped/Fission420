@@ -89,6 +89,19 @@ fn two_variants_follow_a_shared_edit_and_export_by_name() {
     // Batch export: names carry the variant and part number; the document is
     // restored afterwards.
     let before = s.model().unwrap().document().clone();
+    let history = |s: &Session| {
+        let m = s.summary();
+        (m.can_undo, m.can_redo, s.model().unwrap().dirty)
+    };
+    // Leave a distinct undone step (wall 4) on the redo stack.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_user_parameter", "name": "wall", "expression": "4", "unit": "mm"}),
+    );
+    tray::ok(&mut s, &json!({"cmd": "undo"}));
+    assert_eq!(s.model().unwrap().document(), &before);
+    let history_before = history(&s);
+    assert!(history_before.1.is_some());
     let dir = tempfile::tempdir().unwrap();
     tray::ok(
         &mut s,
@@ -96,6 +109,9 @@ fn two_variants_follow_a_shared_edit_and_export_by_name() {
                 "step": true, "stl": true}),
     );
     assert_eq!(s.model().unwrap().document(), &before);
+    // Review run 6 #14: undo/redo history and dirty flag are untouched, so Redo
+    // still redoes the user's undone wall edit.
+    assert_eq!(history(&s), history_before);
     for f in [
         "tray-Small-ENC-80.step",
         "tray-Small-ENC-80.stl",
@@ -133,6 +149,11 @@ fn two_variants_follow_a_shared_edit_and_export_by_name() {
                 "step": true}),
     );
     assert!(!r.ok);
+    assert_eq!(s.model().unwrap().document(), &before);
+    assert_eq!(history(&s), history_before);
+    tray::ok(&mut s, &json!({"cmd": "redo"}));
+    assert!((tray::volume(&s) - vol(100.0, 4.0, true)).abs() < 1e-6);
+    tray::ok(&mut s, &json!({"cmd": "undo"}));
     assert_eq!(s.model().unwrap().document(), &before);
     // Save / reopen: v6 with both configurations.
     let path = dir.path().join("c.rcad.json");

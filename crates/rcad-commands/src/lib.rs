@@ -592,8 +592,8 @@ pub enum Command {
     },
     /// Export every configuration (or `configurations`) as
     /// `<dir>/<stem>-<configuration>[-<part number>].<ext>` for each requested
-    /// format; the document's state is restored afterwards (the activations
-    /// are undone). Names are sanitized; an existing file is overwritten only
+    /// format; the document, its undo/redo history and the dirty flag are
+    /// restored afterwards (the activations leave no history). Names are sanitized; an existing file is overwritten only
     /// with `overwrite`.
     ExportConfigurations {
         dir: PathBuf,
@@ -2825,7 +2825,9 @@ impl Session {
                 }
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| DocError::File(format!("{}: {e}", dir.display())))?;
-                let mut activations = 0;
+                // Review run 6 #14: put the document, its undo/redo history and
+                // the dirty flag back exactly (the activations leave no trace).
+                let snapshot = self.model_mut()?.snapshot();
                 let mut written = Vec::new();
                 let mut result = Ok(());
                 for c in &chosen {
@@ -2839,7 +2841,6 @@ impl Session {
                         result = Err(e);
                         break;
                     }
-                    activations += 1;
                     for (_, e, p) in plan.iter().filter(|(n, _, _)| *n == c.name) {
                         let cmd = match *e {
                             "step" => Command::ExportStep {
@@ -2870,10 +2871,7 @@ impl Session {
                         break;
                     }
                 }
-                // Restore the document as it was (undo the activations).
-                for _ in 0..activations {
-                    self.model_mut()?.undo()?;
-                }
+                self.model_mut()?.restore(snapshot);
                 result?;
                 r.message = Some(format!("wrote {}", written.join(", ")));
             }

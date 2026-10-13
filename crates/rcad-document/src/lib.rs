@@ -32,7 +32,7 @@ pub use regen::{
     MeshBody, RegenCache, ResolvedFace, projection_curves, regenerate, regenerate_cached,
     regenerate_cached_opts,
 };
-pub use session::{Model, ParamChange};
+pub use session::{Model, ModelSnapshot, ParamChange};
 
 use serde::{Deserialize, Serialize};
 
