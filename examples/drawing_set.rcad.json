@@ -1,0 +1,594 @@
+{
+  "format": "r-cad",
+  "version": 7,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Plate sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -40.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 40.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 40.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -40.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": 25.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Plate",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 10.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Hole A",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "center": [
+            22.0,
+            25.0
+          ],
+          "diameter": 8.0,
+          "depth": null,
+          "counterbore": null,
+          "target": 1
+        },
+        "expressions": {
+          "diameter": "hole_d"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Hole B",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "center": [
+            60.0,
+            25.0
+          ],
+          "diameter": 6.0,
+          "depth": null,
+          "counterbore": null,
+          "target": 1
+        }
+      },
+      {
+        "id": 5,
+        "name": "Pin sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.0
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 100.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.0
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "Pin",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 5,
+          "distance": 20.0,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      }
+    ],
+    "next_id": 7,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Plate",
+        "visible": true,
+        "material": {
+          "name": "PLA",
+          "density": 1.24,
+          "catalog": "pla"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Pin",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "hole_d",
+        "expression": "8",
+        "unit": "mm"
+      }
+    ],
+    "configurations": [
+      {
+        "name": "Std",
+        "values": {
+          "hole_d": "8"
+        },
+        "part_number": "PL-80"
+      },
+      {
+        "name": "Large",
+        "values": {
+          "hole_d": "10"
+        },
+        "part_number": "PL-80-L"
+      }
+    ],
+    "active_configuration": "Std",
+    "assembly": {
+      "components": [
+        {
+          "id": 1,
+          "name": "Plate",
+          "bodies": [
+            1
+          ],
+          "part_number": "PL-80"
+        },
+        {
+          "id": 2,
+          "name": "Pin",
+          "bodies": [
+            2
+          ],
+          "part_number": "PIN-6"
+        }
+      ],
+      "occurrences": [
+        {
+          "id": 1,
+          "component": 1,
+          "name": "Plate#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 2,
+          "component": 2,
+          "name": "Pin#1",
+          "placement": {
+            "translate": [
+              60.0,
+              -75.0,
+              -5.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 3,
+          "component": 2,
+          "name": "Pin#2",
+          "placement": {
+            "translate": [
+              20.0,
+              -75.0,
+              -5.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        }
+      ],
+      "next_component": 3,
+      "next_occurrence": 4,
+      "next_joint": 1
+    },
+    "drawings": [
+      {
+        "id": 1,
+        "name": "Plate",
+        "sheet": "a4_landscape",
+        "projection": "third_angle",
+        "title": {
+          "title": "Holed plate",
+          "part_number": "PL-80"
+        },
+        "views": [
+          {
+            "id": 1,
+            "kind": {
+              "base": {
+                "bodies": [
+                  1
+                ],
+                "orientation": "front",
+                "scale": 0.5,
+                "position": [
+                  83.16000000000001,
+                  75.6
+                ]
+              }
+            },
+            "annotations": [
+              {
+                "dimension": {
+                  "a": {
+                    "face": {
+                      "feature": 2,
+                      "role": "ExtrudeStartCap"
+                    }
+                  },
+                  "b": {
+                    "face": {
+                      "feature": 2,
+                      "role": "ExtrudeEndCap"
+                    }
+                  },
+                  "tolerance": {
+                    "type": "symmetric",
+                    "value": 0.1
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "above"
+              }
+            },
+            "annotations": [
+              {
+                "dimension": {
+                  "a": {
+                    "hole": 3
+                  },
+                  "b": {
+                    "hole": 4
+                  },
+                  "tolerance": {
+                    "type": "deviation",
+                    "upper": 0.05,
+                    "lower": -0.05
+                  }
+                }
+              },
+              {
+                "dimension": {
+                  "a": {
+                    "hole": 3
+                  },
+                  "tolerance": {
+                    "type": "limits",
+                    "upper": 0.1,
+                    "lower": 0.0
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "right"
+              }
+            }
+          },
+          {
+            "id": 4,
+            "kind": {
+              "section": {
+                "parent": 1,
+                "from": "right",
+                "offset": 20.0,
+                "label": "A"
+              }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "detail": {
+                "parent": 2,
+                "center": [
+                  60.0,
+                  25.0
+                ],
+                "radius": 9.0,
+                "scale": 2.0,
+                "position": [
+                  240.0,
+                  150.0
+                ],
+                "label": "B"
+              }
+            }
+          }
+        ],
+        "next_view": 6,
+        "auto_dimensions": true,
+        "notes": [
+          {
+            "text": "NOTES:\n1. BREAK SHARP EDGES 0.2\n2. GENERAL TOLERANCE ISO 2768-m",
+            "position": [
+              15.0,
+              45.0
+            ]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Assembly",
+        "sheet": "a4_landscape",
+        "projection": "third_angle",
+        "title": {
+          "title": "Pinned plate",
+          "part_number": "ASM-1"
+        },
+        "views": [
+          {
+            "id": 1,
+            "kind": {
+              "base": {
+                "bodies": [],
+                "orientation": "front",
+                "scale": 0.5,
+                "position": [
+                  83.16000000000001,
+                  75.6
+                ],
+                "assembly": true
+              }
+            },
+            "annotations": [
+              "balloons"
+            ]
+          },
+          {
+            "id": 2,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "above"
+              }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "right"
+              }
+            }
+          }
+        ],
+        "next_view": 4,
+        "auto_dimensions": true,
+        "bom": {}
+      }
+    ]
+  },
+  "cache": {
+    "volume": 565.486678,
+    "bounds": {
+      "min": [
+        -3.0,
+        97.0,
+        0.0
+      ],
+      "max": [
+        3.0,
+        103.0,
+        20.0
+      ]
+    },
+    "face_count": 5
+  }
+}
