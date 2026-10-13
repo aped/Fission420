@@ -1,0 +1,1006 @@
+{
+  "format": "r-cad",
+  "version": 7,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Leaf A sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -20.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Leaf A",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 4.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Pin hole sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 2.0
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -5.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 4.0
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Pin hole",
+        "kind": {
+          "type": "Cut",
+          "sketch": 3,
+          "extent": "ThroughAll",
+          "target": 1
+        }
+      },
+      {
+        "id": 5,
+        "name": "Leaf B sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "Leaf B",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 5,
+          "distance": 4.0,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 7,
+        "name": "Pin sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -1.25,
+                "y": -1.25
+              },
+              {
+                "id": 2,
+                "x": 1.25,
+                "y": -1.25
+              },
+              {
+                "id": 3,
+                "x": 1.25,
+                "y": 1.25
+              },
+              {
+                "id": 4,
+                "x": -1.25,
+                "y": 1.25
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -5.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 2.5
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 2.5
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 8,
+        "name": "Pin",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 7,
+          "distance": 10.0,
+          "operation": {
+            "NewBody": {
+              "body": 3
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 9,
+        "name": "Screw sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -2.0,
+                "y": -2.0
+              },
+              {
+                "id": 2,
+                "x": 2.0,
+                "y": -2.0
+              },
+              {
+                "id": 3,
+                "x": 2.0,
+                "y": 2.0
+              },
+              {
+                "id": 4,
+                "x": -2.0,
+                "y": 2.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 4.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 4.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 10,
+        "name": "Screw",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 9,
+          "distance": 8.0,
+          "operation": {
+            "NewBody": {
+              "body": 4
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 11,
+        "name": "Copy1",
+        "kind": {
+          "type": "MoveBody",
+          "body": 4,
+          "translate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "angle": 0.0,
+          "copy": 5
+        }
+      }
+    ],
+    "next_id": 12,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Body2",
+        "visible": true
+      },
+      {
+        "id": 3,
+        "name": "Body3",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "name": "Body4",
+        "visible": true
+      },
+      {
+        "id": 5,
+        "name": "Body4 (Screw copy)",
+        "visible": true
+      }
+    ],
+    "next_body_id": 6,
+    "blobs": [],
+    "next_blob_id": 1,
+    "assembly": {
+      "components": [
+        {
+          "id": 1,
+          "name": "LeafA",
+          "bodies": [
+            1
+          ],
+          "part_number": "HG-A"
+        },
+        {
+          "id": 2,
+          "name": "LeafB",
+          "bodies": [
+            2
+          ],
+          "part_number": "HG-B"
+        },
+        {
+          "id": 3,
+          "name": "Pin",
+          "bodies": [
+            3
+          ],
+          "part_number": "HG-PIN"
+        },
+        {
+          "id": 4,
+          "name": "Screw",
+          "bodies": [
+            4
+          ],
+          "part_number": "HG-M3"
+        },
+        {
+          "id": 5,
+          "name": "Screw copy",
+          "bodies": [
+            5
+          ],
+          "part_number": "HG-M3",
+          "derived_from": 4
+        },
+        {
+          "id": 6,
+          "name": "Wing",
+          "bodies": [],
+          "part_number": "HG-WING"
+        }
+      ],
+      "occurrences": [
+        {
+          "id": 1,
+          "component": 1,
+          "name": "LeafA#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "grounded": true
+        },
+        {
+          "id": 2,
+          "component": 2,
+          "name": "LeafB#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              4.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "owner": 6
+        },
+        {
+          "id": 3,
+          "component": 3,
+          "name": "Pin#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 4,
+          "component": 4,
+          "name": "Screw#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              8.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "owner": 6
+        },
+        {
+          "id": 5,
+          "component": 4,
+          "name": "Screw#2",
+          "placement": {
+            "translate": [
+              10.0,
+              8.0,
+              8.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "owner": 6
+        },
+        {
+          "id": 6,
+          "component": 4,
+          "name": "Screw#3",
+          "placement": {
+            "translate": [
+              10.0,
+              -8.0,
+              8.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "owner": 6
+        },
+        {
+          "id": 7,
+          "component": 5,
+          "name": "Screw#4",
+          "placement": {
+            "translate": [
+              0.0,
+              40.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 8,
+          "component": 6,
+          "name": "Wing#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        }
+      ],
+      "joints": [
+        {
+          "id": 1,
+          "name": "Pin fix",
+          "kind": "rigid",
+          "parent": 1,
+          "child": 3,
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "value": 0.0,
+          "rest": {
+            "r": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "t": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "id": 2,
+          "name": "Hinge",
+          "kind": "revolute",
+          "parent": 1,
+          "child": 8,
+          "origin": [
+            -5.0,
+            0.0,
+            0.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "value": 90.0,
+          "min": 0.0,
+          "max": 180.0,
+          "rest": {
+            "r": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "t": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "next_component": 7,
+      "next_occurrence": 9,
+      "next_joint": 3,
+      "explode": {
+        "O8/O5": [
+          0.0,
+          0.0,
+          20.0
+        ]
+      }
+    }
+  },
+  "cache": {
+    "volume": 128.0,
+    "bounds": {
+      "min": [
+        18.0,
+        -2.0,
+        0.0
+      ],
+      "max": [
+        22.0,
+        2.0,
+        8.0
+      ]
+    },
+    "face_count": 6
+  }
+}
