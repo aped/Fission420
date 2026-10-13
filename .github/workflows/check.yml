@@ -58,6 +58,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ inputs.name }}
+          # Keep a warm cache for legs that still fail (Windows saved none).
+          cache-on-failure: true
 
       - name: Lockfile is current
         run: cargo fetch --locked

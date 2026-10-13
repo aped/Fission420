@@ -58,7 +58,7 @@ const NEXTEST: &[&str] = &[
     "--release",
     "--no-fail-fast",
 ];
-const CARGO_TEST: &[&str] = &["test", "--workspace", "--release"];
+const CARGO_TEST: &[&str] = &["test", "--workspace", "--release", "--no-fail-fast"];
 const DOCTEST: &[&str] = &["test", "--workspace", "--release", "--doc"];
 
 /// Whether `cargo nextest` is available (optional speed-up; CI without it
