@@ -86,6 +86,9 @@ pub struct ImportForm {
     /// Face selected when the dialog opened (offered as a DXF plane).
     pub face: Option<(FaceRef, String)>,
     pub allow_partial: bool,
+    /// STEP (run 7): import the file's surface models (open shells) as one
+    /// surface body instead of its solids.
+    pub surfaces: bool,
     /// Submitted: the request token (sequence number) of the import command
     /// whose reply this form waits for. A reply with another token (an import
     /// from a cancelled or replaced form) never touches this form.
@@ -119,6 +122,12 @@ impl ImportForm {
                 units_to_mm: self.needs_units.then_some(unit),
                 allow_partial: self.allow_partial,
             },
+            Format::Step if self.surfaces => {
+                Command::ImportSurfaces(rcad_commands::sheet_surface::ImportSurfacesArgs {
+                    path,
+                    units_to_mm: self.needs_units.then_some(unit),
+                })
+            }
             Format::Step => Command::ImportStep {
                 path,
                 units_to_mm: self.needs_units.then_some(unit),
@@ -169,6 +178,7 @@ fn is_import(cmd: &Command) -> bool {
     matches!(
         cmd,
         Command::ImportStep { .. }
+            | Command::ImportSurfaces(_)
             | Command::ImportStl { .. }
             | Command::ImportDxf { .. }
             | Command::Import3mf { .. }
@@ -188,6 +198,7 @@ impl RcadApp {
             plane: DxfPlane::WorldXY,
             face,
             allow_partial: false,
+            surfaces: false,
             pending: None,
             error: None,
         }));
@@ -363,6 +374,7 @@ impl RcadApp {
         }
         if fmt == Some(Format::Step) {
             ui.small("Each solid becomes a separate exact body (no feature history). The file is embedded in the document.");
+            crate::sheet_ui::import_surfaces_toggle(ui, &mut form.surfaces);
         }
         if form.pending.is_some() {
             ui.horizontal(|ui| {

@@ -87,3 +87,15 @@ Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware
 | `prismatic::RING_CHORDS` | 64, 128, 256, 512 per turn | construction | ring resolutions tried; at least 2 chords between consecutive special points |
 | boolean output clean (`prismatic::clean_contour`) | `FACE_MATCH` | geometric | near-duplicate / collinear / spike vertices and sliver contours (area ≤ FACE_MATCH × half-perimeter) of 2-D boolean outputs are removed |
 | arc-corpus oracle (`tests/arc_fuzz.rs`) | volume: 1e-6 × V + 10 × integration error estimate; probes skipped within 0.05 mm of a primitive boundary or level | acceptance | independent CSG oracle for the seeded round/rounded cut corpus |
+
+
+## Added run 7 (ADR 0012, sheet bodies and surface repair)
+
+| name | value | kind | meaning |
+|---|---|---|---|
+| `sheet::GLUE_TOL` (rcad-document) | 1e-7 mm | construction | vertex/edge merge when gluing the plate and flange prisms (pieces share exact points up to rounding) |
+| healing tolerance (`stitch_surface`, `fill_surface`) | user value in [0, 1] mm, default 1e-6 | geometric, displayed | vertices/edge midpoints closer than this merge; boundary loops planar within this can be filled; shown in the feature notes |
+| gap search (`analyze_surface`) | user value, default 0.1 mm | report | free-edge pairs closer than this are reported as gaps (sizes reported, nothing changed) |
+| flange footprint overlap / plate clearance | 1e-7 mm | geometric | footprints overlapping by more than this (strictly) are refused; touching is allowed |
+| `merge_collinear` (flat outline) | sin angle < 1e-12 | export | collinear consecutive CUT lines become one line |
+| sheet base line matching | 1e-9 × (1 + |p|) mm | geometric | a profile segment carries the sketch line whose end points coincide with it |

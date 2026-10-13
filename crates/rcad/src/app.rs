@@ -418,6 +418,8 @@ pub struct RcadApp {
     /// Sheet-metal flange form: thickness, radius, K, width; flat-pattern path.
     pub(crate) sheet_form: [String; 4],
     pub(crate) flat_path: String,
+    /// Run 7 sheet-metal / surface forms (crate::sheet_ui).
+    pub(crate) sheet_surface: crate::sheet_ui::SheetSurfaceForm,
     /// Wall thickness typed for "Shell from this face" (run 6).
     pub(crate) shell_thickness: String,
     pub(crate) scale_factor: String,
@@ -528,6 +530,7 @@ impl RcadApp {
             move_form: Default::default(),
             sheet_form: ["1".into(), "2".into(), "0.44".into(), "40".into()],
             flat_path: String::new(),
+            sheet_surface: Default::default(),
             shell_thickness: "2".into(),
             scale_factor: "1".into(),
             split_form: (0, "0".into()),
@@ -1113,6 +1116,7 @@ impl RcadApp {
         }
         self.body_props.on_reply(&response, &summary);
         self.exact_measure.on_reply(&response, &summary);
+        self.sheet_surface.on_reply(&response, &summary, &command);
         self.assembly_ui.on_reply(&response, &summary);
         self.drawing_ui.on_reply(&response, &summary);
         if doc_changed {

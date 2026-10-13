@@ -1,0 +1,9 @@
+[
+ {"cmd": "new_document"},
+ {"cmd": "import_surfaces", "path": "${STEP_FIXTURES}/gap_box_mm.step"},
+ {"cmd": "analyze_surface", "body": 1, "search": 0.1},
+ {"cmd": "stitch_surface", "body": 1, "tolerance": 0.05, "body_name": "Gap box stitched"},
+ {"cmd": "fill_surface", "body": 2, "tolerance": 0.05, "body_name": "Gap box solid"},
+ {"cmd": "import_surfaces", "path": "${STEP_FIXTURES}/half_tube_mm.step"},
+ {"cmd": "thicken_surface", "body": 4, "distance": 2, "body_name": "Half tube 2 mm"}
+]

@@ -1,0 +1,217 @@
+{
+  "format": "r-cad",
+  "version": 7,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Channel base",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -30.0,
+                "y": -20.0
+              },
+              {
+                "id": 2,
+                "x": 30.0,
+                "y": -20.0
+              },
+              {
+                "id": 3,
+                "x": 30.0,
+                "y": 20.0
+              },
+              {
+                "id": 4,
+                "x": -30.0,
+                "y": 20.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 30.0,
+                  "y": 20.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 60.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Sheet",
+        "kind": {
+          "type": "SheetBase",
+          "sketch": 1,
+          "rule": {
+            "thickness": 1.0,
+            "radius": 2.0,
+            "k_factor": 0.4,
+            "relief": "rectangular",
+            "relief_width": 1.0,
+            "relief_depth": 1.0
+          },
+          "body": 1
+        }
+      },
+      {
+        "id": 3,
+        "name": "Right flange",
+        "kind": {
+          "type": "SheetFlange",
+          "base": 2,
+          "body": 1,
+          "edge": 2,
+          "angle": 1.5707963267948966,
+          "length": 20.0,
+          "start_offset": 0.0,
+          "end_offset": 0.0
+        }
+      },
+      {
+        "id": 4,
+        "name": "Left flange",
+        "kind": {
+          "type": "SheetFlange",
+          "base": 2,
+          "body": 1,
+          "edge": 4,
+          "angle": 1.5707963267948966,
+          "length": 20.0,
+          "start_offset": 0.0,
+          "end_offset": 0.0
+        }
+      },
+      {
+        "id": 5,
+        "name": "Flat pattern1",
+        "kind": {
+          "type": "SheetFlat",
+          "base": 2,
+          "body": 2
+        }
+      }
+    ],
+    "next_id": 6,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "U-channel",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "U-channel (flat)",
+        "visible": false
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 4301.592895,
+    "bounds": {
+      "min": [
+        -23.769911184,
+        0.0,
+        0.0
+      ],
+      "max": [
+        83.769911184,
+        40.0,
+        1.0
+      ]
+    },
+    "face_count": 6
+  }
+}

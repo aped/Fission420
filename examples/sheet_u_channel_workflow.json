@@ -1,0 +1,12 @@
+[
+ {"cmd": "new_document"},
+ {"cmd": "create_sketch", "name": "Channel base", "plane": "WorldXY",
+  "template": "centered_rectangle", "width": 60, "height": 40, "center": [30, 20]},
+ {"cmd": "sheet_base", "name": "Sheet", "sketch": 1, "thickness": 1, "radius": 2,
+  "k_factor": 0.4, "body_name": "U-channel"},
+ {"cmd": "sheet_flange", "name": "Right flange", "base": 2, "edge": 2,
+  "angle_deg": 90, "length": 20},
+ {"cmd": "sheet_flange", "name": "Left flange", "base": 2, "edge": 4,
+  "angle_deg": 90, "length": 20},
+ {"cmd": "sheet_flat_state", "base": 2, "flat": false}
+]

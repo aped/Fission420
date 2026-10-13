@@ -1,0 +1,122 @@
+{
+  "format": "r-cad",
+  "version": 7,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Surfaces1",
+        "kind": {
+          "type": "ImportSurfaces",
+          "blob": 1,
+          "unit_override_to_mm": null,
+          "body": 1
+        }
+      },
+      {
+        "id": 2,
+        "name": "Stitch1",
+        "kind": {
+          "type": "SurfaceStitch",
+          "source": 1,
+          "tolerance": 0.05,
+          "body": 2
+        }
+      },
+      {
+        "id": 3,
+        "name": "Fill1",
+        "kind": {
+          "type": "SurfaceFill",
+          "source": 2,
+          "tolerance": 0.05,
+          "body": 3
+        }
+      },
+      {
+        "id": 4,
+        "name": "Surfaces2",
+        "kind": {
+          "type": "ImportSurfaces",
+          "blob": 2,
+          "unit_override_to_mm": null,
+          "body": 4
+        }
+      },
+      {
+        "id": 5,
+        "name": "Thicken1",
+        "kind": {
+          "type": "Thicken",
+          "source": 4,
+          "distance": 2.0,
+          "body": 5
+        }
+      }
+    ],
+    "next_id": 6,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "gap_box_mm surfaces",
+        "visible": false
+      },
+      {
+        "id": 2,
+        "name": "Gap box stitched",
+        "visible": false
+      },
+      {
+        "id": 3,
+        "name": "Gap box solid",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "name": "half_tube_mm surfaces",
+        "visible": false
+      },
+      {
+        "id": 5,
+        "name": "Half tube 2 mm",
+        "visible": true
+      }
+    ],
+    "next_body_id": 6,
+    "blobs": [
+      {
+        "id": 1,
+        "file_name": "gap_box_mm.step",
+        "len": 8937,
+        "fnv64": "bb54dc749afc07ff",
+        "encoding": "Text",
+        "data": "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('FreeCAD Model'),'2;1');\nFILE_NAME('Open CASCADE Shape Model','2026-10-13T11:20:25',('FreeCAD'),(\n    'FreeCAD'),'Open CASCADE STEP processor 7.8','FreeCAD','Unknown');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n#1 = APPLICATION_PROTOCOL_DEFINITION('international standard',\n  'automotive_design',2000,#2);\n#2 = APPLICATION_CONTEXT(\n  'core data for automotive mechanical design processes');\n#3 = SHAPE_DEFINITION_REPRESENTATION(#4,#10);\n#4 = PRODUCT_DEFINITION_SHAPE('','',#5);\n#5 = PRODUCT_DEFINITION('design','',#6,#9);\n#6 = PRODUCT_DEFINITION_FORMATION('','',#7);\n#7 = PRODUCT('Open CASCADE STEP translator 7.8 3',\n  'Open CASCADE STEP translator 7.8 3','',(#8));\n#8 = PRODUCT_CONTEXT('',#2,'mechanical');\n#9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');\n#10 = SHAPE_REPRESENTATION('',(#11,#15,#57,#99,#141,#183),#225);\n#11 = AXIS2_PLACEMENT_3D('',#12,#13,#14);\n#12 = CARTESIAN_POINT('',(0.,0.,0.));\n#13 = DIRECTION('',(0.,0.,1.));\n#14 = DIRECTION('',(1.,0.,-0.));\n#15 = SHELL_BASED_SURFACE_MODEL('',(#16));\n#16 = OPEN_SHELL('',(#17));\n#17 = ADVANCED_FACE('',(#18),#52,.F.);\n#18 = FACE_BOUND('',#19,.F.);\n#19 = EDGE_LOOP('',(#20,#30,#38,#46));\n#20 = ORIENTED_EDGE('',*,*,#21,.F.);\n#21 = EDGE_CURVE('',#22,#24,#26,.T.);\n#22 = VERTEX_POINT('',#23);\n#23 = CARTESIAN_POINT('',(0.,0.,0.));\n#24 = VERTEX_POINT('',#25);\n#25 = CARTESIAN_POINT('',(0.,0.,20.));\n#26 = LINE('',#27,#28);\n#27 = CARTESIAN_POINT('',(0.,0.,0.));\n#28 = VECTOR('',#29,1.);\n#29 = DIRECTION('',(0.,0.,1.));\n#30 = ORIENTED_EDGE('',*,*,#31,.T.);\n#31 = EDGE_CURVE('',#22,#32,#34,.T.);\n#32 = VERTEX_POINT('',#33);\n#33 = CARTESIAN_POINT('',(0.,30.,0.));\n#34 = LINE('',#35,#36);\n#35 = CARTESIAN_POINT('',(0.,0.,0.));\n#36 = VECTOR('',#37,1.);\n#37 = DIRECTION('',(-0.,1.,0.));\n#38 = ORIENTED_EDGE('',*,*,#39,.T.);\n#39 = EDGE_CURVE('',#32,#40,#42,.T.);\n#40 = VERTEX_POINT('',#41);\n#41 = CARTESIAN_POINT('',(0.,30.,20.));\n#42 = LINE('',#43,#44);\n#43 = CARTESIAN_POINT('',(0.,30.,0.));\n#44 = VECTOR('',#45,1.);\n#45 = DIRECTION('',(0.,0.,1.));\n#46 = ORIENTED_EDGE('',*,*,#47,.F.);\n#47 = EDGE_CURVE('',#24,#40,#48,.T.);\n#48 = LINE('',#49,#50);\n#49 = CARTESIAN_POINT('',(0.,0.,20.));\n#50 = VECTOR('',#51,1.);\n#51 = DIRECTION('',(-0.,1.,0.));\n#52 = PLANE('',#53);\n#53 = AXIS2_PLACEMENT_3D('',#54,#55,#56);\n#54 = CARTESIAN_POINT('',(0.,0.,0.));\n#55 = DIRECTION('',(1.,0.,-0.));\n#56 = DIRECTION('',(0.,0.,1.));\n#57 = SHELL_BASED_SURFACE_MODEL('',(#58));\n#58 = OPEN_SHELL('',(#59));\n#59 = ADVANCED_FACE('',(#60),#94,.T.);\n#60 = FACE_BOUND('',#61,.T.);\n#61 = EDGE_LOOP('',(#62,#72,#80,#88));\n#62 = ORIENTED_EDGE('',*,*,#63,.F.);\n#63 = EDGE_CURVE('',#64,#66,#68,.T.);\n#64 = VERTEX_POINT('',#65);\n#65 = CARTESIAN_POINT('',(40.02,0.,0.));\n#66 = VERTEX_POINT('',#67);\n#67 = CARTESIAN_POINT('',(40.02,0.,20.));\n#68 = LINE('',#69,#70);\n#69 = CARTESIAN_POINT('',(40.02,0.,0.));\n#70 = VECTOR('',#71,1.);\n#71 = DIRECTION('',(0.,0.,1.));\n#72 = ORIENTED_EDGE('',*,*,#73,.T.);\n#73 = EDGE_CURVE('',#64,#74,#76,.T.);\n#74 = VERTEX_POINT('',#75);\n#75 = CARTESIAN_POINT('',(40.02,30.,0.));\n#76 = LINE('',#77,#78);\n#77 = CARTESIAN_POINT('',(40.02,0.,0.));\n#78 = VECTOR('',#79,1.);\n#79 = DIRECTION('',(-0.,1.,0.));\n#80 = ORIENTED_EDGE('',*,*,#81,.T.);\n#81 = EDGE_CURVE('',#74,#82,#84,.T.);\n#82 = VERTEX_POINT('',#83);\n#83 = CARTESIAN_POINT('',(40.02,30.,20.));\n#84 = LINE('',#85,#86);\n#85 = CARTESIAN_POINT('',(40.02,30.,0.));\n#86 = VECTOR('',#87,1.);\n#87 = DIRECTION('',(0.,0.,1.));\n#88 = ORIENTED_EDGE('',*,*,#89,.F.);\n#89 = EDGE_CURVE('',#66,#82,#90,.T.);\n#90 = LINE('',#91,#92);\n#91 = CARTESIAN_POINT('',(40.02,0.,20.));\n#92 = VECTOR('',#93,1.);\n#93 = DIRECTION('',(-0.,1.,0.));\n#94 = PLANE('',#95);\n#95 = AXIS2_PLACEMENT_3D('',#96,#97,#98);\n#96 = CARTESIAN_POINT('',(40.02,0.,0.));\n#97 = DIRECTION('',(1.,0.,-0.));\n#98 = DIRECTION('',(0.,0.,1.));\n#99 = SHELL_BASED_SURFACE_MODEL('',(#100));\n#100 = OPEN_SHELL('',(#101));\n#101 = ADVANCED_FACE('',(#102),#136,.F.);\n#102 = FACE_BOUND('',#103,.F.);\n#103 = EDGE_LOOP('',(#104,#114,#122,#130));\n#104 = ORIENTED_EDGE('',*,*,#105,.F.);\n#105 = EDGE_CURVE('',#106,#108,#110,.T.);\n#106 = VERTEX_POINT('',#107);\n#107 = CARTESIAN_POINT('',(0.,0.,0.));\n#108 = VERTEX_POINT('',#109);\n#109 = CARTESIAN_POINT('',(40.,0.,0.));\n#110 = LINE('',#111,#112);\n#111 = CARTESIAN_POINT('',(0.,0.,0.));\n#112 = VECTOR('',#113,1.);\n#113 = DIRECTION('',(1.,0.,-0.));\n#114 = ORIENTED_EDGE('',*,*,#115,.T.);\n#115 = EDGE_CURVE('',#106,#116,#118,.T.);\n#116 = VERTEX_POINT('',#117);\n#117 = CARTESIAN_POINT('',(0.,0.,20.));\n#118 = LINE('',#119,#120);\n#119 = CARTESIAN_POINT('',(0.,0.,0.));\n#120 = VECTOR('',#121,1.);\n#121 = DIRECTION('',(0.,0.,1.));\n#122 = ORIENTED_EDGE('',*,*,#123,.T.);\n#123 = EDGE_CURVE('',#116,#124,#126,.T.);\n#124 = VERTEX_POINT('',#125);\n#125 = CARTESIAN_POINT('',(40.,0.,20.));\n#126 = LINE('',#127,#128);\n#127 = CARTESIAN_POINT('',(0.,0.,20.));\n#128 = VECTOR('',#129,1.);\n#129 = DIRECTION('',(1.,0.,-0.));\n#130 = ORIENTED_EDGE('',*,*,#131,.F.);\n#131 = EDGE_CURVE('',#108,#124,#132,.T.);\n#132 = LINE('',#133,#134);\n#133 = CARTESIAN_POINT('',(40.,0.,0.));\n#134 = VECTOR('',#135,1.);\n#135 = DIRECTION('',(0.,0.,1.));\n#136 = PLANE('',#137);\n#137 = AXIS2_PLACEMENT_3D('',#138,#139,#140);\n#138 = CARTESIAN_POINT('',(0.,0.,0.));\n#139 = DIRECTION('',(-0.,1.,0.));\n#140 = DIRECTION('',(0.,0.,1.));\n#141 = SHELL_BASED_SURFACE_MODEL('',(#142));\n#142 = OPEN_SHELL('',(#143));\n#143 = ADVANCED_FACE('',(#144),#178,.T.);\n#144 = FACE_BOUND('',#145,.T.);\n#145 = EDGE_LOOP('',(#146,#156,#164,#172));\n#146 = ORIENTED_EDGE('',*,*,#147,.F.);\n#147 = EDGE_CURVE('',#148,#150,#152,.T.);\n#148 = VERTEX_POINT('',#149);\n#149 = CARTESIAN_POINT('',(0.,30.,0.));\n#150 = VERTEX_POINT('',#151);\n#151 = CARTESIAN_POINT('',(40.,30.,0.));\n#152 = LINE('',#153,#154);\n#153 = CARTESIAN_POINT('',(0.,30.,0.));\n#154 = VECTOR('',#155,1.);\n#155 = DIRECTION('',(1.,0.,-0.));\n#156 = ORIENTED_EDGE('',*,*,#157,.T.);\n#157 = EDGE_CURVE('',#148,#158,#160,.T.);\n#158 = VERTEX_POINT('',#159);\n#159 = CARTESIAN_POINT('',(0.,30.,20.));\n#160 = LINE('',#161,#162);\n#161 = CARTESIAN_POINT('',(0.,30.,0.));\n#162 = VECTOR('',#163,1.);\n#163 = DIRECTION('',(0.,0.,1.));\n#164 = ORIENTED_EDGE('',*,*,#165,.T.);\n#165 = EDGE_CURVE('',#158,#166,#168,.T.);\n#166 = VERTEX_POINT('',#167);\n#167 = CARTESIAN_POINT('',(40.,30.,20.));\n#168 = LINE('',#169,#170);\n#169 = CARTESIAN_POINT('',(0.,30.,20.));\n#170 = VECTOR('',#171,1.);\n#171 = DIRECTION('',(1.,0.,-0.));\n#172 = ORIENTED_EDGE('',*,*,#173,.F.);\n#173 = EDGE_CURVE('',#150,#166,#174,.T.);\n#174 = LINE('',#175,#176);\n#175 = CARTESIAN_POINT('',(40.,30.,0.));\n#176 = VECTOR('',#177,1.);\n#177 = DIRECTION('',(0.,0.,1.));\n#178 = PLANE('',#179);\n#179 = AXIS2_PLACEMENT_3D('',#180,#181,#182);\n#180 = CARTESIAN_POINT('',(0.,30.,0.));\n#181 = DIRECTION('',(-0.,1.,0.));\n#182 = DIRECTION('',(0.,0.,1.));\n#183 = SHELL_BASED_SURFACE_MODEL('',(#184));\n#184 = OPEN_SHELL('',(#185));\n#185 = ADVANCED_FACE('',(#186),#220,.F.);\n#186 = FACE_BOUND('',#187,.F.);\n#187 = EDGE_LOOP('',(#188,#198,#206,#214));\n#188 = ORIENTED_EDGE('',*,*,#189,.F.);\n#189 = EDGE_CURVE('',#190,#192,#194,.T.);\n#190 = VERTEX_POINT('',#191);\n#191 = CARTESIAN_POINT('',(0.,0.,0.));\n#192 = VERTEX_POINT('',#193);\n#193 = CARTESIAN_POINT('',(0.,30.,0.));\n#194 = LINE('',#195,#196);\n#195 = CARTESIAN_POINT('',(0.,0.,0.));\n#196 = VECTOR('',#197,1.);\n#197 = DIRECTION('',(-0.,1.,0.));\n#198 = ORIENTED_EDGE('',*,*,#199,.T.);\n#199 = EDGE_CURVE('',#190,#200,#202,.T.);\n#200 = VERTEX_POINT('',#201);\n#201 = CARTESIAN_POINT('',(40.,0.,0.));\n#202 = LINE('',#203,#204);\n#203 = CARTESIAN_POINT('',(0.,0.,0.));\n#204 = VECTOR('',#205,1.);\n#205 = DIRECTION('',(1.,0.,-0.));\n#206 = ORIENTED_EDGE('',*,*,#207,.T.);\n#207 = EDGE_CURVE('',#200,#208,#210,.T.);\n#208 = VERTEX_POINT('',#209);\n#209 = CARTESIAN_POINT('',(40.,30.,0.));\n#210 = LINE('',#211,#212);\n#211 = CARTESIAN_POINT('',(40.,0.,0.));\n#212 = VECTOR('',#213,1.);\n#213 = DIRECTION('',(-0.,1.,0.));\n#214 = ORIENTED_EDGE('',*,*,#215,.F.);\n#215 = EDGE_CURVE('',#192,#208,#216,.T.);\n#216 = LINE('',#217,#218);\n#217 = CARTESIAN_POINT('',(0.,30.,0.));\n#218 = VECTOR('',#219,1.);\n#219 = DIRECTION('',(1.,0.,-0.));\n#220 = PLANE('',#221);\n#221 = AXIS2_PLACEMENT_3D('',#222,#223,#224);\n#222 = CARTESIAN_POINT('',(0.,0.,0.));\n#223 = DIRECTION('',(0.,0.,1.));\n#224 = DIRECTION('',(1.,0.,-0.));\n#225 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) \nGLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#229)) GLOBAL_UNIT_ASSIGNED_CONTEXT\n((#226,#227,#228)) REPRESENTATION_CONTEXT('Context #1',\n  '3D Context with UNIT and UNCERTAINTY') );\n#226 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );\n#227 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );\n#228 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );\n#229 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#226,\n  'distance_accuracy_value','confusion accuracy');\n#230 = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#7));\nENDSEC;\nEND-ISO-10303-21;\n"
+      },
+      {
+        "id": 2,
+        "file_name": "half_tube_mm.step",
+        "len": 3278,
+        "fnv64": "482c884aa4351323",
+        "encoding": "Text",
+        "data": "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('FreeCAD Model'),'2;1');\nFILE_NAME('Open CASCADE Shape Model','2026-10-13T11:20:25',('FreeCAD'),(\n    'FreeCAD'),'Open CASCADE STEP processor 7.8','FreeCAD','Unknown');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n#1 = APPLICATION_PROTOCOL_DEFINITION('international standard',\n  'automotive_design',2000,#2);\n#2 = APPLICATION_CONTEXT(\n  'core data for automotive mechanical design processes');\n#3 = SHAPE_DEFINITION_REPRESENTATION(#4,#10);\n#4 = PRODUCT_DEFINITION_SHAPE('','',#5);\n#5 = PRODUCT_DEFINITION('design','',#6,#9);\n#6 = PRODUCT_DEFINITION_FORMATION('','',#7);\n#7 = PRODUCT('Open CASCADE STEP translator 7.8 5',\n  'Open CASCADE STEP translator 7.8 5','',(#8));\n#8 = PRODUCT_CONTEXT('',#2,'mechanical');\n#9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');\n#10 = MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#11,#15),#59);\n#11 = AXIS2_PLACEMENT_3D('',#12,#13,#14);\n#12 = CARTESIAN_POINT('',(0.,0.,0.));\n#13 = DIRECTION('',(0.,0.,1.));\n#14 = DIRECTION('',(1.,0.,-0.));\n#15 = SHELL_BASED_SURFACE_MODEL('',(#16));\n#16 = OPEN_SHELL('',(#17));\n#17 = ADVANCED_FACE('',(#18),#54,.T.);\n#18 = FACE_BOUND('',#19,.T.);\n#19 = EDGE_LOOP('',(#20,#30,#39,#47));\n#20 = ORIENTED_EDGE('',*,*,#21,.F.);\n#21 = EDGE_CURVE('',#22,#24,#26,.T.);\n#22 = VERTEX_POINT('',#23);\n#23 = CARTESIAN_POINT('',(-1.836970198721E-15,-10.,0.));\n#24 = VERTEX_POINT('',#25);\n#25 = CARTESIAN_POINT('',(-1.836970198721E-15,-10.,30.));\n#26 = LINE('',#27,#28);\n#27 = CARTESIAN_POINT('',(-1.836970198721E-15,-10.,0.));\n#28 = VECTOR('',#29,1.);\n#29 = DIRECTION('',(0.,0.,1.));\n#30 = ORIENTED_EDGE('',*,*,#31,.T.);\n#31 = EDGE_CURVE('',#22,#32,#34,.T.);\n#32 = VERTEX_POINT('',#33);\n#33 = CARTESIAN_POINT('',(3.061616997868E-15,10.,0.));\n#34 = CIRCLE('',#35,10.);\n#35 = AXIS2_PLACEMENT_3D('',#36,#37,#38);\n#36 = CARTESIAN_POINT('',(0.,0.,0.));\n#37 = DIRECTION('',(0.,0.,1.));\n#38 = DIRECTION('',(1.,0.,-0.));\n#39 = ORIENTED_EDGE('',*,*,#40,.T.);\n#40 = EDGE_CURVE('',#32,#41,#43,.T.);\n#41 = VERTEX_POINT('',#42);\n#42 = CARTESIAN_POINT('',(3.061616997868E-15,10.,30.));\n#43 = LINE('',#44,#45);\n#44 = CARTESIAN_POINT('',(3.061616997868E-15,10.,0.));\n#45 = VECTOR('',#46,1.);\n#46 = DIRECTION('',(0.,0.,1.));\n#47 = ORIENTED_EDGE('',*,*,#48,.F.);\n#48 = EDGE_CURVE('',#24,#41,#49,.T.);\n#49 = CIRCLE('',#50,10.);\n#50 = AXIS2_PLACEMENT_3D('',#51,#52,#53);\n#51 = CARTESIAN_POINT('',(0.,0.,30.));\n#52 = DIRECTION('',(0.,0.,1.));\n#53 = DIRECTION('',(1.,0.,-0.));\n#54 = CYLINDRICAL_SURFACE('',#55,10.);\n#55 = AXIS2_PLACEMENT_3D('',#56,#57,#58);\n#56 = CARTESIAN_POINT('',(0.,0.,0.));\n#57 = DIRECTION('',(0.,0.,1.));\n#58 = DIRECTION('',(1.,0.,0.));\n#59 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) \nGLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#63)) GLOBAL_UNIT_ASSIGNED_CONTEXT(\n(#60,#61,#62)) REPRESENTATION_CONTEXT('Context #1',\n  '3D Context with UNIT and UNCERTAINTY') );\n#60 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );\n#61 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );\n#62 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );\n#63 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#60,\n  'distance_accuracy_value','confusion accuracy');\n#64 = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#7));\nENDSEC;\nEND-ISO-10303-21;\n"
+      }
+    ],
+    "next_blob_id": 3
+  },
+  "cache": {
+    "volume": 2073.451151,
+    "bounds": {
+      "min": [
+        0.0,
+        -12.0,
+        0.0
+      ],
+      "max": [
+        12.0,
+        12.0,
+        30.0
+      ]
+    },
+    "face_count": 8
+  }
+}
