@@ -38,6 +38,7 @@ fn ordinary_cut_and_join_pass() {
     let out = cut_prism(&p, &hole, &start, 14.0).unwrap();
     let nominal = Prism {
         profile: &hole,
+        holes: &[],
         start: &start,
         length: 14.0,
     };
@@ -48,6 +49,7 @@ fn ordinary_cut_and_join_pass() {
     let j = join_prism(&p, &boss, &top.offset(-0.5), 5.5).unwrap();
     let nominal = Prism {
         profile: &boss,
+        holes: &[],
         start: &top,
         length: 5.0,
     };
@@ -78,6 +80,7 @@ fn swallowed_hole_cut_is_detected() {
     );
     let nominal = Prism {
         profile: &big,
+        holes: &[],
         start: &start,
         length: 14.0,
     };
@@ -115,6 +118,7 @@ fn join_overlap_into_a_cavity_is_detected_and_clear_depth_avoids_it() {
     let boss = rect(-2.0, -2.0, 2.0, 2.0);
     let nominal = Prism {
         profile: &boss,
+        holes: &[],
         start: &top,
         length: 5.0,
     };
@@ -240,6 +244,7 @@ fn unapplied_tool_is_detected() {
     let start = Frame::XY.offset(-1.0);
     let cut = Prism {
         profile: &small,
+        holes: &[],
         start: &start,
         length: 12.0,
     };
@@ -252,6 +257,7 @@ fn unapplied_tool_is_detected() {
     let boss = rect(40.0, 20.0, 44.0, 24.0);
     let join = Prism {
         profile: &boss,
+        holes: &[],
         start: &top,
         length: 5.0,
     };
@@ -400,4 +406,51 @@ fn zz_brep_edge_determinism() {
         }
     }
     eprintln!("faces A {:?}\nfaces B {:?}", d1.1, d2.1);
+}
+
+/// Review run 5 #1: the interior probes sampled a 7 x 7 grid of the outer
+/// loop's bounding box with a 1 % margin, so a ring (Ø40 minus Ø38) or a
+/// 0.5 mm slot got no sample and an unapplied tool passed with no evidence.
+/// The samples now come from the actual region (grid plus chord midpoints
+/// along inward normals at boundary edges).
+#[test]
+fn ring_and_thin_slot_tools_are_sampled() {
+    let block = extrude(&rect(0.0, 0.0, 60.0, 60.0), &Frame::XY, 10.0).unwrap();
+    let start = Frame::XY.offset(6.0);
+    let ring_outer = Profile::Circle {
+        center: [30.0, 30.0],
+        radius: 20.0,
+    };
+    let ring_hole = [Profile::Circle {
+        center: [30.0, 30.0],
+        radius: 19.0,
+    }];
+    let slot = rect(10.0, 29.75, 50.0, 30.25);
+    for (outer, holes) in [(&ring_outer, &ring_hole[..]), (&slot, &[][..])] {
+        let prism = Prism {
+            profile: outer,
+            holes,
+            start: &start,
+            length: 4.0,
+        };
+        // Applied exactly (slab construction): passes.
+        let cut = crate::prismatic::prism_region_boolean(
+            &block,
+            outer,
+            holes,
+            &start,
+            4.0,
+            crate::prismatic::SlabOp::Cut,
+        )
+        .unwrap();
+        verify_prism_boolean(&block, &cut, PrismOp::Cut, &prism, (0.0, 4.0)).unwrap();
+        // Not applied (the target returned unchanged): refused.
+        let e = verify_prism_boolean(&block, &block, PrismOp::Cut, &prism, (0.0, 4.0))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("was not applied") || e.contains("does not bound"),
+            "{e}"
+        );
+    }
 }

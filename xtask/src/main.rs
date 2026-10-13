@@ -51,7 +51,31 @@ fn check_layout() -> bool {
     }
 }
 
+const NEXTEST: &[&str] = &[
+    "nextest",
+    "run",
+    "--workspace",
+    "--release",
+    "--no-fail-fast",
+];
+const CARGO_TEST: &[&str] = &["test", "--workspace", "--release"];
+const DOCTEST: &[&str] = &["test", "--workspace", "--release", "--doc"];
+
+/// Whether `cargo nextest` is available (optional speed-up; CI without it
+/// runs plain `cargo test`).
+fn nextest() -> bool {
+    Command::new(env!("CARGO"))
+        .args(["nextest", "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn run(stage: &str, args: &[&str]) -> bool {
+    if args.is_empty() {
+        return true; // stage not applicable (e.g. doctest without nextest)
+    }
     eprintln!("==> {stage}: cargo {}", args.join(" "));
     let t = std::time::Instant::now();
     let ok = Command::new(env!("CARGO"))
@@ -89,7 +113,10 @@ fn main() -> ExitCode {
                 "warnings",
             ],
         ),
-        ("test", &["test", "--workspace", "--release"]),
+        // Tests: cargo-nextest when installed (one process per test, all
+        // binaries in parallel; doc tests separately), else cargo test.
+        ("test", if nextest() { NEXTEST } else { CARGO_TEST }),
+        ("doctest", if nextest() { DOCTEST } else { &[] }),
         (
             "acceptance",
             &[
@@ -221,6 +248,30 @@ fn main() -> ExitCode {
                 "--",
                 "run",
                 "examples/mounting_bracket_workflow.json",
+            ],
+        ),
+        (
+            "organizer tray example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/organizer_tray_workflow.json",
+            ],
+        ),
+        (
+            "organizer tray (finished) example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/organizer_tray_finished_workflow.json",
             ],
         ),
     ];

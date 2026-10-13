@@ -111,7 +111,8 @@ fn sketch_on_a_plane_offset_from_the_selected_face() {
         f.plane,
         Some(SketchPlane::Offset {
             base: PlaneBase::Face(top),
-            distance: 5.0
+            distance: 5.0,
+            angle: 0.0,
         })
     );
     assert!(f.parameters.contains(&("plane_offset".to_string(), 5.0)));

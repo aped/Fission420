@@ -42,6 +42,9 @@ enum Eq {
     /// `(p - c)·(q - p) / |q - p|`: component of the radius vector `p - c` along
     /// the line `p -> q` (mm); zero when the line is tangent at `p`.
     Tangent { p: usize, c: usize, q: usize },
+    /// `(p - c1) × (p - c2) / |p - c2|` (mm): zero when the radius vectors of
+    /// two arcs at their shared point `p` are collinear (tangent arcs).
+    TangentArcs { p: usize, c1: usize, c2: usize },
     /// `|a - c| - x[r]` (point x columns `c`, `a`; radius column `r`).
     DistVar { c: usize, a: usize, r: usize },
     /// Line-line angle: `k · (u_a × u_b)` (`perp == false`, parallel) or
@@ -154,6 +157,10 @@ impl Eq {
                 let (ux, uy, _) = unit(x, p, q);
                 (x[p] - x[c]) * ux + (x[p + 1] - x[c + 1]) * uy
             }
+            Eq::TangentArcs { p, c1, c2 } => {
+                let (ux, uy, _) = unit(x, c2, p);
+                (x[p] - x[c1]) * uy - (x[p + 1] - x[c1 + 1]) * ux
+            }
             Eq::DistVar { c, a, r } => (x[a] - x[c]).hypot(x[a + 1] - x[c + 1]) - x[r],
             Eq::LineAngle {
                 a0,
@@ -255,6 +262,26 @@ impl Eq {
                 j[(row, c + 1)] -= uy;
                 j[(row, q)] += wx;
                 j[(row, q + 1)] += wy;
+            }
+            Eq::TangentArcs { p, c1, c2 } => {
+                // f = v × u, v = p - c1, u = (p - c2)/L. df/dv = (uy, -ux);
+                // df/du = g = (-vy, vx); df/dw = (g - (g·u) u) / L for w = p - c2
+                // (zero below the length floor, where u is fixed).
+                let (ux, uy, l) = unit(x, c2, p);
+                let (vx, vy) = (x[p] - x[c1], x[p + 1] - x[c1 + 1]);
+                let (gx, gy) = (-vy, vx);
+                let gu = gx * ux + gy * uy;
+                let (wx, wy) = if l > DIST_GRAD_FLOOR {
+                    ((gx - gu * ux) / l, (gy - gu * uy) / l)
+                } else {
+                    (0.0, 0.0)
+                };
+                j[(row, p)] += uy + wx;
+                j[(row, p + 1)] += -ux + wy;
+                j[(row, c1)] -= uy;
+                j[(row, c1 + 1)] += ux;
+                j[(row, c2)] -= wx;
+                j[(row, c2 + 1)] -= wy;
             }
             Eq::DistVar { c, a, r } => {
                 let (ux, uy, _) = unit(x, c, a);
@@ -501,6 +528,17 @@ impl System {
                             p: point_col[&p],
                             c: point_col[&c],
                             q: point_col[&q],
+                        });
+                    }
+                }
+                Constraint::TangentArcs { a, b } => {
+                    if let (Some(ea), Some(eb)) = (entity(a), entity(b))
+                        && let Ok((p, c1, c2)) = crate::arcs_shared_point(ea, eb)
+                    {
+                        push(Eq::TangentArcs {
+                            p: point_col[&p],
+                            c1: point_col[&c1],
+                            c2: point_col[&c2],
                         });
                     }
                 }
@@ -1037,6 +1075,8 @@ mod tests {
                 pt(4, 2.0, 3.0),
                 pt(5, 6.5, 2.5),
                 pt(6, 3.0, 9.0),
+                pt(7, -6.0, 12.0),
+                pt(8, -9.0, 4.0),
             ],
             entities: vec![
                 Entity::Arc {
@@ -1061,8 +1101,19 @@ mod tests {
                     center: PointId(4),
                     radius: 3.3,
                 },
+                // Run 5: an arc sharing arc 1's end point (TangentArcs row).
+                Entity::Arc {
+                    id: EntityId(5),
+                    center: PointId(7),
+                    start: PointId(2),
+                    end: PointId(8),
+                },
             ],
             constraints: vec![
+                Constraint::TangentArcs {
+                    a: EntityId(1),
+                    b: EntityId(5),
+                },
                 Constraint::Radius {
                     entity: EntityId(1),
                     dim: Dimension::new("r", 9.0),
@@ -1085,15 +1136,16 @@ mod tests {
         let sys = System::build(&s);
         assert_eq!(
             sys.eqs.len(),
-            6,
-            "radius, tangent, 2 equal radius, 2 implied"
+            8,
+            "tangent arcs, radius, tangent, 2 equal radius, 3 implied"
         );
         assert_eq!(
-            sys.owner[4],
+            sys.owner[5],
             s.constraints.len(),
             "implied rows: pseudo-owner"
         );
-        assert_eq!(sys.owner[5], s.constraints.len());
+        assert_eq!(sys.owner[6], s.constraints.len());
+        assert_eq!(sys.owner[7], s.constraints.len());
         let rows = sys.all_rows();
         let x0 = sys.initial.clone();
         let j = sys.jacobian(&x0, &rows);
@@ -1116,7 +1168,11 @@ mod tests {
         // Tangent residual by hand: P = (9.1, 1.2), C = (0.4, -0.3), Q = (13, -6):
         // (P - C)·(Q - P)/|Q - P| = (8.7*3.9 + 1.5*(-7.2)) / sqrt(3.9^2 + 7.2^2).
         let want = (8.7 * 3.9 - 1.5 * 7.2) / (3.9f64 * 3.9 + 7.2 * 7.2).sqrt();
-        assert!((sys.eqs[1].eval(&x0) - want).abs() < 1e-12);
+        assert!((sys.eqs[2].eval(&x0) - want).abs() < 1e-12);
+        // TangentArcs by hand: P = (-1.5, 8.7), C1 = (0.4, -0.3), C2 = (-6, 12):
+        // (P - C1) × (P - C2) / |P - C2|.
+        let want = (-1.9 * -3.3 - 9.0 * 4.5) / (4.5f64 * 4.5 + 3.3 * 3.3).sqrt();
+        assert!((sys.eqs[0].eval(&x0) - want).abs() < 1e-12);
     }
 
     /// Coincident endpoints: the Distance gradient falls back to a unit

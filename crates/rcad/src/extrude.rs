@@ -179,24 +179,61 @@ pub fn host_body(features: &[FeatureSummary], sketch: &FeatureSummary) -> Option
 /// of `target` (from the document summary, so faces made by patterns, mirrors
 /// and chamfers count too): +1/-1 when the sketch plane holds a face whose
 /// outward normal is along / against the sketch normal; None when it holds no
-/// face of the target.
+/// face of the target, or faces facing both ways (see [`face_side_ambiguous`];
+/// regeneration refuses that case).
 pub fn face_side(
     bodies: &[BodySummary],
     sketch: &FeatureSummary,
     target: Option<BodyId>,
 ) -> Option<f64> {
-    let (target, f) = (target?, sketch.frame?);
+    match face_sides(bodies, sketch, target) {
+        (true, false) => Some(1.0),
+        (false, true) => Some(-1.0),
+        _ => None,
+    }
+}
+
+/// The sketch plane holds faces of the target facing both ways: the material
+/// side is ambiguous and regeneration refuses a Join/Cut from it (review run
+/// 4 #20: the preview used to take the first plane's sign).
+pub fn face_side_ambiguous(
+    bodies: &[BodySummary],
+    sketch: &FeatureSummary,
+    target: Option<BodyId>,
+) -> bool {
+    face_sides(bodies, sketch, target) == (true, true)
+}
+
+/// (a face along the sketch normal, a face against it) in the sketch plane.
+fn face_sides(
+    bodies: &[BodySummary],
+    sketch: &FeatureSummary,
+    target: Option<BodyId>,
+) -> (bool, bool) {
+    let (Some(target), Some(f)) = (target, sketch.frame) else {
+        return (false, false);
+    };
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let b = bodies.iter().find(|b| b.id == target)?;
-    b.planes.iter().find_map(|p| {
+    let Some(b) = bodies.iter().find(|b| b.id == target) else {
+        return (false, false);
+    };
+    let (mut pos, mut neg) = (false, false);
+    for p in &b.planes {
         let c = dot(p.normal, f.z);
         let d = [
             p.point[0] - f.origin[0],
             p.point[1] - f.origin[1],
             p.point[2] - f.origin[2],
         ];
-        ((c.abs() - 1.0).abs() < 1e-7 && dot(d, f.z).abs() < 1e-7).then_some(c.signum())
-    })
+        if (c.abs() - 1.0).abs() < 1e-7 && dot(d, f.z).abs() < 1e-7 {
+            if c > 0.0 {
+                pos = true;
+            } else {
+                neg = true;
+            }
+        }
+    }
+    (pos, neg)
 }
 
 /// Default target: the body the sketch is on, else the only B-rep body.
@@ -271,6 +308,15 @@ impl ExtrudeForm {
             .flatten()
     }
 
+    /// Join/Cut from a plane holding faces of the target facing both ways.
+    pub fn side_ambiguous(&self, features: &[FeatureSummary], bodies: &[BodySummary]) -> bool {
+        self.op != ExtrudeOp::NewBody
+            && self
+                .sketch
+                .and_then(|id| features.iter().find(|f| f.id == id))
+                .is_some_and(|s| face_side_ambiguous(bodies, s, self.target))
+    }
+
     /// +1 along the sketch normal, -1 against it: the regenerator's rule (a
     /// Cut from a face of the target goes into the material, a Join away from it).
     pub fn direction(&self, features: &[FeatureSummary], bodies: &[BodySummary]) -> f64 {
@@ -291,6 +337,10 @@ impl RcadApp {
         };
         let fs = &self.summary.features;
         let s = fs.iter().find(|f| Some(f.id) == form.sketch)?;
+        // No guessed direction: regeneration refuses an ambiguous side.
+        if !form.through_all && form.side_ambiguous(fs, &self.summary.bodies) {
+            return None;
+        }
         let frame = PlaneFrame::from_kernel(&s.frame?);
         let (outline, holes) = region_outlines(s.sketch.as_ref()?, form.region.as_ref())?;
         let z_range = if form.through_all && form.op == ExtrudeOp::Cut {
@@ -651,6 +701,14 @@ impl RcadApp {
             crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
         }
         let on_face = !form.through_all && form.side(features, &self.summary.bodies).is_some();
+        if !form.through_all && form.side_ambiguous(features, &self.summary.bodies) {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "The sketch plane holds faces of the target facing both ways: the material \
+                 side is ambiguous, so no preview; OK will be refused. Sketch on one face, or \
+                 use Through All.",
+            );
+        }
         if on_face {
             // Reversing a blind cut/join from a face points into air / into the
             // material: the regenerator refuses it, so it is not offered.
@@ -698,6 +756,7 @@ impl RcadApp {
             base,
             face,
             distance: "10".into(),
+            angle: "0".into(),
         });
     }
 

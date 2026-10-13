@@ -272,6 +272,7 @@ impl Sketch {
                 format!("{} (radius of {prefix}{})", dim(d), entity.0)
             }
             Constraint::Tangent { line, arc } => format!("Tangent L{} · A{}", line.0, arc.0),
+            Constraint::TangentArcs { a, b } => format!("Tangent A{} · A{}", a.0, b.0),
             Constraint::EqualRadius { a, b } => {
                 let name = |id: &EntityId| match self.entity(*id) {
                     Some(Entity::Circle { .. }) => format!("C{}", id.0),
@@ -471,6 +472,7 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Diameter { .. }
         | Constraint::Radius { .. }
         | Constraint::Tangent { .. }
+        | Constraint::TangentArcs { .. }
         | Constraint::EqualRadius { .. }
         | Constraint::Parallel { .. }
         | Constraint::Perpendicular { .. }
@@ -487,6 +489,7 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         Constraint::Diameter { circle, .. } => vec![*circle],
         Constraint::Radius { entity, .. } => vec![*entity],
         Constraint::Tangent { line, arc } => vec![*line, *arc],
+        Constraint::TangentArcs { a, b } => vec![*a, *b],
         Constraint::EqualRadius { a, b }
         | Constraint::Parallel { a, b }
         | Constraint::Perpendicular { a, b }

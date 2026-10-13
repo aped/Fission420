@@ -358,6 +358,136 @@ fn export_printable_examples() {
         );
     }
 
+    // Organizer tray (SESSION_5 §7): baseline (notched), variant 1 through
+    // its parameters, and the finished variant (finger notch with r-filleted
+    // bottom corners, four 1.5 mm corner chamfers). One body, printed as
+    // modelled (floor down), centred on the bed. Volumes from the parameters:
+    // plain = LWH − (L−2w)(W−2w)(H−f) + n·d·(W−2w)(H−f); notch area w·d,
+    // finger notch w·d − 2(r² − πr²/4); chamfer c²/2 · H per corner.
+    let tray_plain = |t: &printables::Tray| {
+        let (cl, cw, cd) = (
+            t.length - 2.0 * t.wall,
+            t.width - 2.0 * t.wall,
+            t.height - t.floor,
+        );
+        t.length * t.width * t.height - cl * cw * cd
+            + f64::from(t.dividers) * t.divider_thickness * cw * cd
+    };
+    let rf = printables::TRAY_FINGER_RADIUS;
+    let finger_area =
+        |t: &printables::Tray| t.notch_width * t.notch_depth - 2.0 * (rf * rf - PI * rf * rf / 4.0);
+    // Mesh: planar faces exact (f32 only); the finger notch's two quarter
+    // arcs (length πr) may differ by at most sagitta x length per unit depth.
+    let finger_slack = CHORD * PI * rf;
+    let mut tray_cases: Vec<(String, printables::Tray, f64, f64)> = Vec::new();
+    for finished in [false, true] {
+        let mut s = Session::new();
+        replay(
+            &mut s,
+            &printables::tray_workflow(&out.join("tray.rcad.json"), finished),
+        );
+        let variants: &[(&str, printables::Tray)] = if finished {
+            &[("tray_finished", printables::TRAY_BASELINE)]
+        } else {
+            &[
+                ("tray_baseline", printables::TRAY_BASELINE),
+                ("tray_variant", printables::TRAY_VARIANT),
+            ]
+        };
+        for (stem, t) in variants {
+            if *t != printables::TRAY_BASELINE {
+                ok(&mut s, t.set_parameters_batch());
+            }
+            let rep = export_all(&mut s, &out, stem, &[1], None, false);
+            let names: Vec<String> = serde_json::from_value(rep["names"].clone()).unwrap();
+            reports[*stem] = rep;
+            let (exact, slack) = if finished {
+                let c = printables::TRAY_CORNER_CHAMFER;
+                (
+                    tray_plain(t) - finger_area(t) * t.wall - 4.0 * c * c / 2.0 * t.height,
+                    finger_slack * t.wall,
+                )
+            } else {
+                (tray_plain(t) - t.notch_width * t.notch_depth * t.wall, 0.0)
+            };
+            let dims = [t.length, t.width, t.height];
+            let b = row(&[dims]);
+            let o = obj((exact, F32_VOL + slack), dims, F32_LEN, b[0], F32_LEN);
+            let f = spec["files"].as_object_mut().unwrap();
+            let mut so = o.clone();
+            so["objects"] = json!(1);
+            so["within_bed"] = json!([BED[0], BED[1], 250.0]);
+            f.insert(format!("{stem}.stl"), so);
+            f.insert(
+                format!("{stem}.3mf"),
+                json!({"unit": "millimeter", "objects": 1, "names": names, "closed": true,
+                       "min_z": [0.0, 1e-4], "within_bed": [BED[0], BED[1], 250.0],
+                       "per_object": {names[0].clone(): o}}),
+            );
+            step.as_object_mut().unwrap().insert(
+                format!("{stem}-body1.step"),
+                json!({"volume": exact, "bounds": [0.0, 0.0, 0.0, t.length, t.width, t.height]}),
+            );
+            tray_cases.push((stem.to_string(), *t, exact, F32_VOL + slack));
+        }
+    }
+
+    // Rounded tray (run 5): the baseline tray with its four outer vertical
+    // edges rounded by exact solid fillets (radius 4): plain notched volume
+    // minus 4 (r² − πr²/4) H. Mesh: four quarter cylinders, sagitta x arc
+    // length x height of slack.
+    {
+        let t = printables::TRAY_BASELINE;
+        let rr = 4.0;
+        let mut s = Session::new();
+        replay(
+            &mut s,
+            &printables::tray_workflow(&out.join("tray_rounded.rcad.json"), false),
+        );
+        for (i, (a, b)) in [(1, 2), (2, 3), (3, 4), (4, 1)].into_iter().enumerate() {
+            let side = |e: u32| FaceRef {
+                feature: FeatureId(printables::tray_ids::BLANK),
+                role: FaceRole::ExtrudeSide { entity: e },
+            };
+            ok(
+                &mut s,
+                Command::Fillet {
+                    name: Some(format!("Corner fillet {}", i + 1)),
+                    a: side(a),
+                    b: side(b),
+                    radius: rr,
+                },
+            );
+        }
+        let stem = "tray_rounded";
+        let rep = export_all(&mut s, &out, stem, &[1], None, false);
+        let names: Vec<String> = serde_json::from_value(rep["names"].clone()).unwrap();
+        reports[stem] = rep;
+        let exact = tray_plain(&t)
+            - t.notch_width * t.notch_depth * t.wall
+            - 4.0 * (rr * rr - PI * rr * rr / 4.0) * t.height;
+        let slack = 4.0 * CHORD * (PI * rr / 2.0) * t.height;
+        let dims = [t.length, t.width, t.height];
+        let b = row(&[dims]);
+        let o = obj((exact, F32_VOL + slack), dims, F32_LEN, b[0], F32_LEN);
+        let f = spec["files"].as_object_mut().unwrap();
+        let mut so = o.clone();
+        so["objects"] = json!(1);
+        so["within_bed"] = json!([BED[0], BED[1], 250.0]);
+        f.insert(format!("{stem}.stl"), so);
+        f.insert(
+            format!("{stem}.3mf"),
+            json!({"unit": "millimeter", "objects": 1, "names": names, "closed": true,
+                   "min_z": [0.0, 1e-4], "within_bed": [BED[0], BED[1], 250.0],
+                   "per_object": {names[0].clone(): o}}),
+        );
+        step.as_object_mut().unwrap().insert(
+            format!("{stem}-body1.step"),
+            json!({"volume": exact, "bounds": [0.0, 0.0, 0.0, t.length, t.width, t.height]}),
+        );
+        tray_cases.push((stem.to_string(), t, exact, F32_VOL + slack));
+    }
+
     // In-test cross-check of the reports against the same analytic values.
     let check = |rep: &Value, i: usize, v: (f64, f64), name: &str| {
         let got = rep["3mf"]["bodies"][i]["mesh_check"]["mesh_volume"]
@@ -392,6 +522,9 @@ fn export_printable_examples() {
     check(&reports["coupon"], 0, plate_mesh, "coupon plate");
     check(&reports["coupon"], 1, peg_mesh, "coupon peg");
     check(&reports["bracket"], 0, bracket_mesh, "bracket");
+    for (stem, _, exact, tol) in &tray_cases {
+        check(&reports[stem.as_str()], 0, (*exact, *tol), stem);
+    }
 
     let w = |name: &str, v: &Value| {
         std::fs::write(out.join(name), serde_json::to_string_pretty(v).unwrap()).unwrap()

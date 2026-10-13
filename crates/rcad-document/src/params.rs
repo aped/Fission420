@@ -635,6 +635,18 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
             plane: crate::SketchPlane::Offset { .. },
             ..
         } if name == "plane_offset" => Some(SlotKind::Length),
+        FeatureKind::Sketch {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
+        }
+        | FeatureKind::Mirror {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
+        }
+        | FeatureKind::Hole {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
+        } if name == "plane_angle_deg" => Some(SlotKind::Angle),
         FeatureKind::Sketch { sketch, .. } => {
             if name == "center_x" || name == "center_y" {
                 return Some(SlotKind::Length);
@@ -657,6 +669,7 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
             Some(SlotKind::Count)
         }
         FeatureKind::LinearPattern { .. } if name == "spacing" => Some(SlotKind::Length),
+        FeatureKind::Fillet { .. } if name == "radius" => Some(SlotKind::Length),
         FeatureKind::Extrude { .. } | FeatureKind::Chamfer { .. } if name == "distance" => {
             Some(SlotKind::Length)
         }
@@ -674,6 +687,7 @@ fn kind_has(kind: &FeatureKind, name: &str) -> bool {
         kind: kind.clone(),
         notes: vec![],
         expressions: Default::default(),
+        suppressed: false,
     }
     .parameters()
     .iter()

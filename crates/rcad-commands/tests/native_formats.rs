@@ -56,7 +56,8 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("resaved.rcad.json");
     assert!(s.execute(&Command::Save { path: out.clone() }).ok);
-    assert_eq!(version(&out), u64::from(rcad_document::FORMAT_VERSION));
+    // Run-5 features absent: written as v4 (readable by run-4 builds).
+    assert_eq!(version(&out), 4);
     let mut t = Session::new();
     assert!(t.execute(&Command::Open { path: out }).ok);
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
@@ -150,8 +151,10 @@ fn mounting_bracket() -> f64 {
     60.0 * 40.0 * 5.0 + 50.0 * 5.0 * 35.0 - 0.5 * 60.0 - 4.0 * PI * (5.5f64 / 2.0).powi(2) * 5.0
 }
 
-/// The bracket's holes run along Z and along Y, so the kernel reports a tessellation
-/// estimate; it must hold within 3x its own error estimate (as in printable_examples.rs).
+/// The bracket's holes run along Z and along Y. Before run 5 the kernel could only
+/// estimate that volume (it must then hold within 3x its own error estimate, as in
+/// printable_examples.rs); run 5's surface-of-revolution path measures it exactly, and
+/// an exact method must then match to 1e-9 relative.
 fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
     let path = repo().join(rel);
     if let Some(v) = want_version {
@@ -170,6 +173,10 @@ fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
         } => assert!(
             (volume - expected).abs() <= (3.0 * error_estimate).max(1e-3),
             "{rel}: {volume} vs {expected} (estimate error {error_estimate})"
+        ),
+        VolumeResult::Value { volume, .. } => assert!(
+            (volume - expected).abs() <= 1e-9 * expected,
+            "{rel}: exact {volume} vs {expected}"
         ),
         ref v => panic!("{rel}: {v:?}"),
     }

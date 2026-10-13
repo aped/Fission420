@@ -6,6 +6,8 @@
 
 pub mod app;
 pub mod bodies;
+#[cfg(test)]
+mod display_fault_tests;
 pub mod engine;
 pub mod exchange;
 pub mod extrude;

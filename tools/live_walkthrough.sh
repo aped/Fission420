@@ -11,7 +11,7 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/artifacts/live_walkthrough}
 FILTER=${2:-}
-APP=$ROOT/target/release/rcad
+APP=${CARGO_TARGET_DIR:-$ROOT/target}/release/rcad
 [ -x "$APP" ] || { echo "build first: cargo build --release -p rcad"; exit 2; }
 rc=0
 for script in "$ROOT"/tools/live/*.txt; do

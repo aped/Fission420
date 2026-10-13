@@ -292,3 +292,77 @@ fn count_one_is_the_seed_only() {
     assert!((tray::volume(&s) - t.plain_volume()).abs() < 1e-6);
     tray::assert_occupancy(&s, &t, false);
 }
+
+/// Review run 5 #2: when an occurrence's floor is cut away the plane may
+/// still hold one face (the seed's floor); the occurrence reference must not
+/// attach to it.
+#[test]
+fn occurrence_reference_never_attaches_to_another_occurrences_face() {
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 60.0, "height": 20.0, "center": [30.0, 10.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+        json!({"cmd": "create_sketch", "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+               "template": "centered_rectangle", "width": 10.0, "height": 10.0,
+               "center": [15.0, 10.0]}),
+        json!({"cmd": "extrude", "sketch": 3, "distance": 3.0, "op": "cut", "target": 1}),
+        json!({"cmd": "linear_pattern", "feature": 4, "count": 2, "spacing": 30.0,
+               "direction": [1.0, 0.0]}),
+        // A deeper cut over occurrence 2 only (x 40..50): its 3 mm floor is gone.
+        json!({"cmd": "create_sketch", "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+               "template": "centered_rectangle", "width": 12.0, "height": 12.0,
+               "center": [45.0, 10.0]}),
+        json!({"cmd": "extrude", "sketch": 6, "distance": 5.0, "op": "cut", "target": 1}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "create_sketch",
+                "plane": {"Face": {"feature": 5, "role": {"Copy": {"instance": 1, "of": "EndCap"}}}},
+                "template": "centered_rectangle", "width": 2.0, "height": 2.0,
+                "center": [15.0, 10.0]}),
+    );
+    assert!(!r.ok, "attached to some face: {:?}", r.message);
+    match r.error {
+        Some(DocError::BrokenReference { detail, .. }) => {
+            assert!(detail.contains("no longer exists"), "{detail}")
+        }
+        e => panic!("{e:?}"),
+    }
+    assert_eq!(s.model().unwrap().document(), &before);
+    // The seed's own floor still resolves.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch",
+                "plane": {"Face": {"feature": 4, "role": "ExtrudeEndCap"}},
+                "template": "centered_rectangle", "width": 2.0, "height": 2.0,
+                "center": [15.0, 10.0]}),
+    );
+}
+
+/// Review run 5 #5: a chamfer between faces sharing their plane with other
+/// faces (pattern occurrences) is refused up front with the reason.
+#[test]
+fn chamfer_between_shared_plane_faces_is_refused() {
+    let t = Tray::BASELINE;
+    let mut s = tray::build(&t, false);
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "chamfer",
+                "a": {"feature": tray::COMPARTMENTS, "role": {"Copy": {"instance": 1, "of": "EndCap"}}},
+                "b": {"feature": tray::COMPARTMENTS, "role": {"Copy": {"instance": 1, "of": {"Side": {"entity": 1}}}}},
+                "distance": 0.5}),
+    );
+    assert!(!r.ok);
+    assert!(
+        format!("{:?}", r.error).contains("share their plane"),
+        "{:?}",
+        r.error
+    );
+    assert_eq!(s.model().unwrap().document(), &before);
+}

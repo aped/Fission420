@@ -216,6 +216,18 @@ stroke only), design intent (constraints); sketch placement on export.
 
 ## Native format
 
+**v5 (run 5)** = v4 plus feature suppression (`"suppressed": true`), face references to
+pattern/mirror occurrences and chamfer faces (`FaceRole::Copy`, `FaceRole::Chamfer`), the
+`TangentArcs` sketch constraint (line–arc sketch fillets), solid `Fillet`, `Loft` and `Sweep`
+features, angled construction planes (`Offset.angle`), patterns of count 1 and bound
+`plane_offset` on mirrors/holes. All additive. A document is written as
+v5 only when it uses one of them; otherwise it stays v4, byte for byte as a run-4 save, so run-4
+builds keep reading it, and they refuse a v5 file instead of evaluating suppressed features or
+misreading references. A file labelled v4 that contains a v5 feature is refused. Frozen v4
+documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/native_v4/`
+(`suppression.rs::frozen_v4_fixtures_load_unchanged`: load, regenerate to the cached volume,
+re-save as an identical v4 document).
+
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
 `*.f420.json`. They load unchanged; no version changed with the name, and the extension is

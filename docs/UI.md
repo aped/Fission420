@@ -59,3 +59,32 @@ be interrupted and still completes, and Undo removes it in one step.
   `F420_AUTOSAVE_SECS` still apply when the `RCAD_*` variables are unset.
 * Dialogs holding feature/body ids close on Undo/Redo (ids may be reused afterwards) and
   when their ids disappear; import replies resolve only the form that submitted them.
+
+## Run 5 additions
+
+* **Sketch on modifier faces:** faces made by linear/circular patterns, mirrors and chamfers
+  are semantic references (`FaceRole::Copy { instance, tool, of }`, `FaceRole::Chamfer`) and can
+  host sketches, holes, mirrors and chamfers like extrusion faces. When several faces share a
+  plane (pattern floors), the picked face is matched by plane plus a point inside that face's own
+  tool footprint; ambiguous faces show the reason instead of guessing. A sketch on occurrence *k*
+  follows that occurrence when the count changes and is refused (BrokenReference, model
+  unchanged) when occurrence *k* disappears.
+* **View › Section view…** (display only): a clipping plane parallel to world YZ/XZ/XY or the
+  selected planar face, offset field and slider, Flip. Material beyond the plane is neither drawn
+  nor pickable; exposed inside surfaces are tinted. Not capped; the model, measurements (exact
+  B-rep planes) and exports never change. Probe key `section`.
+* **Mirror dialog:** *Mirror face* combo (any referenceable planar face) and *Mirror plane offset*
+  (a construction plane; `plane_offset` bindable). **Hole dialog:** *Start plane offset*
+  (a construction plane that must hold a face of the target).
+* **Suppression:** inspector *Suppress* / *Suppress with dependents* / *Restore* / *Restore with
+  dependents*; History strikes suppressed features through. Plain *Suppress* is disabled for a
+  feature others use (the reason is in the tooltip).
+* **Sketch editor:** the Fillet tool also rounds a line–arc corner; dimensioning the same two
+  points again gives the other axis (horizontal ↔ vertical).
+* **Parameters panel:** the open edit's Apply / Cancel / Delete sit on their own row (they were
+  clipped off a narrow browser by long expressions); a rename is applied before the value change
+  and a refused rename sends nothing else; long messages wrap (they widened the browser).
+* **Extrude dialog:** a Join/Cut sketched on a plane holding target faces facing both ways shows
+  no preview and says OK will be refused.
+* **Templates › Organizer tray** (after the blank-document workflow, which is the acceptance path).
+* Live walkthrough of the tray from New: `tools/live/t_organizer_tray.txt`.

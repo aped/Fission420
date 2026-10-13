@@ -73,6 +73,10 @@ pub struct Autosave {
     pub(crate) replaced: Option<PathBuf>,
     /// Open Copy requested, not yet answered (becomes `replaced` on success).
     pub(crate) opening: Option<PathBuf>,
+    /// Copies removed because they are no longer needed while a `SaveCopy`
+    /// to them may still be queued: removed again when it lands, and at exit
+    /// (review run 4 #19: Quit right after an autosave recreated a stale copy).
+    pub(crate) dropped: Vec<PathBuf>,
 }
 
 impl Default for Autosave {
@@ -89,6 +93,7 @@ impl Default for Autosave {
             offered: vec![],
             replaced: None,
             opening: None,
+            dropped: Vec::new(),
         }
     }
 }
@@ -213,6 +218,7 @@ impl RcadApp {
         }
         self.autosave.last = Some((key.0, key.1, path.clone()));
         self.autosave.last_time = Some(Instant::now());
+        self.autosave.dropped.retain(|d| *d != path);
         self.request(Command::SaveCopy { path });
     }
 
@@ -220,9 +226,39 @@ impl RcadApp {
     /// deliberately discarded): remove it.
     pub(crate) fn drop_autosave(&mut self) {
         if let Some((_, _, p)) = self.autosave.last.take() {
-            let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_file(&p);
+            if !self.autosave.dropped.contains(&p) {
+                self.autosave.dropped.push(p);
+            }
         }
         self.autosave.last_time = None;
+    }
+
+    /// A `SaveCopy` reply: a copy written after it was dropped is stale.
+    pub(crate) fn autosave_written(&mut self, path: &std::path::Path) {
+        if let Some(i) = self.autosave.dropped.iter().position(|d| d == path) {
+            let _ = std::fs::remove_file(path);
+            self.autosave.dropped.remove(i);
+        }
+    }
+
+    /// At exit: let queued work (a pending `SaveCopy`) finish, up to
+    /// `timeout`, then remove every dropped copy, so a deliberate Quit never
+    /// leaves a recovery copy behind.
+    pub fn shutdown(&mut self, timeout: Duration) {
+        let start = Instant::now();
+        while self.busy() && start.elapsed() < timeout {
+            match self.engine.poll() {
+                Some(r) => self.handle_reply(r),
+                None => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        while let Some(r) = self.engine.poll() {
+            self.handle_reply(r);
+        }
+        for p in std::mem::take(&mut self.autosave.dropped) {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     /// "Recover unsaved work" window (copies found at start-up).
@@ -268,5 +304,64 @@ impl RcadApp {
             self.autosave.offered.retain(|x| *x != p);
             self.guarded(crate::app::Guarded::OpenCopy(p));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::ExecMode;
+    use rcad_commands::SketchTemplate;
+    use rcad_document::SketchPlane;
+
+    fn pump(app: &mut RcadApp) {
+        while let Some(r) = app.engine.poll() {
+            app.handle_reply(r);
+        }
+    }
+
+    /// Review run 4 #19: a recovery copy written after it was dropped (Save /
+    /// Discard / Quit while a `SaveCopy` was still queued) is removed when its
+    /// reply lands, and `shutdown` removes any dropped copy at exit.
+    #[test]
+    fn a_copy_written_after_it_was_dropped_is_removed() {
+        let dir = std::env::temp_dir().join(format!("rcad-dropped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = RcadApp::new(ExecMode::Sync, None);
+        app.autosave.dir = Some(dir.clone());
+        app.autosave.interval = Duration::ZERO;
+        app.enable_autosave();
+        app.request(Command::NewDocument);
+        app.request(Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: 10.0,
+                height: 5.0,
+                center: None,
+            },
+        });
+        pump(&mut app);
+        assert!(app.summary.dirty);
+        app.autosave_tick();
+        let path = app
+            .autosave
+            .last
+            .as_ref()
+            .expect("copy requested")
+            .2
+            .clone();
+        // Dropped before its reply was handled; the queued write then lands.
+        app.drop_autosave();
+        std::fs::write(&path, b"late").unwrap();
+        pump(&mut app);
+        assert!(!path.exists(), "stale copy removed when its write landed");
+        assert!(app.autosave.dropped.is_empty());
+        // At exit: a dropped copy whose write never reported is removed too.
+        std::fs::write(&path, b"late").unwrap();
+        app.autosave.dropped.push(path.clone());
+        app.shutdown(Duration::from_millis(100));
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

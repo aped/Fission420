@@ -23,15 +23,25 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v4 (run 4, docs/PARAMETERS.md): named user parameters and feature expression
 /// bindings (additive; a v3 document is a v4 document without them). Saves
 /// write v4, so older builds refuse the file instead of dropping expressions.
-pub const FORMAT_VERSION: u32 = 4;
+/// v5 (run 5): feature suppression, face references to pattern/mirror
+/// occurrences and chamfer faces (`FaceRole::Copy`, `FaceRole::Chamfer`), and
+/// the `TangentArcs` sketch constraint (all additive). A document is written
+/// as v5 only when it uses one of them ([`required_version`]); otherwise it
+/// stays v4, byte for byte as before, so older builds keep reading it and
+/// refuse (rather than misread) a v5 file.
+pub const FORMAT_VERSION: u32 = 5;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
 pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// The saved [`GeometryCache`] values are rounded to 1/this (1e-9 mm for
-/// bounds, 1e-9 mm^3 for volume).
+/// The saved [`GeometryCache`] bounds are rounded to 1/this (1e-9 mm).
 pub const CACHE_STEPS_PER_UNIT: f64 = 1.0e9;
+/// The saved cache volume is rounded to 1/this (1e-6 mm³; run 5): a volume
+/// integrated over Truck boolean results varies by ~1e-12 relative between
+/// regenerations (observed 49303.902664472 vs …473 on one binary), which
+/// straddled the 1e-9 rounding and made saves of the same document differ.
+pub const CACHE_VOLUME_STEPS: f64 = 1.0e6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeometryCache {
@@ -60,7 +70,9 @@ impl NativeFile {
             .and_then(|e| e.measurements.as_ref())
             .map(|m| GeometryCache {
                 volume: match m.volume {
-                    VolumeResult::Value { volume, .. } => Some(r(volume)),
+                    VolumeResult::Value { volume, .. } => {
+                        Some((volume * CACHE_VOLUME_STEPS).round() / CACHE_VOLUME_STEPS + 0.0)
+                    }
                     VolumeResult::Unavailable { .. } => None,
                 },
                 bounds: Some(Bounds {
@@ -71,11 +83,90 @@ impl NativeFile {
             });
         Self {
             format: FORMAT_NAME.into(),
-            version: FORMAT_VERSION,
+            version: required_version(doc),
             document: doc.clone(),
             cache,
         }
     }
+}
+
+/// What in `doc` needs format v5, if anything (see [`FORMAT_VERSION`]).
+pub fn v5_feature(doc: &Document) -> Option<&'static str> {
+    if doc.features.iter().any(|f| f.suppressed) {
+        return Some("suppressed features");
+    }
+    if doc
+        .features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::Fillet { .. }))
+    {
+        return Some("solid edge fillets");
+    }
+    if doc
+        .features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::Loft { .. }))
+    {
+        return Some("lofts");
+    }
+    if doc
+        .features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::Sweep { .. }))
+    {
+        return Some("sweeps");
+    }
+    // Run-5 parameter ranges / slots a run-4 build refuses with a misleading
+    // message (review run 5): a pattern of count 1, and `plane_offset`
+    // bindings on a Mirror or Hole.
+    if doc.features.iter().any(|f| {
+        matches!(
+            f.kind,
+            crate::FeatureKind::LinearPattern { count: 1, .. }
+                | crate::FeatureKind::CircularPattern { count: 1, .. }
+        ) || (matches!(
+            f.kind,
+            crate::FeatureKind::Mirror { .. } | crate::FeatureKind::Hole { .. }
+        ) && f.expressions.contains_key("plane_offset"))
+    }) {
+        return Some("a pattern of count 1 or a bound mirror/hole plane offset");
+    }
+    fn scan(v: &serde_json::Value) -> Option<&'static str> {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, x) in m {
+                    if k == "role"
+                        && (x.as_str() == Some("Chamfer")
+                            || x.as_object().is_some_and(|o| o.contains_key("Copy")))
+                    {
+                        return Some("references to pattern/mirror/chamfer faces");
+                    }
+                    if k == "Offset" && x.as_object().is_some_and(|o| o.contains_key("angle")) {
+                        return Some("angled construction planes");
+                    }
+                    if k == "TangentArcs" {
+                        return Some("arc-arc tangency (line-arc sketch fillets)");
+                    }
+                    if let Some(r) = scan(x) {
+                        return Some(r);
+                    }
+                }
+                None
+            }
+            serde_json::Value::Array(a) => a.iter().find_map(scan),
+            _ => None,
+        }
+    }
+    serde_json::to_value(&doc.features)
+        .ok()
+        .as_ref()
+        .and_then(scan)
+}
+
+/// The oldest format version that can hold `doc`: 5 when it uses a run-5
+/// feature, else 4.
+pub fn required_version(doc: &Document) -> u32 {
+    if v5_feature(doc).is_some() { 5 } else { 4 }
 }
 
 /// Save atomically (see [`write_atomic`]). On any error the previous file is untouched.
@@ -191,6 +282,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain parameters or expressions (v4 feature)",
+            nf.version
+        )));
+    }
+    if nf.version < 5
+        && let Some(what) = v5_feature(&nf.document)
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain {what} (v5 feature)",
             nf.version
         )));
     }

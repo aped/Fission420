@@ -21,6 +21,14 @@ pub struct ParamsPanel {
     pub edit: Option<(String, String, String, ParamUnit)>,
     /// Last refusal of a parameter command (shown until the next success).
     pub error: Option<String>,
+    /// Commands an Apply sent and still unanswered (rename + set): the edit is
+    /// closed only when all succeeded (review run 4 #17: a successful rename
+    /// followed by a refused value used to drop the typed expression).
+    pub pending: usize,
+    /// The value change of an Apply that also renames: sent only after the
+    /// rename succeeded (otherwise it would create a parameter under the new
+    /// name; review run 5).
+    pub after_rename: Option<Command>,
 }
 
 fn unit_label(u: ParamUnit) -> &'static str {
@@ -66,14 +74,35 @@ impl RcadApp {
             return;
         }
         if ok {
-            self.params.error = None;
-            self.params.edit = None;
+            // A rename succeeded: the open edit now belongs to the new name.
+            if let Command::RenameUserParameter { name, new_name } = cmd
+                && let Some(e) = self.params.edit.as_mut()
+                && e.0 == *name
+            {
+                e.0 = new_name.clone();
+            }
+            // Only replies to the open edit's own commands close it.
+            if self.params.pending > 0 {
+                self.params.pending -= 1;
+                if matches!(cmd, Command::RenameUserParameter { .. })
+                    && let Some(next) = self.params.after_rename.take()
+                {
+                    self.request(next);
+                }
+                if self.params.pending == 0 {
+                    self.params.error = None;
+                    self.params.edit = None;
+                }
+            }
             if matches!(cmd, Command::SetUserParameter { name, .. } if *name == self.params.new_name.trim())
             {
                 self.params.new_name.clear();
                 self.params.new_expr.clear();
             }
         } else {
+            // Keep the typed edit (and whatever part of it already applied).
+            self.params.pending = 0;
+            self.params.after_rename = None;
             self.params.error = error;
         }
     }
@@ -110,66 +139,12 @@ impl RcadApp {
                         else {
                             continue;
                         };
-                        let (mut apply, mut cancel) = (false, false);
                         ui.add(egui::TextEdit::singleline(&mut name).desired_width(90.0))
                             .named("Parameter name");
                         ui.add(egui::TextEdit::singleline(&mut expr).desired_width(140.0))
                             .named("Parameter expression");
-                        ui.horizontal(|ui| {
-                            unit_combo(ui, "edit_unit", &mut unit);
-                            apply = ui.small_button("Apply").named("Apply parameter").clicked();
-                            cancel = ui
-                                .small_button("Cancel")
-                                .named("Cancel parameter edit")
-                                .clicked();
-                            let used = !p.used_by.is_empty();
-                            let del = ui
-                                .add_enabled(!used, egui::Button::new("Delete").small())
-                                .named("Delete parameter");
-                            let del = if used {
-                                del.on_disabled_hover_text(format!(
-                                    "Used by {}; change those first",
-                                    p.used_by.join(", ")
-                                ))
-                            } else {
-                                del
-                            };
-                            if del.clicked() {
-                                send.push(Command::DeleteUserParameter {
-                                    name: p.name.clone(),
-                                });
-                            }
-                        });
-                        self.params.edit = Some((orig.clone(), name.clone(), expr.clone(), unit));
-                        if cancel {
-                            self.params.edit = None;
-                        } else if apply {
-                            let name = name.trim().to_string();
-                            if name != orig && params.iter().any(|x| x.name == name) {
-                                // Review run 4 #14: a refused rename must not fall through to
-                                // editing the other parameter.
-                                self.params.error =
-                                    Some(format!("another parameter is already named '{name}'"));
-                                continue;
-                            }
-                            if name != orig {
-                                send.push(Command::RenameUserParameter {
-                                    name: orig.clone(),
-                                    new_name: name.clone(),
-                                });
-                            }
-                            if expr.trim() != p.expression || unit != p.unit {
-                                send.push(Command::SetUserParameter {
-                                    name,
-                                    expression: expr,
-                                    unit: Some(unit),
-                                    comment: None,
-                                });
-                            }
-                            if send.is_empty() {
-                                self.params.edit = None;
-                            }
-                        }
+                        unit_combo(ui, "edit_unit", &mut unit);
+                        self.params.edit = Some((orig, name, expr, unit));
                     } else {
                         let r = ui
                             .add(egui::Button::new(RichText::new(&p.name).monospace()).frame(false))
@@ -211,6 +186,71 @@ impl RcadApp {
                     ui.end_row();
                 }
             });
+        // Edit actions on their own row (run 5): in the grid's last column
+        // they were clipped off a narrow browser by long expressions.
+        if let Some((orig, name, expr, unit)) = self.params.edit.clone()
+            && let Some(p) = params.iter().find(|p| p.name == orig)
+        {
+            let (mut apply, mut cancel) = (false, false);
+            ui.horizontal(|ui| {
+                apply = ui.small_button("Apply").named("Apply parameter").clicked();
+                cancel = ui
+                    .small_button("Cancel")
+                    .named("Cancel parameter edit")
+                    .clicked();
+                let used = !p.used_by.is_empty();
+                let del = ui
+                    .add_enabled(!used, egui::Button::new("Delete").small())
+                    .named("Delete parameter");
+                let del = if used {
+                    del.on_disabled_hover_text(format!(
+                        "Used by {}; change those first",
+                        p.used_by.join(", ")
+                    ))
+                } else {
+                    del
+                };
+                if del.clicked() {
+                    send.push(Command::DeleteUserParameter {
+                        name: p.name.clone(),
+                    });
+                }
+            });
+            if cancel {
+                self.params.edit = None;
+            } else if apply {
+                let name = name.trim().to_string();
+                if name != orig && params.iter().any(|x| x.name == name) {
+                    // Review run 4 #14: a refused rename must not fall through to
+                    // editing the other parameter.
+                    self.params.error =
+                        Some(format!("another parameter is already named '{name}'"));
+                } else {
+                    let set = (expr.trim() != p.expression || unit != p.unit).then(|| {
+                        Command::SetUserParameter {
+                            name: name.clone(),
+                            expression: expr,
+                            unit: Some(unit),
+                            comment: None,
+                        }
+                    });
+                    let n = usize::from(name != orig) + usize::from(set.is_some());
+                    if name != orig {
+                        send.push(Command::RenameUserParameter {
+                            name: orig.clone(),
+                            new_name: name.clone(),
+                        });
+                        self.params.after_rename = set;
+                    } else if let Some(c) = set {
+                        send.push(c);
+                    }
+                    if n == 0 {
+                        self.params.edit = None;
+                    }
+                    self.params.pending = n;
+                }
+            }
+        }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add(

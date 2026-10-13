@@ -255,8 +255,10 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
     });
     let wall = wall.expect("slot wall at x=50");
     assert!((wall.frame.z[0] - 1.0).abs() < 1e-12, "{:?}", wall.frame);
-    // Join/Cut with inner loops: explicit product limit, model kept.
-    let rev = s.model().unwrap().revision;
+    // Cut with inner loops (ADR 0007, run 5): the same region cut 5 mm into
+    // the body from its bottom face is built exactly by the slab construction
+    // (the region's holes are already empty): the top half remains. Refusals
+    // of inner-loop tools elsewhere: tests/slab_arcs.rs.
     let r = s.execute(&Command::Extrude {
         name: None,
         sketch: sid,
@@ -268,11 +270,8 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
         body_name: None,
         region: None,
     });
-    assert!(
-        matches!(r.error, Some(DocError::ProductLimit(ref m)) if m.contains("inner loop")),
-        "{r:?}"
-    );
-    assert_eq!(s.model().unwrap().revision, rev);
+    assert!(r.ok, "{r:?}");
+    assert!((body_volume(&s, b) - want / 2.0).abs() < 1e-7 * want);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print-export validation of the REAL printable examples (rcad_commands::printables):
-# enclosure baseline + variant (base + lid), clearance coupon (plate + peg), mounting bracket.
+# enclosure baseline + variant (base + lid), clearance coupon (plate + peg), mounting bracket,
+# organizer tray baseline / variant 1 / finished (run 5).
 #   1. crates/rcad-commands/tests/print_examples.rs (ignored test) replays the example workflows
 #      and writes placed per-body STLs, multi-object 3MFs, one STEP per body, and analytic
 #      expectations (spec.json for the mesh checker, step_expected.json for FreeCAD);
@@ -139,6 +140,11 @@ slice enclosure_baseline_stl "$P/baseline_plate.json" "$EXP"/enclosure_baseline-
 slice enclosure_variant_3mf "$P/variant_plate.json" "$EXP/enclosure_variant.3mf"
 slice coupon_3mf "$P/coupon_plate.json" "$EXP/coupon.3mf"
 slice bracket_3mf "$P/bracket_plate.json" "$EXP/bracket.3mf"
+slice tray_baseline_3mf "$P/tray_baseline_plate.json" "$EXP/tray_baseline.3mf"
+slice tray_baseline_stl "$P/tray_baseline_plate.json" "$EXP/tray_baseline.stl"
+slice tray_variant_3mf "$P/tray_variant_plate.json" "$EXP/tray_variant.3mf"
+slice tray_finished_3mf "$P/tray_finished_plate.json" "$EXP/tray_finished.3mf"
+slice tray_rounded_3mf "$P/tray_rounded_plate.json" "$EXP/tray_rounded.3mf"
 
 note "## result: $([ $FAIL -eq 0 ] && echo ALL OK || echo FAILURES)"
 exit $FAIL

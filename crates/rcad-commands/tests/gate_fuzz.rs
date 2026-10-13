@@ -223,12 +223,29 @@ fn random_features_are_exact_or_refused() {
         let _ = FeatureId(0);
     }
     eprintln!("gate fuzz: {cases} features, {accepted} accepted exact, {refused} refused");
+    corpus_line("disjoint", accepted, &refusals);
     for r in &refusals {
         eprintln!("  refused: {r}");
     }
     assert!(
         refused * 10 <= cases,
         "too many refusals for ordinary features: {refused}/{cases}"
+    );
+}
+
+/// One machine-readable summary line per corpus (run-5 evidence): accepted
+/// results are all exact (an incorrect one fails the test before this line);
+/// refusals by kind, from their error text.
+fn corpus_line(name: &str, accepted: usize, refusals: &[String]) {
+    let n = |k: &str| refusals.iter().filter(|l| l.contains(k)).count();
+    let sketch = n("sketch on the top face refused");
+    let (kernel, gate, limit) = (n("Kernel {"), n("GeometryCheck {"), n("ProductLimit("));
+    let other = refusals.len() - sketch - kernel - gate - limit;
+    eprintln!(
+        "CORPUS {name}: features={} accepted_exact={accepted} accepted_incorrect=0 \
+         refused_kernel={kernel} refused_gate={gate} refused_product_limit={limit} \
+         refused_sketch_reference={sketch} refused_other={other}",
+        accepted + refusals.len()
     );
 }
 
@@ -356,6 +373,7 @@ fn overlapping_pockets_are_exact_or_refused() {
         }
     }
     eprintln!("overlap fuzz: {accepted} accepted exact, {refused} refused");
+    corpus_line("overlap", accepted, &log);
     for l in &log {
         eprintln!("  {}", &l[..l.len().min(260)]);
     }
@@ -410,6 +428,7 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
         let top = SketchPlane::Offset {
             base: PlaneBase::WorldXY,
             distance: t as f64 * G,
+            angle: 0.0,
         };
         let mut occ = vec![false; nx * ny * nz];
         let at = |i: usize, j: usize, k: usize| (k * ny + j) * nx + i;
@@ -570,6 +589,7 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
     for l in &log {
         eprintln!("  {l}");
     }
+    corpus_line("flush_coplanar", accepted, &log);
     assert!(accepted >= 120, "{accepted} accepted");
 }
 

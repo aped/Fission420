@@ -145,7 +145,7 @@ orientation check.
 | cylinder_d20_h15 | 3 STEP faces -> 4 | 1500 pi, err 1.1e-9 (Z) | 1.0 ms |
 | plate_hole (60x40x8, Ø10) | 7 -> 8 faces | 19200 - 200 pi, err 1.5e-10 (Z) | 1.5 ms |
 | sphere_r10 (centre 5,5,5) | 1 face (VERTEX_LOOP) -> 8 | 4188.79 vs estimate 4187.72 +- 3.15 (TessellationEstimate) | 76 ms |
-| torus_R20_r5 | 1 face -> 4 | 9869.60 vs estimate 9864.49 +- 15.18 (TessellationEstimate) | 87 ms |
+| torus_R20_r5 | 1 face -> 4 | 9869.60 vs estimate 9864.49 +- 15.18 (TessellationEstimate; run 5: now exact, BrepBoundaryIntegralRevolution) | 87 ms |
 | two_boxes_compound | 2 solids (baked placement) | 1000 each | 1.5 ms |
 | two_boxes_assembly | 2 solids BoxA/BoxB, BoxB placed by IDT (30 deg about Z, +50 X) | 1000 each; bounds to 1e-9 | 2.0 ms |
 | truncated, garbage | error, no panic | | < 0.4 ms |

@@ -3,6 +3,8 @@ use crate::{Body, Frame, KernelError, Result, guarded, tol};
 use serde::{Deserialize, Serialize};
 use truck_modeling::*;
 
+mod revolution;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Bounds {
     pub min: [f64; 3],
@@ -28,7 +30,16 @@ pub enum VolumeMethod {
     /// As [`VolumeMethod::BrepBoundaryIntegralZ`] with F = (0, y, 0): curved faces
     /// must be Y-ruled (n_y == 0) or lie in a plane y = const. Tried after Z and X.
     BrepBoundaryIntegralY,
-    /// Fallback when no axis-ruled boundary integral applies (e.g. a torus): signed
+    /// Divergence theorem with the radial field F = (p - o)_perp / 2 about an axis
+    /// (o, a), tried after Z, X and Y. Curved faces must be cones, cylinders or tori
+    /// of revolution about that common axis (meridian a line or a circle not touching
+    /// the axis, except at a cone apex), or circular cylinders about any axes. Each
+    /// face's flux is an exact closed-form 1-form integrated over its exact boundary
+    /// edges (Stokes), evaluated like the axis methods (chord sums, Richardson). Covers
+    /// lofted frusta, revolved cones/tori and swept circular channels. Not a mesh
+    /// volume. See `measure/revolution.rs`.
+    BrepBoundaryIntegralRevolution,
+    /// Fallback when no exact boundary integral applies (e.g. a sphere): signed
     /// volume of the welded watertight tessellation at two chord tolerances; the
     /// finer value is reported and `error_estimate` is the difference between the
     /// two levels. An estimate, not an exact or bounded value (see
@@ -403,11 +414,14 @@ fn tessellation_volume(body: &Body) -> std::result::Result<(f64, f64), String> {
 }
 
 /// Volume of `body`: the exact boundary integral about the first axis (Z, X, Y) whose
-/// curved faces are all ruled along or perpendicular to it; otherwise (or if the
-/// exact evaluation fails) the tessellation estimate; `Unavailable` if both fail.
+/// curved faces are all ruled along or perpendicular to it; else the exact
+/// surface-of-revolution integral (cones/tori about one axis, cylinders about any);
+/// otherwise (or if the exact evaluation fails) the tessellation estimate;
+/// `Unavailable` if all fail.
 fn volume(body: &Body) -> VolumeResult {
     let solid = &body.solid;
     let mut reasons = Vec::new();
+    let mut eval_failed = false;
     for axis in Axis::ORDER {
         if let Err(e) = axis_supported(solid, axis) {
             reasons.push(format!("{axis:?}: {e}"));
@@ -424,8 +438,21 @@ fn volume(body: &Body) -> VolumeResult {
             Err(e) => {
                 // Another axis would evaluate the same edge curves; go to the fallback.
                 reasons.push(format!("{axis:?}: {e}"));
+                eval_failed = true;
                 break;
             }
+        }
+    }
+    if !eval_failed {
+        match revolution::revolution_volume(solid, VOLUME_CHORDS) {
+            Ok((volume, error_estimate)) => {
+                return VolumeResult::Value {
+                    volume,
+                    error_estimate,
+                    method: VolumeMethod::BrepBoundaryIntegralRevolution,
+                };
+            }
+            Err(e) => reasons.push(format!("revolution: {e}")),
         }
     }
     match tessellation_volume(body) {

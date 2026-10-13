@@ -2,8 +2,8 @@
 //! wrong-geometry case either yields the exact intended solid or a specific
 //! refusal that leaves the document unchanged, and each refusal has an adjacent
 //! control that still works. Expected volumes are box/cylinder arithmetic.
-use rcad_commands::{Command, DocSummary, ExtrudeOp, Response, Session, SketchTemplate};
-use rcad_document::{BodyId, DocError, FaceRef, FaceRole, FeatureId, SketchPlane};
+use rcad_commands::{Command, ExtrudeOp, Response, Session, SketchTemplate};
+use rcad_document::{BodyId, FaceRef, FaceRole, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use std::f64::consts::PI;
 
@@ -67,26 +67,6 @@ fn volume(s: &Session) -> f64 {
     }
 }
 
-/// What must not change on a refusal: definitions, revision, undo label.
-fn state(s: &Session) -> (usize, u64, Option<String>, f64) {
-    let d: DocSummary = s.summary();
-    (d.features.len(), d.revision, d.can_undo.clone(), volume(s))
-}
-
-/// The refused command must fail with a geometry-check error naming the
-/// feature-to-be and leave the document as it was.
-fn refused_unchanged(s: &mut Session, c: Command) -> String {
-    let before = state(s);
-    let r = s.execute(&c);
-    assert!(!r.ok, "expected a refusal for {c:?}");
-    let after = state(s);
-    assert_eq!(before, after, "refusal changed the document");
-    match r.error {
-        Some(DocError::GeometryCheck { detail, .. }) => detail,
-        other => panic!("expected GeometryCheck, got {other:?}"),
-    }
-}
-
 // ------------------------------------------------- engulfed (swallowed) hole
 
 /// 80x50x10 plate with a Ø10 through hole at (20, 25).
@@ -105,9 +85,25 @@ fn holed_plate(s: &mut Session) -> FeatureId {
 }
 
 /// Truck 0.6 keeps the engulfed hole's walls (run 3: 2010.6 removed instead of
-/// 1225.2 with a "closed" shell). Now refused; the document is unchanged.
+/// 1225.2 with a "closed" shell); the result check refuses that. Since run 5
+/// the exact slab construction with arcs (ADR 0007) builds the cut instead,
+/// through Extrude Cut through-all and blind alike, and the same result check
+/// passes it. The run-1 "Cut Through All" command (`legacy_cut`) has the same
+/// slab fallback since run 5 (C3) and is exact too.
 #[test]
-fn cut_swallowing_an_existing_hole_is_refused_unchanged() {
+fn cut_swallowing_an_existing_hole_is_exact() {
+    let want = 40000.0 - PI * 64.0 * 10.0;
+    for (d, through) in [(0.0, true), (10.0, false)] {
+        let mut s = Session::new();
+        let e = holed_plate(&mut s);
+        let big = sketch(
+            &mut s,
+            face(e, FaceRole::ExtrudeEndCap),
+            circle(16.0, [20.0, 25.0]),
+        );
+        ok(&mut s, extrude(big, d, ExtrudeOp::Cut, through));
+        assert!((volume(&s) - want).abs() < 1e-6 * want, "{}", volume(&s));
+    }
     let mut s = Session::new();
     let e = holed_plate(&mut s);
     let big = sketch(
@@ -115,23 +111,14 @@ fn cut_swallowing_an_existing_hole_is_refused_unchanged() {
         face(e, FaceRole::ExtrudeEndCap),
         circle(16.0, [20.0, 25.0]),
     );
-    let why = refused_unchanged(&mut s, extrude(big, 0.0, ExtrudeOp::Cut, true));
-    assert!(
-        why.contains("not closed") || why.contains("does not bound"),
-        "{why}"
-    );
-    // Same through the blind-cut path (depth = full thickness from the top).
-    let why = refused_unchanged(&mut s, extrude(big, 10.0, ExtrudeOp::Cut, false));
-    assert!(why.contains("refused"), "{why}");
-    // And through the run-1 "Cut Through All" command.
-    let why = refused_unchanged(
+    ok(
         &mut s,
         Command::CutThroughAll {
             name: None,
             sketch: big,
         },
     );
-    assert!(why.contains("refused"), "{why}");
+    assert!((volume(&s) - want).abs() < 1e-6 * want, "{}", volume(&s));
 }
 
 /// Control: the same Ø16 cut elsewhere on the plate is exact.

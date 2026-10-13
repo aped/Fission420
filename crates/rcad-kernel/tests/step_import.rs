@@ -192,7 +192,8 @@ fn plate_with_hole_imports_exactly() {
 }
 
 /// Sphere and torus: exact geometry (verified against the analytic surfaces at
-/// import), volume through the labelled tessellation estimate.
+/// import). The torus volume is exact (surface-of-revolution integral); the sphere's
+/// (meridian through the axis) is the labelled tessellation estimate.
 #[test]
 fn sphere_and_torus_import_with_estimated_volume() {
     for (name, expected, min, max) in [
@@ -213,11 +214,20 @@ fn sphere_and_torus_import_with_estimated_volume() {
         let b = &imp.solids[0].body;
         assert_closed_single(b);
         let (v, err, method) = volume(b);
-        assert_eq!(method, VolumeMethod::TessellationEstimate, "{name}");
-        assert!(
-            (v - expected).abs() <= err && err < 0.01 * expected,
-            "{name}: {v} +- {err} vs {expected}"
-        );
+        if name.starts_with("torus") {
+            assert_eq!(
+                method,
+                VolumeMethod::BrepBoundaryIntegralRevolution,
+                "{name}"
+            );
+            assert_exact_volume(b, expected);
+        } else {
+            assert_eq!(method, VolumeMethod::TessellationEstimate, "{name}");
+            assert!(
+                (v - expected).abs() <= err && err < 0.01 * expected,
+                "{name}: {v} +- {err} vs {expected}"
+            );
+        }
         assert_bounds(b, min, max, 1e-9);
         assert!(check_mesh(&tessellate(b, 0.05).unwrap()).watertight);
     }
@@ -398,12 +408,12 @@ fn imported_box_can_be_cut_measured_and_exported() {
     .unwrap();
     assert_closed_single(&side_cut);
     // Ø4 along X at (y, z) = (6, 5) misses the Ø6 Z-hole at (x, y) = (20, 15).
-    // Holes along Z and X: no single exact axis exists, so the volume is the
-    // labelled tessellation estimate, which must contain the analytic value.
-    let (v, err, method) = volume(&side_cut);
+    // Holes along Z and X: no single axis-ruled integral exists; the cylinders
+    // about their own axes make it exact through the revolution method.
+    let (_, _, method) = volume(&side_cut);
     let exp2 = expected - 4.0 * PI * 40.0;
-    assert_eq!(method, VolumeMethod::TessellationEstimate);
-    assert!((v - exp2).abs() <= err, "{v} +- {err} vs {exp2}");
+    assert_eq!(method, VolumeMethod::BrepBoundaryIntegralRevolution);
+    assert_exact_volume(&side_cut, exp2);
     // STEP export of the edited body; re-import (not independent: covers the
     // B-spline surface / rational curve import path; FreeCAD validation is in
     // docs/formats/step.md).

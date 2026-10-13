@@ -68,7 +68,8 @@ fn committed_v2_examples_migrate_and_regenerate_identically() {
         let out = dir.path().join("v3.rcad.json");
         save_file(&out, m.document(), Some(m.evaluation())).unwrap();
         let nf3 = load_file(&out).unwrap();
-        assert_eq!(nf3.version, FORMAT_VERSION);
+        // Plain documents are written as v4 (v5 only for run-5 features).
+        assert_eq!(nf3.version, 4);
         assert_eq!(&nf3.document, m.document());
     }
 }

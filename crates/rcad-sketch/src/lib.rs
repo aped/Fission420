@@ -161,6 +161,11 @@ pub enum Constraint {
     /// centre, Q the line's other end). The line and the arc must share exactly
     /// one endpoint.
     Tangent { line: EntityId, arc: EntityId },
+    /// Two arcs share exactly one endpoint and are tangent there (internally
+    /// or externally): the radius vectors at the shared point P are collinear.
+    /// 1 equation (mm), `(P − C_a) × (P − C_b) / |P − C_b|`. Added in run 5
+    /// for line–arc sketch fillets (serde-additive).
+    TangentArcs { a: EntityId, b: EntityId },
     /// Two arcs/circles have equal radii (arc radius = |start − centre|);
     /// 1 equation, no dimension.
     EqualRadius { a: EntityId, b: EntityId },
@@ -446,6 +451,40 @@ pub(crate) fn tangent_shared_point(
     }
 }
 
+/// For a `TangentArcs` constraint: `(shared point, centre of a, centre of b)`.
+/// The arcs must share exactly one endpoint `PointId`.
+pub(crate) fn arcs_shared_point(
+    a: &Entity,
+    b: &Entity,
+) -> Result<(PointId, PointId, PointId), &'static str> {
+    let (
+        Entity::Arc {
+            center: ca,
+            start: sa,
+            end: ea,
+            ..
+        },
+        Entity::Arc {
+            center: cb,
+            start: sb,
+            end: eb,
+            ..
+        },
+    ) = (a, b)
+    else {
+        return Err("arc tangency needs two arcs");
+    };
+    let shared: Vec<PointId> = [*sa, *ea]
+        .into_iter()
+        .filter(|p| p == sb || p == eb)
+        .collect();
+    match shared.as_slice() {
+        [p] => Ok((*p, *ca, *cb)),
+        [] => Err("tangent arcs must share an endpoint"),
+        _ => Err("tangent arcs share both endpoints"),
+    }
+}
+
 impl Sketch {
     /// Rectangle centred on a fixed origin point. Points: 0 origin, 1..=4 corners
     /// (BL, BR, TR, TL). Lines 1..=4 (bottom, right, top, left). Exactly fully
@@ -709,6 +748,13 @@ impl Sketch {
                     let l = need_entity(i, line, "line")?;
                     let a = need_entity(i, arc, "arc")?;
                     tangent_shared_point(l, a).map_err(|why| {
+                        SketchError::InvalidValue(format!("constraint {i}: {why}"))
+                    })?;
+                }
+                Constraint::TangentArcs { a, b } => {
+                    let ea = need_entity(i, a, "arc")?;
+                    let eb = need_entity(i, b, "arc")?;
+                    arcs_shared_point(ea, eb).map_err(|why| {
                         SketchError::InvalidValue(format!("constraint {i}: {why}"))
                     })?;
                 }

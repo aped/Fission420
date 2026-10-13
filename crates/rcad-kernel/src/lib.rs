@@ -9,17 +9,22 @@ mod build;
 mod chamfer;
 mod exact;
 mod faceref;
+mod fillet;
+mod loft;
 mod measure;
 mod mesh;
 mod ops;
 pub mod prismatic;
 mod step;
 mod step_in;
+mod sweep;
 mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
 pub use faceref::{planar_faces_overlapping, profile_outline};
+pub use fillet::fillet_edge;
+pub use loft::loft;
 pub use measure::{
     Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count,
     face_planes, measure, planar_faces_on, z_face_inner_loops,
@@ -30,14 +35,15 @@ pub use mesh::{
     write_stl_binary,
 };
 pub use ops::{
-    bounds, coplanar_face_side, cut_prism, cut_region, extent_along, join_prism, join_region,
-    plane_has_face, profile_within_face, through_all_margin,
+    bounds, coplanar_face_side, cut_prism, cut_region, extent_along, has_implicit_edges,
+    join_prism, join_region, plane_has_face, profile_within_face, through_all_margin,
 };
 pub use step::{export_step, export_step_bodies};
 pub use step_in::{
     ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
     import_step,
 };
+pub use sweep::{PathSegment, sweep};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
     verify_prism_boolean, verify_prisms_boolean,

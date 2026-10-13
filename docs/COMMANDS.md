@@ -41,9 +41,9 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `revolve` | `name?`, `sketch`, `angle_deg` | new body; revolves about the sketch's local Y axis (WorldXZ → world Z); 0 < angle ≤ 360; profile strictly at x > 0 |
 | `cut_through_all` | `name?`, `sketch` | both directions along the sketch normal; circular, parallel to the base extrusion, strictly inside its profile (product limit; for a line/arc host: centre inside the loop and clearance > `MIN_LENGTH` to every line segment and arc); not on revolved bodies |
 | `pocket` | `name?`, `sketch`, `depth` | blind cut from the extrusion cap the sketch is on, `depth` mm into the material (against the cap's outward normal). Product limits: circular profile sketched on an end/start cap of the base extrusion, strictly inside it, 0 < depth < thickness (`ProductLimit` otherwise; a through hole is `cut_through_all`). Parameter `depth`; follows the cap when the thickness changes |
-| `linear_pattern` | `name?`, `feature`, `count`, `spacing`, `direction` | repeats an Extrude **Join or Cut** (`feature`, instance 0) `count − 1` more times, `spacing` mm apart along `direction` given in the seed sketch's local 2D axes (normalized), on the seed's target body, with the seed's exact tool span. Parameters `count` (integer 1..=100; 1 = the seed only, no copies) and `spacing` (mm). An instance that misses the body is refused naming it ("instance k of n"); a joined instance of a face-sketched seed must again lie inside a face (`ProductLimit` otherwise). Instance faces are not referenceable. New Body / body patterns: not yet |
+| `linear_pattern` | `name?`, `feature`, `count`, `spacing`, `direction` | repeats an Extrude **Join or Cut** (`feature`, instance 0) `count − 1` more times, `spacing` mm apart along `direction` given in the seed sketch's local 2D axes (normalized), on the seed's target body, with the seed's exact tool span. Parameters `count` (integer 1..=100; 1 = the seed only, no copies) and `spacing` (mm). An instance that misses the body is refused naming it ("instance k of n"); a joined instance of a face-sketched seed must again lie inside a face (`ProductLimit` otherwise). Instance faces are referenceable since run 5 (`FaceRole::Copy { instance, tool, of }`, see below). New Body / body patterns: not yet |
 | `circular_pattern` | `name?`, `feature`, `count`, `angle_deg`, `center` | repeats an Extrude Join/Cut `count − 1` more times, each rotated a further `angle_deg` (0 < a < 360) counter-clockwise about the seed sketch's normal through `center` (seed sketch 2D coordinates); refused when the instances reach or wrap past a full turn (`(count − 1) · angle ≥ 360°`, the last copy would land on the seed); parameters `count`, `angle_deg`; same per-instance refusals as `linear_pattern` |
-| `mirror` | `name?`, `feature`, `plane` | adds the reflection of an Extrude Join/Cut's tool across `plane` (world XY/XZ/YZ through the origin, or a planar face reference) to the seed's target; same refusals as patterns; the mirrored copy's faces are not referenceable |
+| `mirror` | `name?`, `feature`, `plane` | adds the reflection of an Extrude Join/Cut's tool across `plane` (world XY/XZ/YZ through the origin, or a planar face reference) to the seed's target; same refusals as patterns; run 5: `plane` may also be an offset plane (`{"Offset": {"base": …, "distance": d}}`, parameter `plane_offset`, bindable) and the copy's faces are referenceable (`Copy { instance: 1, … }`) |
 | `chamfer` | `name?`, `a`, `b` (face references), `distance` | equal-distance chamfer of the straight convex edge where planar faces `a` and `b` of one body meet (edge named by its faces, never by index). Refused: parallel faces, faces not meeting in an edge, concave edge, distance past either face, or when the cut would remove anything but the exact edge wedge (oblique edge ends, other features within reach) — verified by removed volume. Parameter `distance`. UI: select a face → **Chamfer edge…** |
 | `set_parameter` | `feature`, `name`, `value` | sketch: every named dimension (`width`, `height`, `diameter`, or any name an editor sketch gives, e.g. `chamfer`) and, on template sketches only, `center_x`, `center_y`; extrude: `distance` (mm); pocket: `depth` (mm); linear pattern: `count`, `spacing` (mm); chamfer: `distance` (mm); revolve: `angle_deg` (stored in radians). Sketch edits store the **solved** coordinates in the definition |
 | `hole` | `name?`, `plane` (a face of the target, or a world plane holding one), `center` (plane mm), `diameter`, `depth?` (omit: through all), `counterbore?` `[diameter, depth]`, `target?` | run 4: round hole into the material, optional counterbore (wider, shallower), built as counterbore cut then hole cut, each checked (ADR 0005); parameters `diameter`, `depth`, `cbore_diameter`, `cbore_depth`, `center_x`, `center_y` (bindable); `linear_pattern`/`circular_pattern`/`mirror` accept a hole as seed. Countersinks are not supported |
@@ -57,6 +57,7 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `rename_feature` | `feature`, `name` | 1-128 printable characters, unique among features |
 | `rename_body` | `body`, `name` | 1-128 printable characters, unique among bodies; undoable |
 | `set_body_visible` | `body`, `visible` | undoable; hidden bodies stay evaluated and measurable; default exports skip them |
+| `set_suppressed` | `feature`, `suppressed`, `with_dependents?` (default false) | run 5: suppressed features stay in history and are not evaluated (one undo step). Refused (`BrokenReference`, document unchanged) when an evaluated feature would depend on a suppressed one; `with_dependents` applies the state to every transitive dependent. A document with a suppressed feature is saved as format v5 |
 | `set_sketch_plane` | `feature`, `plane` | re-attach a sketch (repair of a broken/ambiguous face reference); local sketch geometry kept; one undo step |
 | `import_step` | `path`, `units_to_mm?` | exact solids (subset: docs/formats/step.md) → one body per solid, named from the file; source bytes embedded (no path dependency); one undo step; `units_to_mm` only used when the file declares no length unit (else refused with "units required") |
 | `import_stl` | `path`, `units_to_mm` (required: STL is unitless) | ASCII/binary → one mesh body (display, hide/show, save, STL export; exact operations and STEP export refused); diagnostics in `summary.bodies[].mesh`; bytes embedded |
@@ -197,3 +198,33 @@ a newer version than the build supports are refused with a `File` error. Stored 
 are written with shortest round-trip float formatting and reload bit-exactly.
 `crates/rcad-document/tests/fixtures/plate_v1.rcad.json` is a frozen v1 file used by the
 migration test (the `examples/*.rcad.json` files are re-saved as v2 by their workflows).
+
+## Face references (run 5)
+
+Besides `ExtrudeEndCap`, `ExtrudeStartCap`, `ExtrudeSide { entity }` and `Imported`, a
+`FaceRef.role` may be:
+
+* `{"Copy": {"instance": k, "tool": t, "of": "EndCap" | "StartCap" | {"Side": {"entity": e}}}}`
+  with `feature` = a linear/circular pattern (occurrence `k` = 1..count−1; the seed keeps its
+  own references) or a mirror (`k` = 1). `tool` (default 0) picks a Hole seed's counterbore (0)
+  or hole (1). An occurrence removed by a count change is a `BrokenReference`.
+* `"Chamfer"` with `feature` = a chamfer: its planar chamfer face.
+
+When several faces of the body lie in the referenced plane, the face is the one the
+generating tool's footprint overlaps (exact 2-D overlap); a footprint over two faces is
+ambiguous and refused. `FeatureSummary.faces[].sample` is then a point inside the face.
+`hole` with an offset plane based on a face targets that face's body.
+
+## Run 5 commands
+
+| command | fields | notes |
+|---|---|---|
+| `fillet` | `name?`, `a`, `b` (face references), `radius` | exact solid fillet of the straight convex edge between planar faces `a` and `b` (an exact cylinder tangent to both; `rcad_kernel::fillet_edge`). Scope: body prismatic along the edge, perpendicular end faces; refused otherwise with the reason (concave edge, radius too large, other features within reach, faces sharing their plane with others). Parameter `radius`. UI: select a face → **Fillet edge…**. File format v5 |
+| `loft` | `name?`, `a`, `b` (sketch features), `body_name?` | new body between the closed profiles of two sketches on parallel planes (ADR 0008): equal-count polygons with parallel corresponding edges (planar sides), or coaxial circles (cone frustum); refused otherwise (`ProductLimit` naming the reason). UI: **Loft / Sweep › Loft…**. v5 |
+| `sweep` | `name?`, `profile`, `path` (sketch features), `body_name?` | new body: the closed profile swept along the open line/arc chain of the path sketch, which starts at the profile sketch's origin along its normal with tangent joints (ADR 0009). UI: **Loft / Sweep › Sweep…**. v5 |
+| `set_suppressed` | see above | |
+
+Plane forms (run 5): `{"Offset": {"base": …, "distance": d, "angle": a}}` — `angle` (radians,
+optional) tilts the base about its local X axis through its origin before the offset; parameter
+`plane_angle_deg` (bindable) on sketches, mirrors and holes. A non-zero angle makes the file v5.
+Pattern `count` 1 = the seed only.

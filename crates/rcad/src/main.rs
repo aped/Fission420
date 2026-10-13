@@ -285,10 +285,23 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
     let last_reply = app.last_reply().map_or("null".to_string(), |(c, ok)| {
         format!("{{\"command\":\"{}\",\"ok\":{ok}}}", esc(c))
     });
+    // Run 5: the section plane (unit normal toward the hidden side, offset) and
+    // the two-face measurement.
+    let section = app.section_plane().map_or("null".to_string(), |p| {
+        format!(
+            "{{\"nx\":{},\"ny\":{},\"nz\":{},\"offset\":{}}}",
+            p.normal[0], p.normal[1], p.normal[2], p.offset
+        )
+    });
+    let measure = app
+        .face_measurement()
+        .map_or("null".to_string(), |(par, v)| {
+            format!("{{\"parallel\":{par},\"value\":{v}}}")
+        });
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
-        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply}}}",
+        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply},\"section\":{section},\"measure\":{measure}}}",
         s.open,
         s.revision,
         s.features.len(),
@@ -323,6 +336,12 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
 }
 
 impl eframe::App for Shell {
+    fn on_exit(&mut self) {
+        // Finish a queued autosave and remove copies that are no longer
+        // needed (review run 4 #19).
+        self.app.shutdown(std::time::Duration::from_secs(5));
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.trace_input {

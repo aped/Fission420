@@ -513,6 +513,7 @@ pub fn regenerate_cached_opts(
 ) -> Result<Evaluation> {
     let order = doc.evaluation_order()?;
     doc.validate_bodies()?;
+    doc.check_suppression()?;
     let keys = prefix_keys(doc, &order)?;
     let mut st = Snapshot::new();
     let mut start = 0;
@@ -543,6 +544,15 @@ pub fn regenerate_cached_opts(
             body: None,
             notes: vec![],
         };
+        if f.suppressed {
+            // Not evaluated (no dependent is evaluated: `check_suppression`).
+            r.notes.push("suppressed: not evaluated".into());
+            st.results.push(r);
+            if let Some(c) = cache.as_deref_mut() {
+                c.insert(keys[i].clone(), st.clone());
+            }
+            continue;
+        }
         match &f.kind {
             FeatureKind::Sketch { plane, sketch } => {
                 let (frame, resolved) = plane_frame(id, plane, &st)?;
@@ -601,6 +611,59 @@ pub fn regenerate_cached_opts(
                     id,
                     *body,
                     BodyGeometry::Brep(b),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::Sweep {
+                profile,
+                path,
+                body,
+            } => {
+                let sp = st.sketches.get(profile).ok_or(not_a_sketch(id, *profile))?;
+                let pp = st.sketches.get(path).ok_or(not_a_sketch(id, *path))?;
+                let prof = to_kernel(sp.single_loop(id, *profile, "Sweep")?);
+                let segs = path_segments(&pp.solved, &pp.frame, sp.frame.origin)
+                    .map_err(|m| DocError::ProductLimit(format!("{id}: sweep path: {m}")))?;
+                let solid = k::sweep(&prof, &sp.frame, &segs).map_err(|e| match e {
+                    k::KernelError::InvalidInput(m) => {
+                        DocError::ProductLimit(format!("{id}: sweep: {m}"))
+                    }
+                    other => DocError::Kernel {
+                        feature: id,
+                        detail: other.to_string(),
+                    },
+                })?;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::Loft { a, b, body } => {
+                let sa = st.sketches.get(a).ok_or(not_a_sketch(id, *a))?;
+                let sb = st.sketches.get(b).ok_or(not_a_sketch(id, *b))?;
+                let (pa, pb) = (
+                    to_kernel(sa.single_loop(id, *a, "Loft")?),
+                    to_kernel(sb.single_loop(id, *b, "Loft")?),
+                );
+                let solid = k::loft(&pa, &sa.frame, &pb, &sb.frame).map_err(|e| match e {
+                    k::KernelError::InvalidInput(m) => {
+                        DocError::ProductLimit(format!("{id}: loft: {m}"))
+                    }
+                    other => DocError::Kernel {
+                        feature: id,
+                        detail: other.to_string(),
+                    },
+                })?;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
                     BodySource::Modeled,
                 )?;
                 r.body = Some(*body);
@@ -707,6 +770,16 @@ pub fn regenerate_cached_opts(
                         fa.body, fb.body
                     )));
                 }
+                // The kernel finds the edge along the whole line where the two
+                // planes meet; with other faces in either plane (pattern
+                // occurrences, split faces) that line spans several edges.
+                if fa.sample.is_some() || fb.sample.is_some() {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: a chamfer between faces that share their plane with other faces \
+                         of the body (pattern occurrences, split faces) is not supported: the \
+                         edge is found along the whole intersection of the two planes"
+                    )));
+                }
                 let body = brep_target(&st, id, fa.body)?;
                 let out =
                     k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
@@ -714,6 +787,27 @@ pub fn regenerate_cached_opts(
                 if let Some(frame) = chamfer_face_frame(&fa.frame, &fb.frame, *distance) {
                     st.chamfers.insert(id, (frame, fa.body));
                 }
+                r.body = Some(fa.body);
+            }
+            FeatureKind::Fillet { a, b, radius } => {
+                let (fa, fb) = (resolve_face(id, a, &st)?, resolve_face(id, b, &st)?);
+                if fa.body != fb.body {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the two faces belong to different bodies ({} and {})",
+                        fa.body, fb.body
+                    )));
+                }
+                if fa.sample.is_some() || fb.sample.is_some() {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: a fillet between faces that share their plane with other faces \
+                         of the body (pattern occurrences, split faces) is not supported: the \
+                         edge is found along the whole intersection of the two planes"
+                    )));
+                }
+                let body = brep_target(&st, id, fa.body)?;
+                let out =
+                    k::fillet_edge(&body, &fa.frame, &fb.frame, *radius).map_err(kernel(id))?;
+                replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
             FeatureKind::Hole {
@@ -1038,14 +1132,8 @@ fn extrude_feature(
     let (profile, entities) = (region.outer, region.outer_entities);
     let holes = region.holes;
     let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
-    if !holes.is_empty() && !matches!(operation, Operation::NewBody { .. }) {
-        return Err(DocError::ProductLimit(format!(
-            "{id}: sketch {sketch} has {} inner loop(s); Join and Cut need a single closed loop \
-             (Truck 0.6 booleans fail for tools with inner loops); use New Body, or cut each \
-             loop separately",
-            holes.len()
-        )));
-    }
+    // Join/Cut with inner loops: only the exact slab construction builds them
+    // (`apply_tool`, ADR 0007); elsewhere it refuses with the reason.
     let kp = to_kernel(&profile);
     let frame = s.frame;
     if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
@@ -1277,6 +1365,8 @@ fn coplanar_cut_error(id: FeatureId, end: Option<CoplanarEnd>, e: k::KernelError
 struct Applied {
     frame: Frame,
     profile: k::Profile,
+    /// Inner loops of the tool region (empty for a single closed loop).
+    holes: Vec<k::Profile>,
     /// The user's span along `frame.z`.
     nominal: (f64, f64),
     /// The span handed to the kernel.
@@ -1305,6 +1395,7 @@ fn verify_applied(
         .zip(&starts)
         .map(|(a, start)| k::Prism {
             profile: &a.profile,
+            holes: &a.holes,
             start,
             length: a.nominal.1 - a.nominal.0,
         })
@@ -1359,6 +1450,7 @@ fn apply_tool(
     defer: Option<&mut Vec<Applied>>,
 ) -> Result<(Body, (f64, f64))> {
     let kp = to_kernel(&e.profile);
+    let khole: Vec<k::Profile> = e.holes.iter().map(|(p, _)| to_kernel(p)).collect();
     let prefix = what.map(|w| format!("{w}: ")).unwrap_or_default();
     let err = |x: k::KernelError| DocError::Kernel {
         feature: id,
@@ -1371,6 +1463,7 @@ fn apply_tool(
         let a = Applied {
             frame: *frame,
             profile: kp.clone(),
+            holes: khole.clone(),
             nominal,
             used,
             op,
@@ -1383,6 +1476,45 @@ fn apply_tool(
             None => verify_applied(id, &prefix, body, result, std::slice::from_ref(&a)),
         }
     };
+    if !khole.is_empty() {
+        // A tool region with inner loops (Truck 0.6 booleans fail for those):
+        // only the exact slab construction, over the nominal span (it needs no
+        // overlap or margin), checked against the holed nominal tool.
+        let (op, kop, span) = if e.removes {
+            let span = if e.extent == Extent::ThroughAll {
+                let margin = k::through_all_margin(body).map_err(err)?;
+                let (lo, hi) = k::extent_along(body, frame).map_err(err)?;
+                (lo - margin, hi + margin)
+            } else {
+                e.nominal
+            };
+            (k::prismatic::SlabOp::Cut, k::PrismOp::Cut, span)
+        } else {
+            (k::prismatic::SlabOp::Join, k::PrismOp::Join, e.nominal)
+        };
+        if let Some(why) = k::prismatic::not_applicable(body, &kp, frame) {
+            return Err(DocError::ProductLimit(format!(
+                "{id}: {prefix}the sketch region has {} inner loop(s); a Join or Cut with inner \
+                 loops is built only by the exact slab construction, which does not apply here \
+                 ({why}). Use New Body, or cut each loop separately",
+                khole.len()
+            )));
+        }
+        let out = k::prismatic::prism_region_boolean(
+            body,
+            &kp,
+            &khole,
+            &frame.offset(span.0),
+            span.1 - span.0,
+            op,
+        )
+        .map_err(|x| DocError::Kernel {
+            feature: id,
+            detail: format!("{prefix}exact slab construction (region with inner loops): {x}"),
+        })?;
+        check(&out, kop, span, span).map_err(slab_checked)?;
+        return Ok((out, span));
+    }
     if e.removes {
         let margin = k::through_all_margin(body).map_err(err)?;
         let (nominal, (span, refused)) = if e.extent == Extent::ThroughAll {
@@ -1402,7 +1534,7 @@ fn apply_tool(
             })
             .and_then(|out| check(&out, k::PrismOp::Cut, nominal, span).map(|()| out));
         let out = match truck {
-            Ok(out) => out,
+            Ok(out) => exact_instead(id, &prefix, body, out, &kp, frame, nominal, span, true),
             Err(e) => {
                 let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Cut, e)?;
                 check(&out, k::PrismOp::Cut, nominal, span).map_err(slab_checked)?;
@@ -1420,27 +1552,30 @@ fn apply_tool(
             // the material, which is only exact when the profile lies on the
             // face (material under the whole profile) and the overlap stays
             // inside material that no other surface crosses.
-            let slab = k::prismatic::applicable(body, &kp, frame);
             if !k::profile_within_face(body, frame, &kp).map_err(err)? {
-                if slab {
-                    // Prismatic target: the exact slab construction needs no
-                    // overlap into the support, so the profile may leave the face.
-                    let out = k::prismatic::prism_boolean(
-                        body,
-                        &kp,
-                        &frame.offset(a),
-                        b - a,
-                        k::prismatic::SlabOp::Join,
-                    )
-                    .map_err(err)?;
-                    check(&out, k::PrismOp::Join, (a, b), (a, b))?;
-                    return Ok((out, (a, b)));
+                let limit = |why: String| {
+                    DocError::ProductLimit(format!(
+                        "{id}: {prefix}a Join sketched on a face of the target must lie inside \
+                         that face; the profile is not inside a face here (it crosses the face \
+                         boundary or a hole). Use New Body, or sketch on another plane \
+                         (exact slab construction: {why})"
+                    ))
+                };
+                if let Some(why) = k::prismatic::not_applicable(body, &kp, frame) {
+                    return Err(limit(format!("not applicable: {why}")));
                 }
-                return Err(DocError::ProductLimit(format!(
-                    "{id}: {prefix}a Join sketched on a face of the target must lie inside \
-                     that face; the profile is not inside a face here (it crosses the face \
-                     boundary or a hole). Use New Body, or sketch on another plane"
-                )));
+                // Prismatic target: the exact slab construction needs no
+                // overlap into the support, so the profile may leave the face.
+                let out = k::prismatic::prism_boolean(
+                    body,
+                    &kp,
+                    &frame.offset(a),
+                    b - a,
+                    k::prismatic::SlabOp::Join,
+                )
+                .map_err(|x| limit(x.to_string()))?;
+                check(&out, k::PrismOp::Join, (a, b), (a, b)).map_err(slab_checked)?;
+                return Ok((out, (a, b)));
             }
             let face = Frame {
                 z: [side * frame.z[0], side * frame.z[1], side * frame.z[2]],
@@ -1467,7 +1602,7 @@ fn apply_tool(
         .map_err(err)
         .and_then(|out| check(&out, k::PrismOp::Join, (a, b), span).map(|()| out));
     let out = match truck {
-        Ok(out) => out,
+        Ok(out) => exact_instead(id, &prefix, body, out, &kp, frame, (a, b), span, false),
         Err(e) => {
             let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Join, e)?;
             check(&out, k::PrismOp::Join, (a, b), span).map_err(slab_checked)?;
@@ -1475,6 +1610,50 @@ fn apply_tool(
         }
     };
     Ok((out, span))
+}
+
+/// Truck's (checked) result `out`, or, when it keeps implicit intersection
+/// edges without an exact replacement (e.g. cylinder ∩ cylinder: approximated,
+/// not exportable to STEP) and the case is prismatic, the exact slab
+/// construction's result, if that passes the result check on its own
+/// (ADR 0007). Any failure of the alternative keeps Truck's result.
+#[allow(clippy::too_many_arguments)]
+fn exact_instead(
+    id: FeatureId,
+    prefix: &str,
+    body: &Body,
+    out: Body,
+    kp: &k::Profile,
+    frame: &Frame,
+    nominal: (f64, f64),
+    span: (f64, f64),
+    removes: bool,
+) -> Body {
+    if !k::has_implicit_edges(&out) || k::prismatic::not_applicable(body, kp, frame).is_some() {
+        return out;
+    }
+    let (slab_op, op) = if removes {
+        (k::prismatic::SlabOp::Cut, k::PrismOp::Cut)
+    } else {
+        (k::prismatic::SlabOp::Join, k::PrismOp::Join)
+    };
+    let Ok(alt) =
+        k::prismatic::prism_boolean(body, kp, &frame.offset(span.0), span.1 - span.0, slab_op)
+    else {
+        return out;
+    };
+    let applied = Applied {
+        frame: *frame,
+        profile: kp.clone(),
+        holes: Vec::new(),
+        nominal,
+        used: span,
+        op,
+    };
+    match verify_applied(id, prefix, body, &alt, std::slice::from_ref(&applied)) {
+        Ok(()) => alt,
+        Err(_) => out,
+    }
 }
 
 /// A result check failure of the exact slab construction (says so: it is a
@@ -1548,6 +1727,29 @@ fn plane_frame(
             (rf.frame, Some(rf))
         }
         SketchPlane::Offset { .. } => unreachable!("base_and_offset returns a base plane"),
+    };
+    let a = plane.angle();
+    if !a.is_finite() {
+        return Err(DocError::Validation(format!(
+            "{id}.plane_angle_deg: the plane angle must be finite"
+        )));
+    }
+    // Tilt about the base's local X axis through its origin (run 5).
+    let frame = if a == 0.0 {
+        frame
+    } else {
+        let (s, c) = a.sin_cos();
+        let y = [
+            c * frame.y[0] + s * frame.z[0],
+            c * frame.y[1] + s * frame.z[1],
+            c * frame.y[2] + s * frame.z[2],
+        ];
+        let z = [
+            -s * frame.y[0] + c * frame.z[0],
+            -s * frame.y[1] + c * frame.z[1],
+            -s * frame.y[2] + c * frame.z[2],
+        ];
+        Frame { y, z, ..frame }
     };
     Ok((if d == 0.0 { frame } else { frame.offset(d) }, rf))
 }
@@ -1669,6 +1871,42 @@ fn shell_tool(
 /// Tools of a Hole, in application order (`[counterbore, hole]` or `[hole]`),
 /// as blind/through cuts from the face in `frame` into the material of
 /// `target`.
+/// +1/-1 when the faces of `body` in `frame`'s plane that the hole's circle
+/// (`center`, `diameter`) overlaps all face along / against `frame.z`; None
+/// when it overlaps none (or the diameter is not usable yet). Faces facing
+/// both ways under the hole: refused as ambiguous.
+fn hole_face_side(
+    body: &Body,
+    frame: &Frame,
+    center: [f64; 2],
+    diameter: f64,
+) -> std::result::Result<Option<f64>, k::KernelError> {
+    if !(diameter.is_finite() && diameter > 0.0) {
+        return Ok(None);
+    }
+    let (pts, curved) = k::profile_outline(&k::Profile::Circle {
+        center,
+        radius: diameter / 2.0,
+    });
+    let outline: Vec<[f64; 3]> = pts.into_iter().map(|p| frame.to_world(p)).collect();
+    let flipped = Frame {
+        x: frame.y,
+        y: frame.x,
+        z: scale(frame.z, -1.0),
+        ..*frame
+    };
+    let (pos, _) = k::planar_faces_overlapping(body, frame, &outline, curved)?;
+    let (neg, _) = k::planar_faces_overlapping(body, &flipped, &outline, curved)?;
+    match (pos > 0, neg > 0) {
+        (true, false) => Ok(Some(1.0)),
+        (false, true) => Ok(Some(-1.0)),
+        (false, false) => Ok(None),
+        (true, true) => Err(k::KernelError::InvalidInput(
+            "the faces under the hole face both ways; the material side is ambiguous".into(),
+        )),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn hole_tools(
     st: &Snapshot,
@@ -1681,14 +1919,19 @@ fn hole_tools(
     target: BodyId,
 ) -> Result<Vec<ExtrudeOut>> {
     let t = brep_target(st, id, target)?;
-    let side = k::coplanar_face_side(&t, frame)
-        .map_err(kernel(id))?
-        .ok_or_else(|| {
-            DocError::ProductLimit(format!(
-                "{id}: a hole starts on a planar face of its target body; the chosen plane holds \
-                 no face of {target}"
-            ))
-        })?;
+    // The material side from the faces under the hole itself (review run 4
+    // #9: any coplanar face of the body used to decide, so a plane holding
+    // faces facing both ways elsewhere refused every hole on it).
+    let side = match hole_face_side(&t, frame, center, diameter).map_err(kernel(id))? {
+        Some(s) => Some(s),
+        None => k::coplanar_face_side(&t, frame).map_err(kernel(id))?,
+    }
+    .ok_or_else(|| {
+        DocError::ProductLimit(format!(
+            "{id}: a hole starts on a planar face of its target body; the chosen plane holds \
+             no face of {target}"
+        ))
+    })?;
     let dir = -side;
     let finite = |v: f64, what: &str| {
         (v.is_finite() && v > 0.0)
@@ -2076,13 +2319,9 @@ fn legacy_cut(
     let hole = hole_in_host_frame(cut_profile, &s.frame, &host.start)?;
     check_hole_inside(&hole, &host.profile)?;
     let kp = to_kernel(cut_profile);
-    let b = match depth {
-        None => k::cut_through_all(&t, &kp, &s.frame),
-        Some(d) => k::cut_blind(&t, &kp, &s.frame, d),
-    }
-    .map_err(kernel(id))?;
-    // Independent check against the nominal cut (through all: the body's whole
-    // extent along the normal; pocket: from the face down to `depth`).
+    // Nominal cut (through all: the body's whole extent along the normal plus
+    // the margin; pocket: from the face down to `depth`) and the span handed
+    // to Truck (a pocket's top is moved a margin above the face).
     let (nominal, used) = match depth {
         None => {
             let (lo, hi) = k::extent_along(&t, &s.frame).map_err(kernel(id))?;
@@ -2095,27 +2334,48 @@ fn legacy_cut(
         }
     };
     let start = s.frame.offset(nominal.0);
-    k::verify_prism_boolean(
-        &t,
-        &b,
-        k::PrismOp::Cut,
-        &k::Prism {
-            profile: &kp,
-            start: &start,
-            length: nominal.1 - nominal.0,
-        },
-        (used.0 - nominal.0, used.1 - nominal.0),
-    )
-    .map_err(|x| DocError::GeometryCheck {
-        feature: id,
-        detail: format!(
-            "{}; refused (the model is unchanged). Known Truck 0.6 case: a cut that fully \
-             contains an existing hole or pocket; enlarge that feature by editing its \
-             dimension instead",
-            x.to_string()
-                .trim_start_matches("result is not a valid solid: ")
-        ),
-    })?;
+    // Independent check against the nominal cut (ADR 0005).
+    let verify = |b: &Body, used: (f64, f64)| {
+        k::verify_prism_boolean(
+            &t,
+            b,
+            k::PrismOp::Cut,
+            &k::Prism {
+                profile: &kp,
+                holes: &[],
+                start: &start,
+                length: nominal.1 - nominal.0,
+            },
+            (used.0 - nominal.0, used.1 - nominal.0),
+        )
+        .map_err(|x| DocError::GeometryCheck {
+            feature: id,
+            detail: format!(
+                "{}; refused (the model is unchanged). Known Truck 0.6 case: a cut that fully \
+                 contains an existing hole or pocket; enlarge that feature by editing its \
+                 dimension instead",
+                x.to_string()
+                    .trim_start_matches("result is not a valid solid: ")
+            ),
+        })
+    };
+    let truck = match depth {
+        None => k::cut_through_all(&t, &kp, &s.frame),
+        Some(d) => k::cut_blind(&t, &kp, &s.frame, d),
+    }
+    .map_err(kernel(id))
+    .and_then(|b| verify(&b, used).map(|_| b));
+    // As for Extrude Cut (ADR 0006/0007): when Truck fails or its result fails
+    // the check on a prismatic target, the exact slab construction over the
+    // nominal span, checked the same way.
+    let b = match truck {
+        Ok(b) => b,
+        Err(e) => {
+            let b = slab_fallback(&t, &kp, &s.frame, nominal, k::prismatic::SlabOp::Cut, e)?;
+            verify(&b, nominal).map_err(slab_checked)?;
+            b
+        }
+    };
     // A cut that removes material always adds faces; containment (checked
     // above) guarantees the cutter intersects the body.
     if k::face_count(&b) <= k::face_count(&t) {
@@ -2275,6 +2535,97 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
             fr.feature
         ))),
     }
+}
+
+/// The sweep path of `sketch` (on `frame`): its non-construction lines and
+/// arcs must form one open chain; it is walked from the end at `start` (the
+/// profile sketch's origin, world mm) to the other end. Circles, branches,
+/// closed loops or a chain not starting at `start` are refused.
+fn path_segments(
+    sketch: &rcad_sketch::Sketch,
+    frame: &Frame,
+    start: [f64; 3],
+) -> std::result::Result<Vec<k::PathSegment>, String> {
+    use rcad_sketch::Entity;
+    let edges: Vec<&Entity> = sketch
+        .entities
+        .iter()
+        .filter(|e| !sketch.is_construction(e.id()))
+        .collect();
+    if edges.is_empty() {
+        return Err("the path sketch has no lines or arcs".into());
+    }
+    let ends = |e: &Entity| -> std::result::Result<_, String> {
+        match e {
+            Entity::Line { a, b, .. } => Ok((*a, *b)),
+            Entity::Arc { start, end, .. } => Ok((*start, *end)),
+            Entity::Circle { .. } => Err("a circle cannot be a sweep path".to_string()),
+        }
+    };
+    let mut degree: HashMap<rcad_sketch::PointId, usize> = HashMap::new();
+    for e in &edges {
+        let (a, b) = ends(e)?;
+        *degree.entry(a).or_default() += 1;
+        *degree.entry(b).or_default() += 1;
+    }
+    if degree.values().any(|&d| d > 2) {
+        return Err("the path branches (a point joins more than two curves)".into());
+    }
+    let tips: Vec<_> = degree
+        .iter()
+        .filter(|&(_, &d)| d == 1)
+        .map(|(p, _)| *p)
+        .collect();
+    if tips.len() != 2 {
+        return Err("the path must be one open chain of lines and arcs".into());
+    }
+    let world = |p: rcad_sketch::PointId| -> std::result::Result<[f64; 3], String> {
+        let q = sketch.point_xy(p).ok_or("missing path point")?;
+        Ok(frame.to_world(q))
+    };
+    let dist = |a: [f64; 3], b: [f64; 3]| dot(sub(a, b), sub(a, b)).sqrt();
+    let tol = 1e-6 * (1.0 + dot(start, start).sqrt());
+    let first = *tips
+        .iter()
+        .find(|p| world(**p).is_ok_and(|w| dist(w, start) <= tol))
+        .ok_or("the path must start at the profile sketch's origin")?;
+    let mut out = Vec::new();
+    let mut used = vec![false; edges.len()];
+    let mut at = first;
+    while out.len() < edges.len() {
+        let i = (0..edges.len())
+            .find(|&i| !used[i] && ends(edges[i]).is_ok_and(|(a, b)| a == at || b == at))
+            .ok_or("the path is not one connected chain")?;
+        used[i] = true;
+        let (a, b) = ends(edges[i])?;
+        let next = if a == at { b } else { a };
+        out.push(match edges[i] {
+            Entity::Line { .. } => k::PathSegment::Line { end: world(next)? },
+            Entity::Arc { center, .. } => k::PathSegment::Arc {
+                center: world(*center)?,
+                end: world(next)?,
+            },
+            Entity::Circle { .. } => unreachable!("refused above"),
+        });
+        at = next;
+    }
+    Ok(out)
+}
+
+/// Area of a closed planar polygon in 3-D (Newell), mm².
+fn polygon_area(p: &[[f64; 3]]) -> f64 {
+    let n = p.len();
+    if n < 3 {
+        return 0.0;
+    }
+    let mut a = [0.0; 3];
+    for i in 0..n {
+        let c = cross(p[i], p[(i + 1) % n]);
+        for k in 0..3 {
+            a[k] += c[k];
+        }
+    }
+    0.5 * dot(a, a).sqrt()
 }
 
 /// Footprint of the face `role` of extrusion tool `e` (whose resolved plane is
@@ -2479,19 +2830,24 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
             detail: format!("body {owner} is a mesh; mesh faces cannot host sketches"),
         });
     };
-    let mut n = k::planar_faces_on(body, &frame);
+    let in_plane = k::planar_faces_on(body, &frame);
+    let mut n = in_plane;
     let mut sample = None;
-    if n > 1
+    let mut gone_from_footprint = false;
+    if n > 0
         && let Some((e, role)) = tool
     {
-        // Several faces in the plane: the one holding this tool's footprint.
+        // The face is the one this tool's footprint overlaps (review run 5:
+        // also when the plane holds one face, which may be another tool's —
+        // e.g. an occurrence's floor cut away and the seed's still there).
         let (outline, curved) = footprint(e, role, &frame);
-        if !outline.is_empty() {
+        if polygon_area(&outline) > 0.0 {
             let (hits, inside) = k::planar_faces_overlapping(body, &frame, &outline, curved)
                 .map_err(kernel(from))?;
-            // No face under the footprint: still the plane's ambiguity (n > 1).
-            if hits > 0 {
-                (n, sample) = (hits, inside);
+            n = hits;
+            gone_from_footprint = hits == 0;
+            if hits == 1 && in_plane > 1 {
+                sample = inside;
             }
         }
     }
@@ -2503,6 +2859,17 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         }
         r => format!("{r:?}"),
     };
+    if gone_from_footprint {
+        return Err(DocError::BrokenReference {
+            from,
+            detail: format!(
+                "the {role} of {} no longer exists on body {owner}: {in_plane} face(s) lie in \
+                 its plane, none where its own tool made it (removed or replaced by a later \
+                 feature); re-attach to an existing face",
+                fr.feature
+            ),
+        });
+    }
     if n == 0 {
         return Err(DocError::BrokenReference {
             from,
@@ -2518,7 +2885,7 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
             from,
             detail: format!(
                 "the {role} of {} is ambiguous: {n} faces of body {owner} lie in its plane \
-                 (split or coplanar faces); refusing to guess — re-attach the sketch",
+                 where its tool made it (a split face); refusing to guess — re-attach the sketch",
                 fr.feature
             ),
         });

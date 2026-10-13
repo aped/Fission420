@@ -27,7 +27,8 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | arc span slack (rcad-kernel `build.rs` `ARC_SPAN_SLACK`) | 1e-9 quarter turns | construction | an arc becomes `ceil(sweep / (π/2) − slack)` single-span edges, so a solved quarter arc (sweep π/2 + rounding) stays one edge; spans stay < π (positive middle weight) |
 | B-rep volume chords (rcad-kernel `measure.rs` `VOLUME_CHORDS`) | 512 / 1024 / 2048 chords per edge, Richardson extrapolation | numerical | exact-path boundary integral (`BrepBoundaryIntegral{Z,X,Y}`); error estimate = difference of the two extrapolants |
 | volume axis classification (`measure.rs` `classify_by_sampling`) | \|unit normal · a\| ≤ 1e-12 (ruled), or \|other two normal components\| ≤ 1e-12 and position along a within 1e-9 mm (perpendicular), on a 17×17 parameter grid | numerical | picks the first axis a in Z, X, Y for which every curved face is ruled along or perpendicular to a; planar faces: perpendicular if the two off-axis normal components sum < 1e-12, ignored if \|n · a\| ≤ 1e-12, otherwise integrated in the plane's own frame (tilted) |
-| tessellation volume fallback (`measure.rs` `FALLBACK_CHORD_REL`, `FALLBACK_REFINE`) | chord c = max(1e-4 × bbox diagonal, 4 × `MIN_MESH_CHORD_*`) and c / 4 | numerical | `TessellationEstimate` when no axis applies (e.g. torus): fine-mesh signed volume, error estimate \|V(c) − V(c/4)\| (≈ 3 × the fine error when O(chord) convergence holds; an estimate, not a bound). Torus R 40 r 10: error −3.3e-4 relative, estimate 1.0e-3 relative |
+| tessellation volume fallback (`measure.rs` `FALLBACK_CHORD_REL`, `FALLBACK_REFINE`) | chord c = max(1e-4 × bbox diagonal, 4 × `MIN_MESH_CHORD_*`) and c / 4 | numerical | `TessellationEstimate` when no axis or revolution path applies (e.g. sphere): fine-mesh signed volume, error estimate \|V(c) − V(c/4)\| (≈ 3 × the fine error when O(chord) convergence holds; an estimate, not a bound). Torus R 40 r 10: error −3.3e-4 relative, estimate 1.0e-3 relative |
+| surface-of-revolution volume (`measure/revolution.rs` `SHAPE_REL`, run 5) | a face is recognised as plane / cone / cylinder / torus about the body's common axis when sampled points fit within 1e-9 × body size | numerical | `BrepBoundaryIntegralRevolution`: divergence theorem with a radial field, closed forms per exact boundary edge; observed 1e-15 – 2e-14 relative on analytic cases (`tests/volume_revolution.rs`); unrecognised faces (sphere, tori about two axes) fall back to the estimate |
 | volume test thresholds (`tests/volume_general.rs`) | exact path: max(0.001 mm³, 1e-7 × V); fallback: \|V − analytic\| ≤ error estimate and estimate < 1 % of V | acceptance | side holes along X/Y, tilted planar faces, torus |
 | bounds extremum refinement (rcad-kernel `measure.rs`) | 60 golden-section iterations between neighbouring samples | numerical | exact axis extrema of explicit curved edges; skipped for boolean intersection curves (they keep sampling error; since ADR 0002 only unsupported cases such as cylinder ∩ cylinder remain implicit) |
 | exact boolean edge rebuild `exact::REBUILD_TOL` (rcad-kernel `exact.rs`) | 1e-7 mm | geometric | an exact plane ∩ extrusion curve replaces a boolean intersection edge only if its ends are within this of the edge vertices and 7 interior samples are within this of both surfaces (ADR 0002); also used by STEP export |
@@ -69,3 +70,17 @@ Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware
 | STEP REALs, native-file cache | 1e-9 | export | rounded so recomputed geometry gives the same text |
 | planar re-triangulation ties | in-circle `|det| <= 1e-9 L^4` | export/display | cocircular quads (rectangles) get the diagonal avoiding the smallest-key vertex |
 
+
+## Added run 5 (ADR 0007, slab booleans with arcs)
+
+| name | value | kind | meaning |
+|---|---|---|---|
+| `prismatic::CURVE_TOL` | `KERNEL_LINEAR` (1e-6 mm) | geometric | a target cap edge is straight / a circular arc when 16 samples lie within this of the chord / fitted circle, and in the cap plane |
+| `prismatic::RULED_TOL` | 1e-9 | numerical | a curved target face is a wall when its unit normal's component along the tool axis is at most this on a 9 × 9 parameter grid |
+| `curves::CIRCLE_MATCH` | `KERNEL_LINEAR` | geometric | circles closer in centre and radius are one; loop vertices this close to a circle are placed on it |
+| 2-D vertex merge (`curves::canonicalize`) | `FACE_MATCH` (1e-7 mm) | geometric | 2-D loop vertices this close are one point (first seen wins) |
+| `curves::TANGENT` | `KERNEL_LINEAR` | geometric | a line or circle this close to tangency with a circle is refused, unless the contact is a junction of one loop |
+| `curves::RING_MARGIN` | 2e-9 mm (2 grid steps) | construction | a vertex inside a circle must be at least this far inside the chord of its ring polygon |
+| `prismatic::RING_CHORDS` | 64, 128, 256, 512 per turn | construction | ring resolutions tried; at least 2 chords between consecutive special points |
+| boolean output clean (`prismatic::clean_contour`) | `FACE_MATCH` | geometric | near-duplicate / collinear / spike vertices and sliver contours (area ≤ FACE_MATCH × half-perimeter) of 2-D boolean outputs are removed |
+| arc-corpus oracle (`tests/arc_fuzz.rs`) | volume: 1e-6 × V + 10 × integration error estimate; probes skipped within 0.05 mm of a primitive boundary or level | acceptance | independent CSG oracle for the seeded round/rounded cut corpus |

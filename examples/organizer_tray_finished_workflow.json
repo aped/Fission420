@@ -1,0 +1,640 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside X",
+    "expression": "120",
+    "name": "tray_length",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside Y",
+    "expression": "80",
+    "name": "tray_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside Z (floor + compartment depth)",
+    "expression": "30",
+    "name": "tray_height",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outer wall thickness",
+    "expression": "2",
+    "name": "wall",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "floor thickness",
+    "expression": "2",
+    "name": "floor",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "2",
+    "name": "divider_thickness",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "full-width dividers (whole number >= 0)",
+    "expression": "2",
+    "name": "divider_count",
+    "unit": "unitless"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "rim access notch, first compartment",
+    "expression": "16",
+    "name": "notch_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "notch depth below the rim",
+    "expression": "8",
+    "name": "notch_depth",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "divider_count + 1",
+    "name": "compartment_count",
+    "unit": "unitless"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "interior width of each compartment along X",
+    "expression": "(tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count",
+    "name": "compartment_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "tray_width - 2 * wall",
+    "name": "cavity_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "tray_height - floor",
+    "name": "cavity_depth",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "notch bottom corner radius (sketch fillet)",
+    "expression": "6",
+    "name": "finger_radius",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outer vertical edges",
+    "expression": "1.5",
+    "name": "corner_chamfer",
+    "unit": "mm"
+  },
+  {
+    "center": [
+      60.0,
+      40.0
+    ],
+    "cmd": "create_sketch",
+    "height": 80.0,
+    "name": "Tray outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 120.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_length",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width",
+    "feature": 1,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_length / 2",
+    "feature": 1,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width / 2",
+    "feature": 1,
+    "name": "center_y"
+  },
+  {
+    "body_name": "Organizer tray",
+    "cmd": "extrude",
+    "distance": 30.0,
+    "name": "Tray blank",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_height",
+    "feature": 2,
+    "name": "distance"
+  },
+  {
+    "center": [
+      20.666666666666668,
+      40.0
+    ],
+    "cmd": "create_sketch",
+    "height": 76.0,
+    "name": "Compartment outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 37.333333333333336
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_width",
+    "feature": 3,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_width",
+    "feature": 3,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall + compartment_width / 2",
+    "feature": 3,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width / 2",
+    "feature": 3,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 28.0,
+    "name": "Compartment",
+    "op": "cut",
+    "sketch": 3,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_depth",
+    "feature": 4,
+    "name": "distance"
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 3,
+    "direction": [
+      1.0,
+      0.0
+    ],
+    "feature": 4,
+    "name": "Compartments",
+    "spacing": 39.333333333333336
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_count",
+    "feature": 5,
+    "name": "count"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_width + divider_thickness",
+    "feature": 5,
+    "name": "spacing"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Finger notch outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": {
+          "ExtrudeSide": {
+            "entity": 1
+          }
+        }
+      }
+    },
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 20.666666666666668,
+            "y": 26.0
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 3
+          }
+        },
+        {
+          "Vertical": {
+            "line": 2
+          }
+        },
+        {
+          "Vertical": {
+            "line": 4
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 1,
+            "b": 2,
+            "dim": {
+              "name": "width",
+              "value": 16.0
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 1,
+            "b": 4,
+            "dim": {
+              "name": "height",
+              "value": 8.0
+            }
+          }
+        },
+        {
+          "SymmetricAboutPoint": {
+            "a": 1,
+            "b": 3,
+            "center": 0
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 1,
+            "point": 1
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 4,
+            "point": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 5,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 5,
+            "line": 4
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "finger_r",
+              "value": 6.0
+            },
+            "entity": 5
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 1,
+            "point": 2
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 2,
+            "point": 2
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 2
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "finger_r2",
+              "value": 6.0
+            },
+            "entity": 6
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 5,
+            "b": 8,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 9,
+            "b": 3,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 3,
+            "b": 4,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 4,
+            "b": 6,
+            "id": 4
+          }
+        },
+        {
+          "Arc": {
+            "center": 7,
+            "end": 5,
+            "id": 5,
+            "start": 6
+          }
+        },
+        {
+          "Arc": {
+            "center": 10,
+            "end": 9,
+            "id": 6,
+            "start": 8
+          }
+        }
+      ],
+      "points": [
+        {
+          "id": 0,
+          "x": 20.666666666666668,
+          "y": 26.0
+        },
+        {
+          "id": 1,
+          "x": 12.666666666666668,
+          "y": 22.0
+        },
+        {
+          "id": 2,
+          "x": 28.666666666666668,
+          "y": 22.0
+        },
+        {
+          "id": 3,
+          "x": 28.666666666666668,
+          "y": 30.0
+        },
+        {
+          "id": 4,
+          "x": 12.666666666666668,
+          "y": 30.0
+        },
+        {
+          "id": 5,
+          "x": 18.666666666666668,
+          "y": 22.0
+        },
+        {
+          "id": 6,
+          "x": 12.666666666666668,
+          "y": 28.0
+        },
+        {
+          "id": 7,
+          "x": 18.666666666666668,
+          "y": 28.0
+        },
+        {
+          "id": 8,
+          "x": 22.666666666666668,
+          "y": 22.0
+        },
+        {
+          "id": 9,
+          "x": 28.666666666666668,
+          "y": 28.0
+        },
+        {
+          "id": 10,
+          "x": 22.666666666666668,
+          "y": 28.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "notch_width",
+    "feature": 6,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "notch_depth",
+    "feature": 6,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall + compartment_width / 2",
+    "feature": 6,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_height - notch_depth / 2",
+    "feature": 6,
+    "name": "center_y"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "finger_radius",
+    "feature": 6,
+    "name": "finger_r"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "finger_radius",
+    "feature": 6,
+    "name": "finger_r2"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 2.0,
+    "name": "Finger notch",
+    "op": "cut",
+    "sketch": 6,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall",
+    "feature": 7,
+    "name": "distance"
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "cmd": "chamfer",
+    "distance": 1.5,
+    "name": "Corner chamfer 1"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "corner_chamfer",
+    "feature": 8,
+    "name": "distance"
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "cmd": "chamfer",
+    "distance": 1.5,
+    "name": "Corner chamfer 2"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "corner_chamfer",
+    "feature": 9,
+    "name": "distance"
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "cmd": "chamfer",
+    "distance": 1.5,
+    "name": "Corner chamfer 3"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "corner_chamfer",
+    "feature": 10,
+    "name": "distance"
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "cmd": "chamfer",
+    "distance": 1.5,
+    "name": "Corner chamfer 4"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "corner_chamfer",
+    "feature": 11,
+    "name": "distance"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/organizer_tray_finished.rcad.json"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

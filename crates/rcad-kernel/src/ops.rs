@@ -409,3 +409,20 @@ pub fn through_all_margin(body: &Body) -> Result<f64> {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `body` has an implicit boolean intersection edge without a verified
+/// exact replacement (e.g. cylinder ∩ cylinder): such a result is only
+/// approximated (and STEP export refuses it). Used to prefer the exact slab
+/// construction where it applies (ADR 0007).
+pub fn has_implicit_edges(body: &Body) -> bool {
+    let cs = body.solid.compress();
+    cs.boundaries.iter().any(|shell| {
+        shell.edges.iter().any(|e| match &e.curve {
+            Curve::IntersectionCurve(ic) => {
+                let (a, b) = (shell.vertices[e.vertices.0], shell.vertices[e.vertices.1]);
+                crate::exact::exact_edge(ic, a, b).is_err()
+            }
+            _ => false,
+        })
+    })
+}

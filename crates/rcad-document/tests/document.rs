@@ -178,6 +178,7 @@ fn broken_and_cyclic_references_are_reported() {
         },
         notes: vec![],
         expressions: Default::default(),
+        suppressed: false,
     });
     d.features.push(Feature {
         id: FeatureId(2),
@@ -185,6 +186,7 @@ fn broken_and_cyclic_references_are_reported() {
         kind: FeatureKind::extrude(FeatureId(1), 1.0, Operation::NewBody { body: BodyId(1) }),
         notes: vec![],
         expressions: Default::default(),
+        suppressed: false,
     });
     match regenerate(&d) {
         Err(DocError::Cycle(ids)) => assert_eq!(ids, vec![FeatureId(1), FeatureId(2)]),
@@ -209,7 +211,8 @@ fn save_load_round_trip_and_corrupt_inputs() {
     save_file(&p, m.document(), Some(m.evaluation())).unwrap();
     let nf = load_file(&p).unwrap();
     assert_eq!(&nf.document, m.document());
-    assert_eq!(nf.version, FORMAT_VERSION);
+    assert_eq!(nf.version, 4, "no run-5 feature: written as v4");
+    assert!(FORMAT_VERSION >= nf.version);
     let m2 = Model::from_document(nf.document).unwrap();
     assert_eq!(volume(&m2), volume(&m));
 

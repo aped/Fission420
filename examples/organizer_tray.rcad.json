@@ -1,0 +1,587 @@
+{
+  "format": "r-cad",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Tray outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -60.0,
+                "y": -40.0
+              },
+              {
+                "id": 2,
+                "x": 60.0,
+                "y": -40.0
+              },
+              {
+                "id": 3,
+                "x": 60.0,
+                "y": 40.0
+              },
+              {
+                "id": 4,
+                "x": -60.0,
+                "y": 40.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 60.0,
+                  "y": 40.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 120.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "tray_length / 2",
+          "center_y": "tray_width / 2",
+          "height": "tray_width",
+          "width": "tray_length"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Tray blank",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 30.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "tray_height"
+        }
+      },
+      {
+        "id": 3,
+        "name": "Compartment outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -18.666666666666668,
+                "y": -38.0
+              },
+              {
+                "id": 2,
+                "x": 18.666666666666668,
+                "y": -38.0
+              },
+              {
+                "id": 3,
+                "x": 18.666666666666668,
+                "y": 38.0
+              },
+              {
+                "id": 4,
+                "x": -18.666666666666668,
+                "y": 38.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.666666666666668,
+                  "y": 40.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 37.333333333333336
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 76.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "wall + compartment_width / 2",
+          "center_y": "tray_width / 2",
+          "height": "cavity_width",
+          "width": "compartment_width"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Compartment",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 28.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "cavity_depth"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Compartments",
+        "kind": {
+          "type": "LinearPattern",
+          "seed": 4,
+          "count": 3,
+          "spacing": 39.333333333333336,
+          "direction": [
+            1.0,
+            0.0
+          ]
+        },
+        "expressions": {
+          "count": "compartment_count",
+          "spacing": "compartment_width + divider_thickness"
+        }
+      },
+      {
+        "id": 6,
+        "name": "Notch outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": {
+                "ExtrudeSide": {
+                  "entity": 1
+                }
+              }
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -8.0,
+                "y": -4.0
+              },
+              {
+                "id": 2,
+                "x": 8.0,
+                "y": -4.0
+              },
+              {
+                "id": 3,
+                "x": 8.0,
+                "y": 4.0
+              },
+              {
+                "id": 4,
+                "x": -8.0,
+                "y": 4.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.666666666666668,
+                  "y": 26.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 16.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 8.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "wall + compartment_width / 2",
+          "center_y": "tray_height - notch_depth / 2",
+          "height": "notch_depth",
+          "width": "notch_width"
+        }
+      },
+      {
+        "id": 7,
+        "name": "Rim notch",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 6,
+          "distance": 2.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "wall"
+        }
+      }
+    ],
+    "next_id": 8,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Organizer tray",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "tray_length",
+        "expression": "120",
+        "unit": "mm",
+        "comment": "outside X"
+      },
+      {
+        "name": "tray_width",
+        "expression": "80",
+        "unit": "mm",
+        "comment": "outside Y"
+      },
+      {
+        "name": "tray_height",
+        "expression": "30",
+        "unit": "mm",
+        "comment": "outside Z (floor + compartment depth)"
+      },
+      {
+        "name": "wall",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "outer wall thickness"
+      },
+      {
+        "name": "floor",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "floor thickness"
+      },
+      {
+        "name": "divider_thickness",
+        "expression": "2",
+        "unit": "mm"
+      },
+      {
+        "name": "divider_count",
+        "expression": "2",
+        "unit": "unitless",
+        "comment": "full-width dividers (whole number >= 0)"
+      },
+      {
+        "name": "notch_width",
+        "expression": "16",
+        "unit": "mm",
+        "comment": "rim access notch, first compartment"
+      },
+      {
+        "name": "notch_depth",
+        "expression": "8",
+        "unit": "mm",
+        "comment": "notch depth below the rim"
+      },
+      {
+        "name": "compartment_count",
+        "expression": "divider_count + 1",
+        "unit": "unitless"
+      },
+      {
+        "name": "compartment_width",
+        "expression": "(tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count",
+        "unit": "mm",
+        "comment": "interior width of each compartment along X"
+      },
+      {
+        "name": "cavity_width",
+        "expression": "tray_width - 2 * wall",
+        "unit": "mm"
+      },
+      {
+        "name": "cavity_depth",
+        "expression": "tray_height - floor",
+        "unit": "mm"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 49408.0,
+    "bounds": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        120.0,
+        80.0,
+        30.0
+      ]
+    },
+    "face_count": 24
+  }
+}

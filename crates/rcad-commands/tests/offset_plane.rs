@@ -67,6 +67,7 @@ fn world_offset_plane_and_its_parameter() {
     let plane = SketchPlane::Offset {
         base: PlaneBase::WorldXY,
         distance: 7.0,
+        angle: 0.0,
     };
     let sk = sketch(&mut s, plane, rect(20.0, 10.0));
     ok(&mut s, Command::extrude(None, sk, 3.0));
@@ -81,6 +82,7 @@ fn world_offset_plane_and_its_parameter() {
     let xz = SketchPlane::Offset {
         base: PlaneBase::WorldXZ,
         distance: 4.0,
+        angle: 0.0,
     };
     let sk2 = sketch(&mut s, xz, rect(6.0, 6.0));
     ok(&mut s, Command::extrude(None, sk2, 2.0));
@@ -140,6 +142,7 @@ fn offset_from_the_cavity_floor_bound_to_a_parameter() {
         SketchPlane::Offset {
             base: floor,
             distance: 5.0,
+            angle: 0.0,
         },
         rect(10.0, 10.0),
     );
@@ -199,6 +202,7 @@ fn missing_base_face_is_a_broken_reference() {
                 role: FaceRole::ExtrudeSide { entity: 99 },
             }),
             distance: 2.0,
+            angle: 0.0,
         },
         template: rect(4.0, 4.0),
     });
@@ -213,6 +217,7 @@ fn missing_base_face_is_a_broken_reference() {
         plane: SketchPlane::Offset {
             base: PlaneBase::WorldXY,
             distance: f64::NAN,
+            angle: 0.0,
         },
         template: rect(4.0, 4.0),
     });
@@ -228,7 +233,8 @@ fn plane_json_shape_is_additive() {
         p,
         SketchPlane::Offset {
             base: PlaneBase::WorldXY,
-            distance: 7.0
+            distance: 7.0,
+            angle: 0.0,
         }
     );
     let f: SketchPlane = serde_json::from_str(

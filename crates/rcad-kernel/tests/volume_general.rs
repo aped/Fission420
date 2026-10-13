@@ -1,5 +1,6 @@
-//! Generalized B-rep volume: X/Y boundary integrals, tilted planar faces, and the
-//! tessellation fallback, against analytic values.
+//! Generalized B-rep volume: X/Y boundary integrals, tilted planar faces, the
+//! surface-of-revolution integral and the tessellation fallback, against analytic
+//! values.
 use rcad_kernel::*;
 use std::f64::consts::PI;
 
@@ -139,27 +140,58 @@ fn tilted_face_with_side_hole_x() {
 }
 
 #[test]
-fn torus_uses_tessellation_estimate() {
+fn torus_is_exact_by_revolution() {
     let (big_r, r) = (40.0, 10.0);
     let prof = Profile::Circle {
         center: [big_r, 0.0],
         radius: r,
     };
-    let t = std::time::Instant::now();
     let body = revolve(&prof, &Frame::XZ, 2.0 * PI).unwrap();
+    check_exact(
+        &body,
+        2.0 * PI * PI * big_r * r * r,
+        VolumeMethod::BrepBoundaryIntegralRevolution,
+        "torus",
+    );
+}
+
+#[test]
+fn tori_about_two_axes_use_tessellation_estimate() {
+    // Ø6 disc swept along an S-bend: line 10, then 90° arcs R 15 about two different
+    // axes (parallel, distinct): no common revolution axis, so the labelled
+    // tessellation estimate applies and must contain Pappus' value.
+    let disc = Profile::Circle {
+        center: [0.0, 0.0],
+        radius: 3.0,
+    };
+    let path = [
+        PathSegment::Line {
+            end: [0.0, 0.0, 10.0],
+        },
+        PathSegment::Arc {
+            center: [15.0, 0.0, 10.0],
+            end: [15.0, 0.0, 25.0],
+        },
+        PathSegment::Arc {
+            center: [15.0, 0.0, 40.0],
+            end: [30.0, 0.0, 40.0],
+        },
+    ];
+    let t = std::time::Instant::now();
+    let body = sweep(&disc, &Frame::XY, &path).unwrap();
     let m = measure(&body).unwrap();
     let dt = t.elapsed();
-    let expected = 2.0 * PI * PI * big_r * r * r;
+    let expected = 9.0 * PI * (10.0 + 15.0 * PI);
     let (v, est, method) = value(&m);
     eprintln!(
-        "torus: V = {v:.6}, expected {expected:.6}, err {:.3e} ({:.2e} rel), est {est:.3e}, {method:?}, {dt:?}",
+        "S-bend: V = {v:.6}, expected {expected:.6}, err {:.3e} ({:.2e} rel), est {est:.3e}, {method:?}, {dt:?}",
         v - expected,
         (v - expected) / expected
     );
     assert_eq!(method, VolumeMethod::TessellationEstimate);
     assert!(
         (v - expected).abs() <= est,
-        "torus: {v} vs {expected}, estimate {est}"
+        "S-bend: {v} vs {expected}, estimate {est}"
     );
     assert!(est < 0.01 * expected, "estimate {est} too loose");
 }
@@ -172,6 +204,10 @@ fn volume_method_deserializes_by_variant_name() {
         ("BrepBoundaryIntegralZ", VolumeMethod::BrepBoundaryIntegralZ),
         ("BrepBoundaryIntegralX", VolumeMethod::BrepBoundaryIntegralX),
         ("BrepBoundaryIntegralY", VolumeMethod::BrepBoundaryIntegralY),
+        (
+            "BrepBoundaryIntegralRevolution",
+            VolumeMethod::BrepBoundaryIntegralRevolution,
+        ),
         ("TessellationEstimate", VolumeMethod::TessellationEstimate),
     ] {
         // A JSON unit variant is the bare string, exactly what this deserializer feeds.

@@ -31,6 +31,12 @@ pub const SCENES: &[&str] = &[
     "param_error",
     "print_export",
     "hole",
+    "tray_params",
+    "tray_section",
+    "tray_modifier_face",
+    "tray_finished",
+    "tray_export",
+    "tray_refusal",
 ];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -72,6 +78,17 @@ fn import(app: &mut RcadApp, path: PathBuf, unit: usize, partial: bool) {
 }
 
 /// The committed parametric enclosure example.
+/// Run 5: the organizer tray example (committed document).
+fn tray(finished: bool) -> SceneStep {
+    SceneStep::Cmd(Command::Open {
+        path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if finished {
+            "../../examples/organizer_tray_finished.rcad.json"
+        } else {
+            "../../examples/organizer_tray.rcad.json"
+        }),
+    })
+}
+
 fn enclosure() -> SceneStep {
     SceneStep::Cmd(Command::Open {
         path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.rcad.json"),
@@ -348,6 +365,80 @@ impl RcadApp {
                         }
                     }
                 }),
+            ],
+            // Run 5: tray parameters and the pattern's bound count/spacing.
+            "tray_params" => vec![
+                tray(false),
+                Ui(|a| {
+                    let s = a.feature_by_name("Compartments").map(|f| f.id);
+                    a.select(s);
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                }),
+            ],
+            // Run 5: display-only section through the compartments.
+            "tray_section" => vec![
+                tray(false),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    a.section = Some(crate::section::SectionState {
+                        axis: crate::section::SectionAxis::Y,
+                        offset: "40".into(),
+                        flip: false,
+                    });
+                }),
+            ],
+            // Run 5: the floor of the second compartment (a pattern occurrence)
+            // selected: it can host a sketch (semantic Copy reference).
+            "tray_modifier_face" => vec![
+                tray(false),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    let g = a.faces.iter().find_map(|f| match f.reference {
+                        Some(rcad_document::FaceRef {
+                            role:
+                                rcad_document::FaceRole::Copy {
+                                    instance: 1,
+                                    of: rcad_document::CopiedRole::EndCap,
+                                    ..
+                                },
+                            ..
+                        }) => Some(f.group),
+                        _ => None,
+                    });
+                    a.select_face(g);
+                }),
+            ],
+            // Run 5: finished variant (finger notch, corner chamfers).
+            "tray_finished" => vec![
+                tray(true),
+                Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
+            ],
+            // Run 5: placed 3MF export of the tray for the P1S.
+            "tray_export" => vec![
+                tray(true),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    let mut form = crate::exchange::PrintForm::new(
+                        false,
+                        "organizer_tray.3mf".into(),
+                        ExportScope::AllVisible,
+                    );
+                    form.place = true;
+                    form.layout = true;
+                    form.bed = crate::exchange::BedChoice::P1s;
+                    a.dialog = Some(Dialog::Export3mf(form));
+                }),
+            ],
+            // Run 5: an impossible divider count refused, model unchanged.
+            "tray_refusal" => vec![
+                tray(false),
+                Cmd(Command::SetUserParameter {
+                    name: "divider_count".into(),
+                    expression: "60".into(),
+                    unit: None,
+                    comment: None,
+                }),
+                Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],
             _ => return false,
         };

@@ -69,7 +69,9 @@ fn to_gamma(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
     let section = u.highlight.z == 1u;
-    if section && dot(i.world, u.section.xyz) > u.section.w {
+    // Same tolerance as `SectionPlane::keeps` (picking): a face lying on the
+    // plane stays whole instead of speckling with float noise.
+    if section && dot(i.world, u.section.xyz) > u.section.w + 1.0e-4 * (1.0 + abs(u.section.w)) {
         discard;
     }
     var n = normalize(i.normal);

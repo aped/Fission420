@@ -246,7 +246,9 @@ impl RcadApp {
                         ui.close();
                     }
                 }
-            });
+            })
+            .response
+            .probe("View");
             if ui
                 .button("Fit view")
                 .probe("Fit view")
@@ -362,6 +364,37 @@ impl RcadApp {
                 angle: "360".into(),
             });
         }
+        // Run 5: exact loft / sweep (new bodies from two sketches).
+        ui.menu_button("Loft / Sweep", |ui| {
+            if ui
+                .add_enabled(has_sketch, egui::Button::new("Loft…"))
+                .probe("Loft…")
+                .on_hover_text("New body between two closed profiles on parallel planes (exact; same-count polygons with parallel edges, or coaxial circles)")
+                .clicked()
+            {
+                self.dialog = Some(Dialog::LoftSweep {
+                    a: None,
+                    b: None,
+                    sweep: false,
+                });
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_sketch, egui::Button::new("Sweep…"))
+                .probe("Sweep…")
+                .on_hover_text("New body: a closed profile swept along a line/arc path sketch starting at the profile sketch's origin (exact)")
+                .clicked()
+            {
+                self.dialog = Some(Dialog::LoftSweep {
+                    a: None,
+                    b: None,
+                    sweep: true,
+                });
+                ui.close();
+            }
+        })
+        .response
+        .probe("Loft / Sweep");
         let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
         let templates = ui.menu_button("Templates", |ui| {
             ui.weak("Printable parts (new document with editable parameters)");
@@ -369,6 +402,7 @@ impl RcadApp {
                 crate::app::PrintTemplate::Enclosure,
                 crate::app::PrintTemplate::Coupon,
                 crate::app::PrintTemplate::Bracket,
+                crate::app::PrintTemplate::Tray,
             ] {
                 if ui
                     .button(t.label())
@@ -627,6 +661,7 @@ impl RcadApp {
                 "linear_pattern" | "circular_pattern" => "Pattern",
                 "mirror" => "Mirror",
                 "chamfer" => "Chamfer",
+                "fillet" => "Fillet",
                 "hole" => "Hole",
                 "import_step" | "import_mesh" => "Import",
                 k => k,
@@ -638,7 +673,15 @@ impl RcadApp {
                         .weak()
                         .small(),
                 );
-                let r = ui.selectable_label(sel, &f.name).probe(&f.name);
+                let label = if f.suppressed {
+                    RichText::new(&f.name).weak().strikethrough()
+                } else {
+                    RichText::new(&f.name)
+                };
+                let r = ui.selectable_label(sel, label).probe(&f.name);
+                if f.suppressed {
+                    ui.label(RichText::new("suppressed").weak().small());
+                }
                 if r.clicked() {
                     clicked = Some(f.id);
                 }
@@ -746,6 +789,20 @@ impl RcadApp {
                             a: r,
                             b: None,
                             distance: "1".into(),
+                            fillet: false,
+                        });
+                    }
+                    if ui
+                        .button("Fillet edge…")
+                        .probe("Fillet edge…")
+                        .on_hover_text("Round the straight edge where this face meets another planar face with an exact cylinder (bodies prismatic along the edge)")
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::Chamfer {
+                            a: r,
+                            b: None,
+                            distance: "2".into(),
+                            fillet: true,
                         });
                     }
                 }
@@ -800,6 +857,71 @@ impl RcadApp {
             };
             if r.clicked() {
                 self.delete_selected_feature();
+            }
+        });
+        // Run 5: suppression (kept in history, not evaluated). Dependents are
+        // never silently rebound: suppress them too, or the change is refused.
+        ui.horizontal_wrapped(|ui| {
+            let users = self.dependents_of(f.id);
+            if f.suppressed {
+                ui.label(RichText::new("Suppressed: not evaluated").weak());
+                if ui
+                    .small_button("Restore")
+                    .probe("Restore feature")
+                    .on_hover_text("Evaluate this feature again (refused while something it uses is suppressed)")
+                    .clicked()
+                {
+                    self.request(Command::SetSuppressed {
+                        feature: f.id,
+                        suppressed: false,
+                        with_dependents: false,
+                    });
+                }
+                if ui
+                    .small_button("Restore with dependents")
+                    .probe("Restore with dependents")
+                    .clicked()
+                {
+                    self.request(Command::SetSuppressed {
+                        feature: f.id,
+                        suppressed: false,
+                        with_dependents: true,
+                    });
+                }
+            } else {
+                let why = (!users.is_empty()).then(|| {
+                    format!(
+                        "Used by {}: use \"Suppress with dependents\"",
+                        users.join(", ")
+                    )
+                });
+                let r = ui
+                    .add_enabled(why.is_none(), egui::Button::new("Suppress").small())
+                    .probe("Suppress feature");
+                let r = match &why {
+                    Some(w) => r.on_disabled_hover_text(w),
+                    None => r.on_hover_text("Keep in history but do not evaluate (one Undo step)"),
+                };
+                if r.clicked() {
+                    self.request(Command::SetSuppressed {
+                        feature: f.id,
+                        suppressed: true,
+                        with_dependents: false,
+                    });
+                }
+                if !users.is_empty()
+                    && ui
+                        .small_button("Suppress with dependents")
+                        .probe("Suppress with dependents")
+                        .on_hover_text(format!("Also suppresses {}", users.join(", ")))
+                        .clicked()
+                {
+                    self.request(Command::SetSuppressed {
+                        feature: f.id,
+                        suppressed: true,
+                        with_dependents: true,
+                    });
+                }
             }
         });
         if let Some((t, c)) = state_text(&f) {
@@ -962,22 +1084,16 @@ impl RcadApp {
         ));
         match &self.measure_from {
             Some(a) if a.group != info.group => {
-                if let Some(q) = a.plane {
-                    let c = dot(q.normal, p.normal);
-                    let text = if (c.abs() - 1.0).abs() < 1e-9 {
-                        let d = [
-                            p.point[0] - q.point[0],
-                            p.point[1] - q.point[1],
-                            p.point[2] - q.point[2],
-                        ];
+                if let Some((parallel, v)) = self.face_measurement() {
+                    let text = if parallel {
                         format!(
                             "Distance between parallel faces: {} mm",
-                            crate::params_ui::fmt_value(dot(d, q.normal).abs())
+                            crate::params_ui::fmt_value(v)
                         )
                     } else {
                         format!(
                             "Angle between the faces' normals: {}°",
-                            crate::params_ui::fmt_value(c.clamp(-1.0, 1.0).acos().to_degrees())
+                            crate::params_ui::fmt_value(v)
                         )
                     };
                     ui.label(RichText::new(text).strong());
@@ -1306,20 +1422,27 @@ impl RcadApp {
                 self.banner = None;
             }
         });
+        // Wrapped: a long message must not widen the browser panel (run 5:
+        // a refused edit squeezed the 3D view to ~220 px at 1280x800).
         if let Some(e) = self.diagnostics.iter().rev().find(|d| d.error) {
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                RichText::new(format!("Last error [{}]: {}", e.kind, e.text)).small(),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!("Last error [{}]: {}", e.kind, e.text))
+                        .small()
+                        .color(ui.visuals().error_fg_color),
+                )
+                .wrap(),
             );
         }
         ui.collapsing("Log", |ui| {
             for d in self.diagnostics.iter().rev().take(12) {
-                let t = format!("[{}] {}", d.kind, d.text);
-                if d.error {
-                    ui.colored_label(ui.visuals().warn_fg_color, RichText::new(t).small());
+                let t = RichText::new(format!("[{}] {}", d.kind, d.text)).small();
+                let t = if d.error {
+                    t.color(ui.visuals().warn_fg_color)
                 } else {
-                    ui.small(t);
-                }
+                    t
+                };
+                ui.add(egui::Label::new(t).wrap());
             }
         });
     }
@@ -1518,6 +1641,17 @@ impl RcadApp {
                         feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
                         num_field(ui, "Revolve angle (deg)", angle);
                     }
+                    Dialog::LoftSweep { a, b, sweep } => {
+                        if *sweep {
+                            feature_combo(ui, "Profile sketch", a, &sketches);
+                            feature_combo(ui, "Path sketch", b, &sketches);
+                            ui.small("The path sketch's lines and arcs form one open chain that starts at the profile sketch's origin, leaving along its normal, with tangent joints. Exact faces; refused otherwise with the reason.");
+                        } else {
+                            feature_combo(ui, "First profile sketch", a, &sketches);
+                            feature_combo(ui, "Second profile sketch", b, &sketches);
+                            ui.small("Parallel planes; polygons with the same number of corners whose corresponding edges are parallel (planar sides), or two coaxial circles (cone frustum). Corner 0 of the second profile is the one nearest corner 0 of the first (ADR 0008).");
+                        }
+                    }
                     Dialog::CircleOnFace {
                         extrude,
                         diameter,
@@ -1602,8 +1736,11 @@ impl RcadApp {
                         base,
                         face,
                         distance,
+                        angle,
                     } => {
                         self.offset_plane_form_ui(ui, base, face, distance);
+                        crate::panels::num_field(ui, "Plane angle (deg)", angle);
+                        ui.small("Optional tilt about the base plane's local X axis through its origin (for a face: its frame's X axis), applied before the offset; 0 = parallel. Editable and bindable afterwards as plane_angle_deg.");
                     }
                     Dialog::Shell {
                         extrude,
@@ -1612,7 +1749,12 @@ impl RcadApp {
                     } => {
                         self.shell_form_ui(ui, *extrude, open_end, thickness);
                     }
-                    Dialog::Chamfer { a, b, distance } => {
+                    Dialog::Chamfer {
+                        a,
+                        b,
+                        distance,
+                        fillet,
+                    } => {
                         let faces: Vec<rcad_commands::FaceSummary> = self
                             .summary
                             .features
@@ -1661,8 +1803,13 @@ impl RcadApp {
                                 ui.label("The selected face is no longer available.");
                             }
                         }
-                        num_field(ui, "Chamfer distance (mm)", distance);
-                        ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
+                        if *fillet {
+                            num_field(ui, "Fillet radius (mm)", distance);
+                            ui.small("Exact solid fillet: a cylinder of this radius tangent to both faces. Supported when the body is prismatic along the edge (its planar faces parallel or perpendicular to it) and the edge ends on perpendicular faces; refused otherwise with the reason (concave edge, radius too large, other features within reach).");
+                        } else {
+                            num_field(ui, "Chamfer distance (mm)", distance);
+                            ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
+                        }
                     }
                     Dialog::Pattern {
                         feature,
@@ -1775,14 +1922,32 @@ impl RcadApp {
             self.last_dialog = None;
             return; // dialog dropped; nothing created
         }
-        if ok && let Dialog::OffsetPlane { base, distance, .. } = &dlg {
-            match crate::app::parse_num("plane offset", distance) {
-                Ok(d) => {
+        if ok
+            && let Dialog::OffsetPlane {
+                base,
+                distance,
+                angle,
+                ..
+            } = &dlg
+        {
+            let parsed = crate::app::parse_num("plane offset", distance).and_then(|d| {
+                let a = crate::app::parse_num("plane angle", angle)?;
+                if a.abs() < 180.0 {
+                    Ok((d, a))
+                } else {
+                    Err(format!(
+                        "plane angle must be in (-180, 180) degrees, got {a}"
+                    ))
+                }
+            });
+            match parsed {
+                Ok((d, a)) => {
                     self.last_dialog = None;
                     self.begin_sketch(SketchTarget::New {
                         plane: SketchPlane::Offset {
                             base: *base,
                             distance: d,
+                            angle: a.to_radians(),
                         },
                     });
                     return;

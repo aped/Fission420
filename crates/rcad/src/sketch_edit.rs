@@ -49,7 +49,8 @@ pub enum SketchTool {
     Extend,
     /// Offset a closed loop by an editable distance (docs/behavior/sketching.md).
     Offset,
-    /// SKETCH corner fillet: round the corner where two lines meet.
+    /// SKETCH corner fillet: round the corner where two lines (or a line and an
+    /// arc) meet.
     Fillet,
 }
 
@@ -115,9 +116,10 @@ impl SketchTool {
                 "Click a line near its free end: the end moves along the line to the nearest curve it would cross · lines only"
             }
             SketchTool::Fillet => {
-                "Sketch corner fillet: click the corner point where two lines meet, type the \
-                 radius, Enter: both lines are trimmed and a tangent arc with an editable radius \
-                 dimension is added (2D sketch only; solid edges cannot be filleted) · Esc cancels"
+                "Sketch corner fillet: click the corner point where two lines (or a line and an \
+                 arc) meet, type the radius, Enter: both curves are trimmed and a tangent arc \
+                 with an editable radius dimension is added (2D sketch only; solid edges cannot \
+                 be filleted) · Esc cancels"
             }
             SketchTool::Offset => {
                 "Click a curve of a closed loop, type the distance (+ outward, − inward), Enter: adds the \
@@ -399,29 +401,40 @@ fn drop_implied_on_line(sk: &mut Sketch) {
 /// with whichever piece still ends at the tangent point, else it is dropped.
 /// Returns the number dropped.
 fn retarget_tangents(sk: &mut Sketch, e: EntityId, piece: Option<EntityId>) -> usize {
-    let pts = |sk: &Sketch, id: EntityId| sk.entity(id).map(|x| x.points()).unwrap_or_default();
+    // Endpoints only (an arc's centre is not where tangency holds).
+    let ends = |sk: &Sketch, id: EntityId| match sk.entity(id) {
+        Some(Entity::Line { a, b, .. }) => vec![*a, *b],
+        Some(Entity::Arc { start, end, .. }) => vec![*start, *end],
+        _ => vec![],
+    };
     let shares = |sk: &Sketch, u: EntityId, v: EntityId| {
-        let pv = pts(sk, v);
-        pts(sk, u).iter().any(|p| pv.contains(p))
+        let pv = ends(sk, v);
+        ends(sk, u).iter().any(|p| pv.contains(p))
     };
     let before = sk.constraints.len();
     let old = std::mem::take(&mut sk.constraints);
     let mut keep = Vec::with_capacity(old.len());
     for c in old {
-        let Constraint::Tangent { line, arc } = c else {
-            keep.push(c);
-            continue;
+        // (first, second, rebuild with one of them replaced) for both
+        // line–arc and (run 5) arc–arc tangency.
+        let (x, y) = match c {
+            Constraint::Tangent { line, arc } => (line, arc),
+            Constraint::TangentArcs { a, b } => (a, b),
+            _ => {
+                keep.push(c);
+                continue;
+            }
         };
-        if line != e && arc != e {
+        if x != e && y != e {
             keep.push(c);
             continue;
         }
-        let other = if line == e { arc } else { line };
+        let other = if x == e { y } else { x };
         let swap = |id: EntityId| {
-            if line == e {
-                Constraint::Tangent { line: id, arc }
-            } else {
-                Constraint::Tangent { line, arc: id }
+            let (nx, ny) = if x == e { (id, y) } else { (x, id) };
+            match c {
+                Constraint::Tangent { .. } => Constraint::Tangent { line: nx, arc: ny },
+                _ => Constraint::TangentArcs { a: nx, b: ny },
             }
         };
         if shares(sk, e, other) {
@@ -1143,7 +1156,8 @@ impl SketchEditor {
                 self.fillet_edit = Some(FilletEdit { point: p, buffer });
                 self.info("Type the fillet radius and press Enter.".into());
             }
-            _ => self.fail("Click the corner point where two lines meet.".into()),
+            _ => self
+                .fail("Click the corner point where two lines (or a line and an arc) meet.".into()),
         }
     }
 
@@ -2805,6 +2819,52 @@ mod tests {
         ed.release();
         assert_eq!(ed.sketch, before);
         assert!(!ed.can_redo());
+    }
+
+    /// Review run 5: a trim that replaces one of two tangent arcs by a piece
+    /// moves the arc–arc tangency to the piece that keeps the shared point
+    /// (it used to be left behind, then refused or silently dropped).
+    #[test]
+    fn trim_retargets_arc_arc_tangency() {
+        let mut sk = Sketch::default();
+        let (c1, c2, c3) = (
+            sk.add_point(0.0, 0.0),
+            sk.add_point(20.0, 0.0),
+            sk.add_point(0.0, 0.1),
+        );
+        let p = sk.add_point(10.0, 0.0);
+        let (s1, e2, s3) = (
+            sk.add_point(-10.0, 0.0),
+            sk.add_point(30.0, 0.0),
+            sk.add_point(0.0, 10.1),
+        );
+        let arc = |sk: &mut Sketch, center, start, end| {
+            let id = sk.next_entity_id();
+            sk.entities.push(Entity::Arc {
+                id,
+                center,
+                start,
+                end,
+            });
+            id
+        };
+        let a = arc(&mut sk, c1, s1, p);
+        let b = arc(&mut sk, c2, p, e2);
+        sk.constraints.push(Constraint::TangentArcs { a, b });
+        // The trim moved `a` off P and a new piece (c3) now ends at P.
+        let piece = arc(&mut sk, c3, s3, p);
+        for e in &mut sk.entities {
+            if let Entity::Arc { id, end, .. } = e
+                && *id == a
+            {
+                *end = s3;
+            }
+        }
+        assert_eq!(retarget_tangents(&mut sk, a, Some(piece)), 0);
+        assert!(
+            sk.constraints
+                .contains(&Constraint::TangentArcs { a: piece, b })
+        );
     }
 
     #[test]

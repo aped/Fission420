@@ -83,18 +83,18 @@ fn coupon_and_bracket_build() {
     let hole = PI * (5.5f64 / 2.0).powi(2);
     let want =
         60.0 * 40.0 * 5.0 + 50.0 * 5.0 * 35.0 - 2.0 * hole * 5.0 - 2.0 * hole * 5.0 - 0.5 * 60.0;
-    // Holes along Z and along Y: no axis-ruled exact boundary integral applies,
-    // so the kernel reports a tessellation estimate with its error estimate
-    // (FreeCAD checks the exported STEP exactly: tools/print/check_examples.sh).
+    // Holes along Z and along Y: no axis-ruled boundary integral applies, but
+    // the hole cylinders about their own axes make the revolution integral
+    // exact (FreeCAD also checks the exported STEP: tools/print/check_examples.sh).
     let m = s.summary().bodies[0].measurements.clone().unwrap();
     match m.volume {
         VolumeResult::Value {
             volume,
-            method: rcad_kernel::VolumeMethod::TessellationEstimate,
+            method: rcad_kernel::VolumeMethod::BrepBoundaryIntegralRevolution,
             error_estimate,
         } => assert!(
-            (volume - want).abs() <= (3.0 * error_estimate).max(1e-3),
-            "{volume} vs {want} (estimate error {error_estimate})"
+            (volume - want).abs() <= 1e-9 * want,
+            "{volume} vs {want} (error estimate {error_estimate})"
         ),
         v => panic!("{v:?}"),
     }
@@ -137,5 +137,16 @@ fn committed_printable_workflows_are_current() {
     sync(
         "mounting_bracket_workflow.json",
         &printables::bracket_workflow(Path::new("examples/mounting_bracket.rcad.json")),
+    );
+    sync(
+        "organizer_tray_workflow.json",
+        &printables::tray_workflow(Path::new("examples/organizer_tray.rcad.json"), false),
+    );
+    sync(
+        "organizer_tray_finished_workflow.json",
+        &printables::tray_workflow(
+            Path::new("examples/organizer_tray_finished.rcad.json"),
+            true,
+        ),
     );
 }

@@ -613,3 +613,323 @@ pub fn bracket_workflow(doc: &Path) -> Vec<Step> {
         ok(Command::Inspect),
     ]
 }
+
+// ------------------------------------------------------------ organizer tray
+
+/// Organizer tray parameters (SESSION_5 §7), mm; `dividers` is a count.
+/// A generic demonstrator with explicit dimensions, not a fit claim for any
+/// commercial carrier.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tray {
+    pub length: f64,
+    pub width: f64,
+    pub height: f64,
+    pub wall: f64,
+    pub floor: f64,
+    pub divider_thickness: f64,
+    pub dividers: u32,
+    pub notch_width: f64,
+    pub notch_depth: f64,
+}
+
+/// SESSION_5 §7 baseline: 120 x 80 x 30, walls/floor/dividers 2, 2 dividers,
+/// notch 16 x 8 centred on the first compartment.
+pub const TRAY_BASELINE: Tray = Tray {
+    length: 120.0,
+    width: 80.0,
+    height: 30.0,
+    wall: 2.0,
+    floor: 2.0,
+    divider_thickness: 2.0,
+    dividers: 2,
+    notch_width: 16.0,
+    notch_depth: 8.0,
+};
+
+/// SESSION_5 §7 variant 1: 160 x 90 x 35, 2.4 everywhere, 3 dividers.
+pub const TRAY_VARIANT: Tray = Tray {
+    length: 160.0,
+    width: 90.0,
+    height: 35.0,
+    wall: 2.4,
+    floor: 2.4,
+    divider_thickness: 2.4,
+    dividers: 3,
+    notch_width: 16.0,
+    notch_depth: 8.0,
+};
+
+/// Finished variant (rectangular body): finger-notch bottom corner radius
+/// and the chamfer of the four outer vertical edges, mm.
+pub const TRAY_FINGER_RADIUS: f64 = 6.0;
+pub const TRAY_CORNER_CHAMFER: f64 = 1.5;
+
+impl Tray {
+    /// All user parameters in one `set_user_parameters` (one undo step).
+    pub fn set_parameters_batch(&self) -> Command {
+        let mm = |name: &str, v: f64| crate::ParameterDef {
+            name: name.into(),
+            expression: format!("{v}"),
+            unit: Some(ParamUnit::Mm),
+            comment: None,
+        };
+        Command::SetUserParameters {
+            parameters: vec![
+                mm("tray_length", self.length),
+                mm("tray_width", self.width),
+                mm("tray_height", self.height),
+                mm("wall", self.wall),
+                mm("floor", self.floor),
+                mm("divider_thickness", self.divider_thickness),
+                crate::ParameterDef {
+                    name: "divider_count".into(),
+                    expression: self.dividers.to_string(),
+                    unit: Some(ParamUnit::Unitless),
+                    comment: None,
+                },
+                mm("notch_width", self.notch_width),
+                mm("notch_depth", self.notch_depth),
+            ],
+        }
+    }
+
+    fn compartment(&self) -> f64 {
+        (self.length - 2.0 * self.wall - f64::from(self.dividers) * self.divider_thickness)
+            / f64::from(self.dividers + 1)
+    }
+}
+
+/// Organizer tray feature ids. Finished variant only: chamfers 8..=11.
+pub mod tray_ids {
+    pub const OUTLINE: u32 = 1;
+    pub const BLANK: u32 = 2;
+    pub const COMPARTMENT_SKETCH: u32 = 3;
+    pub const COMPARTMENT: u32 = 4;
+    pub const COMPARTMENTS: u32 = 5;
+    pub const NOTCH_SKETCH: u32 = 6;
+    pub const NOTCH: u32 = 7;
+    pub const BODY: u32 = 1;
+}
+
+/// The notch profile on the front face: a `w` x `d` rectangle centred at
+/// `c` (front-face coordinates: x = world X, y = world Z); with `finger`, its
+/// two bottom corners rounded by sketch fillets of radius `finger` (named
+/// dimensions `finger_r`, `finger_r2`; 2-D sketch fillets, not solid fillets).
+fn notch_sketch(w: f64, d: f64, c: [f64; 2], finger: Option<f64>) -> Step {
+    let template = match finger {
+        None => SketchTemplate::CenteredRectangle {
+            width: w,
+            height: d,
+            center: Some(c),
+        },
+        Some(r) => {
+            let mut s = rcad_sketch::Sketch::centered_rectangle(w, d).expect("valid rectangle");
+            // Corners: points 1..=4 = BL, BR, TR, TL (centred on the anchor).
+            for corner in [1, 2] {
+                s.fillet_corner(rcad_sketch::PointId(corner), r, Some("finger_r"))
+                    .expect("the finger radius fits the notch");
+            }
+            for p in &mut s.points {
+                p.x += c[0];
+                p.y += c[1];
+            }
+            for k in &mut s.constraints {
+                if let rcad_sketch::Constraint::FixedPoint { x, y, .. } = k {
+                    (*x, *y) = (c[0], c[1]);
+                }
+            }
+            SketchTemplate::Custom { sketch: s }
+        }
+    };
+    ok(Command::CreateSketch {
+        name: Some(
+            if finger.is_some() {
+                "Finger notch outline"
+            } else {
+                "Notch outline"
+            }
+            .into(),
+        ),
+        plane: face(tray_ids::BLANK, FaceRole::ExtrudeSide { entity: 1 }),
+        template,
+    })
+}
+
+/// The organizer tray from New (SESSION_5 §7), the command-level twin of
+/// the live UI walkthrough `tools/live/t_organizer_tray.txt`: named
+/// parameters; outline bound to `tray_length`/`tray_width`; blank bound to
+/// `tray_height`; one compartment pocket from the top face (corner at
+/// (wall, wall), depth `cavity_depth`) repeated by a linear pattern with
+/// count `divider_count + 1` (count 1 = no dividers) and spacing
+/// `compartment_width + divider_thickness`; the dividers are the material
+/// left between compartments, so they always join the walls and floor
+/// exactly; a rim notch on the front face centred on the first compartment,
+/// flush with the rim, cut `wall` deep. `finished`: the notch's bottom corners
+/// rounded (sketch fillets, `finger_radius`) and the four outer vertical edges
+/// chamfered (`corner_chamfer`). Saved to `doc`.
+pub fn tray_workflow(doc: &Path, finished: bool) -> Vec<Step> {
+    use tray_ids::*;
+    let t = TRAY_BASELINE;
+    let mm = ParamUnit::Mm;
+    let cw = t.compartment();
+    let mut v = vec![
+        ok(Command::NewDocument),
+        param("tray_length", "120", mm, "outside X"),
+        param("tray_width", "80", mm, "outside Y"),
+        param(
+            "tray_height",
+            "30",
+            mm,
+            "outside Z (floor + compartment depth)",
+        ),
+        param("wall", "2", mm, "outer wall thickness"),
+        param("floor", "2", mm, "floor thickness"),
+        param("divider_thickness", "2", mm, ""),
+        param(
+            "divider_count",
+            "2",
+            ParamUnit::Unitless,
+            "full-width dividers (whole number >= 0)",
+        ),
+        param(
+            "notch_width",
+            "16",
+            mm,
+            "rim access notch, first compartment",
+        ),
+        param("notch_depth", "8", mm, "notch depth below the rim"),
+        param(
+            "compartment_count",
+            "divider_count + 1",
+            ParamUnit::Unitless,
+            "",
+        ),
+        param(
+            "compartment_width",
+            "(tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count",
+            mm,
+            "interior width of each compartment along X",
+        ),
+        param("cavity_width", "tray_width - 2 * wall", mm, ""),
+        param("cavity_depth", "tray_height - floor", mm, ""),
+    ];
+    if finished {
+        v.push(param(
+            "finger_radius",
+            &format!("{TRAY_FINGER_RADIUS}"),
+            mm,
+            "notch bottom corner radius (sketch fillet)",
+        ));
+        v.push(param(
+            "corner_chamfer",
+            &format!("{TRAY_CORNER_CHAMFER}"),
+            mm,
+            "outer vertical edges",
+        ));
+    }
+    v.extend([
+        rect(
+            "Tray outline",
+            SketchPlane::WorldXY,
+            t.length,
+            t.width,
+            [t.length / 2.0, t.width / 2.0],
+        ),
+        bind(OUTLINE, "width", "tray_length"),
+        bind(OUTLINE, "height", "tray_width"),
+        bind(OUTLINE, "center_x", "tray_length / 2"),
+        bind(OUTLINE, "center_y", "tray_width / 2"),
+        new_body("Tray blank", OUTLINE, t.height, "Organizer tray"),
+        bind(BLANK, "distance", "tray_height"),
+        rect(
+            "Compartment outline",
+            face(BLANK, FaceRole::ExtrudeEndCap),
+            cw,
+            t.width - 2.0 * t.wall,
+            [t.wall + cw / 2.0, t.width / 2.0],
+        ),
+        bind(COMPARTMENT_SKETCH, "width", "compartment_width"),
+        bind(COMPARTMENT_SKETCH, "height", "cavity_width"),
+        bind(
+            COMPARTMENT_SKETCH,
+            "center_x",
+            "wall + compartment_width / 2",
+        ),
+        bind(COMPARTMENT_SKETCH, "center_y", "tray_width / 2"),
+        modify(
+            "Compartment",
+            COMPARTMENT_SKETCH,
+            t.height - t.floor,
+            ExtrudeOp::Cut,
+            BODY,
+            false,
+        ),
+        bind(COMPARTMENT, "distance", "cavity_depth"),
+        ok(Command::LinearPattern {
+            name: Some("Compartments".into()),
+            feature: FeatureId(COMPARTMENT),
+            count: t.dividers + 1,
+            spacing: cw + t.divider_thickness,
+            direction: [1.0, 0.0],
+        }),
+        bind(COMPARTMENTS, "count", "compartment_count"),
+        bind(
+            COMPARTMENTS,
+            "spacing",
+            "compartment_width + divider_thickness",
+        ),
+        notch_sketch(
+            t.notch_width,
+            t.notch_depth,
+            [t.wall + cw / 2.0, t.height - t.notch_depth / 2.0],
+            finished.then_some(TRAY_FINGER_RADIUS),
+        ),
+        bind(NOTCH_SKETCH, "width", "notch_width"),
+        bind(NOTCH_SKETCH, "height", "notch_depth"),
+        bind(NOTCH_SKETCH, "center_x", "wall + compartment_width / 2"),
+        bind(NOTCH_SKETCH, "center_y", "tray_height - notch_depth / 2"),
+    ]);
+    if finished {
+        v.push(bind(NOTCH_SKETCH, "finger_r", "finger_radius"));
+        v.push(bind(NOTCH_SKETCH, "finger_r2", "finger_radius"));
+    }
+    v.extend([
+        modify(
+            if finished {
+                "Finger notch"
+            } else {
+                "Rim notch"
+            },
+            NOTCH_SKETCH,
+            t.wall,
+            ExtrudeOp::Cut,
+            BODY,
+            false,
+        ),
+        bind(NOTCH, "distance", "wall"),
+    ]);
+    if finished {
+        // Outer vertical edges: between consecutive outline sides (bottom,
+        // right, top, left = sketch lines 1..4).
+        for (i, (a, b)) in [(1, 2), (2, 3), (3, 4), (4, 1)].into_iter().enumerate() {
+            let side = |e: u32| FaceRef {
+                feature: FeatureId(BLANK),
+                role: FaceRole::ExtrudeSide { entity: e },
+            };
+            v.push(ok(Command::Chamfer {
+                name: Some(format!("Corner chamfer {}", i + 1)),
+                a: side(a),
+                b: side(b),
+                distance: TRAY_CORNER_CHAMFER,
+            }));
+            v.push(bind(NOTCH + 1 + i as u32, "distance", "corner_chamfer"));
+        }
+    }
+    v.extend([
+        ok(Command::Save {
+            path: doc.to_path_buf(),
+        }),
+        ok(Command::Inspect),
+    ]);
+    v
+}

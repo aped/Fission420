@@ -1,0 +1,218 @@
+{
+ "_comment": "Organizer tray rounded (baseline + exact solid fillets r 4 on the four outer vertical edges), centred on the P1S bed (x 68.0..188.0, y 88.0..168.0); compartments 3 x 37.3333 mm; notch 16 x 8 centred on compartment 1 at x 88.6667",
+ "probes": [
+  {
+   "name": "layer count 150 (30 mm / 0.2)",
+   "kind": "layer_count",
+   "equals": 150
+  },
+  {
+   "name": "top layer z=30",
+   "kind": "max_z",
+   "value": 30
+  },
+  {
+   "name": "compartment 1 empty z2.4..30",
+   "kind": "no_extrusion_in_rect",
+   "frame": "plate",
+   "z_range": [
+    2.4,
+    30
+   ],
+   "rect": [
+    71.0,
+    91.0,
+    106.333,
+    165.0
+   ]
+  },
+  {
+   "name": "compartment 1 floor solid (bottom shell z<=0.6)",
+   "kind": "filled_rect",
+   "frame": "plate",
+   "z_range": [
+    0,
+    0.6
+   ],
+   "rect": [
+    72.0,
+    92.0,
+    105.333,
+    164.0
+   ],
+   "min_coverage": 0.95,
+   "mode": "each"
+  },
+  {
+   "name": "divider 1 present z15",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 15.0,
+   "xy": [
+    108.333,
+    128.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "compartment 2 empty z2.4..30",
+   "kind": "no_extrusion_in_rect",
+   "frame": "plate",
+   "z_range": [
+    2.4,
+    30
+   ],
+   "rect": [
+    110.333,
+    91.0,
+    145.667,
+    165.0
+   ]
+  },
+  {
+   "name": "compartment 2 floor solid (bottom shell z<=0.6)",
+   "kind": "filled_rect",
+   "frame": "plate",
+   "z_range": [
+    0,
+    0.6
+   ],
+   "rect": [
+    111.333,
+    92.0,
+    144.667,
+    164.0
+   ],
+   "min_coverage": 0.95,
+   "mode": "each"
+  },
+  {
+   "name": "divider 2 present z15",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 15.0,
+   "xy": [
+    147.667,
+    128.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "compartment 3 empty z2.4..30",
+   "kind": "no_extrusion_in_rect",
+   "frame": "plate",
+   "z_range": [
+    2.4,
+    30
+   ],
+   "rect": [
+    149.667,
+    91.0,
+    185.0,
+    165.0
+   ]
+  },
+  {
+   "name": "compartment 3 floor solid (bottom shell z<=0.6)",
+   "kind": "filled_rect",
+   "frame": "plate",
+   "z_range": [
+    0,
+    0.6
+   ],
+   "rect": [
+    150.667,
+    92.0,
+    184.0,
+    164.0
+   ],
+   "min_coverage": 0.95,
+   "mode": "each"
+  },
+  {
+   "name": "outer wall -X z mid",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 15.0,
+   "xy": [
+    69.0,
+    128.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "outer wall +Y z mid",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 15.0,
+   "xy": [
+    128.3,
+    167.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "notch open (front wall) near the rim",
+   "kind": "no_extrusion_in_rect",
+   "frame": "plate",
+   "z_range": [
+    22.4,
+    30
+   ],
+   "rect": [
+    81.267,
+    88.0,
+    96.067,
+    90.0
+   ]
+  },
+  {
+   "name": "front wall beside the notch",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 26.0,
+   "xy": [
+    78.667,
+    89.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "front wall below the notch",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 20.5,
+   "xy": [
+    88.667,
+    89.0
+   ],
+   "radius": 0.6
+  },
+  {
+   "name": "rounded outer corner (-X,-Y) empty",
+   "kind": "no_extrusion_in_rect",
+   "frame": "plate",
+   "z_range": [
+    0.4,
+    29.6
+   ],
+   "rect": [
+    68.0,
+    88.0,
+    68.6,
+    88.6
+   ]
+  },
+  {
+   "name": "rounded corner keeps material inside the arc",
+   "kind": "extrusion_near",
+   "frame": "plate",
+   "z": 15.0,
+   "xy": [
+    69.6,
+    89.6
+   ],
+   "radius": 0.6
+  }
+ ]
+}

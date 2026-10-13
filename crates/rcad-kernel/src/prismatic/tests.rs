@@ -34,6 +34,7 @@ fn checked(t: &Body, r: &Body, p: &Profile, start: &Frame, len: f64, op: PrismOp
     assert_eq!((m.shell_count, m.all_shells_closed), (1, true));
     let prism = Prism {
         profile: p,
+        holes: &[],
         start,
         length: len,
     };
@@ -127,7 +128,8 @@ fn refusals() {
     // Removes nothing.
     let e = pocket(&block(), &rect(50.0, 0.0, 60.0, 10.0), 3.0).unwrap_err();
     assert!(e.to_string().contains("removes no material"), "{e}");
-    // Not prismatic: a cylindrical hole, an arc profile.
+    // A cylindrical hole parallel to the axis and an arc profile are
+    // prismatic (ADR 0007); a hole across the axis is not.
     let holed = cut_prism(
         &block(),
         &Profile::Circle {
@@ -139,17 +141,35 @@ fn refusals() {
     )
     .unwrap();
     let p = rect(5.0, 5.0, 10.0, 10.0);
-    assert!(!applicable(&holed, &p, &Frame::XY));
-    assert!(matches!(
-        pocket(&holed, &p, 2.0),
-        Err(KernelError::InvalidInput(_))
-    ));
+    assert!(applicable(&holed, &p, &Frame::XY));
     let circle = Profile::Circle {
         center: [5.0, 5.0],
         radius: 2.0,
     };
-    assert!(!applicable(&block(), &circle, &Frame::XY));
+    assert!(applicable(&block(), &circle, &Frame::XY));
     assert!(applicable(&block(), &p, &Frame::XY));
+    let side = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 0.0, 1.0],
+        z: [0.0, -1.0, 0.0],
+    };
+    let cross = cut_prism(
+        &block(),
+        &Profile::Circle {
+            center: [20.0, 5.0],
+            radius: 2.0,
+        },
+        &side.offset(-31.0),
+        32.0,
+    )
+    .unwrap();
+    let why = not_applicable(&cross, &p, &Frame::XY).unwrap();
+    assert!(why.contains("not parallel to the tool axis"), "{why}");
+    assert!(matches!(
+        pocket(&cross, &p, 2.0),
+        Err(KernelError::InvalidInput(_))
+    ));
     // Oblique axis.
     let tilted = Frame {
         origin: [0.0, 0.0, 0.0],
@@ -244,4 +264,22 @@ fn grid_snapping_is_consistent_across_calls() {
     for p in back.iter().flatten().flatten() {
         assert_eq!(p.map(snap), *p, "off the grid: {p:?}");
     }
+}
+
+/// Review run 5 #9: a pocket covered by a joined plate encloses a void. Not
+/// supported (one shell per body); the refusal says so instead of reporting
+/// disconnected solids.
+#[test]
+fn enclosed_void_is_refused_by_name() {
+    let p = pocket(&block(), &rect(10.0, 10.0, 20.0, 20.0), 4.0).unwrap();
+    let plate = rect(5.0, 5.0, 25.0, 25.0);
+    let Err(e) = prism_boolean(&p, &plate, &Frame::XY.offset(10.0), 2.0, SlabOp::Join) else {
+        panic!("a closed cavity was accepted");
+    };
+    assert!(e.to_string().contains("internal void"), "{e}");
+    // Separate bodies keep their message.
+    let Err(e) = pocket(&block(), &rect(18.0, -1.0, 22.0, 31.0), 10.0) else {
+        panic!("a split body was accepted");
+    };
+    assert!(e.to_string().contains("disconnected"), "{e}");
 }

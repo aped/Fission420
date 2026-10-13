@@ -1,0 +1,821 @@
+{
+  "format": "r-cad",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Tray outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -60.0,
+                "y": -40.0
+              },
+              {
+                "id": 2,
+                "x": 60.0,
+                "y": -40.0
+              },
+              {
+                "id": 3,
+                "x": 60.0,
+                "y": 40.0
+              },
+              {
+                "id": 4,
+                "x": -60.0,
+                "y": 40.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 60.0,
+                  "y": 40.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 120.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "tray_length / 2",
+          "center_y": "tray_width / 2",
+          "height": "tray_width",
+          "width": "tray_length"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Tray blank",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 30.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "tray_height"
+        }
+      },
+      {
+        "id": 3,
+        "name": "Compartment outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -18.666666666666668,
+                "y": -38.0
+              },
+              {
+                "id": 2,
+                "x": 18.666666666666668,
+                "y": -38.0
+              },
+              {
+                "id": 3,
+                "x": 18.666666666666668,
+                "y": 38.0
+              },
+              {
+                "id": 4,
+                "x": -18.666666666666668,
+                "y": 38.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.666666666666668,
+                  "y": 40.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 37.333333333333336
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 76.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "wall + compartment_width / 2",
+          "center_y": "tray_width / 2",
+          "height": "cavity_width",
+          "width": "compartment_width"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Compartment",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 28.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "cavity_depth"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Compartments",
+        "kind": {
+          "type": "LinearPattern",
+          "seed": 4,
+          "count": 3,
+          "spacing": 39.333333333333336,
+          "direction": [
+            1.0,
+            0.0
+          ]
+        },
+        "expressions": {
+          "count": "compartment_count",
+          "spacing": "compartment_width + divider_thickness"
+        }
+      },
+      {
+        "id": 6,
+        "name": "Finger notch outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": {
+                "ExtrudeSide": {
+                  "entity": 1
+                }
+              }
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 20.666666666666668,
+                "y": 26.0
+              },
+              {
+                "id": 1,
+                "x": 12.666666666666668,
+                "y": 22.0
+              },
+              {
+                "id": 2,
+                "x": 28.666666666666668,
+                "y": 22.0
+              },
+              {
+                "id": 3,
+                "x": 28.666666666666668,
+                "y": 30.0
+              },
+              {
+                "id": 4,
+                "x": 12.666666666666668,
+                "y": 30.0
+              },
+              {
+                "id": 5,
+                "x": 18.666666666666668,
+                "y": 22.0
+              },
+              {
+                "id": 6,
+                "x": 12.666666666666668,
+                "y": 28.0
+              },
+              {
+                "id": 7,
+                "x": 18.666666666666668,
+                "y": 28.0
+              },
+              {
+                "id": 8,
+                "x": 22.666666666666668,
+                "y": 22.0
+              },
+              {
+                "id": 9,
+                "x": 28.666666666666668,
+                "y": 28.0
+              },
+              {
+                "id": 10,
+                "x": 22.666666666666668,
+                "y": 28.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 5,
+                  "b": 8
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 9,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 6
+                }
+              },
+              {
+                "Arc": {
+                  "id": 5,
+                  "center": 7,
+                  "start": 6,
+                  "end": 5
+                }
+              },
+              {
+                "Arc": {
+                  "id": 6,
+                  "center": 10,
+                  "start": 8,
+                  "end": 9
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.666666666666668,
+                  "y": 26.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 16.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 8.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              },
+              {
+                "PointOnLine": {
+                  "point": 1,
+                  "line": 1
+                }
+              },
+              {
+                "PointOnLine": {
+                  "point": 1,
+                  "line": 4
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 1,
+                  "arc": 5
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 4,
+                  "arc": 5
+                }
+              },
+              {
+                "Radius": {
+                  "entity": 5,
+                  "dim": {
+                    "name": "finger_r",
+                    "value": 6.0
+                  }
+                }
+              },
+              {
+                "PointOnLine": {
+                  "point": 2,
+                  "line": 1
+                }
+              },
+              {
+                "PointOnLine": {
+                  "point": 2,
+                  "line": 2
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 1,
+                  "arc": 6
+                }
+              },
+              {
+                "Tangent": {
+                  "line": 2,
+                  "arc": 6
+                }
+              },
+              {
+                "Radius": {
+                  "entity": 6,
+                  "dim": {
+                    "name": "finger_r2",
+                    "value": 6.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "wall + compartment_width / 2",
+          "center_y": "tray_height - notch_depth / 2",
+          "finger_r": "finger_radius",
+          "finger_r2": "finger_radius",
+          "height": "notch_depth",
+          "width": "notch_width"
+        }
+      },
+      {
+        "id": 7,
+        "name": "Finger notch",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 6,
+          "distance": 2.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "wall"
+        }
+      },
+      {
+        "id": 8,
+        "name": "Corner chamfer 1",
+        "kind": {
+          "type": "Chamfer",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "distance": 1.5
+        },
+        "expressions": {
+          "distance": "corner_chamfer"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Corner chamfer 2",
+        "kind": {
+          "type": "Chamfer",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "distance": 1.5
+        },
+        "expressions": {
+          "distance": "corner_chamfer"
+        }
+      },
+      {
+        "id": 10,
+        "name": "Corner chamfer 3",
+        "kind": {
+          "type": "Chamfer",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "distance": 1.5
+        },
+        "expressions": {
+          "distance": "corner_chamfer"
+        }
+      },
+      {
+        "id": 11,
+        "name": "Corner chamfer 4",
+        "kind": {
+          "type": "Chamfer",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "distance": 1.5
+        },
+        "expressions": {
+          "distance": "corner_chamfer"
+        }
+      }
+    ],
+    "next_id": 12,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Organizer tray",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "tray_length",
+        "expression": "120",
+        "unit": "mm",
+        "comment": "outside X"
+      },
+      {
+        "name": "tray_width",
+        "expression": "80",
+        "unit": "mm",
+        "comment": "outside Y"
+      },
+      {
+        "name": "tray_height",
+        "expression": "30",
+        "unit": "mm",
+        "comment": "outside Z (floor + compartment depth)"
+      },
+      {
+        "name": "wall",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "outer wall thickness"
+      },
+      {
+        "name": "floor",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "floor thickness"
+      },
+      {
+        "name": "divider_thickness",
+        "expression": "2",
+        "unit": "mm"
+      },
+      {
+        "name": "divider_count",
+        "expression": "2",
+        "unit": "unitless",
+        "comment": "full-width dividers (whole number >= 0)"
+      },
+      {
+        "name": "notch_width",
+        "expression": "16",
+        "unit": "mm",
+        "comment": "rim access notch, first compartment"
+      },
+      {
+        "name": "notch_depth",
+        "expression": "8",
+        "unit": "mm",
+        "comment": "notch depth below the rim"
+      },
+      {
+        "name": "compartment_count",
+        "expression": "divider_count + 1",
+        "unit": "unitless"
+      },
+      {
+        "name": "compartment_width",
+        "expression": "(tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count",
+        "unit": "mm",
+        "comment": "interior width of each compartment along X"
+      },
+      {
+        "name": "cavity_width",
+        "expression": "tray_width - 2 * wall",
+        "unit": "mm"
+      },
+      {
+        "name": "cavity_depth",
+        "expression": "tray_height - floor",
+        "unit": "mm"
+      },
+      {
+        "name": "finger_radius",
+        "expression": "6",
+        "unit": "mm",
+        "comment": "notch bottom corner radius (sketch fillet)"
+      },
+      {
+        "name": "corner_chamfer",
+        "expression": "1.5",
+        "unit": "mm",
+        "comment": "outer vertical edges"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 49303.902664,
+    "bounds": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        120.0,
+        80.0,
+        30.0
+      ]
+    },
+    "face_count": 30
+  }
+}

@@ -88,6 +88,29 @@ pub enum Command {
         sketch: FeatureId,
         angle_deg: f64,
     },
+    /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
+    /// `a` and `b` (parallel planes) as a new body: equal-count polygons with
+    /// parallel corresponding edges, or coaxial circles. Refused otherwise
+    /// with the reason (ProductLimit), document unchanged.
+    Loft {
+        #[serde(default)]
+        name: Option<String>,
+        a: FeatureId,
+        b: FeatureId,
+        #[serde(default)]
+        body_name: Option<String>,
+    },
+    /// Exact sweep (run 5, ADR 0009): the closed profile of sketch `profile`
+    /// along the open line/arc chain of sketch `path` (starting at the profile
+    /// sketch's origin along its normal), as a new body.
+    Sweep {
+        #[serde(default)]
+        name: Option<String>,
+        profile: FeatureId,
+        path: FeatureId,
+        #[serde(default)]
+        body_name: Option<String>,
+    },
     CutThroughAll {
         #[serde(default)]
         name: Option<String>,
@@ -139,6 +162,17 @@ pub enum Command {
         a: FaceRef,
         b: FaceRef,
         distance: f64,
+    },
+    /// Exact solid fillet (run 5) of the straight convex edge between planar
+    /// faces `a` and `b` (semantic references), `radius` mm: an exact cylinder
+    /// tangent to both. Body prismatic along the edge with perpendicular end
+    /// faces; refused otherwise. Parameter `radius`.
+    Fillet {
+        #[serde(default)]
+        name: Option<String>,
+        a: FaceRef,
+        b: FaceRef,
+        radius: f64,
     },
     /// Round hole (run 4) from a planar face of `target` (default: the body
     /// owning the face), centred at `center` (plane coordinates): `diameter`,
@@ -225,6 +259,16 @@ pub enum Command {
     SetBodyVisible {
         body: BodyId,
         visible: bool,
+    },
+    /// Suppress (or restore) a feature: kept in history, not evaluated (run
+    /// 5; one undo step). With `with_dependents`, every feature depending on
+    /// it (transitively) gets the same state; otherwise the change is refused
+    /// when it would leave an evaluated feature depending on a suppressed one.
+    SetSuppressed {
+        feature: FeatureId,
+        suppressed: bool,
+        #[serde(default)]
+        with_dependents: bool,
     },
     /// Re-attach a sketch to another plane or face (repair of a broken face
     /// reference; one undo step). The sketch's local geometry is kept.
@@ -382,10 +426,13 @@ impl Command {
             Command::CutThroughAll { .. } => "cut_through_all",
             Command::Pocket { .. } => "pocket",
             Command::Revolve { .. } => "revolve",
+            Command::Loft { .. } => "loft",
+            Command::Sweep { .. } => "sweep",
             Command::LinearPattern { .. } => "linear_pattern",
             Command::Mirror { .. } => "mirror",
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
+            Command::Fillet { .. } => "fillet",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
             Command::Shell { .. } => "shell",
@@ -397,6 +444,7 @@ impl Command {
             Command::EditSketch { .. } => "edit_sketch",
             Command::RenameFeature { .. } => "rename_feature",
             Command::RenameBody { .. } => "rename_body",
+            Command::SetSuppressed { .. } => "set_suppressed",
             Command::SetBodyVisible { .. } => "set_body_visible",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
@@ -527,6 +575,9 @@ pub struct FeatureSummary {
     /// Parameters bound to expressions (name -> expression).
     #[serde(default)]
     pub expressions: std::collections::BTreeMap<String, String>,
+    /// Suppressed: in history, not evaluated (run 5).
+    #[serde(default)]
+    pub suppressed: bool,
 }
 
 /// A named user parameter with its evaluated value and relationships.
@@ -920,6 +971,52 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Loft {
+                name,
+                a,
+                b,
+                body_name,
+            } => {
+                let (name, a, b, body_name) = (name.clone(), *a, *b, body_name.clone());
+                if a == b {
+                    return Err(DocError::Validation(
+                        "loft needs two different sketches".into(),
+                    ));
+                }
+                let id = self.model_mut()?.transact("Loft", |d| {
+                    let body = d.add_body(body_name.unwrap_or_else(|| d.default_body_name()));
+                    let n = name.unwrap_or_else(|| d.default_name("Loft"));
+                    Ok(d.push(n, FeatureKind::Loft { a, b, body }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::Sweep {
+                name,
+                profile,
+                path,
+                body_name,
+            } => {
+                let (name, profile, path, body_name) =
+                    (name.clone(), *profile, *path, body_name.clone());
+                if profile == path {
+                    return Err(DocError::Validation(
+                        "sweep needs a profile sketch and a separate path sketch".into(),
+                    ));
+                }
+                let id = self.model_mut()?.transact("Sweep", |d| {
+                    let body = d.add_body(body_name.unwrap_or_else(|| d.default_body_name()));
+                    let n = name.unwrap_or_else(|| d.default_name("Sweep"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Sweep {
+                            profile,
+                            path,
+                            body,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::CutThroughAll { name, sketch } => {
                 let (name, sketch) = (name.clone(), *sketch);
                 let m = self.model_mut()?;
@@ -1041,6 +1138,19 @@ impl Session {
                 let id = self.model_mut()?.transact("Chamfer", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Chamfer"));
                     Ok(d.push(n, FeatureKind::Chamfer { a, b, distance }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::Fillet { name, a, b, radius } => {
+                let (name, a, b, radius) = (name.clone(), *a, *b, *radius);
+                if !radius.is_finite() || radius <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "fillet radius must be > 0 mm, got {radius}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Fillet", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Fillet"));
+                    Ok(d.push(n, FeatureKind::Fillet { a, b, radius }))
                 })?;
                 r.feature = Some(id);
             }
@@ -1469,6 +1579,47 @@ impl Session {
                     Ok(())
                 })?;
             }
+            Command::SetSuppressed {
+                feature,
+                suppressed,
+                with_dependents,
+            } => {
+                let (feature, suppressed, cascade) = (*feature, *suppressed, *with_dependents);
+                let m = self.model_mut()?;
+                let doc = m.document();
+                let name = doc.feature(feature)?.name.clone();
+                let ids = if cascade {
+                    doc.with_dependents(feature)
+                } else {
+                    vec![feature]
+                };
+                m.transact(
+                    &format!(
+                        "{} {name}{}",
+                        if suppressed { "Suppress" } else { "Restore" },
+                        if ids.len() > 1 {
+                            format!(" (+{} dependent)", ids.len() - 1)
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    |d| {
+                        for id in &ids {
+                            d.feature_mut(*id)?.suppressed = suppressed;
+                        }
+                        Ok(())
+                    },
+                )?;
+                r.feature = Some(feature);
+                r.message = Some(format!(
+                    "{} {}",
+                    if suppressed { "suppressed" } else { "restored" },
+                    ids.iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             Command::SetBodyVisible { body, visible } => {
                 let (body, visible) = (*body, *visible);
                 let m = self.model_mut()?;
@@ -1779,21 +1930,31 @@ impl Session {
             }
             Command::OpenCopy { path } => {
                 let nf = load_file(path)?;
-                let mut model = Model::from_document(nf.document)?;
+                let (mut model, warning) = Model::from_document_reporting(nf.document)?;
                 model.dirty = true;
                 self.model = Some(model);
                 self.path = None;
                 self.doc_id += 1;
                 self.fresh_model_settings();
-                r.message = Some(format!(
-                    "opened a copy of {} as an unsaved document",
-                    path.display()
-                ));
+                let mut msg = format!("opened a copy of {} as an unsaved document", path.display());
+                if let Some(w) = warning {
+                    msg += &format!(
+                        "; WARNING: the parameter expressions do not evaluate ({w}); showing the \
+                         stored values. Fix the named parameter or expression before editing"
+                    );
+                }
+                r.message = Some(msg);
             }
             Command::Open { path } => {
                 let nf = load_file(path)?;
-                let model = Model::from_document(nf.document)?;
+                let (model, warning) = Model::from_document_reporting(nf.document)?;
                 let mut msg = format!("opened {}", path.display());
+                if let Some(w) = warning {
+                    msg += &format!(
+                        "; WARNING: the parameter expressions do not evaluate ({w}); showing the \
+                         stored values. Fix the named parameter or expression before editing"
+                    );
+                }
                 if let (Some(c), Some(m)) = (&nf.cache, &model.evaluation().measurements)
                     && let (Some(v0), k::VolumeResult::Value { volume, .. }) = (c.volume, &m.volume)
                 {
@@ -2003,6 +2164,8 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Sketch { plane, .. } => ("sketch", Some(*plane)),
                 FeatureKind::Extrude { .. } => ("extrude", None),
                 FeatureKind::Revolve { .. } => ("revolve", None),
+                FeatureKind::Loft { .. } => ("loft", None),
+                FeatureKind::Sweep { .. } => ("sweep", None),
                 FeatureKind::Cut { .. } => ("cut_through_all", None),
                 FeatureKind::Pocket { .. } => ("pocket", None),
                 FeatureKind::ImportStep { .. } => ("import_step", None),
@@ -2012,6 +2175,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::CircularPattern { .. } => ("circular_pattern", None),
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
+                FeatureKind::Fillet { .. } => ("fillet", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
             };
@@ -2067,6 +2231,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                     .chain(res.map(|r| r.notes.clone()).unwrap_or_default())
                     .collect(),
                 expressions: f.expressions.clone(),
+                suppressed: f.suppressed,
             }
         })
         .collect()

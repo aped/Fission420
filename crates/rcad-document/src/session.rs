@@ -56,21 +56,41 @@ impl Model {
     }
 
     /// Build from a loaded document; fails (without side effects) if it does not regenerate.
-    pub fn from_document(mut doc: Document) -> Result<Self> {
-        crate::params::apply_expressions(&mut doc)?;
+    pub fn from_document(doc: Document) -> Result<Self> {
+        Self::from_document_reporting(doc).map(|(m, _)| m)
+    }
+
+    /// [`Model::from_document`], but a document whose expressions no longer
+    /// evaluate (e.g. a hand-edited file) still opens with its stored values
+    /// (the last committed definition) when those regenerate; the expression
+    /// error is returned so the client can show it (review run 4 #15: such a
+    /// file could not be opened to repair it). The next edit re-derives every
+    /// bound value, so it is refused until the named parameter is fixed.
+    pub fn from_document_reporting(mut doc: Document) -> Result<(Self, Option<DocError>)> {
+        let stored = doc.clone();
+        let warning = match crate::params::apply_expressions(&mut doc) {
+            Ok(()) => None,
+            Err(e) => {
+                doc = stored;
+                Some(e)
+            }
+        };
         let mut cache = RegenCache::default();
         let eval = regenerate_cached(&doc, Some(&mut cache))?;
-        Ok(Self {
-            doc,
-            eval,
-            undo: vec![],
-            redo: vec![],
-            revision: 0,
-            dirty: false,
-            cache,
-            defer_measurements: false,
-            measure_failed: None,
-        })
+        Ok((
+            Self {
+                doc,
+                eval,
+                undo: vec![],
+                redo: vec![],
+                revision: 0,
+                dirty: false,
+                cache,
+                defer_measurements: false,
+                measure_failed: None,
+            },
+            warning,
+        ))
     }
 
     /// See the `defer_measurements` field. Headless clients keep the default (off).

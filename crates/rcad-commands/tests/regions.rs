@@ -280,7 +280,7 @@ fn region_survives_save_and_reopen_and_json_is_additive() {
 }
 
 #[test]
-fn join_or_cut_with_a_holed_region_is_refused_but_a_single_loop_region_cuts() {
+fn cut_with_a_holed_region_is_exact_and_a_single_loop_region_cuts() {
     let mut s = Session::new();
     let (f, rs) = setup(&mut s);
     // A plate to cut, below the sketch plane (its top face is on the sketch
@@ -301,9 +301,13 @@ fn join_or_cut_with_a_holed_region_is_refused_but_a_single_loop_region_cuts() {
     .unwrap();
     ok(&mut s, rev(extrude(plate, 10.0, ExtrudeOp::NewBody, None)));
     let v0 = volume(&s, 0);
+    // Since run 5 (ADR 0007) a holed region on a prismatic target is cut by
+    // the exact slab construction: the ring (2400 - 800 mm²) becomes a groove.
+    // Inner-loop refusals on non-prismatic targets: tests/slab_arcs.rs.
     let r = s.execute(&extrude(f, 3.0, ExtrudeOp::Cut, Some(rs[0].clone())));
-    assert!(matches!(r.error, Some(DocError::ProductLimit(_))), "{r:?}");
+    assert!(r.ok, "{r:?}");
+    assert!((volume(&s, 0) - (v0 - 1600.0 * 3.0)).abs() < 1e-6 * v0);
     // The island disc is a single loop: an ordinary cut.
     ok(&mut s, extrude(f, 3.0, ExtrudeOp::Cut, Some(rs[2].clone())));
-    assert!((volume(&s, 0) - (v0 - 25.0 * PI * 3.0)).abs() < 1e-3);
+    assert!((volume(&s, 0) - (v0 - 1600.0 * 3.0 - 25.0 * PI * 3.0)).abs() < 1e-3);
 }

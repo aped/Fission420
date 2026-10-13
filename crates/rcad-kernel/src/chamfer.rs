@@ -8,6 +8,15 @@
 //! past both faces, closed on the outer side, so the tool meets the body only
 //! where the chamfer plane crosses the faces (Truck 0.6 booleans fail on
 //! coplanar faces and on tool edges lying in body faces).
+//!
+//! The edge's two END faces may be slanted (planar, not perpendicular to the
+//! edge; run 5): the tool is clipped by them, so the removed solid is the
+//! triangle T (edge, A, B) swept between the two end planes. Each end plane is
+//! s_k(w) = (n_k·(Q_k - P) - n_k·w) / (n_k·e) along the edge, linear in the
+//! in-section offset w, so the removed volume is exactly
+//! area(T) · (s_1 - s_0)(centroid of T). The result must remove exactly that
+//! (anything else: another feature within reach), the ends must be single
+//! planar faces not parallel to the edge, and T must lie between them.
 use crate::build::{check_single_closed, subtract_prism};
 use crate::ops::{coplanar_faces, face_loops_2d, inside_loops, through_all_margin};
 use crate::{Body, Frame, KernelError, Profile, Result, guarded};
@@ -21,7 +30,7 @@ fn arr(a: Vector3) -> [f64; 3] {
 }
 
 /// Is `p` strictly inside a face of `body` lying in `face`'s plane?
-fn on_face(body: &Body, face: &Frame, p: Vector3) -> Result<bool> {
+pub(crate) fn on_face(body: &Body, face: &Frame, p: Vector3) -> Result<bool> {
     let o = v(face.origin);
     let q = [(p - o).dot(v(face.x)), (p - o).dot(v(face.y))];
     for f in coplanar_faces(body, face) {
@@ -47,75 +56,36 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
             crate::tol::MIN_LENGTH
         )));
     }
-    let (n1, n2) = (v(f1.z), v(f2.z));
-    let e = n1.cross(n2);
-    if e.magnitude() < 1e-9 {
-        return Err(KernelError::InvalidInput(
-            "chamfer: the two faces are parallel; they share no edge".into(),
-        ));
-    }
-    let e = e.normalize();
-    // Point on both planes: P = (h1 (n2 × e) + h2 (e × n1)) / |n1 × n2|^2 with e
-    // unnormalized; with e normalized, divide by (n1 × n2)·e instead.
-    let (h1, h2) = (n1.dot(v(f1.origin)), n2.dot(v(f2.origin)));
-    let p = (n2.cross(e) * h1 + e.cross(n1) * h2) / n1.cross(n2).dot(e);
-    let eps = 1e-6;
-    let on_line = |q: Point3| {
-        let w = Vector3::new(q.x, q.y, q.z) - p;
-        (w - e * w.dot(e)).magnitude() <= eps
-    };
-    let (mut smin, mut smax) = (f64::INFINITY, f64::NEG_INFINITY);
-    guarded("chamfer edge search", || {
-        for edge in body.solid.edge_iter() {
-            let c = edge.oriented_curve();
-            let (t0, t1) = c.range_tuple();
-            let (a, b, m) = (c.subs(t0), c.subs(t1), c.subs(0.5 * (t0 + t1)));
-            if on_line(a) && on_line(b) && on_line(m) {
-                for q in [a, b] {
-                    let s = (Vector3::new(q.x, q.y, q.z) - p).dot(e);
-                    smin = smin.min(s);
-                    smax = smax.max(s);
-                }
-            }
-        }
-    })?;
-    if smin >= smax {
-        return Err(KernelError::InvalidInput(
-            "chamfer: the two faces do not meet in a straight edge of the body".into(),
-        ));
-    }
-    // In-face directions away from the edge, at the edge midpoint.
+    let ConvexEdge {
+        p,
+        e,
+        n1,
+        n2,
+        t1,
+        t2,
+        smin,
+        smax,
+    } = convex_edge(body, f1, f2, 1e-3f64.min(0.25 * d), "chamfer")?;
     let mid = p + e * (0.5 * (smin + smax));
-    let probe = 1e-3f64.min(0.25 * d);
-    let mut dirs = Vec::new();
-    for (f, n) in [(f1, n1), (f2, n2)] {
-        let t = n.cross(e).normalize();
-        let fwd = on_face(body, f, mid + t * probe)?;
-        let back = on_face(body, f, mid - t * probe)?;
-        let t = match (fwd, back) {
-            (true, false) => t,
-            (false, true) => -t,
-            _ => {
-                return Err(KernelError::InvalidInput(
-                    "chamfer: cannot tell which side of the edge a face lies on (the edge \
-                     is interior to a face or the faces are not adjacent)"
-                        .into(),
-                ));
-            }
-        };
-        dirs.push(t);
-    }
-    let (t1, t2) = (dirs[0], dirs[1]);
-    if t1.dot(n2) >= 0.0 || t2.dot(n1) >= 0.0 {
-        return Err(KernelError::InvalidInput(
-            "chamfer: the edge is concave (a chamfer would add material); not supported".into(),
-        ));
-    }
     for (f, t, which) in [(f1, t1, "first"), (f2, t2, "second")] {
         if !on_face(body, f, mid + t * d)? {
             return Err(KernelError::InvalidInput(format!(
                 "chamfer: {d} mm reaches past the {which} face"
             )));
+        }
+    }
+    // End planes at the two edge endpoints (validated before any boolean).
+    let end0 = end_plane(body, p + e * smin, n1, n2)?;
+    let end1 = end_plane(body, p + e * smax, n1, n2)?;
+    // Axial coordinate (from p along e) of end plane (q, n) at offset w.
+    let s_at = |(q, n): (Vector3, Vector3), w: Vector3| (n.dot(q - p) - n.dot(w)) / n.dot(e);
+    for w in [Vector3::new(0.0, 0.0, 0.0), t1 * d, t2 * d] {
+        if s_at(end1, w) - s_at(end0, w) <= crate::tol::MIN_LENGTH {
+            return Err(KernelError::InvalidInput(
+                "chamfer: the end faces cross within the chamfer (the edge is too short for \
+                 this distance at these end angles)"
+                    .into(),
+            ));
         }
     }
     let m = through_all_margin(body)?;
@@ -152,9 +122,12 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
     )?;
     check_single_closed(&out, "chamfer")?;
     // The tool must have removed exactly the edge wedge: triangle (edge, A, B)
-    // times the edge length. Anything else (oblique end faces, other features
-    // within the tool's reach) is refused rather than silently cut.
-    let wedge = 0.5 * t1.cross(t2).magnitude() * d * d * (smax - smin);
+    // swept between the end planes, area(T) times the axial length at T's
+    // centroid (exact: that length is linear over T). Anything else (other
+    // features within the tool's reach) is refused rather than silently cut.
+    let centroid = (t1 + t2) * (d / 3.0);
+    let wedge =
+        0.5 * t1.cross(t2).magnitude() * d * d * (s_at(end1, centroid) - s_at(end0, centroid));
     let vol = |b: &Body| match crate::measure(b)?.volume {
         crate::VolumeResult::Value {
             volume,
@@ -171,9 +144,167 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
     if (removed - wedge).abs() > tol {
         return Err(KernelError::InvalidInput(format!(
             "chamfer: would remove {removed:.6} mm^3 instead of the edge wedge {wedge:.6} mm^3 \
-             (only straight convex edges whose ends meet faces perpendicular to the edge, with \
-             no other features within the chamfer region, are supported)"
+             (only straight convex edges ending at single planar faces, with no other \
+             features within the chamfer region, are supported)"
         )));
     }
     Ok(out)
+}
+
+/// The planar END face of the edge at its endpoint `q`: the one face through
+/// `q` other than those in the edge's two planes (normals `n1`, `n2`), as
+/// (point, outward unit normal). Refused when it is not a single plane, is
+/// curved, or is parallel to the edge.
+pub(crate) fn end_plane(
+    body: &Body,
+    q: Vector3,
+    n1: Vector3,
+    n2: Vector3,
+) -> Result<(Vector3, Vector3)> {
+    let e = n1.cross(n2).normalize();
+    let at = |pt: Point3| (Vector3::new(pt.x, pt.y, pt.z) - q).magnitude() <= 1e-6;
+    let mut planes: Vec<Vector3> = Vec::new();
+    for f in body.solid.face_iter() {
+        let touches = f
+            .boundaries()
+            .iter()
+            .any(|w| w.vertex_iter().any(|v| at(v.point())));
+        if !touches {
+            continue;
+        }
+        let Surface::Plane(pl) = f.surface() else {
+            return Err(KernelError::InvalidInput(
+                "chamfer: an end of the edge meets a curved face (only planar end faces are \
+                 supported)"
+                    .into(),
+            ));
+        };
+        let mut n = pl.normal();
+        if !f.orientation() {
+            n = -n;
+        }
+        if n.cross(n1).magnitude() < 1e-9 || n.cross(n2).magnitude() < 1e-9 {
+            continue; // one of the edge's own faces (or coplanar with one)
+        }
+        if !planes.iter().any(|m| m.dot(n) > 1.0 - 1e-12) {
+            planes.push(n);
+        }
+    }
+    match planes.as_slice() {
+        [n] if n.dot(e).abs() > 1e-6 => Ok((q, *n)),
+        [_] => Err(KernelError::InvalidInput(
+            "chamfer: an end face of the edge is parallel to it".into(),
+        )),
+        [] => Err(KernelError::InvalidInput(
+            "chamfer: no end face found at an end of the edge".into(),
+        )),
+        _ => Err(KernelError::InvalidInput(format!(
+            "chamfer: {} faces meet at an end of the edge (only a single planar end face is \
+             supported)",
+            planes.len()
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+/// A straight convex edge between two planar faces: a point `p` on it, unit
+/// direction `e`, outward face normals `n1`, `n2`, in-face unit directions
+/// `t1`, `t2` away from the edge (perpendicular to it), and its extent
+/// `[smin, smax]` along `e` from `p`.
+pub(crate) struct ConvexEdge {
+    pub p: Vector3,
+    pub e: Vector3,
+    pub n1: Vector3,
+    pub n2: Vector3,
+    pub t1: Vector3,
+    pub t2: Vector3,
+    pub smin: f64,
+    pub smax: f64,
+}
+
+/// The straight edge where the faces in planes `f1` and `f2` (z = outward
+/// normal) meet, refused (`what`: the operation's name) when the planes are
+/// parallel, no straight edge of `body` lies on their line, the side of a face
+/// cannot be told (probing `probe` mm off the edge), or the edge is concave.
+pub(crate) fn convex_edge(
+    body: &Body,
+    f1: &Frame,
+    f2: &Frame,
+    probe: f64,
+    what: &str,
+) -> Result<ConvexEdge> {
+    let (n1, n2) = (v(f1.z), v(f2.z));
+    let e = n1.cross(n2);
+    if e.magnitude() < 1e-9 {
+        return Err(KernelError::InvalidInput(format!(
+            "{what}: the two faces are parallel; they share no edge"
+        )));
+    }
+    let e = e.normalize();
+    // Point on both planes: P = (h1 (n2 × e) + h2 (e × n1)) / |n1 × n2|^2 with e
+    // unnormalized; with e normalized, divide by (n1 × n2)·e instead.
+    let (h1, h2) = (n1.dot(v(f1.origin)), n2.dot(v(f2.origin)));
+    let p = (n2.cross(e) * h1 + e.cross(n1) * h2) / n1.cross(n2).dot(e);
+    let eps = 1e-6;
+    let on_line = |q: Point3| {
+        let w = Vector3::new(q.x, q.y, q.z) - p;
+        (w - e * w.dot(e)).magnitude() <= eps
+    };
+    let (mut smin, mut smax) = (f64::INFINITY, f64::NEG_INFINITY);
+    guarded("edge search", || {
+        for edge in body.solid.edge_iter() {
+            let c = edge.oriented_curve();
+            let (t0, t1) = c.range_tuple();
+            let (a, b, m) = (c.subs(t0), c.subs(t1), c.subs(0.5 * (t0 + t1)));
+            if on_line(a) && on_line(b) && on_line(m) {
+                for q in [a, b] {
+                    let s = (Vector3::new(q.x, q.y, q.z) - p).dot(e);
+                    smin = smin.min(s);
+                    smax = smax.max(s);
+                }
+            }
+        }
+    })?;
+    if smin >= smax {
+        return Err(KernelError::InvalidInput(format!(
+            "{what}: the two faces do not meet in a straight edge of the body"
+        )));
+    }
+    // In-face directions away from the edge, at the edge midpoint.
+    let mid = p + e * (0.5 * (smin + smax));
+    let mut dirs = Vec::new();
+    for (f, n) in [(f1, n1), (f2, n2)] {
+        let t = n.cross(e).normalize();
+        let fwd = on_face(body, f, mid + t * probe)?;
+        let back = on_face(body, f, mid - t * probe)?;
+        let t = match (fwd, back) {
+            (true, false) => t,
+            (false, true) => -t,
+            _ => {
+                return Err(KernelError::InvalidInput(format!(
+                    "{what}: cannot tell which side of the edge a face lies on (the edge \
+                         is interior to a face or the faces are not adjacent)"
+                )));
+            }
+        };
+        dirs.push(t);
+    }
+    let (t1, t2) = (dirs[0], dirs[1]);
+    if t1.dot(n2) >= 0.0 || t2.dot(n1) >= 0.0 {
+        return Err(KernelError::InvalidInput(format!(
+            "{what}: the edge is concave (it would add material); not supported"
+        )));
+    }
+    Ok(ConvexEdge {
+        p,
+        e,
+        n1,
+        n2,
+        t1,
+        t2,
+        smin,
+        smax,
+    })
 }

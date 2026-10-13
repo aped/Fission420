@@ -1,41 +1,51 @@
 //! Exact Cut/Join of a straight prism into a *prismatic* body without a 3-D
-//! boolean (ADR 0006).
+//! boolean (ADR 0006, extended to lines and arcs by ADR 0007).
 //!
-//! Truck 0.6 booleans fail (or return non-closed shells) when tool faces
-//! coincide with faces of the target: a pocket overlapping an earlier pocket of
-//! the same depth, sharing a wall plane with it, or flush with an outer wall.
-//! For the common case where every face of the target is planar and either
-//! perpendicular to the tool axis (a *cap*) or parallel to it (a *wall*), the
-//! body is exactly a stack of slabs: between two consecutive cap levels its
-//! cross-section is a constant 2-D region. The boolean is then a 2-D region
-//! boolean per slab, and the result is rebuilt from the slab regions:
+//! Truck 0.6 booleans fail (or return non-closed shells or wrong solids) when
+//! tool faces coincide with faces of the target, or when a cut engulfs an
+//! existing hole. For the common case where every face of the target is
+//! either a plane perpendicular to the tool axis (a *cap*) or a surface
+//! parallel to it (a *wall*: a plane, or a cylinder whose cap edges are
+//! circular arcs), the body is exactly a stack of slabs: between two
+//! consecutive cap levels its cross-section is a constant 2-D region bounded
+//! by lines and circular arcs. The boolean is then a 2-D region boolean per
+//! slab, and the result is rebuilt from the slab regions:
 //!
 //! * slab regions: `S_k = (S_{k-1} \ Up_k) ∪ Down_k`, where `Up_k`/`Down_k`
 //!   are the up-/down-facing cap faces at level `k` (material below / above);
 //! * the tool's levels split slabs; slabs inside the tool span get
-//!   `S_k \ P` (Cut) or `S_k ∪ P` (Join);
+//!   `S_k \ P` (Cut) or `S_k ∪ P` (Join), `P` = outer profile minus holes;
 //! * result caps at level `k`: `S_{k-1} \ S_k` (up) and `S_k \ S_{k-1}` (down);
-//! * result walls: each boundary edge of `S_k` sweeps a rectangle over the
-//!   slab; rectangles in one wall plane are united into that plane's faces, so
-//!   a wall is one face however many slabs it spans (face references resolve
-//!   by plane and must stay unambiguous);
+//! * result walls: each straight boundary edge of `S_k` sweeps a rectangle
+//!   over the slab; rectangles in one wall plane are united into that plane's
+//!   faces, so a wall is one face however many slabs it spans (face
+//!   references resolve by plane and must stay unambiguous). Each arc sweeps a
+//!   cylinder patch, one per span (at most a quarter turn) of the circle's
+//!   partition and contiguous run of slabs;
 //! * vertices are shared, T-junctions split, every edge must bound exactly two
 //!   faces in opposite directions, and the shell must be connected.
 //!
 //! The 2-D booleans run on an integer grid ([`GRID_STEPS_PER_MM`]) via
 //! `i_overlay`, which makes coincident and collinear edges exact instead of a
-//! numerical accident. Every coordinate of the result is on that grid in the
-//! tool frame (1e-9 mm, far below [`tol::KERNEL_LINEAR`]). Profiles with arcs
-//! and bodies with curved or oblique faces are not handled here (the caller
-//! keeps Truck's error). Callers verify the result like any other boolean.
+//! numerical accident. Arcs enter them as chains on a per-circle ring shared
+//! by every loop (see `curves`), so the polygons decide only the topology; the
+//! output is rebuilt from exact lines and arcs. Every coordinate of the result
+//! is on the grid in the tool frame (1e-9 mm, far below
+//! [`tol::KERNEL_LINEAR`]). Bodies with oblique or non-ruled faces, cap edges
+//! that are neither straight nor circular, and tangent or ambiguous contacts
+//! are refused with the reason. Callers verify the result like any other
+//! boolean (ADR 0005).
+mod curves;
+mod solid;
+
 use crate::{Body, Frame, KernelError, LoopSegment, Profile, Result, tol};
+use curves::{CircleSet, ELoop, FResult, Fail, Kind, Rings};
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::ShapeType;
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::float::overlay::FloatOverlay;
 use i_overlay::i_float::adapter::FloatPointAdapter;
 use i_overlay::i_float::float::rect::FloatRect;
-use std::collections::HashMap;
 use truck_modeling::*;
 
 /// Integer grid of the 2-D booleans: steps per mm (1e-9 mm resolution).
@@ -43,6 +53,17 @@ pub const GRID_STEPS_PER_MM: f64 = 1.0e9;
 
 /// Distinct cap levels and wall planes closer than this are the same.
 const SAME: f64 = tol::FACE_MATCH;
+
+/// Ring resolutions tried (chords per full turn at most): a configuration
+/// that is ambiguous at one resolution is retried at the next, then refused.
+const RING_CHORDS: [usize; 4] = [64, 128, 256, 512];
+
+/// Edges of a cap face and surfaces of a wall are classified to this
+/// tolerance (Truck's linear tolerance): straight, circular, ruled.
+const CURVE_TOL: f64 = tol::KERNEL_LINEAR;
+
+/// A wall's unit normal may have at most this component along the axis.
+const RULED_TOL: f64 = 1.0e-9;
 
 /// Join or Cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,28 +77,50 @@ type Contour = Vec<[f64; 2]>;
 type Shape = Vec<Contour>;
 type Region = Vec<Shape>;
 
-/// Whether `body` is prismatic along `frame.z` (every face planar,
-/// perpendicular or parallel to it) and `profile` has straight edges only: the
-/// cases [`prism_boolean`] can build.
+impl From<KernelError> for Fail {
+    fn from(e: KernelError) -> Fail {
+        Fail::Kernel(e)
+    }
+}
+
+/// Whether `body` is prismatic along `frame.z` and `profile` is a valid
+/// line/arc profile: the cases [`prism_boolean`] can attempt.
 pub fn applicable(body: &Body, profile: &Profile, frame: &Frame) -> bool {
     not_applicable(body, profile, frame).is_none()
 }
 
-/// Why [`prism_boolean`] cannot build this case, or None when it can.
+/// Why [`prism_boolean`] cannot build this case, or None when it can be
+/// attempted (it may still refuse a tangent or ambiguous contact).
 pub fn not_applicable(body: &Body, profile: &Profile, frame: &Frame) -> Option<String> {
-    if profile_polygon(profile).is_none() {
-        return Some("the profile has arcs or is a circle".into());
+    if let Err(e) = profile.validate() {
+        return Some(e.to_string());
     }
-    classify_faces(body, frame).err()
+    let (frame, _) = right_handed(frame);
+    classify_faces(body, &frame, &mut CircleSet::default()).err()
 }
 
 /// `target` cut by (or joined with) the prism of `profile` (in `start`'s 2-D
 /// coordinates) swept from `start` by `length` along `start.z`, built exactly
 /// from slab regions (see the module docs). `InvalidInput` when the case is not
-/// prismatic; `InvalidResult` when the result is not one closed solid.
+/// prismatic or is ambiguous; `InvalidResult` when the result is not one
+/// closed solid.
 pub fn prism_boolean(
     target: &Body,
     profile: &Profile,
+    start: &Frame,
+    length: f64,
+    op: SlabOp,
+) -> Result<Body> {
+    prism_region_boolean(target, profile, &[], start, length, op)
+}
+
+/// [`prism_boolean`] with a tool region `outer` minus `holes` (inner loops
+/// strictly inside `outer`, not touching each other; the caller's sketch
+/// region extraction guarantees it).
+pub fn prism_region_boolean(
+    target: &Body,
+    outer: &Profile,
+    holes: &[Profile],
     start: &Frame,
     length: f64,
     op: SlabOp,
@@ -89,16 +132,159 @@ pub fn prism_boolean(
             tol::MIN_LENGTH
         )));
     }
-    let tool = profile_polygon(profile).ok_or_else(|| {
-        KernelError::InvalidInput("prismatic boolean: the profile has arcs or is a circle".into())
-    })?;
-    let caps = classify_faces(target, start)
-        .map_err(|m| KernelError::InvalidInput(format!("prismatic boolean: {m}")))?;
-    let tool_region = normalize(&[vec![tool]])?;
+    outer.validate()?;
+    for h in holes {
+        h.validate()?;
+    }
+    let (frame, mirrored) = right_handed(start);
+    let refuse = |m: String| KernelError::InvalidInput(format!("prismatic boolean: {m}"));
+    let mut set = CircleSet::default();
+    let mut tool: Vec<ELoop> = std::iter::once(outer)
+        .chain(holes)
+        .map(|p| tool_loop(p, mirrored, &mut set))
+        .collect();
+    let mut caps = classify_faces(target, &frame, &mut set).map_err(refuse)?;
+    let circles = set.circles.clone();
+    let fail = |f: Fail| match f {
+        Fail::Refine(m) | Fail::Refuse(m) => refuse(m),
+        Fail::Kernel(e) => e,
+    };
+    // Canonical vertices over all loops at once (tool first, so its exact
+    // values represent clusters).
+    let mut all: Vec<ELoop> = std::mem::take(&mut tool);
+    let ntool = all.len();
+    for c in &mut caps {
+        all.append(&mut c.loops);
+    }
+    curves::canonicalize(&mut all, &circles).map_err(fail)?;
+    let mut rest = all.split_off(ntool);
+    tool = all;
+    for c in caps.iter_mut().rev() {
+        let n = c.count;
+        c.loops = rest.split_off(rest.len() - n);
+    }
+    let mut last = String::new();
+    for chords in RING_CHORDS {
+        let step = std::f64::consts::TAU / chords as f64;
+        match attempt(&caps, &tool, &circles, step, length, op, &frame) {
+            Ok(solid) => return Ok(Body { solid }),
+            Err(Fail::Refine(m)) => last = m,
+            Err(f) => return Err(fail(f)),
+        }
+    }
+    Err(refuse(format!(
+        "ambiguous at the finest arc resolution ({} chords per turn): {last}",
+        RING_CHORDS[RING_CHORDS.len() - 1]
+    )))
+}
+
+/// `frame`, or (left-handed, e.g. a mirror copy) the same frame with its y
+/// axis negated, and whether it was negated: the construction's orientation
+/// rules assume x × y = z.
+fn right_handed(frame: &Frame) -> (Frame, bool) {
+    let (x, y, z) = (frame.x, frame.y, frame.z);
+    let c = [
+        x[1] * y[2] - x[2] * y[1],
+        x[2] * y[0] - x[0] * y[2],
+        x[0] * y[1] - x[1] * y[0],
+    ];
+    if c[0] * z[0] + c[1] * z[1] + c[2] * z[2] >= 0.0 {
+        (*frame, false)
+    } else {
+        let mut f = *frame;
+        f.y = [-y[0], -y[1], -y[2]];
+        (f, true)
+    }
+}
+
+/// Exact loop of a tool profile (y negated and arcs reversed in a mirrored
+/// frame).
+fn tool_loop(p: &Profile, mirrored: bool, set: &mut CircleSet) -> ELoop {
+    let m = |q: [f64; 2]| if mirrored { [q[0], -q[1]] } else { q };
+    match p {
+        Profile::Polygon(v) => ELoop {
+            pts: v.iter().map(|&q| m(q)).collect(),
+            kind: vec![Kind::Line; v.len()],
+        },
+        Profile::Circle { center, radius } => {
+            let c = m(*center);
+            ELoop {
+                pts: vec![[c[0] + radius, c[1]]],
+                kind: vec![Kind::Arc {
+                    circle: set.id(c, *radius),
+                    ccw: true,
+                }],
+            }
+        }
+        Profile::Loop(segs) => {
+            let mut pts = Vec::with_capacity(segs.len());
+            let mut kind = Vec::with_capacity(segs.len());
+            for s in segs {
+                pts.push(m(s.start()));
+                kind.push(match s {
+                    LoopSegment::Line { .. } => Kind::Line,
+                    LoopSegment::Arc { start, center, ccw } => Kind::Arc {
+                        circle: set.id(
+                            m(*center),
+                            (start[0] - center[0]).hypot(start[1] - center[1]),
+                        ),
+                        ccw: *ccw != mirrored,
+                    },
+                });
+            }
+            ELoop { pts, kind }
+        }
+    }
+}
+
+/// One construction at ring resolution `step` (radians per chord at most).
+#[allow(clippy::too_many_arguments)]
+fn attempt(
+    caps: &[Cap],
+    tool: &[ELoop],
+    circles: &[curves::Circ],
+    step: f64,
+    length: f64,
+    op: SlabOp,
+    frame: &Frame,
+) -> FResult<Solid> {
+    let all: Vec<ELoop> = caps
+        .iter()
+        .flat_map(|c| c.loops.iter().cloned())
+        .chain(tool.iter().cloned())
+        .collect();
+    let mut rings = Rings::new(circles, &all, step)?;
+    let mut cap_shapes: Vec<(f64, bool, Shape)> = Vec::with_capacity(caps.len());
+    for c in caps {
+        let shape: Shape = c
+            .loops
+            .iter()
+            .map(|l| rings.polygon(l))
+            .collect::<FResult<_>>()?;
+        cap_shapes.push((c.w, c.up, shape));
+    }
+    let tool_shape: Shape = tool
+        .iter()
+        .map(|l| rings.polygon(l))
+        .collect::<FResult<_>>()?;
+    for c in cap_shapes
+        .iter()
+        .flat_map(|s| s.2.iter())
+        .chain(&tool_shape)
+    {
+        rings.learn(c);
+    }
+    rings.check_vertices()?;
+    let rings = rings;
+    let bool_op = |a: &Region, b: &Region, rule: OverlayRule| -> FResult<Region> {
+        let r = boolean_keep(a, b, rule, &|p| rings.is_ring_point(p))?;
+        rings.check_output(&r)?;
+        Ok(r)
+    };
+    let norm = |r: &[Shape]| bool_op(&orient(r), &Vec::new(), OverlayRule::Union);
+    let tool_region = norm(&[tool_shape])?;
     if area(&tool_region) <= 0.0 {
-        return Err(KernelError::InvalidInput(
-            "prismatic boolean: empty profile".into(),
-        ));
+        return Err(Fail::Refuse("empty profile".into()));
     }
 
     // Levels: every cap, plus the tool's two ends.
@@ -107,26 +293,26 @@ pub fn prism_boolean(
     levels.dedup_by(|b, a| (*b - *a).abs() <= SAME);
     let level_of = |w: f64| levels.iter().position(|l| (l - w).abs() <= SAME);
     let n = levels.len();
-    let (mut up, mut down): (Vec<Region>, Vec<Region>) = (vec![vec![]; n], vec![vec![]; n]);
-    for c in &caps {
-        let k = level_of(c.w).ok_or_else(|| internal("cap level lost"))?;
-        if c.up {
-            up[k].push(c.shape.clone());
+    let (mut up, mut down): (Vec<Vec<Shape>>, Vec<Vec<Shape>>) = (vec![vec![]; n], vec![vec![]; n]);
+    for (w, is_up, shape) in cap_shapes {
+        let k = level_of(w).ok_or_else(|| internal("cap level lost"))?;
+        if is_up {
+            up[k].push(shape);
         } else {
-            down[k].push(c.shape.clone());
+            down[k].push(shape);
         }
     }
     // Slab k lies between levels k and k + 1.
     let mut slabs: Vec<Region> = Vec::with_capacity(n.saturating_sub(1));
     let mut prev: Region = Vec::new();
     for k in 0..n {
-        let below_up = boolean(&prev, &normalize(&up[k])?, OverlayRule::Difference)?;
-        let cur = boolean(&below_up, &normalize(&down[k])?, OverlayRule::Union)?;
+        let below_up = bool_op(&prev, &norm(&up[k])?, OverlayRule::Difference)?;
+        let cur = bool_op(&below_up, &norm(&down[k])?, OverlayRule::Union)?;
         if k + 1 == n {
             if area(&cur) > 0.0 {
-                return Err(internal(
+                return Err(Fail::Kernel(internal(
                     "the body's cap faces do not close (not prismatic)",
-                ));
+                )));
             }
         } else {
             slabs.push(cur.clone());
@@ -144,54 +330,56 @@ pub fn prism_boolean(
                 SlabOp::Cut => OverlayRule::Difference,
                 SlabOp::Join => OverlayRule::Union,
             };
-            let next = boolean(s, &tool_region, rule)?;
+            let next = bool_op(s, &tool_region, rule)?;
             // Any real change is far above one grid cell (1e-18 mm^2).
             changed |= (area(&next) - area(s)).abs() > 1.0e-12;
             *s = next;
         }
     }
     if !changed {
-        return Err(KernelError::InvalidInput(match op {
+        return Err(Fail::Kernel(KernelError::InvalidInput(match op {
             SlabOp::Cut => "cut: the extrusion removes no material from the target body".into(),
             SlabOp::Join => "join: the extrusion adds no material to the target body".into(),
-        }));
+        })));
     }
-    let faces = rebuild_faces(&levels, &slabs)?;
-    let solid = build_solid(&faces, start)?;
-    Ok(Body { solid })
-}
-
-/// The straight-edged loop of `profile`, or None for arcs and circles.
-fn profile_polygon(profile: &Profile) -> Option<Contour> {
-    match profile {
-        Profile::Polygon(v) if v.len() >= 3 => Some(v.clone()),
-        Profile::Loop(segs) if segs.len() >= 3 => segs
-            .iter()
-            .map(|s| match s {
-                LoopSegment::Line { start } => Some(*start),
-                LoopSegment::Arc { .. } => None,
-            })
-            .collect(),
-        _ => None,
+    // Result caps.
+    let empty: Region = Vec::new();
+    let mut cap_regions = Vec::with_capacity(2 * n);
+    for (k, &w) in levels.iter().enumerate() {
+        let below = if k > 0 { &slabs[k - 1] } else { &empty };
+        let above = slabs.get(k).unwrap_or(&empty);
+        cap_regions.push((w, true, bool_op(below, above, OverlayRule::Difference)?));
+        cap_regions.push((w, false, bool_op(above, below, OverlayRule::Difference)?));
     }
+    Ok(solid::build(&levels, &slabs, &cap_regions, &rings, frame)?)
 }
 
 /// A cap face of the target in tool-frame coordinates: level `w` along the
-/// axis, outward normal along (+) or against (-) it, and its region.
+/// axis, outward normal along (+) or against (-) it, and its exact loops.
 struct Cap {
     w: f64,
     up: bool,
-    shape: Shape,
+    loops: Vec<ELoop>,
+    /// Number of loops (kept while the loops are canonicalized elsewhere).
+    count: usize,
 }
 
-/// Caps of `body` in `frame` coordinates, or why the body is not prismatic
-/// along `frame.z` (a curved face, or a face oblique to it).
-fn classify_faces(body: &Body, frame: &Frame) -> std::result::Result<Vec<Cap>, String> {
+/// Caps of `body` in `frame` coordinates (circles registered in `set`), or
+/// why the body is not prismatic along `frame.z`: a face oblique to it, a
+/// curved face not parallel to it, or a cap edge neither straight nor a
+/// circular arc.
+fn classify_faces(
+    body: &Body,
+    frame: &Frame,
+    set: &mut CircleSet,
+) -> std::result::Result<Vec<Cap>, String> {
     let z = Vector3::new(frame.z[0], frame.z[1], frame.z[2]);
     let mut caps = Vec::new();
     for f in body.solid.face_iter() {
-        let Surface::Plane(pl) = f.surface() else {
-            return Err("the body has a curved face".into());
+        let surface = f.surface();
+        let Surface::Plane(pl) = &surface else {
+            ruled_along(&surface, z)?;
+            continue; // curved wall
         };
         let mut nrm = pl.normal();
         if !f.orientation() {
@@ -199,7 +387,7 @@ fn classify_faces(body: &Body, frame: &Frame) -> std::result::Result<Vec<Cap>, S
         }
         let along = nrm.dot(z);
         if along.abs() <= SAME {
-            continue; // wall
+            continue; // planar wall
         }
         if nrm.cross(z).magnitude() > SAME {
             return Err(format!(
@@ -207,21 +395,28 @@ fn classify_faces(body: &Body, frame: &Frame) -> std::result::Result<Vec<Cap>, S
                 [nrm.x, nrm.y, nrm.z]
             ));
         }
-        let mut loops: Vec<Contour> = Vec::new();
+        let mut loops = Vec::new();
         let mut w = 0.0;
         let mut count = 0.0;
         for wire in f.absolute_boundaries() {
-            let mut c = Vec::new();
+            let mut l = ELoop {
+                pts: Vec::new(),
+                kind: Vec::new(),
+            };
             for e in wire.edge_iter() {
-                if e.front() == e.back() {
-                    return Err("a planar face has a closed (curved) edge".into());
-                }
                 let p = to_frame(frame, e.front().point());
                 w += p[2];
                 count += 1.0;
-                c.push([p[0], p[1]]);
+                l.pts.push([p[0], p[1]]);
+                l.kind.push(edge_kind(e, frame, set)?);
             }
-            loops.push(c);
+            if l.pts.len() == 1 && l.kind[0] == Kind::Line {
+                return Err("a cap face has a closed straight edge".into());
+            }
+            if l.pts.len() > 1 && wire.edge_iter().any(|e| e.front() == e.back()) {
+                return Err("a cap face loop mixes a closed edge with others".into());
+            }
+            loops.push(l);
         }
         if count == 0.0 {
             return Err("a face has no boundary".into());
@@ -229,10 +424,93 @@ fn classify_faces(body: &Body, frame: &Frame) -> std::result::Result<Vec<Cap>, S
         caps.push(Cap {
             w: w / count,
             up: along > 0.0,
-            shape: loops,
+            count: loops.len(),
+            loops,
         });
     }
     Ok(caps)
+}
+
+/// A curved face must be a wall: unit normal perpendicular to `z` on a 9 × 9
+/// grid of its parameter domain.
+fn ruled_along(s: &Surface, z: Vector3) -> std::result::Result<(), String> {
+    let bound = |b: std::ops::Bound<f64>| match b {
+        std::ops::Bound::Included(x) | std::ops::Bound::Excluded(x) => Some(x),
+        std::ops::Bound::Unbounded => None,
+    };
+    let ((a0, a1), (b0, b1)) = s.parameter_range();
+    let (Some(u0), Some(u1), Some(v0), Some(v1)) = (bound(a0), bound(a1), bound(b0), bound(b1))
+    else {
+        return Err("the body has a curved face with an unbounded domain".into());
+    };
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let (u, v) = (
+                u0 + (u1 - u0) * i as f64 / 8.0,
+                v0 + (v1 - v0) * j as f64 / 8.0,
+            );
+            let n = s.normal(u, v);
+            if !(n.x.is_finite() && n.y.is_finite() && n.z.is_finite()) {
+                continue;
+            }
+            if n.dot(z).abs() > RULED_TOL {
+                return Err(
+                    "the body has a curved face that is not parallel to the tool axis".into(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Straight edge, or circular arc (circle registered in `set`) traversed
+/// counter-clockwise or clockwise about the frame normal, to [`CURVE_TOL`].
+fn edge_kind(e: &Edge, frame: &Frame, set: &mut CircleSet) -> std::result::Result<Kind, String> {
+    let curve = e.oriented_curve();
+    if matches!(curve, Curve::Line(_)) {
+        return Ok(Kind::Line);
+    }
+    let (t0, t1) = curve.range_tuple();
+    const N: usize = 16;
+    let s: Vec<[f64; 3]> = (0..=N)
+        .map(|i| to_frame(frame, curve.subs(t0 + (t1 - t0) * i as f64 / N as f64)))
+        .collect();
+    let p = to_frame(frame, e.front().point());
+    let q = to_frame(frame, e.back().point());
+    if s.iter().any(|x| (x[2] - p[2]).abs() > CURVE_TOL) {
+        return Err("a cap face has an edge that leaves its plane".into());
+    }
+    let p2 = |x: [f64; 3]| [x[0], x[1]];
+    let closed = e.front() == e.back();
+    if !closed
+        && s.iter()
+            .all(|x| seg_dist(p2(*x), p2(p), p2(q)) <= CURVE_TOL)
+    {
+        return Ok(Kind::Line);
+    }
+    // Circle through three samples spread over the edge.
+    let (a, b, c) = (p2(s[0]), p2(s[N / 3]), p2(s[2 * N / 3]));
+    let d = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+    if d.abs() < 1e-300 {
+        return Err("a cap face has a curved edge that is not a circular arc".into());
+    }
+    let sq = |v: [f64; 2]| v[0] * v[0] + v[1] * v[1];
+    let center = [
+        (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d,
+        (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d,
+    ];
+    let r = (a[0] - center[0]).hypot(a[1] - center[1]);
+    let on = |x: [f64; 2]| ((x[0] - center[0]).hypot(x[1] - center[1]) - r).abs() <= CURVE_TOL;
+    if !s.iter().all(|x| on(p2(*x))) || !on(p2(p)) || !on(p2(q)) {
+        return Err("a cap face has a curved edge that is not a circular arc".into());
+    }
+    // Direction from the first sample step (1/16 of the edge: under a half turn).
+    let (u, v) = (p2(s[0]), p2(s[1]));
+    let cr = (u[0] - center[0]) * (v[1] - center[1]) - (u[1] - center[1]) * (v[0] - center[0]);
+    Ok(Kind::Arc {
+        circle: set.id(center, r),
+        ccw: cr > 0.0,
+    })
 }
 
 /// World point in `frame` coordinates (x, y in-plane, z along the normal).
@@ -268,8 +546,12 @@ fn area(r: &Region) -> f64 {
 /// Union of the shapes of `r` with consistent orientation (outer CCW, holes
 /// CW, whatever the input's), on the grid.
 fn normalize(r: &[Shape]) -> Result<Region> {
-    let oriented: Region = r
-        .iter()
+    boolean(&orient(r), &Vec::new(), OverlayRule::Union)
+}
+
+/// Each shape's largest contour counter-clockwise, the others clockwise.
+fn orient(r: &[Shape]) -> Region {
+    r.iter()
         .map(|s| {
             let outer = s
                 .iter()
@@ -288,13 +570,25 @@ fn normalize(r: &[Shape]) -> Result<Region> {
                 })
                 .collect()
         })
-        .collect();
-    boolean(&oriented, &Vec::new(), OverlayRule::Union)
+        .collect()
 }
 
 /// `a op b` on the integer grid (non-zero fill), each output shape oriented
 /// outer CCW / holes CW.
 fn boolean(a: &Region, b: &Region, rule: OverlayRule) -> Result<Region> {
+    boolean_keep(a, b, rule, &|_| false)
+}
+
+/// [`boolean`] whose output clean-up never removes a point for which `keep`
+/// holds (the ring points of the arc construction: two special points on a
+/// circle very close together leave a ring vertex within `SAME` of their
+/// chord, which must stay an arc vertex; review run 5 #10).
+fn boolean_keep(
+    a: &Region,
+    b: &Region,
+    rule: OverlayRule,
+    keep: &dyn Fn([f64; 2]) -> bool,
+) -> Result<Region> {
     if a.is_empty() && b.is_empty() {
         return Ok(Vec::new());
     }
@@ -347,13 +641,83 @@ fn boolean(a: &Region, b: &Region, rule: OverlayRule) -> Result<Region> {
                     if (signed_area(&c) > 0.0) != (i == 0) {
                         c.reverse();
                     }
-                    c
+                    (i, clean_contour(c, keep))
                 })
-                .filter(|c| c.len() >= 3)
+                // A shape whose outer contour vanished at the merge scale is a
+                // sliver; drop it with its holes.
+                .take_while(|(i, c)| *i > 0 || c.is_some())
+                .filter_map(|(_, c)| c)
                 .collect::<Shape>()
         })
         .filter(|s: &Shape| !s.is_empty())
         .collect())
+}
+
+/// Remove features of a boolean output contour narrower than [`SAME`], the
+/// scale at which the 3-D rebuild merges vertices anyway: consecutive points
+/// within `SAME`, vertices within `SAME` of the segment joining their
+/// neighbours (collinear points and zero-width spikes `a -> b -> a`), and
+/// contours whose area is no more than `SAME` times their half-perimeter
+/// (slivers). B-rep coordinates carry float noise (e.g. a wall at
+/// x = 117.99999999955 at one end and 117.99999999949 at the other); on the
+/// 1e-9 mm grid that can round to adjacent grid points and leave a 1e-9 mm
+/// sliver or spike, which would become a non-simple face loop (rim notch
+/// repro, run 5). None when nothing is left.
+fn clean_contour(mut c: Contour, keep: &dyn Fn([f64; 2]) -> bool) -> Option<Contour> {
+    let near =
+        |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() <= SAME && (a[1] - b[1]).abs() <= SAME;
+    loop {
+        let n = c.len();
+        if n < 3 {
+            return None;
+        }
+        let mut removed = false;
+        for i in 0..n {
+            let (a, b, d) = (c[(i + n - 1) % n], c[i], c[(i + 1) % n]);
+            if near(a, b) && !(keep(a) && keep(b)) {
+                // Drop the one that is not protected.
+                c.remove(if keep(b) { (i + n - 1) % n } else { i });
+                removed = true;
+                break;
+            }
+            // Spike tip (a ≈ d): drop the tip and the returning point.
+            if near(a, d) {
+                let j = (i + 1) % n;
+                let (hi, lo) = if j > i { (j, i) } else { (i, j) };
+                c.remove(hi);
+                c.remove(lo);
+                removed = true;
+                break;
+            }
+            if seg_dist(b, a, d) <= SAME && !keep(b) {
+                c.remove(i);
+                removed = true;
+                break;
+            }
+        }
+        if !removed {
+            break;
+        }
+    }
+    let perim: f64 = (0..c.len())
+        .map(|i| {
+            let (p, q) = (c[i], c[(i + 1) % c.len()]);
+            (q[0] - p[0]).hypot(q[1] - p[1])
+        })
+        .sum();
+    (signed_area(&c).abs() > SAME * perim / 2.0).then_some(c)
+}
+
+/// Distance from `p` to the segment `ab`.
+fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let e = [b[0] - a[0], b[1] - a[1]];
+    let l2 = e[0] * e[0] + e[1] * e[1];
+    let t = if l2 > 0.0 {
+        (((p[0] - a[0]) * e[0] + (p[1] - a[1]) * e[1]) / l2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p[0] - a[0] - t * e[0]).hypot(p[1] - a[1] - t * e[1])
 }
 
 /// `x` on the absolute grid of the 2-D booleans.
@@ -378,288 +742,7 @@ pub(crate) fn area_outside(p: &[[f64; 2]], faces: &[Vec<Vec<[f64; 2]>>]) -> Resu
     Ok(area(&boolean(&profile, &region, OverlayRule::Difference)?))
 }
 
-/// A planar face of the result in tool-frame coordinates: loops (outer first)
-/// counter-clockwise about the outward normal, and the face's in-plane axes
-/// (`ex × ey` = outward normal).
-struct FaceLoops {
-    loops: Vec<Vec<[f64; 3]>>,
-    origin: [f64; 3],
-    ex: [f64; 3],
-    ey: [f64; 3],
-}
-
-fn rebuild_faces(levels: &[f64], slabs: &[Region]) -> Result<Vec<FaceLoops>> {
-    let mut faces = Vec::new();
-    let empty: Region = Vec::new();
-    // Caps.
-    for (k, &w) in levels.iter().enumerate() {
-        let below = if k > 0 { &slabs[k - 1] } else { &empty };
-        let above = slabs.get(k).unwrap_or(&empty);
-        for (up, region) in [
-            (true, boolean(below, above, OverlayRule::Difference)?),
-            (false, boolean(above, below, OverlayRule::Difference)?),
-        ] {
-            for shape in region {
-                let loops = shape
-                    .iter()
-                    .map(|c| {
-                        let mut l: Vec<[f64; 3]> = c.iter().map(|p| [p[0], p[1], w]).collect();
-                        if !up {
-                            l.reverse(); // counter-clockwise seen from -z
-                        }
-                        l
-                    })
-                    .collect();
-                faces.push(FaceLoops {
-                    loops,
-                    origin: [0.0, 0.0, w],
-                    ex: if up { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] },
-                    ey: if up { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] },
-                });
-            }
-        }
-    }
-    // Walls: group the slab boundary edges by plane (outward normal n, offset
-    // c = n·p); each edge sweeps [s0, s1] x [w_k, w_k+1] in the plane's (t, z)
-    // coordinates, t = n rotated +90° (the edge direction: material on its left).
-    struct Wall {
-        n: [f64; 2],
-        c: f64,
-        rects: Region,
-    }
-    let mut walls: Vec<Wall> = Vec::new();
-    for (k, region) in slabs.iter().enumerate() {
-        let (w0, w1) = (levels[k], levels[k + 1]);
-        for c in region.iter().flatten() {
-            for i in 0..c.len() {
-                let (p, q) = (c[i], c[(i + 1) % c.len()]);
-                let d = [q[0] - p[0], q[1] - p[1]];
-                let len = d[0].hypot(d[1]);
-                if len == 0.0 {
-                    continue;
-                }
-                let n = [d[1] / len, -d[0] / len];
-                let off = n[0] * p[0] + n[1] * p[1];
-                let on = |wall: &Wall, x: [f64; 2]| {
-                    (wall.n[0] * x[0] + wall.n[1] * x[1] - wall.c).abs() <= SAME
-                };
-                let idx = walls
-                    .iter()
-                    .position(|w| n[0] * w.n[0] + n[1] * w.n[1] > 0.5 && on(w, p) && on(w, q));
-                let idx = match idx {
-                    Some(i) => i,
-                    None => {
-                        walls.push(Wall {
-                            n,
-                            c: off,
-                            rects: Vec::new(),
-                        });
-                        walls.len() - 1
-                    }
-                };
-                let wall = &mut walls[idx];
-                let t = [-wall.n[1], wall.n[0]];
-                let (s0, s1) = (t[0] * p[0] + t[1] * p[1], t[0] * q[0] + t[1] * q[1]);
-                wall.rects
-                    .push(vec![vec![[s0, w0], [s1, w0], [s1, w1], [s0, w1]]]);
-            }
-        }
-    }
-    for wall in walls {
-        let t = [-wall.n[1], wall.n[0]];
-        let foot = [wall.n[0] * wall.c, wall.n[1] * wall.c];
-        for shape in normalize(&wall.rects)? {
-            let loops = shape
-                .iter()
-                .map(|c| {
-                    c.iter()
-                        .map(|&[s, w]| [foot[0] + s * t[0], foot[1] + s * t[1], w])
-                        .collect()
-                })
-                .collect();
-            faces.push(FaceLoops {
-                loops,
-                origin: [foot[0], foot[1], 0.0],
-                ex: [t[0], t[1], 0.0],
-                ey: [0.0, 0.0, 1.0],
-            });
-        }
-    }
-    Ok(faces)
-}
-
-/// Truck solid from the face loops (tool-frame coordinates mapped through
-/// `frame`): shared vertices and edges, T-junctions split.
-fn build_solid(faces: &[FaceLoops], frame: &Frame) -> Result<Solid> {
-    // Global vertex table (merge within SAME).
-    let mut pts: Vec<[f64; 3]> = Vec::new();
-    let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
-    let cell = |p: [f64; 3]| p.map(|c| (c / (4.0 * SAME)).floor() as i64);
-    let mut index = |p: [f64; 3]| -> usize {
-        let c = cell(p);
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    if let Some(v) = cells.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) {
-                        for &i in v {
-                            let q = pts[i];
-                            if (0..3).all(|j| (p[j] - q[j]).abs() <= SAME) {
-                                return i;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        pts.push(p);
-        cells.entry(c).or_default().push(pts.len() - 1);
-        pts.len() - 1
-    };
-    let mut face_ids: Vec<Vec<Vec<usize>>> = faces
-        .iter()
-        .map(|f| {
-            f.loops
-                .iter()
-                .map(|l| {
-                    let mut ids: Vec<usize> = l.iter().map(|&p| index(p)).collect();
-                    ids.dedup();
-                    while ids.len() > 1 && ids.first() == ids.last() {
-                        ids.pop();
-                    }
-                    ids
-                })
-                .collect()
-        })
-        .collect();
-    // Split edges at vertices lying on them (T-junctions between faces).
-    for f in &mut face_ids {
-        for l in f.iter_mut() {
-            let mut out = Vec::with_capacity(l.len());
-            for i in 0..l.len() {
-                let (a, b) = (l[i], l[(i + 1) % l.len()]);
-                out.push(a);
-                let (pa, pb) = (pts[a], pts[b]);
-                let d = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-                let dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                let mut on: Vec<(f64, usize)> = pts
-                    .iter()
-                    .enumerate()
-                    .filter(|&(j, _)| j != a && j != b)
-                    .filter_map(|(j, p)| {
-                        let v = [p[0] - pa[0], p[1] - pa[1], p[2] - pa[2]];
-                        let s = (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / dd;
-                        if s <= 0.0 || s >= 1.0 {
-                            return None;
-                        }
-                        let off = [v[0] - s * d[0], v[1] - s * d[1], v[2] - s * d[2]];
-                        let dist2 = off[0] * off[0] + off[1] * off[1] + off[2] * off[2];
-                        (dist2 <= SAME * SAME).then_some((s, j))
-                    })
-                    .collect();
-                on.sort_by(|x, y| x.0.total_cmp(&y.0));
-                out.extend(on.into_iter().map(|(_, j)| j));
-            }
-            *l = out;
-        }
-    }
-    let world = |p: [f64; 3]| {
-        Point3::new(
-            frame.origin[0] + p[0] * frame.x[0] + p[1] * frame.y[0] + p[2] * frame.z[0],
-            frame.origin[1] + p[0] * frame.x[1] + p[1] * frame.y[1] + p[2] * frame.z[1],
-            frame.origin[2] + p[0] * frame.x[2] + p[1] * frame.y[2] + p[2] * frame.z[2],
-        )
-    };
-    let wvec = |v: [f64; 3]| {
-        let o = world([0.0; 3]);
-        world(v) - o
-    };
-    let vertices: Vec<Vertex> = pts.iter().map(|&p| builder::vertex(world(p))).collect();
-    // Each undirected edge is built once and must be used exactly twice, in
-    // opposite directions.
-    let mut edges: HashMap<(usize, usize), (Edge, i32)> = HashMap::new();
-    let mut tfaces = Vec::with_capacity(faces.len());
-    for (f, ids) in faces.iter().zip(&face_ids) {
-        let mut wires = Vec::with_capacity(ids.len());
-        for l in ids {
-            if l.len() < 3 {
-                return Err(internal("degenerate face loop"));
-            }
-            let mut wire = Wire::new();
-            for i in 0..l.len() {
-                let (a, b) = (l[i], l[(i + 1) % l.len()]);
-                let key = (a.min(b), a.max(b));
-                let entry = edges
-                    .entry(key)
-                    .or_insert_with(|| (builder::line(&vertices[key.0], &vertices[key.1]), 0));
-                entry.1 += if a < b { 1 } else { -1 };
-                wire.push_back(if a < b {
-                    entry.0.clone()
-                } else {
-                    entry.0.inverse()
-                });
-            }
-            wires.push(wire);
-        }
-        let o = world(f.origin);
-        let plane = Plane::new(o, o + wvec(f.ex), o + wvec(f.ey));
-        let face = Face::try_new(wires, Surface::Plane(plane))
-            .map_err(|e| internal(&format!("face: {e:?}")))?;
-        tfaces.push(face);
-    }
-    // Use counts: +1 and -1 per edge sum to 0; also each edge used twice.
-    let mut uses: HashMap<(usize, usize), usize> = HashMap::new();
-    for ids in &face_ids {
-        for l in ids {
-            for i in 0..l.len() {
-                let (a, b) = (l[i], l[(i + 1) % l.len()]);
-                *uses.entry((a.min(b), a.max(b))).or_default() += 1;
-            }
-        }
-    }
-    if edges.values().any(|(_, s)| *s != 0) || uses.values().any(|&u| u != 2) {
-        return Err(KernelError::InvalidResult(
-            "the result would not be a manifold solid (bodies meeting along an edge or \
-             at a point)"
-                .into(),
-        ));
-    }
-    // Connected?
-    let mut parent: Vec<usize> = (0..face_ids.len()).collect();
-    fn find(p: &mut [usize], i: usize) -> usize {
-        let mut r = i;
-        while p[r] != r {
-            r = p[r];
-        }
-        p[i] = r;
-        r
-    }
-    let mut owner: HashMap<(usize, usize), usize> = HashMap::new();
-    for (fi, ids) in face_ids.iter().enumerate() {
-        for l in ids {
-            for i in 0..l.len() {
-                let (a, b) = (l[i], l[(i + 1) % l.len()]);
-                if let Some(&g) = owner.get(&(a.min(b), a.max(b))) {
-                    let (x, y) = (find(&mut parent, fi), find(&mut parent, g));
-                    parent[x] = y;
-                } else {
-                    owner.insert((a.min(b), a.max(b)), fi);
-                }
-            }
-        }
-    }
-    let roots = (0..face_ids.len())
-        .map(|i| find(&mut parent, i))
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    if roots != 1 {
-        return Err(KernelError::InvalidResult(format!(
-            "the result would be {roots} disconnected solids; exactly one connected solid is \
-             required"
-        )));
-    }
-    let shell: Shell = tfaces.into();
-    Solid::try_new(vec![shell]).map_err(|e| internal(&format!("solid: {e:?}")))
-}
-
+#[cfg(test)]
+mod arc_tests;
 #[cfg(test)]
 mod tests;

@@ -1,0 +1,5 @@
+{"files": {
+  "organizer_tray.stl": {"objects": 1, "volume": [92619.84, 0.5], "dims": [[160, 90, 35], 1e-4], "min_z": [0.0, 1e-4], "closed": true},
+  "organizer_tray.3mf": {"unit": "millimeter", "objects": 1, "closed": true, "min_z": [0.0, 1e-4],
+     "per_object": {"Body1": {"closed": true, "volume": [92619.84, 0.5], "dims": [[160, 90, 35], 1e-4]}}}
+}}

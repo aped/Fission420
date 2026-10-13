@@ -44,10 +44,12 @@ pub struct BooleanCheck {
     pub skipped: usize,
 }
 
-/// The nominal prism: `profile` (in `start`'s 2D coordinates) swept from
-/// `start` by `length` along `start.z`.
+/// The nominal prism: `profile` minus its inner loops `holes` (in `start`'s
+/// 2D coordinates) swept from `start` by `length` along `start.z`.
 pub struct Prism<'a> {
     pub profile: &'a Profile,
+    /// Inner loops of the tool region (empty for a single closed loop).
+    pub holes: &'a [Profile],
     pub start: &'a Frame,
     pub length: f64,
 }
@@ -198,6 +200,7 @@ struct PrismTest {
     start: Frame,
     length: f64,
     poly: Vec<[f64; 2]>,
+    holes: Vec<Vec<[f64; 2]>>,
 }
 
 impl PrismTest {
@@ -206,19 +209,101 @@ impl PrismTest {
             start: *p.start,
             length: p.length,
             poly: profile_polygon(p.profile),
+            holes: p.holes.iter().map(profile_polygon).collect(),
         }
+    }
+    /// Inside the profile region (outer loop minus holes).
+    fn inside(&self, q: [f64; 2]) -> bool {
+        point_in_polygon(q, &self.poly) && !self.holes.iter().any(|h| point_in_polygon(q, h))
+    }
+    /// Distance to the region's boundary (outer loop and holes).
+    fn boundary_dist(&self, q: [f64; 2]) -> f64 {
+        self.holes
+            .iter()
+            .map(|h| dist_to_polygon(q, h))
+            .fold(dist_to_polygon(q, &self.poly), f64::min)
+    }
+    /// In-plane sample points of the actual tool region (outer loop minus
+    /// holes): a 7 x 7 grid of its bounding box (points inside the region, 1 %
+    /// of the size clear of its boundary), plus, for up to 128 boundary edges
+    /// spread over all loops, the middle of the chord the inward normal at the
+    /// edge midpoint cuts through the region on either side. The chord
+    /// midpoints reach rings and slots thinner than the grid spacing or the 1 %
+    /// margin (review run 5 #1).
+    fn samples(&self) -> Vec<[f64; 2]> {
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for p in &self.poly {
+            for i in 0..2 {
+                lo[i] = lo[i].min(p[i]);
+                hi[i] = hi[i].max(p[i]);
+            }
+        }
+        let size = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        let mut out = Vec::new();
+        for i in 0..7 {
+            for j in 0..7 {
+                let q = [
+                    lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / 7.0,
+                    lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / 7.0,
+                ];
+                if self.inside(q) && self.boundary_dist(q) > 0.01 * size {
+                    out.push(q);
+                }
+            }
+        }
+        let loops: Vec<&Vec<[f64; 2]>> = std::iter::once(&self.poly).chain(&self.holes).collect();
+        let edges: Vec<([f64; 2], [f64; 2])> = loops
+            .iter()
+            .flat_map(|l| (0..l.len()).map(move |i| (l[i], l[(i + 1) % l.len()])))
+            .collect();
+        let n = edges.len();
+        let picks = n.min(128);
+        for k in 0..picks {
+            let (a, b) = edges[k * n / picks.max(1)];
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let len = d[0].hypot(d[1]);
+            if len == 0.0 {
+                continue;
+            }
+            let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            for sgn in [1.0, -1.0] {
+                let u = [-sgn * d[1] / len, sgn * d[0] / len];
+                // Nearest boundary crossing of the ray m + s u, s > 0.
+                let mut best = f64::INFINITY;
+                for &(c, e) in &edges {
+                    let f = [e[0] - c[0], e[1] - c[1]];
+                    let den = u[0] * f[1] - u[1] * f[0];
+                    if den.abs() < 1e-300 {
+                        continue;
+                    }
+                    let g = [c[0] - m[0], c[1] - m[1]];
+                    let s_ray = (g[0] * f[1] - g[1] * f[0]) / den;
+                    let t_seg = (g[0] * u[1] - g[1] * u[0]) / den;
+                    if s_ray > 1e-9 * size.max(1.0) && (0.0..=1.0).contains(&t_seg) {
+                        best = best.min(s_ray);
+                    }
+                }
+                if best.is_finite() {
+                    let q = [m[0] + u[0] * best / 2.0, m[1] + u[1] * best / 2.0];
+                    if self.inside(q) {
+                        out.push(q);
+                    }
+                }
+            }
+        }
+        out
     }
     fn classify(&self, x: [f64; 3], eps: f64) -> Option<bool> {
         let [u, v, w] = local(&self.start, x);
         let d_cap = w.abs().min((w - self.length).abs());
-        let d_side = dist_to_polygon([u, v], &self.poly);
-        if d_cap < eps && (point_in_polygon([u, v], &self.poly) || d_side < eps) {
+        let d_side = self.boundary_dist([u, v]);
+        if d_cap < eps && (self.inside([u, v]) || d_side < eps) {
             return None;
         }
         if d_side < eps && w > -eps && w < self.length + eps {
             return None;
         }
-        Some(w > 0.0 && w < self.length && point_in_polygon([u, v], &self.poly))
+        Some(w > 0.0 && w < self.length && self.inside([u, v]))
     }
 }
 
@@ -348,7 +433,7 @@ pub fn verify_prisms_boolean(
 
 #[allow(clippy::too_many_arguments)]
 fn check_faces(
-    _target: &Body,
+    target: &Body,
     result: &Body,
     op: PrismOp,
     tools: &[(&Prism, (f64, f64))],
@@ -492,15 +577,93 @@ fn check_faces(
             "result check: no probe point near the tool could be classified; cannot verify".into(),
         ));
     }
+    let rwind = Winding::new(rmesh);
+    // Target faces near the tools, probed on both sides against the result's
+    // own winding number (run 5): a boolean that refills an existing void (a
+    // shallow pocket beside a tangent cut lost its floor and walls) or removes
+    // untouched material leaves no result face there for the probes above.
+    let tplanar = planar_faces(target);
+    let near_tri = |t: &[[f64; 3]; 3]| {
+        tool_boxes.iter().any(|(lo, hi)| {
+            (0..3).all(|i| {
+                let mn = t.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min);
+                let mx = t.iter().map(|p| p[i]).fold(f64::NEG_INFINITY, f64::max);
+                mx >= lo[i] && mn <= hi[i]
+            })
+        })
+    };
+    let tfaces = tplanar.len();
+    let mut tby_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); tfaces];
+    for (ti, t) in tmesh.triangles.iter().enumerate() {
+        let [a, b, c] = t.map(|i| tmesh.positions[i as usize]);
+        let area2 = norm(cross(sub(b, a), sub(c, a)));
+        let fi = tmesh.tri_face.get(ti).copied().unwrap_or(0) as usize;
+        if fi < tfaces && area2 > 0.0 && near_tri(&[a, b, c]) {
+            tby_face[fi].push((area2, ti));
+        }
+    }
+    for (fi, tris) in tby_face.iter_mut().enumerate() {
+        tris.sort_by(|x, y| y.0.total_cmp(&x.0));
+        let mut decided = 0;
+        for &(area2, ti) in tris.iter().take(24) {
+            if decided >= 3 {
+                break;
+            }
+            let [a, b, c] = tmesh.triangles[ti].map(|i| tmesh.positions[i as usize]);
+            let h = if tplanar[fi] { h_plane } else { h_curved };
+            let inr = area2 / (norm(sub(b, a)) + norm(sub(c, b)) + norm(sub(a, c)));
+            if inr < 2.0 * h {
+                continue;
+            }
+            let n = cross(sub(b, a), sub(c, a));
+            let n = [n[0] / area2, n[1] / area2, n[2] / area2];
+            let centroid = [
+                (a[0] + b[0] + c[0]) / 3.0,
+                (a[1] + b[1] + c[1]) / 3.0,
+                (a[2] + b[2] + c[2]) / 3.0,
+            ];
+            let mut both = true;
+            for sgn in [-1.0, 1.0] {
+                let p = [
+                    centroid[0] + sgn * h * n[0],
+                    centroid[1] + sgn * h * n[1],
+                    centroid[2] + sgn * h * n[2],
+                ];
+                match (expected(p), rwind.classify(p)) {
+                    (Some(e), Some(r)) if e != r => {
+                        return Err(KernelError::InvalidResult(format!(
+                            "result check: beside a face of the target near {} the result has {} \
+                             where the expected solid has {} (existing geometry away from the \
+                             tool was changed); the kernel returned a wrong {} result",
+                            fmt_pt(centroid),
+                            if r { "material" } else { "no material" },
+                            if e { "material" } else { "none" },
+                            match op {
+                                PrismOp::Join => "join",
+                                PrismOp::Cut => "cut",
+                            }
+                        )));
+                    }
+                    (Some(_), Some(_)) => {}
+                    _ => both = false,
+                }
+            }
+            stats.probes += 1;
+            if both {
+                decided += 1;
+            } else {
+                stats.skipped += 1;
+            }
+        }
+    }
     // Interior probes of every nominal tool against the result itself: a tool
     // the kernel never applied leaves no faces to probe above (review run 4
     // #1). Cut: points of tool ∩ target must be outside the result; Join:
     // points of the tool must be inside it.
-    let rwind = Winding::new(rmesh);
     for (k, ((prism, _), test)) in tools.iter().zip(&tests).enumerate() {
         let mut decided = 0;
         let mut considered = 0;
-        for q in interior_samples(&test.poly, 7) {
+        for q in test.samples() {
             for frac in [0.2, 0.5, 0.8] {
                 let p = prism.start.offset(frac * prism.length).to_world(q);
                 if test.classify(p, eps_tool) != Some(true) {
@@ -508,7 +671,11 @@ fn check_faces(
                 }
                 let in_target = match wind.classify(p) {
                     Some(v) => v,
-                    None => continue,
+                    None => {
+                        // Near a target surface: the tool reaches the target here.
+                        considered += 1;
+                        continue;
+                    }
                 };
                 if op == PrismOp::Cut && !in_target {
                     continue;
@@ -532,6 +699,8 @@ fn check_faces(
                 stats.probes += 1;
             }
         }
+        // The tool overlaps the target (or reaches its surface) but no interior
+        // point could be decided: no evidence, not a pass.
         if considered > 0 && decided == 0 {
             return Err(KernelError::InvalidResult(format!(
                 "result check: no interior point of tool {} could be classified in the result; \

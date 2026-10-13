@@ -53,6 +53,13 @@ pub(crate) enum Dialog {
         sketch: Option<FeatureId>,
         angle: String,
     },
+    /// Run 5: exact loft between two sketches (`sweep == false`) or sweep of
+    /// sketch `a`'s profile along sketch `b`'s path (`sweep == true`).
+    LoftSweep {
+        a: Option<FeatureId>,
+        b: Option<FeatureId>,
+        sweep: bool,
+    },
     Rectangle {
         width: String,
         height: String,
@@ -134,6 +141,8 @@ pub(crate) enum Dialog {
         a: rcad_document::FaceRef,
         b: Option<rcad_document::FaceRef>,
         distance: String,
+        /// Run 5: an exact solid fillet of the edge (`distance` = radius).
+        fillet: bool,
     },
     /// Start a sketch on an offset construction plane (world plane or the
     /// face selected when the dialog opened, moved along its normal).
@@ -142,6 +151,8 @@ pub(crate) enum Dialog {
         /// Face offered as a base (selected when the dialog opened).
         face: Option<(rcad_document::FaceRef, String)>,
         distance: String,
+        /// Run 5: tilt about the base plane's local X axis (degrees).
+        angle: String,
     },
     /// Scoped shell of a New Body extrusion (docs/SHELL.md).
     Shell {
@@ -167,6 +178,8 @@ impl Dialog {
             Dialog::Extrude(_) => "Extrude",
             Dialog::RectangleXz { .. } => "New rectangle sketch (XZ, for revolve)",
             Dialog::Revolve { .. } => "New revolve (about world Z)",
+            Dialog::LoftSweep { sweep: false, .. } => "New loft",
+            Dialog::LoftSweep { sweep: true, .. } => "New sweep",
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
             Dialog::Cut { .. } => "New cut",
             Dialog::SaveAs { .. } => "Save document as",
@@ -178,6 +191,7 @@ impl Dialog {
             Dialog::Export3mf(_) => "Export 3MF",
             Dialog::Import(_) => "Import",
             Dialog::Pattern { .. } => "Pattern / mirror",
+            Dialog::Chamfer { fillet: true, .. } => "Fillet edge",
             Dialog::Chamfer { .. } => "Chamfer edge",
             Dialog::Hole { .. } => "Hole",
             Dialog::Shell { .. } => "Shell (scoped)",
@@ -248,6 +262,7 @@ pub enum PrintTemplate {
     Enclosure,
     Coupon,
     Bracket,
+    Tray,
 }
 
 impl PrintTemplate {
@@ -256,6 +271,7 @@ impl PrintTemplate {
             PrintTemplate::Enclosure => "Parametric enclosure + lid",
             PrintTemplate::Coupon => "Clearance test coupon",
             PrintTemplate::Bracket => "Mounting bracket",
+            PrintTemplate::Tray => "Organizer tray",
         }
     }
 
@@ -267,6 +283,7 @@ impl PrintTemplate {
             PrintTemplate::Enclosure => p::enclosure_workflow(unused),
             PrintTemplate::Coupon => p::coupon_workflow(unused),
             PrintTemplate::Bracket => p::bracket_workflow(unused),
+            PrintTemplate::Tray => p::tray_workflow(unused, false),
         };
         steps
             .into_iter()
@@ -538,6 +555,30 @@ impl RcadApp {
     pub fn selected(&self) -> Option<FeatureId> {
         self.selected
     }
+    /// The two-face measurement shown in the inspector: (parallel, value) with
+    /// the distance in mm between parallel faces, else the angle in degrees
+    /// between their normals. Exact B-rep planes, never the display mesh.
+    pub fn face_measurement(&self) -> Option<(bool, f64)> {
+        let a = self.measure_from.as_ref()?;
+        let b = self.selected_face()?;
+        if a.group == b.group {
+            return None;
+        }
+        let (q, p) = (a.plane?, b.plane?);
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let c = dot(q.normal, p.normal);
+        Some(if (c.abs() - 1.0).abs() < 1e-9 {
+            let d = [
+                p.point[0] - q.point[0],
+                p.point[1] - q.point[1],
+                p.point[2] - q.point[2],
+            ];
+            (true, dot(d, q.normal).abs())
+        } else {
+            (false, c.clamp(-1.0, 1.0).acos().to_degrees())
+        })
+    }
+
     pub fn selected_face(&self) -> Option<&FaceInfo> {
         let g = self.selected_face?;
         self.faces.iter().find(|f| f.group == g)
@@ -856,7 +897,49 @@ impl RcadApp {
         }
     }
 
-    fn handle_reply(&mut self, r: Reply) {
+    /// Hand a new display scene to the renderer (`upload`; the viewport's
+    /// `set_mesh`). Bodies that failed to tessellate are reported. If the
+    /// upload is refused the previous scene stays (CPU picking must use the
+    /// mesh the GPU draws) and the user gets an error: a display failure,
+    /// separate from model validity (the document and its summary are already
+    /// updated). Returns whether the scene was accepted.
+    pub(crate) fn accept_scene(
+        &mut self,
+        scene: DisplayScene,
+        upload: impl FnOnce(
+            &rcad_viewport::RenderMesh,
+            &[(std::ops::Range<u32>, u8)],
+        ) -> Result<(), String>,
+    ) -> bool {
+        for e in &scene.skipped {
+            self.diag(
+                true,
+                "Display",
+                format!("not displayed: {e} (the model is unchanged; export and measurements use the exact solid)"),
+            );
+        }
+        match upload(&scene.mesh, &scene.tints()) {
+            Ok(()) => {
+                self.mesh_triangles = scene.mesh.triangle_count();
+                self.selected_face = None;
+                self.scene = scene;
+                true
+            }
+            Err(e) => {
+                self.diag(
+                    true,
+                    "Display",
+                    format!(
+                        "display mesh rejected: {e}; the view shows the previous model (the \
+                         document is updated: save/export use it)"
+                    ),
+                );
+                false
+            }
+        }
+    }
+
+    pub(crate) fn handle_reply(&mut self, r: Reply) {
         if r.followup {
             // Deferred measurement: apply only if it describes what is shown.
             let same = r.summary.doc_id == self.summary.doc_id
@@ -954,6 +1037,9 @@ impl RcadApp {
                     self.autosave.replaced = Some(path.clone());
                 }
             }
+        }
+        if let Command::SaveCopy { path } = &command {
+            self.autosave_written(path);
         }
         if response.ok
             && let Command::SaveCopy { path } = &command
@@ -1105,33 +1191,23 @@ impl RcadApp {
             MeshUpdate::Unchanged => {}
             MeshUpdate::Failed(e) => self.diag(true, "Display", format!("tessellation: {e}")),
             MeshUpdate::Replace(scene) => {
-                for e in &scene.skipped {
-                    self.diag(true, "Display", format!("not displayed: {e}"));
-                }
-                let m = &scene.mesh;
-                let mut accepted = true;
-                if let Some(vp) = self.viewport.as_mut() {
-                    match vp.set_mesh(m) {
-                        Ok(()) => {
-                            vp.set_group_tints(&scene.tints());
-                            if !self.fitted && m.triangle_count() > 0 && self.sketch.is_none() {
-                                vp.fit();
-                                self.fitted = true;
-                            }
+                let fit = !self.fitted && self.sketch.is_none();
+                let mut viewport = self.viewport.take();
+                let accepted = self.accept_scene(scene, |m, tints| match viewport.as_mut() {
+                    Some(vp) => {
+                        vp.set_mesh(m).map_err(|e| e.to_string())?;
+                        vp.set_group_tints(tints);
+                        if fit && m.triangle_count() > 0 {
+                            vp.fit();
                         }
-                        Err(e) => {
-                            accepted = false;
-                            let t = format!("display mesh rejected: {e}");
-                            self.diag(true, "Display", t);
-                        }
+                        Ok(())
                     }
+                    None => Ok(()),
+                });
+                if accepted && fit && self.mesh_triangles > 0 && viewport.is_some() {
+                    self.fitted = true;
                 }
-                // CPU picking must use the mesh the GPU draws.
-                if accepted {
-                    self.mesh_triangles = scene.mesh.triangle_count();
-                    self.selected_face = None;
-                    self.scene = scene;
-                }
+                self.viewport = viewport;
             }
         }
         if let Some(b) = self.selected_body
@@ -1222,6 +1298,7 @@ impl RcadApp {
             Dialog::Revolve { sketch, .. } | Dialog::Cut { sketch, .. } => {
                 (sketch.iter().copied().collect(), vec![])
             }
+            Dialog::LoftSweep { a, b, .. } => (a.iter().chain(b.iter()).copied().collect(), vec![]),
             Dialog::CircleOnFace { extrude, .. } => (extrude.iter().copied().collect(), vec![]),
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
@@ -1500,8 +1577,27 @@ impl RcadApp {
     /// Frame of a sketch plane from the current document summary.
     pub fn plane_frame(&self, plane: &SketchPlane) -> Result<PlaneFrame, String> {
         match plane {
-            SketchPlane::Offset { base, distance } => {
-                Ok(self.plane_frame(&base.plane())?.offset(*distance))
+            SketchPlane::Offset {
+                base,
+                distance,
+                angle,
+            } => {
+                let f = self.plane_frame(&base.plane())?;
+                // Tilt about the base's local X axis (as regeneration does).
+                let (s, c) = angle.sin_cos();
+                let mix = |a: [f64; 3], b: [f64; 3], ka: f64, kb: f64| {
+                    [
+                        ka * a[0] + kb * b[0],
+                        ka * a[1] + kb * b[1],
+                        ka * a[2] + kb * b[2],
+                    ]
+                };
+                let f = PlaneFrame {
+                    y: mix(f.y, f.z, c, s),
+                    z: mix(f.y, f.z, -s, c),
+                    ..f
+                };
+                Ok(f.offset(*distance))
             }
             SketchPlane::WorldXY => Ok(PlaneFrame::WORLD_XY),
             SketchPlane::WorldXZ => Ok(PlaneFrame::from_kernel(&rcad_kernel::Frame::XZ)),
@@ -1717,8 +1813,20 @@ impl RcadApp {
 
     pub(crate) fn plane_text(&self, plane: &SketchPlane) -> String {
         match plane {
-            SketchPlane::Offset { base, distance } => format!(
-                "offset {} mm from {}",
+            SketchPlane::Offset {
+                base,
+                distance,
+                angle,
+            } => format!(
+                "{}offset {} mm from {}",
+                if *angle == 0.0 {
+                    String::new()
+                } else {
+                    format!(
+                        "tilted {}° about X, ",
+                        crate::params_ui::fmt_value(angle.to_degrees())
+                    )
+                },
                 rcad_sketch::fmt_mm(*distance),
                 self.plane_text(&base.plane()).trim_start_matches("on ")
             ),
@@ -1962,6 +2070,7 @@ impl RcadApp {
         egui::Panel::left("rcad_browser")
             .resizable(true)
             .default_size(260.0)
+            .max_size(560.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("browser_scroll")
@@ -2217,6 +2326,18 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                 center: Some([parse_num("center X", cx)?, parse_num("center Z", cz)?]),
             },
         },
+        Dialog::LoftSweep { a, b, sweep: false } => Command::Loft {
+            name: None,
+            a: need(a, "first profile sketch")?,
+            b: need(b, "second profile sketch")?,
+            body_name: None,
+        },
+        Dialog::LoftSweep { a, b, sweep: true } => Command::Sweep {
+            name: None,
+            profile: need(a, "profile sketch")?,
+            path: need(b, "path sketch")?,
+            body_name: None,
+        },
         Dialog::Revolve { sketch, angle } => Command::Revolve {
             name: None,
             sketch: need(sketch, "profile sketch")?,
@@ -2274,7 +2395,18 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             },
             thickness: parse_num("thickness", thickness)?,
         },
-        Dialog::Chamfer { a, b, distance } => Command::Chamfer {
+        Dialog::Chamfer {
+            a,
+            b,
+            distance,
+            fillet: true,
+        } => Command::Fillet {
+            name: None,
+            a: *a,
+            b: b.ok_or_else(|| "choose the second face of the edge".to_string())?,
+            radius: parse_num("radius", distance)?,
+        },
+        Dialog::Chamfer { a, b, distance, .. } => Command::Chamfer {
             name: None,
             a: *a,
             b: b.ok_or_else(|| "choose the second face of the edge".to_string())?,
@@ -2407,7 +2539,11 @@ pub(crate) fn offset_plane(plane: SketchPlane, distance: f64) -> SketchPlane {
     if distance == 0.0 {
         plane
     } else {
-        SketchPlane::Offset { base, distance }
+        SketchPlane::Offset {
+            base,
+            distance,
+            angle: 0.0,
+        }
     }
 }
 

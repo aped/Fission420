@@ -1,0 +1,285 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside X",
+    "expression": "120",
+    "name": "tray_length",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside Y",
+    "expression": "80",
+    "name": "tray_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside Z (floor + compartment depth)",
+    "expression": "30",
+    "name": "tray_height",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outer wall thickness",
+    "expression": "2",
+    "name": "wall",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "floor thickness",
+    "expression": "2",
+    "name": "floor",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "2",
+    "name": "divider_thickness",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "full-width dividers (whole number >= 0)",
+    "expression": "2",
+    "name": "divider_count",
+    "unit": "unitless"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "rim access notch, first compartment",
+    "expression": "16",
+    "name": "notch_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "notch depth below the rim",
+    "expression": "8",
+    "name": "notch_depth",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "divider_count + 1",
+    "name": "compartment_count",
+    "unit": "unitless"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "interior width of each compartment along X",
+    "expression": "(tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count",
+    "name": "compartment_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "tray_width - 2 * wall",
+    "name": "cavity_width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "expression": "tray_height - floor",
+    "name": "cavity_depth",
+    "unit": "mm"
+  },
+  {
+    "center": [
+      60.0,
+      40.0
+    ],
+    "cmd": "create_sketch",
+    "height": 80.0,
+    "name": "Tray outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 120.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_length",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width",
+    "feature": 1,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_length / 2",
+    "feature": 1,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width / 2",
+    "feature": 1,
+    "name": "center_y"
+  },
+  {
+    "body_name": "Organizer tray",
+    "cmd": "extrude",
+    "distance": 30.0,
+    "name": "Tray blank",
+    "sketch": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_height",
+    "feature": 2,
+    "name": "distance"
+  },
+  {
+    "center": [
+      20.666666666666668,
+      40.0
+    ],
+    "cmd": "create_sketch",
+    "height": 76.0,
+    "name": "Compartment outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": "ExtrudeEndCap"
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 37.333333333333336
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_width",
+    "feature": 3,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_width",
+    "feature": 3,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall + compartment_width / 2",
+    "feature": 3,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_width / 2",
+    "feature": 3,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 28.0,
+    "name": "Compartment",
+    "op": "cut",
+    "sketch": 3,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "cavity_depth",
+    "feature": 4,
+    "name": "distance"
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 3,
+    "direction": [
+      1.0,
+      0.0
+    ],
+    "feature": 4,
+    "name": "Compartments",
+    "spacing": 39.333333333333336
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_count",
+    "feature": 5,
+    "name": "count"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "compartment_width + divider_thickness",
+    "feature": 5,
+    "name": "spacing"
+  },
+  {
+    "center": [
+      20.666666666666668,
+      26.0
+    ],
+    "cmd": "create_sketch",
+    "height": 8.0,
+    "name": "Notch outline",
+    "plane": {
+      "Face": {
+        "feature": 2,
+        "role": {
+          "ExtrudeSide": {
+            "entity": 1
+          }
+        }
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 16.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "notch_width",
+    "feature": 6,
+    "name": "width"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "notch_depth",
+    "feature": 6,
+    "name": "height"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall + compartment_width / 2",
+    "feature": 6,
+    "name": "center_x"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "tray_height - notch_depth / 2",
+    "feature": 6,
+    "name": "center_y"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 2.0,
+    "name": "Rim notch",
+    "op": "cut",
+    "sketch": 6,
+    "target": 1
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "wall",
+    "feature": 7,
+    "name": "distance"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/organizer_tray.rcad.json"
+  },
+  {
+    "cmd": "inspect"
+  }
+]

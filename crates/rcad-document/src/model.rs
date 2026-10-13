@@ -179,7 +179,20 @@ pub enum SketchPlane {
     /// (a face's outward normal; +Z / −Y / +X for the world planes), same
     /// in-plane axes. Parameter "plane_offset" of the sketch (bindable). A
     /// face base resolves like `Face` (BrokenReference when it is gone).
-    Offset { base: PlaneBase, distance: f64 },
+    /// Run 5: `angle` (radians, default 0, written only when non-zero) first
+    /// tilts the base plane about its local X axis through its origin
+    /// (right-handed: +angle turns local +Y toward the normal), then the offset
+    /// is applied along the tilted normal. Parameter "plane_angle_deg".
+    Offset {
+        base: PlaneBase,
+        distance: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        angle: f64,
+    },
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 // `distance` is validated finite wherever a plane is accepted, so equality is
@@ -224,8 +237,16 @@ impl SketchPlane {
     /// `(self, 0)`.
     pub fn base_and_offset(&self) -> (SketchPlane, f64) {
         match *self {
-            SketchPlane::Offset { base, distance } => (base.plane(), distance),
+            SketchPlane::Offset { base, distance, .. } => (base.plane(), distance),
             p => (p, 0.0),
+        }
+    }
+
+    /// Tilt (radians) of a construction plane about its base's local X axis.
+    pub fn angle(&self) -> f64 {
+        match *self {
+            SketchPlane::Offset { angle, .. } => angle,
+            _ => 0.0,
         }
     }
 }
@@ -373,6 +394,35 @@ pub enum FeatureKind {
         b: FaceRef,
         distance: f64,
     },
+    /// Exact solid fillet (run 5) of the straight convex edge where planar
+    /// faces `a` and `b` meet: an exact cylinder of `radius` mm tangent to
+    /// both. Scope (`rcad_kernel::fillet_edge`): the body is prismatic along
+    /// the edge (planar faces parallel/perpendicular to it), end faces
+    /// perpendicular; refused otherwise with the reason. Parameter "radius".
+    Fillet {
+        a: FaceRef,
+        b: FaceRef,
+        radius: f64,
+    },
+    /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
+    /// `a` and `b` on parallel planes, as new body `body`: equal-count
+    /// polygons whose corresponding edges are parallel (planar sides; vertex
+    /// correspondence by the rule in ADR 0008), or two coaxial circles (cone
+    /// frustum). Anything else is refused with the reason.
+    Loft {
+        a: FeatureId,
+        b: FeatureId,
+        body: BodyId,
+    },
+    /// Exact sweep (run 5, ADR 0009) of the closed profile of sketch `profile`
+    /// along the open chain of lines and arcs of sketch `path`, as new body
+    /// `body`. The path starts at the profile sketch's origin, leaving along
+    /// its normal; joints tangent; planar path. Refused otherwise by name.
+    Sweep {
+        profile: FeatureId,
+        path: FeatureId,
+        body: BodyId,
+    },
     /// Round hole (run 4) drilled into `target` from `plane` (which must hold a
     /// planar face of the target; the hole goes into the material), centred at
     /// `center` (plane coordinates): `diameter`, `depth` mm from the face
@@ -440,6 +490,12 @@ pub struct Feature {
     /// these by every transaction.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub expressions: std::collections::BTreeMap<String, String>,
+    /// Suppressed (run 5): kept in history, not evaluated. Nothing that is
+    /// evaluated may depend on a suppressed feature
+    /// ([`Document::check_suppression`]): dependents are suppressed with it or
+    /// the change is refused, never silently rebound. Serde-additive.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
 }
 
 impl Feature {
@@ -453,13 +509,15 @@ impl Feature {
             | FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
+            FeatureKind::Loft { a, b, .. } => vec![*a, *b],
+            FeatureKind::Sweep { profile, path, .. } => vec![*profile, *path],
             FeatureKind::LinearPattern { seed, .. } | FeatureKind::CircularPattern { seed, .. } => {
                 vec![*seed]
             }
             FeatureKind::Mirror { seed, plane } => std::iter::once(*seed)
                 .chain(plane.face().map(|r| r.feature))
                 .collect(),
-            FeatureKind::Chamfer { a, b, .. } => {
+            FeatureKind::Chamfer { a, b, .. } | FeatureKind::Fillet { a, b, .. } => {
                 let mut v = vec![a.feature];
                 if b.feature != a.feature {
                     v.push(b.feature);
@@ -484,6 +542,8 @@ impl Feature {
                 ..
             }
             | FeatureKind::Revolve { body, .. }
+            | FeatureKind::Loft { body, .. }
+            | FeatureKind::Sweep { body, .. }
             | FeatureKind::ImportMesh { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
@@ -525,8 +585,12 @@ impl Feature {
                     p.push(("center_x".into(), x));
                     p.push(("center_y".into(), y));
                 }
-                if let SketchPlane::Offset { distance, .. } = plane {
+                if let SketchPlane::Offset {
+                    distance, angle, ..
+                } = plane
+                {
                     p.push(("plane_offset".into(), *distance));
+                    p.push(("plane_angle_deg".into(), angle.to_degrees()));
                 }
                 p
             }
@@ -539,17 +603,25 @@ impl Feature {
             FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
             // Run 5: an offset mirror plane's distance is a parameter.
             FeatureKind::Mirror {
-                plane: SketchPlane::Offset { distance, .. },
+                plane:
+                    SketchPlane::Offset {
+                        distance, angle, ..
+                    },
                 ..
-            } => vec![("plane_offset".into(), *distance)],
+            } => vec![
+                ("plane_offset".into(), *distance),
+                ("plane_angle_deg".into(), angle.to_degrees()),
+            ],
             FeatureKind::Cut { .. }
             | FeatureKind::ImportStep { .. }
             | FeatureKind::Mirror { .. } => {
                 vec![]
             }
             FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
+            FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => vec![],
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
             FeatureKind::Hole {
                 center,
@@ -569,8 +641,12 @@ impl Feature {
                 }
                 v.push(("center_x".into(), center[0]));
                 v.push(("center_y".into(), center[1]));
-                if let SketchPlane::Offset { distance, .. } = plane {
+                if let SketchPlane::Offset {
+                    distance, angle, ..
+                } = plane
+                {
                     v.push(("plane_offset".into(), *distance));
+                    v.push(("plane_angle_deg".into(), angle.to_degrees()));
                 }
                 v
             }
@@ -607,6 +683,11 @@ impl Feature {
                     ("plane_offset", ..) if matches!(plane, SketchPlane::Offset { .. }) => {
                         if let SketchPlane::Offset { distance, .. } = plane {
                             *distance = *v;
+                        }
+                    }
+                    ("plane_angle_deg", ..) if matches!(plane, SketchPlane::Offset { .. }) => {
+                        if let SketchPlane::Offset { angle, .. } = plane {
+                            *angle = v.to_radians();
                         }
                     }
                     ("diameter", ..) => *diameter = *v,
@@ -669,6 +750,27 @@ impl Feature {
                     });
                 };
                 *(if name == "center_x" { x } else { y }) = value;
+                Ok(())
+            }
+            FeatureKind::Sketch {
+                plane: SketchPlane::Offset { angle, .. },
+                ..
+            }
+            | FeatureKind::Mirror {
+                plane: SketchPlane::Offset { angle, .. },
+                ..
+            }
+            | FeatureKind::Hole {
+                plane: SketchPlane::Offset { angle, .. },
+                ..
+            } if name == "plane_angle_deg" => {
+                if !(value.is_finite() && value.abs() < 180.0) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.plane_angle_deg: the plane angle must be in (-180, 180) degrees, \
+                         got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
                 Ok(())
             }
             FeatureKind::Sketch {
@@ -842,6 +944,15 @@ impl Feature {
                 }
                 Ok(())
             }
+            FeatureKind::Fillet { radius, .. } if name == "radius" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.radius: fillet radius must be > 0 mm, got {value}"
+                    )));
+                }
+                *radius = value;
+                Ok(())
+            }
             FeatureKind::Chamfer { distance, .. } if name == "distance" => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
@@ -1007,7 +1118,7 @@ impl Document {
             | FeatureKind::Mirror { seed, .. } => {
                 self.feature(*seed).ok().and_then(Feature::target_body)
             }
-            FeatureKind::Chamfer { a, .. } => self.face_body(a),
+            FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => self.face_body(a),
             FeatureKind::Shell { extrude, .. } => self
                 .feature(*extrude)
                 .ok()
@@ -1035,7 +1146,9 @@ impl Document {
                     | FeatureKind::Mirror { seed, .. } => {
                         return self.feature(*seed).ok()?.target_body();
                     }
-                    FeatureKind::Chamfer { a, .. } => return self.face_body_depth(a, depth + 1),
+                    FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => {
+                        return self.face_body_depth(a, depth + 1);
+                    }
                     _ => {}
                 }
                 match f.created_bodies().first() {
@@ -1066,6 +1179,48 @@ impl Document {
             d.push(prev.id);
         }
         d
+    }
+
+    /// Every evaluated feature's dependencies are evaluated: a feature that is
+    /// not suppressed may not depend on a suppressed one.
+    pub fn check_suppression(&self) -> Result<()> {
+        for f in self.features.iter().filter(|f| !f.suppressed) {
+            for d in self.dependencies_of(f) {
+                if let Ok(g) = self.feature(d)
+                    && g.suppressed
+                {
+                    return Err(DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!(
+                            "{} ({}) depends on {} ({}), which is suppressed; suppress {} too \
+                             (with dependents) or restore {}",
+                            f.id, f.name, g.id, g.name, f.id, g.id
+                        ),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `id` and every feature that depends on it, directly or transitively
+    /// (history order).
+    pub fn with_dependents(&self, id: FeatureId) -> Vec<FeatureId> {
+        let mut out = vec![id];
+        let mut i = 0;
+        while i < out.len() {
+            for d in self.dependents_of(out[i]) {
+                if !out.contains(&d) {
+                    out.push(d);
+                }
+            }
+            i += 1;
+        }
+        self.features
+            .iter()
+            .map(|f| f.id)
+            .filter(|f| out.contains(f))
+            .collect()
     }
 
     /// Features that depend on `id` (explicitly or through a body target).
@@ -1188,6 +1343,7 @@ impl Document {
             kind,
             notes: vec![],
             expressions: Default::default(),
+            suppressed: false,
         });
         id
     }

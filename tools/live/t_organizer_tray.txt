@@ -166,3 +166,214 @@ clickw Apply
 wait_idle
 expect volume 49664 0.01
 shot
+
+# Rim notch: sketch on the front face (y = 0; sketch x = world X, y = world Z),
+# corner placed by two point dimensions, flush with the rim, cut `wall` deep.
+key 0
+key f
+wait_idle
+wclick 60 0 15
+clickw Create Sketch
+wait_idle
+clickw 2-Point Rect
+sclick 15 15
+sclick 30 40
+expect editing.entities 4
+key d
+sclick 0 0
+sclick 15 15
+type 12
+key Return
+sclick 0 0
+sclick 12 15
+type 22
+key Return
+sclick 20 22
+type 16
+key Return
+sclick 28 31
+type 8
+key Return
+expect editing.dims 4
+expect editing.status FullyConstrained
+shot
+clickw Finish Sketch
+wait_idle
+clickw Sketch3
+typew width (mm) | notch_width
+typew height (mm) | notch_depth
+typew dx (mm) | wall + compartment_width / 2 - notch_width / 2
+typew dy (mm) | tray_height - notch_depth
+clickw Apply
+wait_idle
+clickw Extrude…
+clickw Cut
+typew Extrude distance (mm) | 2
+key Return
+wait_idle
+clickw Extrude3
+typew distance (mm) | wall
+clickw Apply
+wait_idle
+# 49664 - 16 * 8 * 2
+expect volume 49408 0.01
+shot
+
+# ---- Part 2: revise through the Parameters panel (one undo step each) ----
+clickw Parameters header
+clickw param divider_count
+typew Parameter expression | 3
+clickw Apply parameter
+wait_idle
+expect params.compartment_count 4 0
+expect volume 53664 0.01
+shot
+clickw param divider_count
+typew Parameter expression | 0
+clickw Apply parameter
+wait_idle
+expect params.compartment_count 1 0
+expect volume 40896 0.01
+shot
+# Invalid: wall 45 leaves no cavity -> refused, model unchanged.
+clickw param wall
+typew Parameter expression | 45
+clickw Apply parameter
+wait_idle
+expect last_reply.ok false
+expect params.wall 2 0
+expect volume 40896 0.01
+shot
+clickw Cancel parameter edit
+# Undo/redo (divider_count 0 <-> 3), then back to the baseline (2).
+key ctrl+z
+wait_idle
+expect volume 53664 0.01
+key ctrl+shift+z
+wait_idle
+expect volume 40896 0.01
+key ctrl+z
+wait_idle
+key ctrl+z
+wait_idle
+expect params.divider_count 2 0
+expect volume 49408 0.01
+# Variant 1: 160 x 90 x 35, wall/floor/divider 2.4, 3 dividers.
+clickw param tray_length
+typew Parameter expression | 160
+clickw Apply parameter
+wait_idle
+clickw param tray_width
+typew Parameter expression | 90
+clickw Apply parameter
+wait_idle
+clickw param tray_height
+typew Parameter expression | 35
+clickw Apply parameter
+wait_idle
+clickw param wall
+typew Parameter expression | 2.4
+clickw Apply parameter
+wait_idle
+clickw param floor
+typew Parameter expression | 2.4
+clickw Apply parameter
+wait_idle
+clickw param divider_thickness
+typew Parameter expression | 2.4
+clickw Apply parameter
+wait_idle
+clickw param divider_count
+typew Parameter expression | 3
+clickw Apply parameter
+wait_idle
+expect volume 92619.84 0.01
+shot
+clickw Parameters header
+# Section view (display only): XZ plane through the middle, then off.
+key 0
+key f
+wait_idle
+clickw View
+clickw Section view…
+clickw Section Y
+typew Section offset (mm) | 45
+wait_idle
+expect section.ny 1 0
+expect section.offset 45 0.0001
+shot
+clickw Section flip
+wait_idle
+expect section.ny -1 0
+expect section.offset -45 0.0001
+shot
+expect volume 92619.84 0.01
+clickw View
+clickw Section view…
+wait_idle
+expect section null
+# Measure (exact planes): rim top to the floor of compartment 2 = cavity depth.
+key 7
+key f
+wait_idle
+wclick 1.2 45 35
+clickw Measure from this face
+wclick 60.3 45 2.4
+wait_idle
+expect measure.parallel true
+expect measure.value 32.6 0.000001
+shot
+# Rim top to the notch bottom (z = 35 - 8) = notch depth.
+wclick 20.9 1.2 27
+wait_idle
+expect measure.parallel true
+expect measure.value 8 0.000001
+shot
+# Save, close, reopen.
+key ctrl+shift+s
+typew File path | @OUT@/organizer_tray.rcad.json
+key Return
+wait_idle
+expect dirty false
+clickw Close
+wait_idle
+expect open false
+key ctrl+o
+typew File path | @OUT@/organizer_tray.rcad.json
+key Return
+wait_idle
+expect volume 92619.84 0.01
+expect params.divider_count 3 0
+expect params.compartment_width 37 0.000001
+# Exports: STEP (exact), placed STL and 3MF for the P1S.
+key 0
+key f
+wait_idle
+clickw Export
+clickw Export STEP…
+typew STEP path | @OUT@/organizer_tray.step
+clickw All visible bodies
+clickw OK
+wait_idle
+expect last_reply.command export_step
+expect last_reply.ok true
+clickw Export
+clickw Export STL…
+typew STL path | @OUT@/organizer_tray.stl
+clickw All visible bodies
+clickw Place on bed (export only)
+clickw OK
+wait_idle
+expect last_reply.command export_stl
+expect last_reply.ok true
+clickw Export
+clickw Export 3MF…
+typew 3MF path | @OUT@/organizer_tray.3mf
+clickw All visible bodies
+clickw Place on bed (export only)
+clickw Bambu Lab P1S
+clickw OK
+wait_idle
+expect last_reply.command export_3mf
+expect last_reply.ok true
+shot

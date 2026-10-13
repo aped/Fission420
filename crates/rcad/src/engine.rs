@@ -260,6 +260,17 @@ fn display_mesh(session: &Session) -> MeshUpdate {
 /// Tints follow the body's position in creation order (stable under
 /// visibility changes); mesh bodies use [`MESH_TINT`].
 pub fn display_scene(ev: &rcad_document::Evaluation) -> Result<DisplayScene, String> {
+    display_scene_with(ev, &|body| {
+        rcad_kernel::tessellate_display(body, DISPLAY_CHORD).map_err(|e| e.to_string())
+    })
+}
+
+/// [`display_scene`] with the B-rep display tessellator as a parameter (run 5:
+/// the seam where tests inject a failing tessellation).
+pub fn display_scene_with(
+    ev: &rcad_document::Evaluation,
+    tessellate: &dyn Fn(&rcad_kernel::Body) -> Result<rcad_kernel::TriMesh, String>,
+) -> Result<DisplayScene, String> {
     use rcad_document::BodyGeometry;
     let mut scene = DisplayScene::default();
     let mut next_group = 0u32;
@@ -268,15 +279,13 @@ pub fn display_scene(ev: &rcad_document::Evaluation) -> Result<DisplayScene, Str
             continue;
         }
         let (tm, mesh_body) = match &b.geometry {
-            BodyGeometry::Brep(body) => {
-                match rcad_kernel::tessellate_display(body, DISPLAY_CHORD) {
-                    Ok(tm) => (tm, false),
-                    Err(e) => {
-                        scene.skipped.push(format!("{}: {e}", b.name));
-                        continue;
-                    }
+            BodyGeometry::Brep(body) => match tessellate(body) {
+                Ok(tm) => (tm, false),
+                Err(e) => {
+                    scene.skipped.push(format!("{}: {e}", b.name));
+                    continue;
                 }
-            }
+            },
             BodyGeometry::Mesh(mb) => (mb.mesh.clone(), true),
         };
         let rm = to_render_mesh(&tm);
@@ -623,6 +632,15 @@ impl Engine {
             backend,
             in_flight: 0,
             worker_lost: false,
+        }
+    }
+
+    /// Sync backend only (tests): the session's current evaluation.
+    #[cfg(test)]
+    pub(crate) fn sync_evaluation(&self) -> Option<rcad_document::Evaluation> {
+        match &self.backend {
+            Backend::Sync { session, .. } => session.model().map(|m| m.evaluation().clone()),
+            Backend::Threaded { .. } => None,
         }
     }
 
