@@ -120,6 +120,9 @@ pub enum Command {
         name: Option<String>,
         a: FeatureId,
         b: FeatureId,
+        /// Run 6: intermediate section sketches, in order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        via: Vec<FeatureId>,
         #[serde(default)]
         body_name: Option<String>,
     },
@@ -1538,9 +1541,11 @@ impl Session {
                 name,
                 a,
                 b,
+                via,
                 body_name,
             } => {
                 let (name, a, b, body_name) = (name.clone(), *a, *b, body_name.clone());
+                let via = via.clone();
                 if a == b {
                     return Err(DocError::Validation(
                         "loft needs two different sketches".into(),
@@ -1549,7 +1554,7 @@ impl Session {
                 let id = self.model_mut()?.transact("Loft", |d| {
                     let body = d.add_body(body_name.unwrap_or_else(|| d.default_body_name()));
                     let n = name.unwrap_or_else(|| d.default_name("Loft"));
-                    Ok(d.push(n, FeatureKind::Loft { a, b, body }))
+                    Ok(d.push(n, FeatureKind::Loft { a, b, body, via }))
                 })?;
                 r.feature = Some(id);
             }

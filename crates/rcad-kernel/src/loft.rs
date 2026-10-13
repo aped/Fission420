@@ -265,6 +265,204 @@ fn polygon_loft(
     Ok(body)
 }
 
+/// Loft through several straight-edged profiles on parallel planes (run 6:
+/// additional sections), in order: each consecutive pair obeys the
+/// two-profile rules (same vertex count, corresponding edges parallel, vertex
+/// 0 nearest to the previous section's vertex 0) and the sections must
+/// advance monotonically along the normal. Built as one exact shell: planar
+/// side quads per segment sharing the intermediate rings, caps at both ends.
+/// Volume checked against the sum of the segments' prismatoid volumes.
+pub fn loft_sections(sections: &[(Profile, Frame)]) -> Result<Body> {
+    if sections.len() == 2 {
+        return loft(
+            &sections[0].0,
+            &sections[0].1,
+            &sections[1].0,
+            &sections[1].1,
+        );
+    }
+    if sections.len() < 2 {
+        return refuse("a loft needs at least two profiles");
+    }
+    let (p0, f0) = (&sections[0].0, &sections[0].1);
+    f0.validate()?;
+    let z0 = Vector3::new(f0.z[0], f0.z[1], f0.z[2]);
+    let o0 = Vector3::new(f0.origin[0], f0.origin[1], f0.origin[2]);
+    let hlast = {
+        let fl = &sections[sections.len() - 1].1;
+        (Vector3::new(fl.origin[0], fl.origin[1], fl.origin[2]) - o0).dot(z0)
+    };
+    let mut f = *f0;
+    if hlast < 0.0 {
+        f.z = [-f0.z[0], -f0.z[1], -f0.z[2]];
+        f.y = [-f0.y[0], -f0.y[1], -f0.y[2]];
+    }
+    let fz = Vector3::new(f.z[0], f.z[1], f.z[2]);
+    let (fx, fy) = (
+        Vector3::new(f.x[0], f.x[1], f.x[2]),
+        Vector3::new(f.y[0], f.y[1], f.y[2]),
+    );
+    let world = |p: [f64; 2], w: f64| {
+        let q = f.to_world(p);
+        Point3::new(q[0] + w * f.z[0], q[1] + w * f.z[1], q[2] + w * f.z[2])
+    };
+    let _ = p0;
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut hs: Vec<f64> = Vec::new();
+    for (k, (p, fr)) in sections.iter().enumerate() {
+        fr.validate()?;
+        p.validate()?;
+        let zk = Vector3::new(fr.z[0], fr.z[1], fr.z[2]);
+        if zk.cross(fz).magnitude() > 1e-9 {
+            return refuse("the profile planes are not parallel");
+        }
+        let ok = Vector3::new(fr.origin[0], fr.origin[1], fr.origin[2]);
+        let h = (ok - o0).dot(fz);
+        if k > 0 && h <= hs[k - 1] + tol::MIN_LENGTH {
+            return refuse("the sections must advance along the normal in order (no repeats)");
+        }
+        let Some(pts) = straight(p) else {
+            return refuse("sections with arcs or circles are not supported for 3+ profiles");
+        };
+        let mut pts: Vec<[f64; 2]> = pts
+            .iter()
+            .map(|&q| {
+                let w = fr.to_world(q);
+                let d = Vector3::new(w[0], w[1], w[2]) - o0;
+                [d.dot(fx), d.dot(fy)]
+            })
+            .collect();
+        if !simple(&pts) {
+            return refuse("a profile is self-intersecting");
+        }
+        if signed_area(&pts) < 0.0 {
+            pts.reverse();
+        }
+        if let Some(prev) = rings.last() {
+            let n = prev.len();
+            if pts.len() != n {
+                return refuse(format!(
+                    "section {} has {} vertices, the previous one {n}",
+                    k + 1,
+                    pts.len()
+                ));
+            }
+            let d: Vec<f64> = pts
+                .iter()
+                .map(|q| (q[0] - prev[0][0]).hypot(q[1] - prev[0][1]))
+                .collect();
+            let m = (0..n).min_by(|&i, &j| d[i].total_cmp(&d[j])).unwrap_or(0);
+            if (0..n).any(|i| i != m && (d[i] - d[m]).abs() <= 1e-9 * d[m].max(1.0)) {
+                return refuse("the vertex correspondence is ambiguous between two sections");
+            }
+            pts.rotate_left(m);
+            for i in 0..n {
+                let (a0, a1, b0, b1) = (prev[i], prev[(i + 1) % n], pts[i], pts[(i + 1) % n]);
+                let (ea, eb) = (
+                    [a1[0] - a0[0], a1[1] - a0[1]],
+                    [b1[0] - b0[0], b1[1] - b0[1]],
+                );
+                let (la, lb) = (ea[0].hypot(ea[1]), eb[0].hypot(eb[1]));
+                let cr = (ea[0] * eb[1] - ea[1] * eb[0]) / (la * lb);
+                let dt = (ea[0] * eb[0] + ea[1] * eb[1]) / (la * lb);
+                if cr.abs() > 1e-9 || dt <= 0.0 {
+                    return refuse(format!(
+                        "between sections {} and {}, corresponding edges {i} are not parallel \
+                         (a twisted side is not supported)",
+                        k,
+                        k + 1
+                    ));
+                }
+            }
+        }
+        rings.push(pts);
+        hs.push(h);
+    }
+    let n = rings[0].len();
+    let m = rings.len();
+    let solid = guarded("loft", || -> Result<Solid> {
+        let v: Vec<Vec<Vertex>> = (0..m)
+            .map(|k| {
+                rings[k]
+                    .iter()
+                    .map(|p| builder::vertex(world(*p, hs[k])))
+                    .collect()
+            })
+            .collect();
+        let ring_e: Vec<Vec<Edge>> = (0..m)
+            .map(|k| {
+                (0..n)
+                    .map(|i| builder::line(&v[k][i], &v[k][(i + 1) % n]))
+                    .collect()
+            })
+            .collect();
+        let up: Vec<Vec<Edge>> = (0..m - 1)
+            .map(|k| {
+                (0..n)
+                    .map(|i| builder::line(&v[k][i], &v[k + 1][i]))
+                    .collect()
+            })
+            .collect();
+        let mut faces = Vec::new();
+        let bottom: Wire = ring_e[0].iter().rev().map(|e| e.inverse()).collect();
+        faces.push(face(
+            bottom,
+            Plane::new(
+                world([0.0, 0.0], hs[0]),
+                world([0.0, 1.0], hs[0]),
+                world([1.0, 0.0], hs[0]),
+            ),
+        )?);
+        let top: Wire = ring_e[m - 1].iter().cloned().collect();
+        let ht = hs[m - 1];
+        faces.push(face(
+            top,
+            Plane::new(
+                world([0.0, 0.0], ht),
+                world([1.0, 0.0], ht),
+                world([0.0, 1.0], ht),
+            ),
+        )?);
+        for k in 0..m - 1 {
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let w: Wire = vec![
+                    ring_e[k][i].clone(),
+                    up[k][j].clone(),
+                    ring_e[k + 1][i].inverse(),
+                    up[k][i].inverse(),
+                ]
+                .into();
+                faces.push(face(
+                    w,
+                    Plane::new(v[k][i].point(), v[k][j].point(), v[k + 1][i].point()),
+                )?);
+            }
+        }
+        let shell: Shell = faces.into();
+        Solid::try_new(vec![shell])
+            .map_err(|e| KernelError::InvalidResult(format!("loft: solid: {e:?}")))
+    })??;
+    let body = Body { solid };
+    check_single_closed(&body, "loft")?;
+    let mid = |a: &[[f64; 2]], b: &[[f64; 2]]| -> Vec<[f64; 2]> {
+        a.iter()
+            .zip(b)
+            .map(|(p, q)| [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0])
+            .collect()
+    };
+    let want: f64 = (0..m - 1)
+        .map(|k| {
+            (hs[k + 1] - hs[k]) / 6.0
+                * (signed_area(&rings[k])
+                    + 4.0 * signed_area(&mid(&rings[k], &rings[k + 1]))
+                    + signed_area(&rings[k + 1]))
+        })
+        .sum();
+    check_volume(&body, want, "multi-section prismatoid")?;
+    Ok(body)
+}
+
 fn face(w: Wire, plane: Plane) -> Result<Face> {
     Face::try_new(vec![w], Surface::Plane(plane))
         .map_err(|e| KernelError::InvalidResult(format!("loft: face: {e:?}")))

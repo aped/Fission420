@@ -431,6 +431,10 @@ pub enum FeatureKind {
         a: FeatureId,
         b: FeatureId,
         body: BodyId,
+        /// Run 6 (format v6): intermediate section sketches, in order from
+        /// `a` to `b` (straight-edged profiles; `rcad_kernel::loft_sections`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        via: Vec<FeatureId>,
     },
     /// Exact sweep (run 5, ADR 0009) of the closed profile of sketch `profile`
     /// along the open chain of lines and arcs of sketch `path`, as new body
@@ -806,7 +810,10 @@ impl Feature {
             FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
-            FeatureKind::Loft { a, b, .. } => vec![*a, *b],
+            FeatureKind::Loft { a, b, via, .. } => std::iter::once(*a)
+                .chain(via.iter().copied())
+                .chain([*b])
+                .collect(),
             FeatureKind::Sweep { profile, path, .. } => vec![*profile, *path],
             FeatureKind::LinearPattern { seed, .. } | FeatureKind::CircularPattern { seed, .. } => {
                 vec![*seed]

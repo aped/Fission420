@@ -463,3 +463,47 @@ fn shell_face_refuses_a_non_prismatic_body() {
     );
     assert_eq!(t.model().unwrap().document(), &before);
 }
+
+#[test]
+fn loft_through_three_sections() {
+    // 40 x 30 at z 0, 60 x 50 at z 20, 30 x 20 at z 35: a bulging tower.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        rect_on(0.0, 40.0, 30.0),
+        rect_on(20.0, 60.0, 50.0),
+        rect_on(35.0, 30.0, 20.0),
+        json!({"cmd": "loft", "a": 1, "b": 3, "via": [2], "body_name": "Tower"}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let want = taper_volume(20.0, (40.0, 30.0), (60.0, 50.0))
+        + taper_volume(15.0, (60.0, 50.0), (30.0, 20.0));
+    assert!(
+        (tray::volume(&s) - want).abs() < 1e-6,
+        "{} vs {want}",
+        tray::volume(&s)
+    );
+    // Sections: at z = 10 half-width 25, at z = 27.5 half-width 22.5.
+    let p = tray::probe(
+        &s,
+        &[
+            [24.9, 0.0, 10.0],
+            [25.1, 0.0, 10.0],
+            [22.4, 0.0, 27.5],
+            [22.6, 0.0, 27.5],
+        ],
+    );
+    assert_eq!(p, vec![Some(true), Some(false), Some(true), Some(false)]);
+    // Upstream edit of the middle section.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 2, "name": "width", "value": 70.0}),
+    );
+    let want2 = taper_volume(20.0, (40.0, 30.0), (70.0, 50.0))
+        + taper_volume(15.0, (70.0, 50.0), (30.0, 20.0));
+    assert!((tray::volume(&s) - want2).abs() < 1e-6);
+    // Out of order: refused.
+    let r = tray::exec(&mut s, &json!({"cmd": "loft", "a": 2, "b": 3, "via": [1]}));
+    assert!(!r.ok);
+}

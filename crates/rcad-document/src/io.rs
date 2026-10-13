@@ -201,6 +201,11 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         {
             return Some("revolve axis/direction options");
         }
+        if let crate::FeatureKind::Loft { via, .. } = &f.kind
+            && !via.is_empty()
+        {
+            return Some("multi-section lofts");
+        }
         if matches!(f.kind, crate::FeatureKind::AlignBody { .. }) {
             return Some("aligned bodies");
         }

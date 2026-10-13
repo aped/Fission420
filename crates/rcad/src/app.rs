@@ -72,6 +72,8 @@ pub(crate) enum Dialog {
         a: Option<FeatureId>,
         b: Option<FeatureId>,
         sweep: bool,
+        /// Run 6: an optional middle section of a loft.
+        via: Option<FeatureId>,
     },
     Rectangle {
         width: String,
@@ -2375,13 +2377,21 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                 center: Some([parse_num("center X", cx)?, parse_num("center Z", cz)?]),
             },
         },
-        Dialog::LoftSweep { a, b, sweep: false } => Command::Loft {
+        Dialog::LoftSweep {
+            a,
+            b,
+            sweep: false,
+            via,
+        } => Command::Loft {
             name: None,
             a: need(a, "first profile sketch")?,
             b: need(b, "second profile sketch")?,
             body_name: None,
+            via: via.iter().copied().collect(),
         },
-        Dialog::LoftSweep { a, b, sweep: true } => Command::Sweep {
+        Dialog::LoftSweep {
+            a, b, sweep: true, ..
+        } => Command::Sweep {
             name: None,
             profile: need(a, "profile sketch")?,
             path: need(b, "path sketch")?,

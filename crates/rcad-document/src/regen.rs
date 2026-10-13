@@ -801,14 +801,13 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
-            FeatureKind::Loft { a, b, body } => {
-                let sa = st.sketches.get(a).ok_or(not_a_sketch(id, *a))?;
-                let sb = st.sketches.get(b).ok_or(not_a_sketch(id, *b))?;
-                let (pa, pb) = (
-                    to_kernel(sa.single_loop(id, *a, "Loft")?),
-                    to_kernel(sb.single_loop(id, *b, "Loft")?),
-                );
-                let solid = k::loft(&pa, &sa.frame, &pb, &sb.frame).map_err(|e| match e {
+            FeatureKind::Loft { a, b, body, via } => {
+                let mut sections = Vec::new();
+                for f in std::iter::once(a).chain(via.iter()).chain([b]) {
+                    let so = st.sketches.get(f).ok_or(not_a_sketch(id, *f))?;
+                    sections.push((to_kernel(so.single_loop(id, *f, "Loft")?), so.frame));
+                }
+                let solid = k::loft_sections(&sections).map_err(|e| match e {
                     k::KernelError::InvalidInput(m) => {
                         DocError::ProductLimit(format!("{id}: loft: {m}"))
                     }

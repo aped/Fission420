@@ -393,6 +393,7 @@ impl RcadApp {
                     a: None,
                     b: None,
                     sweep: false,
+                    via: None,
                 });
                 ui.close();
             }
@@ -406,6 +407,7 @@ impl RcadApp {
                     a: None,
                     b: None,
                     sweep: true,
+                    via: None,
                 });
                 ui.close();
             }
@@ -1889,7 +1891,10 @@ impl RcadApp {
                         ui.checkbox(reverse, "Reverse direction").probe("Revolve reverse");
                         ui.small("The profile must lie on one side of the axis (either side). Partial angles sweep toward −normal, or +normal with Reverse. A construction line is the usual axis.");
                     }
-                    Dialog::LoftSweep { a, b, sweep } => {
+                    Dialog::LoftSweep { a, b, sweep, via } => {
+                        if !*sweep {
+                            feature_combo(ui, "Middle section (optional)", via, &sketches);
+                        }
                         if *sweep {
                             feature_combo(ui, "Profile sketch", a, &sketches);
                             feature_combo(ui, "Path sketch", b, &sketches);
