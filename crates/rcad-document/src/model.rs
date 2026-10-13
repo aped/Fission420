@@ -509,6 +509,18 @@ pub enum FeatureKind {
     /// to one thickness above the opposite cap (exact slab construction,
     /// result-checked). Refused otherwise by name. Parameter "thickness".
     ShellFace { face: FaceRef, thickness: f64 },
+    /// Align (run 6, format v6): move the body owning planar face `from` so
+    /// that face lies on the plane of face `to` (of another body), facing it
+    /// (outward normals opposite), `offset` mm apart along `to`'s normal; the
+    /// smallest rotation is used and `from`'s origin is projected straight
+    /// onto the plane. Associative: regenerated from both faces; logged like a
+    /// move. Parameter "offset".
+    AlignBody {
+        from: FaceRef,
+        to: FaceRef,
+        #[serde(default)]
+        offset: f64,
+    },
     /// Uniform scale of body `body` by `factor` about `center` (run 6, format
     /// v6), in place; faces made before it keep resolving (scaled with the
     /// body, like moves). Parameter "factor" (ratio).
@@ -820,6 +832,7 @@ impl Feature {
             FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::ScaleBody { .. } => vec![],
+            FeatureKind::AlignBody { from, to, .. } => vec![from.feature, to.feature],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             // Body creators (target and tools) come from `Document::dependencies_of`.
@@ -1026,6 +1039,7 @@ impl Feature {
             FeatureKind::SplitBody { .. } => vec![],
             FeatureKind::ShellFace { thickness, .. } => vec![("thickness".into(), *thickness)],
             FeatureKind::ScaleBody { factor, .. } => vec![("factor".into(), *factor)],
+            FeatureKind::AlignBody { offset, .. } => vec![("offset".into(), *offset)],
             FeatureKind::SheetMetal {
                 thickness,
                 radius,
@@ -1434,6 +1448,10 @@ impl Feature {
                         *angle = value.to_radians();
                     }
                 }
+                Ok(())
+            }
+            FeatureKind::AlignBody { offset, .. } if name == "offset" => {
+                *offset = value;
                 Ok(())
             }
             FeatureKind::ScaleBody { factor, .. } if name == "factor" => {
@@ -1892,7 +1910,9 @@ impl Document {
                 self.feature(*seed).ok().and_then(Feature::target_body)
             }
             FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => self.face_body(a),
-            FeatureKind::ShellFace { face, .. } => self.face_body(face),
+            FeatureKind::ShellFace { face, .. } | FeatureKind::AlignBody { from: face, .. } => {
+                self.face_body(face)
+            }
             FeatureKind::Shell { extrude, .. } => self
                 .feature(*extrude)
                 .ok()

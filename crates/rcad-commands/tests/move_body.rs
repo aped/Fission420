@@ -224,3 +224,48 @@ fn scale_keeps_references_and_scales_volume() {
     assert!(!r.ok);
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+#[test]
+fn align_a_body_onto_another_face_follows_upstream() {
+    // Body 1: block 40 x 30 x 10. Body 2: a 20 x 10 plate drawn on World XZ
+    // (normal −Y), extruded 5: its start cap faces +Y. Align that start cap
+    // onto body 1's top face: body 2 now sits on z = 10, 5 thick.
+    let mut s = Session::new();
+    block(&mut s);
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "create_sketch", "plane": "WorldXZ", "template": "centered_rectangle",
+                   "width": 20.0, "height": 10.0, "center": [100.0, 50.0]}),
+            json!({"cmd": "extrude", "sketch": 3, "distance": 5.0, "body_name": "Plate"}),
+            json!({"cmd": "align_body", "from": {"feature": 4, "role": "ExtrudeStartCap"},
+                   "to": {"feature": 2, "role": "ExtrudeEndCap"}}),
+        ],
+    );
+    assert!((vol(&s, 2) - 1000.0).abs() < 1e-6);
+    let b = body(&s, 2).bounds.unwrap();
+    assert!(
+        (b.min[2] - 10.0).abs() < 1e-9 && (b.max[2] - 15.0).abs() < 1e-9,
+        "{b:?}"
+    );
+    // Upstream: the block grows to 15; the plate follows. Offset 2 lifts it.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 2, "name": "distance", "value": 15.0}),
+    );
+    assert!((body(&s, 2).bounds.unwrap().min[2] - 15.0).abs() < 1e-9);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 5, "name": "offset", "value": 2.0}),
+    );
+    assert!((body(&s, 2).bounds.unwrap().min[2] - 17.0).abs() < 1e-9);
+    // Faces of one body: refused.
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "align_body", "from": {"feature": 2, "role": "ExtrudeStartCap"},
+                "to": {"feature": 2, "role": "ExtrudeEndCap"}}),
+    );
+    assert!(!r.ok);
+    assert_eq!(s.model().unwrap().document(), &before);
+}

@@ -1080,6 +1080,43 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
+            FeatureKind::AlignBody { from, to, offset } => {
+                let a = resolve_face(id, from, &st)?;
+                let b = resolve_face(id, to, &st)?;
+                if a.body == b.body {
+                    return Err(DocError::Validation(format!(
+                        "{id}: align needs faces of two different bodies"
+                    )));
+                }
+                if !offset.is_finite() {
+                    return Err(DocError::Validation(format!("{id}.offset must be finite")));
+                }
+                // Rotate n_a onto −n_b (smallest rotation), then translate a's
+                // origin onto b's plane (+offset along n_b).
+                let (na, nb) = (a.frame.z, b.frame.z);
+                let want = scale(nb, -1.0);
+                let axis = cross(na, want);
+                let s = dot(axis, axis).sqrt();
+                let c = dot(na, want).clamp(-1.0, 1.0);
+                let (ax, ang) = if s > 1e-12 {
+                    (scale(axis, 1.0 / s), s.atan2(c))
+                } else if c > 0.0 {
+                    ([0.0, 0.0, 1.0], 0.0)
+                } else {
+                    (a.frame.x, std::f64::consts::PI)
+                };
+                let rot = k::Rigid::new([0.0; 3], a.frame.origin, ax, ang).map_err(kernel(id))?;
+                let pa = rot.point(a.frame.origin);
+                let h = dot(sub(pa, b.frame.origin), nb) - offset;
+                let t = k::Rigid::new(scale(nb, -h), [0.0; 3], [0.0, 0.0, 1.0], 0.0)
+                    .map_err(kernel(id))?
+                    .after(&rot);
+                let body = brep_target(&st, id, a.body)?;
+                let moved = k::transform_body(&body, &t).map_err(kernel(id))?;
+                replace_body(&mut st, id, a.body, moved);
+                st.moves.push((a.body, i, t));
+                r.body = Some(a.body);
+            }
             FeatureKind::ScaleBody {
                 body,
                 center,

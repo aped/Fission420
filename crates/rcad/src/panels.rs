@@ -853,6 +853,47 @@ impl RcadApp {
                             offset: "0".into(),
                         });
                     }
+                    // Run 6: align this face's body flush onto a face of another body.
+                    let mine = self.selected_face().and_then(|f| f.body);
+                    let targets: Vec<(String, rcad_document::FaceRef)> = self
+                        .summary
+                        .features
+                        .iter()
+                        .flat_map(|g| {
+                            g.faces
+                                .iter()
+                                .filter(|fc| Some(fc.body) != mine)
+                                .map(move |fc| {
+                                    (format!("{} {:?}", g.name, fc.reference.role), fc.reference)
+                                })
+                        })
+                        .collect();
+                    let mut align = None;
+                    ui.menu_button("Align onto…", |ui| {
+                        for (label, to) in &targets {
+                            if ui
+                                .button(label)
+                                .named(&format!("Align onto {label}"))
+                                .clicked()
+                            {
+                                align = Some(*to);
+                                ui.close();
+                            }
+                        }
+                        if targets.is_empty() {
+                            ui.weak("No face of another body.");
+                        }
+                    })
+                    .response
+                    .probe("Align onto…");
+                    if let Some(to) = align {
+                        self.request(Command::AlignBody {
+                            name: None,
+                            from: r,
+                            to,
+                            offset: 0.0,
+                        });
+                    }
                     // Run 6: shell the body under this face, leaving it open.
                     ui.add(
                         egui::TextEdit::singleline(&mut self.shell_thickness).desired_width(40.0),

@@ -616,6 +616,16 @@ pub enum Command {
         feature: FeatureId,
         path: PathBuf,
     },
+    /// Align the body of planar face `from` flush onto face `to` (run 6; see
+    /// `FeatureKind::AlignBody`).
+    AlignBody {
+        #[serde(default)]
+        name: Option<String>,
+        from: FaceRef,
+        to: FaceRef,
+        #[serde(default)]
+        offset: f64,
+    },
     /// Uniform scale of a body about `center` (run 6; one undo step).
     ScaleBody {
         #[serde(default)]
@@ -851,6 +861,7 @@ impl Command {
             Command::SplitBody { .. } => "split_body",
             Command::ShellFace { .. } => "shell_face",
             Command::ScaleBody { .. } => "scale_body",
+            Command::AlignBody { .. } => "align_body",
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::Project { .. } => "project",
@@ -2782,6 +2793,19 @@ impl Session {
                     part.bend_lines.len()
                 ));
             }
+            Command::AlignBody {
+                name,
+                from,
+                to,
+                offset,
+            } => {
+                let (name, from, to, offset) = (name.clone(), *from, *to, *offset);
+                let id = self.model_mut()?.transact("Align", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Align"));
+                    Ok(d.push(n, FeatureKind::AlignBody { from, to, offset }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::ScaleBody {
                 name,
                 body,
@@ -3571,6 +3595,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
+                FeatureKind::AlignBody { .. } => ("align_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),

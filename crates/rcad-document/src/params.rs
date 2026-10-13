@@ -686,6 +686,7 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         }
         FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
         FeatureKind::ScaleBody { .. } if name == "factor" => Some(SlotKind::Angle),
+        FeatureKind::AlignBody { .. } if name == "offset" => Some(SlotKind::Length),
         // The K-factor is a ratio: dimensionless like an angle.
         FeatureKind::SheetMetal { .. } if name == "k_factor" => Some(SlotKind::Angle),
         FeatureKind::SheetMetal { .. } => kind_has(kind, name).then_some(SlotKind::Length),

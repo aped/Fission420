@@ -455,3 +455,38 @@ fn shell_from_a_picked_face() {
         h.state().volume()
     );
 }
+
+#[test]
+fn align_a_body_from_the_face_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    let a = request(&mut h, Command::extrude(None, s1, 10.0));
+    let s2 = sketch(
+        &mut h,
+        SketchPlane::Offset {
+            base: rcad_document::PlaneBase::WorldXY,
+            distance: 50.0,
+            angle: 0.0,
+        },
+        rect(10.0, 10.0),
+    );
+    let b = request(&mut h, Command::extrude(None, s2, 5.0));
+    let bottom = rcad_document::FaceRef {
+        feature: b,
+        role: rcad_document::FaceRole::ExtrudeStartCap,
+    };
+    let g = h
+        .state()
+        .faces()
+        .iter()
+        .find(|f| f.reference == Some(bottom))
+        .map(|f| f.group);
+    h.state_mut().select_face(g);
+    let _ = h.try_run();
+    click(&mut h, "Align onto…");
+    let label = format!("Align onto {} ExtrudeEndCap", fname(&h, a));
+    click(&mut h, &label);
+    let bb = h.state().summary().bodies[1].bounds.unwrap();
+    assert!((bb.min[2] - 10.0).abs() < 1e-9, "{bb:?}");
+}
