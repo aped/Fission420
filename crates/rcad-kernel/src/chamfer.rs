@@ -235,6 +235,25 @@ pub(crate) fn convex_edge(
     probe: f64,
     what: &str,
 ) -> Result<ConvexEdge> {
+    let (edge, convex) = straight_edge(body, f1, f2, probe, what)?;
+    if !convex {
+        return Err(KernelError::InvalidInput(format!(
+            "{what}: the edge is concave (it would add material); not supported"
+        )));
+    }
+    Ok(edge)
+}
+
+/// As [`convex_edge`], also accepting a concave edge: returns the edge and
+/// whether it is convex. For a concave edge `t1`, `t2` still point along the
+/// faces away from the edge; the air wedge lies between them.
+pub(crate) fn straight_edge(
+    body: &Body,
+    f1: &Frame,
+    f2: &Frame,
+    probe: f64,
+    what: &str,
+) -> Result<(ConvexEdge, bool)> {
     let (n1, n2) = (v(f1.z), v(f2.z));
     let e = n1.cross(n2);
     if e.magnitude() < 1e-9 {
@@ -292,12 +311,16 @@ pub(crate) fn convex_edge(
         dirs.push(t);
     }
     let (t1, t2) = (dirs[0], dirs[1]);
-    if t1.dot(n2) >= 0.0 || t2.dot(n1) >= 0.0 {
-        return Err(KernelError::InvalidInput(format!(
-            "{what}: the edge is concave (it would add material); not supported"
-        )));
-    }
-    Ok(ConvexEdge {
+    let convex = match (t1.dot(n2) < 0.0, t2.dot(n1) < 0.0) {
+        (true, true) => true,
+        (false, false) => false,
+        _ => {
+            return Err(KernelError::InvalidInput(format!(
+                "{what}: the faces' sides at the edge are inconsistent (not a simple edge)"
+            )));
+        }
+    };
+    let edge = ConvexEdge {
         p,
         e,
         n1,
@@ -306,5 +329,6 @@ pub(crate) fn convex_edge(
         t2,
         smin,
         smax,
-    })
+    };
+    Ok((edge, convex))
 }

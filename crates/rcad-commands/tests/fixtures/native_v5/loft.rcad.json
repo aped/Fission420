@@ -1,0 +1,296 @@
+{
+  "format": "r-cad",
+  "version": 5,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Sketch1",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Sketch2",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 20.0
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -30.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 30.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 30.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -30.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 60.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "name": "Loft1",
+        "kind": {
+          "type": "Loft",
+          "a": 1,
+          "b": 2,
+          "body": 1
+        }
+      }
+    ],
+    "next_id": 4,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Taper",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 40666.666667,
+    "bounds": {
+      "min": [
+        -30.0,
+        -25.0,
+        0.0
+      ],
+      "max": [
+        30.0,
+        25.0,
+        20.0
+      ]
+    },
+    "face_count": 6
+  }
+}
