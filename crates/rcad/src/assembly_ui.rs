@@ -1139,6 +1139,8 @@ impl RcadApp {
                     {
                         crate::panels::num_field(ui, l, &mut ax[3 + k]);
                     }
+                });
+                {
                     let nums: Vec<Option<f64>> = ax.iter().map(|t| parse(t)).collect();
                     if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..]
                         && ui
@@ -1155,7 +1157,7 @@ impl RcadApp {
                             dir2: j.dir2,
                         });
                     }
-                });
+                }
                 for i in 0..vals.len() {
                     let sfx = if i == 0 {
                         String::new()
@@ -1205,7 +1207,13 @@ impl RcadApp {
                                 occurrences: None,
                             });
                         }
-                        let mut x = parse(&vals[i]).unwrap_or(a).clamp(a, b);
+                        // The slider shows the solved (stored) value.
+                        let stored = if i == 0 {
+                            j.value
+                        } else {
+                            j.extra.get(i - 1).map_or(a, |d| d.value)
+                        };
+                        let mut x = stored.clamp(a, b);
                         let l = format!("Drive{sfx} {}", j.name);
                         let r = ui
                             .add(egui::Slider::new(&mut x, a..=b).text("drive"))

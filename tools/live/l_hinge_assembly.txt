@@ -4,7 +4,8 @@
 # (0–180°), an independent screw copy). Tree selection, component activation,
 # a numeric move that creates an overlap, interference check with highlight,
 # a new revolute joint through the joint dialog (value inside its limits, one
-# outside refused), exploded view, undo, save/reopen.
+# outside refused), a sampled sweep check, the structured BOM, exploded view,
+# undo, save/reopen.
 key ctrl+o
 typew File path | @ROOT@/examples/hinge_assembly.rcad.json
 key Return
@@ -67,6 +68,15 @@ clickw Set value
 wait_idle
 expect last_reply.ok false
 expect joints.J3 45
+shot
+# Sampled motion check across the new joint's limits (document unchanged).
+clickw Sweep check Joint3
+wait_idle
+expect last_reply.ok true
+expect joints.J3 45
+clickw Structured BOM
+wait_idle
+expect last_reply.ok true
 shot
 # Exploded view of the Wing (display only), then undo it.
 scroll 180 500 -10
