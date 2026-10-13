@@ -125,9 +125,9 @@ expected; **C** = cosmetic.
 
 | id | sev | platforms | where | what breaks | planned fix |
 |---|---|---|---|---|---|
-| F1 | T | Windows | `crates/rcad-commands/src/scenarios.rs:245,251,297,303,419,425,441,447`; compared in `tests/scenario_examples.rs:22-29` | Workflow paths are built with `Path::join` and serialised as `artifacts\scenario_a.stl`, which never equals the committed `artifacts/scenario_a.stl`. This fails `scenario_{a,b,r}_example_is_current_and_replays`. | Build these workflow paths as `/`-joined strings (they are portable document data, not OS paths), or normalise separators in `scenarios::workflow_json`. |
+| F1 | T | Windows | `crates/rcad-commands/src/scenarios.rs:245,251,297,303,419,425,441,447`; compared in `tests/scenario_examples.rs:22-29` | Workflow paths are built with `Path::join` and serialised as `artifacts\scenario_a.stl`, which never equals the committed `artifacts/scenario_a.stl`. This fails `scenario_{a,b,r}_example_is_current_and_replays`. | **applied** (`0538511`): a `portable(out, name)` helper joins the eight paths with `/`; committed workflows unchanged. Local `cargo xtask check` passes; not yet confirmed on a Windows runner (no CI run since). |
 | F2 | T | Windows | `examples/imported_step_hole.rcad.json` embeds `crates/rcad-kernel/tests/fixtures/step/box_40x30x10_mm.step` byte-for-byte (length + FNV-64). `tests/imports.rs:505-516` compares the two. | With `core.autocrlf=true` (the runner default) the STEP fixture is checked out with CRLF, so the blob length and hash differ. | **applied:** a root `.gitattributes` (`* text=auto eol=lf`, mesh and archive files binary). The index was already all LF, so `git add --renormalize .` changed nothing. |
-| F3 | T? | macOS, Windows | Committed workflows hold solved floats compared exactly: `examples/scenario_b_workflow.json:257` `18.027756377319946` (`hypot`, `scenarios.rs:121`) and `scenario_r_workflow.json` near-integers. The solver calls libm `hypot`/`atan2` (`rcad-sketch/src/solver.rs`). | glibc, Apple libm and the UCRT do not promise last-bit-identical `hypot`/`atan2`. This would show up in the same `scenario_examples.rs` tests and, less likely, in `printable_examples.rs::committed_printable_workflows_are_current`. Unconfirmed until a run. | Compare workflow JSON numbers with a relative tolerance (about 1e-9), or round solved values before serialising. |
+| F3 | T? | macOS, Windows | Committed workflows hold solved floats compared exactly: `examples/scenario_b_workflow.json:257` `18.027756377319946` (`hypot`, `scenarios.rs:121`) and `scenario_r_workflow.json` near-integers. The solver calls libm `hypot`/`atan2` (`rcad-sketch/src/solver.rs`). | glibc, Apple libm and the UCRT do not promise last-bit-identical `hypot`/`atan2`. This would show up in the same `scenario_examples.rs` tests and, less likely, in `printable_examples.rs::committed_printable_workflows_are_current`. **Checked on the first Windows run (and macOS): did not occur**; with `\\` normalised to `/` the regenerated and committed workflows were identical. | (No change needed while it stays absent.) Compare workflow JSON numbers with a relative tolerance (about 1e-9), or round solved values before serialising. |
 | L1 | T? | macOS, Windows | `crates/rcad-commands/tests/gate_fuzz.rs:230,365,573`; `crates/rcad-kernel/src/ops/tests.rs:33` | Accept and refuse counts were tuned on one Linux run. Truck's circle/NURBS code uses libm `sin`/`cos`, so a borderline case can flip. | Watch the first runs. If one diverges, give the thresholds a documented margin. Never drop the case. |
 | L2 | R | Windows | `crates/rcad-cli/src/main.rs:117`; `rcad` `--sync` mode `src/main.rs:382` | Geometry runs on the main thread, which gets 1 MiB on Windows (8 MiB on Linux). Deep Truck recursion or STEP nesting (limit 64) could overflow it. Tests are not affected: test threads get 2 MiB on every OS. | **applied (mitigation):** `.cargo/config.toml` links MSVC binaries with `/STACK:8388608`. Long term: run the CLI body on a spawned thread with an explicit stack size. |
 | L3 | R | all | `crates/rcad-document/src/io.rs:86-127`; `xtask/src/main.rs` | The example replays write to `artifacts/` but never create it. Only the acceptance stage, which runs first, creates it. A replay run alone on a fresh checkout fails. | `create_dir_all(parent)` in the export commands, or document it. CI is unaffected because it runs the whole xtask. |
@@ -159,9 +159,21 @@ docs/RENAME.md). Their results still describe the same code:
 | 2 (manual, warm) | current layout | pass, 9 min | pass, 9 min | pass, 11 min | fail: F1 only, 22 min |
 | 3 (manual, warm) | current layout | pass | pass | **fail: L7** (`bracket_exports_and_saves_are_byte_identical`) | fail: F1 only |
 
+CI changes after these runs (`dfe8dbe`, not yet exercised by a GitHub run):
+
+- **Cache on failure:** `Swatinem/rust-cache@v2` saves only after a successful job, so the
+  failing Windows leg never had a cache ("No cache found"; the cache list held debian, macOS
+  and ubuntu entries only; "Post Run Swatinem/rust-cache" skipped) and built cold every time
+  (run 38362474951: job 31m26; release binaries 7m16, clippy 251.9 s, test stage 1109 s
+  including the cold release test build; `arc_fuzz` 335 s against 178 s on ubuntu). `cache-on-failure: true` keeps it warm.
+- **No fail-fast:** CI has no nextest, so xtask falls back to `cargo test`, which stopped at the
+  first failing test binary: in run 38362474951 (main `c4627c3`) the Windows log has 54
+  `test result:` lines against 96 on ubuntu. The fallback now passes `--no-fail-fast` (nextest
+  already did), so the test binaries that have never run on Windows will report on the next run.
+
 Findings:
 
-- **F1 confirmed on Windows; nothing else fails there.** Once `\\` is normalised to `/`,
+- **F1 confirmed on Windows; nothing else failed in the binaries that ran** (the test stage stopped at the first failing binary; see the no-fail-fast change above). Once `\\` is normalised to `/`,
   the three committed workflows compare equal, so the solver's floats are bit-identical on
   the UCRT. The timing-sensitive UI tests (L6) passed. xtask stops at the first failing
   stage, so acceptance and the example replays (and with them L2) have not run on Windows
@@ -193,7 +205,7 @@ checkout, untracked):
 Next, in value order:
 
 1. Port `work/run-5` (docs/RENAME.md); this brings the L7 fix.
-2. Fix F1 (build workflow paths with `/`), then make Windows and macOS gating.
+2. ~~Fix F1~~ (applied, `0538511`); confirm Windows green, then make Windows and macOS gating.
 3. Fix L4, L5 and L6.
 
 ## Naming and identity: done (2026-10-13)
