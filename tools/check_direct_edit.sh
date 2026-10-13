@@ -65,4 +65,11 @@ if [ -f "$DIR/direct_cmd_lift4.step" ]; then
     "[[20.9,20,10],[21.1,20,10],[30,12,15],[10,5,23.9],[10,5,24.1]]" \
     "[False, True, True, True, False]"
 fi
+# Countersink (kernel direct::tests, RCAD_EVIDENCE_DIR): D16 x 90 deg on the D8 through hole
+# at (15,20) from the top face: cone 4 deep, removes 256 pi / 3.
+if [ -f "$DIR/csink_block_d16.step" ]; then
+  check csink_block_d16.step "$V0 - 256*pi/3" "[0,0,0,60,40,25]" \
+    "[[21.8,20,19],[22.2,20,19],[18.9,20,10],[19.1,20,10],[15,27.9,19.95]]" \
+    "[False, True, False, True, False]"
+fi
 exit $status

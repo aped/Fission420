@@ -179,6 +179,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");
         }
+        if matches!(f.kind, crate::FeatureKind::Countersink { .. }) {
+            return Some("countersinks");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }

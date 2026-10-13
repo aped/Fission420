@@ -334,3 +334,156 @@ fn result_check_rejects_a_wrong_expectation() {
     };
     assert!(verify(&b, &up.body, PrismOp::Cut, &wrong).is_err());
 }
+
+/// Volume removed by a countersink of diameter 2R, angle `ang`, on a hole of
+/// radius r: the cone frustum minus the cylinder it replaces.
+fn csink_removed(r: f64, big: f64, ang: f64) -> f64 {
+    let h = (big - r) / (ang / 2.0).tan();
+    PI * h / 3.0 * (big * big + big * r + r * r) - PI * r * r * h
+}
+
+/// Volume of `b` (exact or a labelled estimate) agrees with `want`: an
+/// estimate must contain it within its stated error.
+fn assert_volume_any(b: &Body, want: f64) {
+    match measure(b).unwrap().volume {
+        VolumeResult::Value {
+            volume,
+            error_estimate,
+            method,
+        } => {
+            let slack = error_estimate.max(1e-6 * want);
+            assert!(
+                (volume - want).abs() <= slack,
+                "{method:?}: {volume} ± {error_estimate} vs {want}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn countersink_on_imported_through_hole() {
+    let b = block();
+    let out = countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 8.0, 16.0, PI / 2.0).unwrap();
+    let removed = csink_removed(4.0, 8.0, PI / 2.0);
+    assert!((removed - (256.0 / 3.0) * PI).abs() < 1e-9);
+    assert_volume_any(&out, V0 - removed);
+    // Probes: just inside the cone surface is void, just outside is material
+    // (depth 1: cone radius 7).
+    let m = crate::point_membership(
+        &out,
+        &[
+            [15.0 + 6.8, 20.0, 19.0],
+            [15.0 + 7.2, 20.0, 19.0],
+            [15.0, 20.0 + 4.2, 15.0],
+        ],
+    )
+    .unwrap();
+    assert_eq!(m, vec![Some(false), Some(true), Some(true)]);
+    // The cone faces are the exact cone: every surface point at depth t
+    // below z = 20 is 8 - t from the axis (R = 8, r = 4, h = 4).
+    let mut cones = 0;
+    for f in out.solid.face_iter() {
+        if let truck_modeling::Surface::NurbsSurface(srf) = f.surface() {
+            cones += 1;
+            let ((u0, u1), (v0, v1)) = srf.parameter_range();
+            let b = |x: std::ops::Bound<f64>| match x {
+                std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v,
+                std::ops::Bound::Unbounded => panic!("unbounded"),
+            };
+            for i in 0..=20 {
+                for j in 0..=20 {
+                    let u = b(u0) + (b(u1) - b(u0)) * i as f64 / 20.0;
+                    let v = b(v0) + (b(v1) - b(v0)) * j as f64 / 20.0;
+                    let p = srf.subs(u, v);
+                    let rho = (p.x - 15.0).hypot(p.y - 20.0);
+                    let t = 20.0 - p.z;
+                    assert!((rho - (8.0 - t)).abs() < 1e-9, "off cone at {p:?}");
+                    assert!((-1e-9..=4.0 + 1e-9).contains(&t));
+                }
+            }
+        }
+    }
+    assert_eq!(cones, 2);
+    // The direct-edit view still sees one hole wall and the new cone faces.
+    let kinds = classify_faces(&out).unwrap();
+    assert_eq!(kinds.len(), crate::face_count(&b) + 2, "two cone faces");
+    // 82 degrees (common inch screws), and the axis given from below.
+    let out = countersink(
+        &b,
+        [15.0, 20.0, 20.0],
+        [0.0, 0.0, -1.0],
+        8.0,
+        12.0,
+        82f64.to_radians(),
+    )
+    .unwrap();
+    assert_volume_any(&out, V0 - csink_removed(4.0, 6.0, 82f64.to_radians()));
+    if let Ok(dir) = std::env::var("RCAD_EVIDENCE_DIR") {
+        let s = crate::export_step(
+            &countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 8.0, 16.0, PI / 2.0).unwrap(),
+            "R-CAD countersink evidence",
+        )
+        .unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(std::path::Path::new(&dir).join("csink_block_d16.step"), s).unwrap();
+    }
+}
+
+#[test]
+fn countersink_on_both_ends_of_a_plate_hole() {
+    // FreeCAD plate 60x40x8 with a Ø10 hole at (30,20).
+    let imp = import_step(
+        include_str!("../../tests/fixtures/step/plate_hole_mm.step"),
+        &StepImportOptions::default(),
+    )
+    .unwrap();
+    let b = imp.solids.into_iter().next().unwrap().body;
+    let v0 = 19200.0 - 200.0 * PI;
+    let top = countersink(&b, [30.0, 20.0, 8.0], [0.0, 0.0, 1.0], 10.0, 16.0, PI / 2.0).unwrap();
+    let both = countersink(
+        &top,
+        [30.0, 20.0, 0.0],
+        [0.0, 0.0, 1.0],
+        10.0,
+        14.0,
+        PI / 2.0,
+    )
+    .unwrap();
+    let want = v0 - csink_removed(5.0, 8.0, PI / 2.0) - csink_removed(5.0, 7.0, PI / 2.0);
+    assert_volume_any(&both, want);
+}
+
+#[test]
+fn countersink_refusals() {
+    let b = block();
+    let e = |r: Result<Body>| r.unwrap_err().to_string();
+    // Ø30 on the Ø8 hole at x = 15: reaches the blind hole / the x = 0 wall.
+    let m = e(countersink(
+        &b,
+        [15.0, 20.0, 20.0],
+        [0.0, 0.0, 1.0],
+        8.0,
+        30.0,
+        PI / 2.0,
+    ));
+    assert!(m.contains("does not fit"), "{m}");
+    // Ø6 x 8 blind hole: Ø23 at 90 degrees is 8.5 deep.
+    let m = e(countersink(
+        &b,
+        [30.0, 12.0, 20.0],
+        [0.0, 0.0, 1.0],
+        6.0,
+        23.0,
+        PI / 2.0,
+    ));
+    assert!(m.contains("reaches the end of the hole wall"), "{m}");
+    // Not larger than the hole, bad angles, no hole there, wrong diameter.
+    assert!(countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 8.0, 8.0, PI / 2.0).is_err());
+    assert!(countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 8.0, 12.0, PI).is_err());
+    assert!(countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 8.0, 12.0, 0.0).is_err());
+    assert!(countersink(&b, [5.0, 5.0, 20.0], [0.0, 0.0, 1.0], 8.0, 12.0, PI / 2.0).is_err());
+    assert!(countersink(&b, [15.0, 20.0, 20.0], [0.0, 0.0, 1.0], 6.0, 12.0, PI / 2.0).is_err());
+    // Not at a face holding the hole's opening (mid-depth plane).
+    assert!(countersink(&b, [15.0, 20.0, 10.0], [0.0, 0.0, 1.0], 8.0, 12.0, PI / 2.0).is_err());
+}

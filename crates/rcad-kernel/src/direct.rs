@@ -1168,5 +1168,8 @@ pub fn remove_cylinder(body: &Body, face: usize) -> Result<DirectEdit> {
     })
 }
 
+mod countersink;
+pub use countersink::countersink;
+
 #[cfg(test)]
 mod tests;

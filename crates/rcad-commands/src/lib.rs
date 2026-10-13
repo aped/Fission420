@@ -191,6 +191,17 @@ pub enum Command {
         face: FaceRef,
         op: rcad_document::DirectOp,
     },
+    /// Exact countersink (run 6) at the entry of Hole feature `hole`: `diameter`
+    /// mm at the entry face, included angle `angle_deg` (default 90).
+    /// Parameters `diameter`, `angle_deg`.
+    Countersink {
+        #[serde(default)]
+        name: Option<String>,
+        hole: FeatureId,
+        diameter: f64,
+        #[serde(default = "default_csink_angle")]
+        angle_deg: f64,
+    },
     /// Query (run 6): the faces of imported body `body` that direct edits can
     /// name, as JSON in `message`: `[{"face": FaceRef, "kind": DirectFace}]`
     /// in current B-rep order. Fails when the body is not an imported body
@@ -537,6 +548,7 @@ impl Command {
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
             Command::DirectEdit { .. } => "direct_edit",
+            Command::Countersink { .. } => "countersink",
             Command::ImportedFaces { .. } => "imported_faces",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
@@ -1319,6 +1331,37 @@ impl Session {
                         })
                     });
                     Ok(d.push(n, FeatureKind::DirectEdit { face, op }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::Countersink {
+                name,
+                hole,
+                diameter,
+                angle_deg,
+            } => {
+                let (name, hole, diameter, angle_deg) =
+                    (name.clone(), *hole, *diameter, *angle_deg);
+                if !(diameter.is_finite() && diameter > 0.0) {
+                    return Err(DocError::Validation(format!(
+                        "countersink diameter must be > 0 mm, got {diameter}"
+                    )));
+                }
+                if !(angle_deg > 0.0 && angle_deg < 180.0) {
+                    return Err(DocError::Validation(format!(
+                        "countersink angle must be between 0 and 180 degrees, got {angle_deg}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Countersink", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Countersink"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Countersink {
+                            hole,
+                            diameter,
+                            angle: angle_deg.to_radians(),
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }
@@ -2651,6 +2694,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
+                FeatureKind::Countersink { .. } => ("countersink", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {
@@ -2713,6 +2757,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
             }
         })
         .collect()
+}
+
+fn default_csink_angle() -> f64 {
+    90.0
 }
 
 /// [`BodySummary::imported_faces`] (empty when the body has no valid import
