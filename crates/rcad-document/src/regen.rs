@@ -975,6 +975,26 @@ fn regen_impl(
                     }
                 }
             }
+            FeatureKind::SplitBody {
+                body,
+                plane,
+                new_body,
+            } => {
+                let (pf, rf) = plane_frame(id, plane, &st)?;
+                r.frame = Some(pf);
+                r.resolved_face = rf;
+                let t = brep_target(&st, id, *body)?;
+                let (behind, front) = split_by_plane(&t, &pf, id)?;
+                replace_body(&mut st, id, *body, behind);
+                create_body(
+                    &mut st,
+                    id,
+                    *new_body,
+                    BodyGeometry::Brep(front),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*new_body);
+            }
             FeatureKind::Shell {
                 extrude,
                 open,
@@ -1711,6 +1731,72 @@ fn tapered_apply(
                 ),
             },
         })
+}
+
+/// Split `t` by the plane of `pf`: (the part behind the plane, the part in
+/// front of it), each an exact cut by a half-space box through
+/// [`apply_tool`] (result-checked; ADR 0005/0006).
+fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
+    let bb = k::bounds(t).map_err(kernel(id))?;
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for i in 0..8 {
+        let p = [
+            if i & 1 == 0 { bb.min[0] } else { bb.max[0] },
+            if i & 2 == 0 { bb.min[1] } else { bb.max[1] },
+            if i & 4 == 0 { bb.min[2] } else { bb.max[2] },
+        ];
+        let d = sub(p, pf.origin);
+        let q = [dot(d, pf.x), dot(d, pf.y), dot(d, pf.z)];
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
+        }
+    }
+    let eps = k::tol::KERNEL_LINEAR;
+    if lo[2] >= -eps || hi[2] <= eps {
+        return Err(DocError::Validation(format!(
+            "{id}: the split plane does not cross the body (it lies {} it)",
+            if lo[2] >= -eps { "below" } else { "above" }
+        )));
+    }
+    let m = k::through_all_margin(t).map_err(kernel(id))?;
+    let (x0, x1, y0, y1) = (lo[0] - m, hi[0] + m, lo[1] - m, hi[1] + m);
+    let boxp = SketchProfile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let piece = |span: (f64, f64)| ExtrudeOut {
+        start: *pf,
+        distance: span.1 - span.0,
+        dir: 1.0,
+        extent: Extent::Distance,
+        profile: boxp.clone(),
+        entities: vec![],
+        holes: vec![],
+        span,
+        nominal: span,
+        side: None,
+        removes: true,
+        joined: false,
+        intersect: false,
+        plain: true,
+        multi: false,
+        taper: 0.0,
+        body: BodyId(0),
+    };
+    let cut = |span: (f64, f64), what: &str| {
+        apply_tool(t, &piece(span), pf, Some(what), id, None)
+            .map(|(b, _)| b)
+            .map_err(|x| match x {
+                DocError::Kernel { detail, .. } if detail.contains("disconnected") => {
+                    DocError::ProductLimit(format!(
+                        "{id}: split: the {what} falls apart into several solids ({detail}); \
+                         split it further or choose another plane"
+                    ))
+                }
+                other => other,
+            })
+    };
+    let behind = cut((0.0, hi[2] + m), "part behind the plane")?;
+    let front = cut((lo[2] - m, 0.0), "part in front of the plane")?;
+    Ok((behind, front))
 }
 
 /// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:

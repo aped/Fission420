@@ -416,6 +416,16 @@ pub enum Command {
         #[serde(default)]
         overwrite: bool,
     },
+    /// Split `body` by `plane` (run 6; one undo step): the body keeps the
+    /// part behind the plane, a new body (`body_name`) the part in front.
+    SplitBody {
+        #[serde(default)]
+        name: Option<String>,
+        body: BodyId,
+        plane: SketchPlane,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
     /// Timeline marker (run 6; one undo step): evaluate history up to and
     /// including `at`; later features are kept but not evaluated, and new
     /// features are inserted after the marker. `at: null` rolls to the end.
@@ -620,6 +630,7 @@ impl Command {
             Command::ActivateConfiguration { .. } => "activate_configuration",
             Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
+            Command::SplitBody { .. } => "split_body",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
@@ -2362,6 +2373,39 @@ impl Session {
                 result?;
                 r.message = Some(format!("wrote {}", written.join(", ")));
             }
+            Command::SplitBody {
+                name,
+                body,
+                plane,
+                body_name,
+            } => {
+                let (name, body, plane, body_name) =
+                    (name.clone(), *body, *plane, body_name.clone());
+                let m = self.model_mut()?;
+                let src = m.document().body(body)?.name.clone();
+                let id = m.transact(&format!("Split {src}"), |d| {
+                    let n = match &body_name {
+                        Some(n) => valid_name(n, "body")?,
+                        None => d.default_body_name(),
+                    };
+                    if d.bodies.iter().any(|b| b.name == n) {
+                        return Err(DocError::Validation(format!(
+                            "another body is already named '{n}'"
+                        )));
+                    }
+                    let new_body = d.add_body(n);
+                    let n = name.unwrap_or_else(|| d.default_name("Split"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::SplitBody {
+                            body,
+                            plane,
+                            new_body,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SetRollback { at } => {
                 let at = *at;
                 let m = self.model_mut()?;
@@ -2958,6 +3002,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
+                FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
             };

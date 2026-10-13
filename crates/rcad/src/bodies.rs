@@ -253,6 +253,7 @@ impl RcadApp {
         ui.label(provenance(&b));
         if b.kind != "mesh" {
             self.move_ui(ui, b.id);
+            self.split_ui(ui, b.id);
         }
         if b.kind == "mesh" {
             ui.colored_label(
@@ -430,6 +431,57 @@ impl RcadApp {
             );
         });
         header.header_response.probe("Move / Copy");
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+}
+
+impl RcadApp {
+    /// Split a body by a world plane moved along its normal (run 6). The body
+    /// keeps the part behind the plane; a new body gets the part in front.
+    fn split_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
+        let mut send = None;
+        let header = egui::CollapsingHeader::new("Split by plane")
+            .id_salt(("split_ui", body.0))
+            .show(ui, |ui| {
+                let (base, offset) = &mut self.split_form;
+                ui.horizontal(|ui| {
+                    ui.radio_value(base, 0, "World XY").probe("Split XY");
+                    ui.radio_value(base, 1, "World XZ").probe("Split XZ");
+                    ui.radio_value(base, 2, "World YZ").probe("Split YZ");
+                });
+                crate::panels::num_field(ui, "Split plane offset (mm)", offset);
+                let off = offset.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+                if ui
+                    .add_enabled(off.is_some(), egui::Button::new("Split body"))
+                    .probe("Split body")
+                    .clicked()
+                    && let Some(d) = off
+                {
+                    let base = match *base {
+                        0 => rcad_document::PlaneBase::WorldXY,
+                        1 => rcad_document::PlaneBase::WorldXZ,
+                        _ => rcad_document::PlaneBase::WorldYZ,
+                    };
+                    send = Some(Command::SplitBody {
+                        name: None,
+                        body,
+                        plane: rcad_document::SketchPlane::Offset {
+                            base,
+                            distance: d,
+                            angle: 0.0,
+                        },
+                        body_name: None,
+                    });
+                }
+                ui.small(
+                    "Offset along the plane's normal (+Z, −Y, +X). This body keeps the part \
+                     behind the plane; a new body gets the part in front. The offset stays a \
+                     parameter (plane_offset).",
+                );
+            });
+        header.header_response.probe("Split by plane");
         if let Some(c) = send {
             self.request(c);
         }

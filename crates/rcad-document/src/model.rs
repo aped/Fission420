@@ -481,6 +481,18 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         copy: Option<BodyId>,
     },
+    /// Split body `body` by `plane` (run 6, format v6): `body` keeps the part
+    /// behind the plane (against its normal), new body `new_body` gets the
+    /// part in front of it. Each part is an exact, result-checked cut by a
+    /// half-space box (ADR 0005/0006); a plane that misses the body, or a
+    /// side that falls apart into several solids, is refused. Faces of the
+    /// new body are not referencable by role. Parameters "plane_offset",
+    /// "plane_angle_deg" for an offset plane.
+    SplitBody {
+        body: BodyId,
+        plane: SketchPlane,
+        new_body: BodyId,
+    },
     /// Direct edit (run 6, ADR 0010) of an imported STEP body: `face` is an
     /// imported face (`FaceRole::Imported`, by stable import index) and `op`
     /// what is done to it, exactly (`rcad_kernel::{offset_face,
@@ -504,6 +516,7 @@ pub enum FeatureKind {
     },
 }
 
+/// (Split body variant lives in FeatureKind; see `SplitBody`.)
 fn z_axis() -> [f64; 3] {
     [0.0, 0.0, 1.0]
 }
@@ -709,6 +722,9 @@ impl Feature {
             }
             FeatureKind::Shell { extrude, .. } => vec![*extrude],
             FeatureKind::MoveBody { .. } => vec![],
+            FeatureKind::SplitBody { plane, .. } => {
+                plane.face().map(|r| r.feature).into_iter().collect()
+            }
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             FeatureKind::ImportStep { .. }
@@ -730,7 +746,8 @@ impl Feature {
             | FeatureKind::ImportMesh { body, .. }
             | FeatureKind::MoveBody {
                 copy: Some(body), ..
-            } => vec![*body],
+            }
+            | FeatureKind::SplitBody { new_body: body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -751,7 +768,8 @@ impl Feature {
             | FeatureKind::Cut { target, .. }
             | FeatureKind::Pocket { target, .. }
             | FeatureKind::Hole { target, .. }
-            | FeatureKind::MoveBody { body: target, .. } => Some(*target),
+            | FeatureKind::MoveBody { body: target, .. }
+            | FeatureKind::SplitBody { body: target, .. } => Some(*target),
             FeatureKind::DirectEdit {
                 face:
                     FaceRef {
@@ -854,6 +872,17 @@ impl Feature {
                 ("diameter".into(), *diameter),
                 ("angle_deg".into(), angle.to_degrees()),
             ],
+            FeatureKind::SplitBody {
+                plane:
+                    SketchPlane::Offset {
+                        distance, angle, ..
+                    },
+                ..
+            } => vec![
+                ("plane_offset".into(), *distance),
+                ("plane_angle_deg".into(), angle.to_degrees()),
+            ],
+            FeatureKind::SplitBody { .. } => vec![],
             FeatureKind::MoveBody {
                 translate, angle, ..
             } => vec![
@@ -1007,6 +1036,10 @@ impl Feature {
             | FeatureKind::Hole {
                 plane: SketchPlane::Offset { angle, .. },
                 ..
+            }
+            | FeatureKind::SplitBody {
+                plane: SketchPlane::Offset { angle, .. },
+                ..
             } if name == "plane_angle_deg" => {
                 if !(value.is_finite() && value.abs() < 180.0) {
                     return Err(DocError::Validation(format!(
@@ -1026,6 +1059,10 @@ impl Feature {
                 ..
             }
             | FeatureKind::Hole {
+                plane: SketchPlane::Offset { distance, .. },
+                ..
+            }
+            | FeatureKind::SplitBody {
                 plane: SketchPlane::Offset { distance, .. },
                 ..
             } if name == "plane_offset" => {

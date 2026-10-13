@@ -351,3 +351,23 @@ fn revolve_about_the_sketch_x_axis_from_the_dialog() {
         h.state().volume()
     );
 }
+
+#[test]
+fn split_a_body_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    request(&mut h, Command::extrude(None, s1, 10.0));
+    let name = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name);
+    click(&mut h, "Split by plane");
+    type_into(&mut h, "Split plane offset (mm)", "4");
+    click(&mut h, "Split body");
+    let bodies = h.state().summary().bodies.clone();
+    assert_eq!(bodies.len(), 2);
+    let v = |i: usize| match bodies[i].measurements.as_ref().unwrap().volume {
+        rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+        ref x => panic!("{x:?}"),
+    };
+    assert!((v(0) - 4800.0).abs() < 1e-6 && (v(1) - 7200.0).abs() < 1e-6);
+}
