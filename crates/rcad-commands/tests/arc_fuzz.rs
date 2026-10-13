@@ -274,15 +274,60 @@ fn template(shape: &Shape) -> SketchTemplate {
     }
 }
 
+/// One test per case, so the test runner spreads the corpus over its workers. The
+/// cases are independent: feature draws never depend on outcomes, so case k alone
+/// replays exactly the features it has in the whole run.
+macro_rules! arc_cases {
+    ($($name:ident = $k:expr),* $(,)?) => {
+        $(#[test] fn $name() { arc_corpus(Some($k)); })*
+    };
+}
+arc_cases!(
+    arc_case_00 = 0,
+    arc_case_01 = 1,
+    arc_case_02 = 2,
+    arc_case_03 = 3,
+    arc_case_04 = 4,
+    arc_case_05 = 5,
+    arc_case_06 = 6,
+    arc_case_07 = 7,
+    arc_case_08 = 8,
+    arc_case_09 = 9,
+    arc_case_10 = 10,
+    arc_case_11 = 11,
+    arc_case_12 = 12,
+    arc_case_13 = 13,
+    arc_case_14 = 14,
+    arc_case_15 = 15,
+    arc_case_16 = 16,
+    arc_case_17 = 17,
+    arc_case_18 = 18,
+    arc_case_19 = 19,
+    arc_case_20 = 20,
+    arc_case_21 = 21,
+    arc_case_22 = 22,
+    arc_case_23 = 23,
+);
+
+/// The whole corpus in one process, for its single summary line (RCAD_ARC_CASE=k
+/// limits it to one case):
+/// `cargo test -p rcad-commands --release --test arc_fuzz -- --ignored --nocapture`
 #[test]
+#[ignore = "same cases as arc_case_00..23, run serially; for the corpus summary line"]
 fn round_and_rounded_cuts_match_the_csg_oracle() {
+    arc_corpus(
+        std::env::var("RCAD_ARC_CASE")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+    );
+}
+
+/// Run the seeded corpus (all 24 cases, or only case `only`).
+fn arc_corpus(only: Option<usize>) {
     let mut rng = Rng(0x0a2c_5eed_0000_0005);
     let (mut accepted, mut probes, mut skipped) = (0usize, 0usize, 0usize);
     let mut refusals: Vec<String> = Vec::new();
     let t_start = std::time::Instant::now();
-    let only: Option<usize> = std::env::var("RCAD_ARC_CASE")
-        .ok()
-        .and_then(|v| v.parse().ok());
     for case in 0..24 {
         // Probe points come from their own stream, so the feature sequence
         // does not depend on outcomes (a single case can be replayed).
@@ -482,9 +527,10 @@ fn round_and_rounded_cuts_match_the_csg_oracle() {
     let secs = t_start.elapsed().as_secs_f64();
     let n = |k: &str| refusals.iter().filter(|l| l.contains(k)).count();
     eprintln!(
-        "CORPUS arcs: features={} accepted_exact={accepted} accepted_incorrect=0 \
+        "CORPUS arcs{}: features={} accepted_exact={accepted} accepted_incorrect=0 \
          refused_kernel={} refused_gate={} refused_product_limit={} refused_noop={} \
          (tangent {}, ambiguous {}) probes={probes} skipped={skipped} secs={secs:.1}",
+        only.map(|k| format!(" case {k}")).unwrap_or_default(),
         accepted + refusals.len(),
         n("Kernel {"),
         n("GeometryCheck {"),
