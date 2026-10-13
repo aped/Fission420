@@ -673,6 +673,15 @@ impl SketchEditor {
 
     pub fn status(&self) -> (StateKind, String) {
         let r = &self.report;
+        if self.sketch.entities.is_empty() && !self.sketch.texts.is_empty() {
+            return (
+                StateKind::Full,
+                format!(
+                    "✔ Text only: {} text item(s); glyph outlines are profile regions",
+                    self.sketch.texts.len()
+                ),
+            );
+        }
         if self.sketch.entities.is_empty() {
             return (
                 StateKind::Under,
@@ -717,6 +726,21 @@ impl SketchEditor {
 
     /// Profile state for the inspector (closed loop / circle, or why not).
     pub fn profile_state(&self) -> Result<String, String> {
+        if !self.sketch.texts.is_empty() {
+            // Text (run 6): glyphs are separate loops; report the regions.
+            return match self.sketch.regions() {
+                Ok(rs) if rs.len() == 1 => Ok(format!(
+                    "1 region, area {} mm²",
+                    rcad_sketch::fmt_mm(rs[0].area)
+                )),
+                Ok(rs) if !rs.is_empty() => Ok(format!(
+                    "{} regions (text glyphs, counters and other loops): pick regions to extrude",
+                    rs.len()
+                )),
+                Ok(_) => Err("no closed loops".into()),
+                Err(e) => Err(e.to_string()),
+            };
+        }
         if self.sketch.entities.is_empty() {
             return Err("nothing drawn yet".into());
         }

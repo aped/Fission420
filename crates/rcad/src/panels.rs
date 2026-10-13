@@ -1039,7 +1039,21 @@ impl RcadApp {
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
-                    for fs in &f.faces {
+                    // Text glyph walls (run 6) are many small faces: not listed
+                    // as buttons (pick them in the view instead).
+                    let text_side = |r: &rcad_document::FaceRole| match r {
+                        rcad_document::FaceRole::ExtrudeSide { entity } => {
+                            rcad_sketch::text::text_edge_parts(rcad_sketch::EntityId(*entity))
+                                .is_some()
+                        }
+                        _ => false,
+                    };
+                    let hidden = f
+                        .faces
+                        .iter()
+                        .filter(|fs| text_side(&fs.reference.role))
+                        .count();
+                    for fs in f.faces.iter().filter(|fs| !text_side(&fs.reference.role)) {
                         let label =
                             format!("Sketch on {}", crate::face_role_label(&fs.reference.role));
                         if ui.button(label).clicked() {
@@ -1047,6 +1061,11 @@ impl RcadApp {
                                 plane: SketchPlane::Face(fs.reference),
                             });
                         }
+                    }
+                    if hidden > 0 {
+                        ui.small(format!(
+                            "{hidden} text side faces not listed (pick one in the view)"
+                        ));
                     }
                 });
             }
