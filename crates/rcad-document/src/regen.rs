@@ -1924,7 +1924,7 @@ fn tapered_apply(
 /// Split `t` by the plane of `pf`: (the part behind the plane, the part in
 /// front of it), each an exact cut by a half-space box through
 /// [`apply_tool`] (result-checked; ADR 0005/0006).
-fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
+pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
     let bb = k::bounds(t).map_err(kernel(id))?;
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for i in 0..8 {

@@ -75,6 +75,8 @@ struct GroupData {
     visible: Vec<Seg>,
     hidden: Vec<Seg>,
     center: Vec<Seg>,
+    /// Thin lines (dimensions, leaders; hatching in a section view).
+    thin: Vec<Seg>,
     /// (cx, cy, r, class)
     circles: Vec<(f64, f64, f64, String)>,
     texts: Vec<(f64, f64, String)>,
@@ -136,6 +138,7 @@ fn read_svg(svg: &str) -> (f64, f64, BTreeMap<String, GroupData>) {
                         g.hidden.push(s)
                     }
                     "center" => g.center.push(s),
+                    "thin" => g.thin.push(s),
                     _ => {}
                 }
             }
@@ -200,6 +203,7 @@ fn read_pdf(pdf: &[u8]) -> (f64, f64, BTreeMap<String, GroupData>) {
     let mut dashed = false;
     let mut chain = false;
     let mut red = false;
+    let mut width = 0.0;
     let mut stack: Vec<String> = Vec::new();
     let mut path: Vec<[f64; 2]> = Vec::new();
     let mut segs: Vec<Seg> = Vec::new();
@@ -257,6 +261,7 @@ fn read_pdf(pdf: &[u8]) -> (f64, f64, BTreeMap<String, GroupData>) {
                 match t {
                     "cm" => scale = nums[0],
                     "RG" => red = nums[0] > 0.5,
+                    "w" => width = nums[0],
                     "d" => {
                         // "[a b] 0 d": dash array tokens were collected as text.
                         let inside = &line[line.find('[').unwrap() + 1..line.find(']').unwrap()];
@@ -298,6 +303,8 @@ fn read_pdf(pdf: &[u8]) -> (f64, f64, BTreeMap<String, GroupData>) {
                                 g.hidden.push(s);
                             } else if chain {
                                 g.center.push(s);
+                            } else if width < 0.45 {
+                                g.thin.push(s);
                             } else {
                                 g.visible.push(s);
                             }
@@ -926,4 +933,162 @@ fn title_block_fields_come_from_the_model_and_scale_applies() {
     // Scale 2: every view doubles; dimension values stay model values.
     check_views(&g, 2.0, 8.0, 20.0, 15.0, true, "scale 2");
     assert_eq!(dims(&g), vec!["10", "30", "40", "Ø8"]);
+}
+
+/// Section A-A through the hole axis (plane x = cx) of the front view, seen
+/// from the right: the cut face is the 30 x 10 rectangle minus the hole's
+/// slot y in [cy - d/2, cy + d/2]; checks the outline, the hole walls, that
+/// every hatch line lies inside the cut face (none across the slot), the
+/// cutting line on the front view, and that the section follows edits.
+fn check_section(g: &BTreeMap<String, GroupData>, d: f64, cy: f64, hole: bool, what: &str) {
+    let sec = &g["view-4"];
+    let n = if hole { 6 } else { 4 };
+    assert_eq!(sec.visible.len(), n, "{what}: {:?}", sec.visible);
+    assert!(sec.hidden.is_empty(), "{what}: {:?}", sec.hidden);
+    let (lo, hi) = bbox(&sec.visible);
+    assert!((hi[0] - lo[0] - 30.0).abs() < 2e-3 && (hi[1] - lo[1] - 10.0).abs() < 2e-3);
+    let mut xs: Vec<f64> = sec
+        .visible
+        .iter()
+        .filter(|s| (s.a[0] - s.b[0]).abs() < 1e-6)
+        .map(|s| s.a[0] - lo[0])
+        .collect();
+    xs.sort_by(f64::total_cmp);
+    let want: Vec<f64> = if hole {
+        vec![0.0, cy - d / 2.0, cy + d / 2.0, 30.0]
+    } else {
+        vec![0.0, 30.0]
+    };
+    assert_eq!(xs.len(), want.len(), "{what}: {xs:?}");
+    for (a, b) in xs.iter().zip(&want) {
+        assert!((a - b).abs() < 1e-3, "{what}: {xs:?} vs {want:?}");
+    }
+    // Hatching: 45° thin lines, each inside one of the solid parts.
+    let hatch: Vec<&Seg> = sec.thin.iter().collect();
+    assert!(hatch.len() >= 6, "{what}: {} hatch lines", hatch.len());
+    let gap = (cy - d / 2.0, cy + d / 2.0);
+    let (mut left, mut right) = (0, 0);
+    for s in &hatch {
+        let (dx, dy) = (s.b[0] - s.a[0], s.b[1] - s.a[1]);
+        assert!((dx.abs() - dy.abs()).abs() < 2e-3, "{what}: not 45°: {s:?}");
+        let ys = [s.a[0] - lo[0], s.b[0] - lo[0]];
+        for y in ys {
+            assert!(
+                (-1e-3..=30.0 + 1e-3).contains(&y),
+                "{what}: hatch outside {s:?}"
+            );
+        }
+        for z in [s.a[1] - lo[1], s.b[1] - lo[1]] {
+            assert!(
+                (-1e-3..=10.0 + 1e-3).contains(&z),
+                "{what}: hatch outside {s:?}"
+            );
+        }
+        if hole {
+            let (a, b) = (ys[0].min(ys[1]), ys[0].max(ys[1]));
+            assert!(
+                b <= gap.0 + 1e-3 || a >= gap.1 - 1e-3,
+                "{what}: hatch across the hole {s:?}"
+            );
+            if b <= gap.0 + 1e-3 {
+                left += 1;
+            } else {
+                right += 1;
+            }
+        }
+    }
+    if hole {
+        assert!(left > 0 && right > 0);
+    }
+    assert!(sec.texts.iter().any(|t| t.2 == "SECTION A-A"), "{what}");
+    // Cutting line on the front view at x = 20, past its outline, labelled A twice.
+    let (flo, fhi) = bbox(&g["view-1"].visible);
+    let cut = &g["cut-A"];
+    let line = cut.center.first().expect("cutting line");
+    assert!((line.a[0] - (flo[0] + 20.0)).abs() < 1e-3 && (line.b[0] - line.a[0]).abs() < 1e-9);
+    let (y0, y1) = (line.a[1].min(line.b[1]), line.a[1].max(line.b[1]));
+    assert!(y0 < flo[1] && y1 > fhi[1]);
+    assert_eq!(cut.texts.iter().filter(|t| t.2 == "A").count(), 2);
+    // Placed to the right of the front view (third angle), past the right view.
+    let (slo, _) = bbox(&sec.visible);
+    let (_, rhi) = bbox(&g["view-3"].visible);
+    assert!(
+        slo[0] > rhi[0],
+        "{what}: section placed past the right view"
+    );
+    assert!((center(&sec.visible)[1] - center(&g["view-1"].visible)[1]).abs() < 1e-3);
+}
+
+#[test]
+fn section_view_through_the_hole_follows_the_model() {
+    let mut s = Session::new();
+    let (_, hole) = block(&mut s, 8.0, 20.0, 15.0);
+    let d = drawing_of(&mut s);
+    let sec = |label: &str, offset: f64| Command::AddDrawingView {
+        drawing: d,
+        view: ViewSpec::Section {
+            parent: ViewId(1),
+            from: Side::Right,
+            offset,
+            label: label.into(),
+        },
+    };
+    let v = ok(&mut s, sec("A", 20.0)).view.unwrap();
+    assert_eq!(v, ViewId(4));
+    // Same label twice, a bad label, and a section of a section are refused.
+    assert!(!s.execute(&sec("A", 10.0)).ok);
+    assert!(!s.execute(&sec("A-1", 10.0)).ok);
+    assert!(
+        !s.execute(&Command::AddDrawingView {
+            drawing: d,
+            view: ViewSpec::Section {
+                parent: v,
+                from: Side::Right,
+                offset: 1.0,
+                label: "Z".into()
+            },
+        })
+        .ok
+    );
+    let (r, svg) = export(&mut s, d, "section.svg");
+    let rep = r.drawing_report.unwrap();
+    assert!(rep.issues.is_empty(), "{:?}", rep.issues);
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    check_section(&g, 8.0, 15.0, true, "section");
+    // The section has no automatic dimensions of its own.
+    assert!(g["dims-4"].texts.is_empty());
+    let (_, pdf) = export(&mut s, d, "section.pdf");
+    let (_, _, pg) = read_pdf(&pdf);
+    assert_eq!(pg["view-4"].visible.len(), 6);
+
+    // Ø12 at y = 13: the walls move.
+    for (n, x) in [("diameter", 12.0), ("center_y", 13.0)] {
+        ok(
+            &mut s,
+            Command::SetParameter {
+                feature: hole,
+                name: n.into(),
+                value: x,
+            },
+        );
+    }
+    let (_, svg) = export(&mut s, d, "section_edit.svg");
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    check_section(&g, 12.0, 13.0, true, "section after edit");
+    // Hole deleted: one solid cut face.
+    ok(&mut s, Command::DeleteFeature { feature: hole });
+    let (_, svg) = export(&mut s, d, "section_no_hole.svg");
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    check_section(&g, 0.0, 15.0, false, "section without hole");
+    // A cutting plane that misses the part is flagged, not drawn.
+    ok(&mut s, sec("B", 100.0));
+    let (r, svg) = export(&mut s, d, "section_miss.svg");
+    let rep = r.drawing_report.unwrap();
+    assert!(
+        rep.issues.iter().any(|i| i.contains("section failed")),
+        "{:?}",
+        rep.issues
+    );
+    let (_, _, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    assert!(g["view-5"].flagged && g["view-5"].visible.is_empty());
 }

@@ -18,6 +18,10 @@
 //! between visible and hidden samples are refined by bisection to
 //! [`TRANSITION_TOL`]. The drawn curves are the exact projected edges cut at
 //! those transitions. See docs/DRAWINGS.md for the stated tolerances.
+//!
+//! Section views cut the bodies with the exact Split Body cut
+//! (`regen::split_by_plane`), draw the part behind the plane the same way and
+//! hatch the faces lying in the plane ([`HATCH_SPACING`]).
 use crate::{BodyId, DocError, Document, Evaluation, FeatureId, FeatureKind, Result};
 use rcad_exchange::drawing::{Anchor, Group, LineStyle, Prim, SheetPlot};
 use rcad_kernel::{self as k, EdgeCurve};
@@ -267,6 +271,31 @@ pub enum ViewKind {
     /// The parent seen from `from`, at the parent's scale, aligned with it and
     /// placed by the drawing's projection convention.
     Projected { parent: ViewId, from: Side },
+    /// Full section `label`-`label`: the parent cut by the plane through its
+    /// cutting line and seen from `from` (placed like a projected view). The
+    /// cutting line lies in the parent view at `offset` model mm along the
+    /// parent's up axis (`from` above/below: a horizontal line) or right axis
+    /// (`from` left/right: a vertical line), in world coordinates projected on
+    /// that axis. The material between the plane and the viewer is removed;
+    /// faces in the plane are hatched.
+    Section {
+        parent: ViewId,
+        from: Side,
+        offset: f64,
+        label: String,
+    },
+}
+
+impl ViewKind {
+    /// The parent and side of a projected or section view.
+    pub fn parent(&self) -> Option<(ViewId, Side)> {
+        match self {
+            ViewKind::Base { .. } => None,
+            ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
+                Some((*parent, *from))
+            }
+        }
+    }
 }
 
 /// A semantic annotation of a view, resolved at every render.
@@ -384,7 +413,7 @@ impl Drawing {
                     }
                     return Ok((f, *scale, cur));
                 }
-                ViewKind::Projected { parent, from } => {
+                ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
                     chain.push(*from);
                     cur = *parent;
                 }
@@ -397,7 +426,7 @@ impl Drawing {
         let (_, _, base) = self.resolve(id)?;
         match &self.view(base)?.kind {
             ViewKind::Base { bodies, .. } => Ok(bodies.clone()),
-            ViewKind::Projected { .. } => unreachable!("resolve returns a base view"),
+            _ => unreachable!("resolve returns a base view"),
         }
     }
 
@@ -442,17 +471,46 @@ impl Drawing {
                         ));
                     }
                 }
-                ViewKind::Projected { parent, from } => {
-                    if !self.views[..i].iter().any(|o| o.id == *parent) {
+                ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
+                    let Some(pv) = self.views[..i].iter().find(|o| o.id == *parent) else {
                         return bad(format!(
                             "{} projects from {parent}, which is not an earlier view",
                             v.id
                         ));
+                    };
+                    if matches!(pv.kind, ViewKind::Section { .. }) {
+                        return bad(format!(
+                            "{} cannot be derived from the section view {parent}",
+                            v.id
+                        ));
                     }
-                    if self.views[..i].iter().any(|o| {
-                        matches!(&o.kind, ViewKind::Projected { parent: p, from: f } if p == parent && f == from)
-                    }) {
+                    let section = matches!(v.kind, ViewKind::Section { .. });
+                    if !section
+                        && self.views[..i].iter().any(|o| {
+                            matches!(o.kind, ViewKind::Projected { .. })
+                                && o.kind.parent() == Some((*parent, *from))
+                        })
+                    {
                         return bad(format!("{parent} already has a view {}", from.label()));
+                    }
+                    if let ViewKind::Section { offset, label, .. } = &v.kind {
+                        if !offset.is_finite() {
+                            return bad(format!("{} section offset must be finite", v.id));
+                        }
+                        if label.is_empty()
+                            || label.chars().count() > 3
+                            || !label.chars().all(|c| c.is_ascii_alphanumeric())
+                        {
+                            return bad(format!(
+                                "{} section label must be 1 to 3 letters/numbers, got '{label}'",
+                                v.id
+                            ));
+                        }
+                        if self.views[..i].iter().any(
+                            |o| matches!(&o.kind, ViewKind::Section { label: l, .. } if l == label),
+                        ) {
+                            return bad(format!("section {label} already exists"));
+                        }
                     }
                 }
             }
@@ -1407,6 +1465,159 @@ struct Placed {
     /// Sheet bounding box of the view.
     lo: [f64; 2],
     hi: [f64; 2],
+    /// Sheet = off + scale * view coordinates.
+    off: [f64; 2],
+    scale: f64,
+    frame: ViewFrame,
+}
+
+/// Sheet spacing (mm) of section hatch lines (45°).
+pub const HATCH_SPACING: f64 = 2.5;
+
+/// 45° hatch segments (view coordinates) over the faces of `datas` lying in
+/// `plane` and facing the viewer (outward normal = plane normal): their
+/// tessellation triangles, each hatch line clipped to them and the pieces
+/// united, so the hatch follows the face boundaries to the chord tolerance.
+fn hatch(
+    datas: &[&BodyData],
+    plane: &k::Frame,
+    f: &ViewFrame,
+    spacing: f64,
+    tol: f64,
+) -> Vec<([f64; 2], [f64; 2])> {
+    let s2 = std::f64::consts::FRAC_1_SQRT_2;
+    let (u, n) = ([s2, s2], [-s2, s2]);
+    let mut lines: BTreeMap<i64, Vec<Span>> = BTreeMap::new();
+    for d in datas {
+        let m = &d.mesh;
+        for t in &m.triangles {
+            let p = t.map(|i| m.positions[i as usize]);
+            if p.iter()
+                .any(|q| dot(sub(*q, plane.origin), plane.z).abs() > tol)
+            {
+                continue;
+            }
+            let nn = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+            let l = dot(nn, nn).sqrt();
+            if l <= 0.0 || dot(nn, plane.z) / l < 0.999 {
+                continue;
+            }
+            let q = p.map(|x| {
+                let v = f.project(x);
+                [v[0], v[1]]
+            });
+            let sv = q.map(|x| x[0] * n[0] + x[1] * n[1]);
+            let tv = q.map(|x| x[0] * u[0] + x[1] * u[1]);
+            let (lo, hi) = (
+                sv.iter().copied().fold(f64::INFINITY, f64::min),
+                sv.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            );
+            let k0 = (lo / spacing).ceil() as i64;
+            let k1 = (hi / spacing).floor() as i64;
+            for kk in k0..=k1 {
+                let s = kk as f64 * spacing;
+                let mut ts = Vec::new();
+                for i in 0..3 {
+                    let (a, b) = (i, (i + 1) % 3);
+                    let (da, db) = (sv[a] - s, sv[b] - s);
+                    if (da <= 0.0 && db >= 0.0) || (da >= 0.0 && db <= 0.0) {
+                        if (db - da).abs() < 1e-15 {
+                            ts.push(tv[a]);
+                            ts.push(tv[b]);
+                        } else {
+                            let w = da / (da - db);
+                            ts.push(tv[a] + (tv[b] - tv[a]) * w);
+                        }
+                    }
+                }
+                if ts.len() >= 2 {
+                    let t0 = ts.iter().copied().fold(f64::INFINITY, f64::min);
+                    let t1 = ts.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    if t1 > t0 {
+                        lines.entry(kk).or_default().push((t0, t1));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (kk, iv) in lines {
+        let s = kk as f64 * spacing;
+        for (t0, t1) in union(iv, 1e-9) {
+            if t1 - t0 > 1e-6 {
+                let at = |t: f64| [n[0] * s + u[0] * t, n[1] * s + u[1] * t];
+                out.push((at(t0), at(t1)));
+            }
+        }
+    }
+    out
+}
+
+/// The cutting line of section `label` on its parent view `p`, with arrows
+/// in the direction of sight and the label at both ends.
+fn cutting_line(
+    parent: ViewId,
+    from: Side,
+    offset: f64,
+    label: &str,
+    p: &Placed,
+    section: &ViewFrame,
+) -> Group {
+    let look = section.toward.map(|x| -x);
+    let dir = [dot(look, p.frame.right), dot(look, p.frame.up)];
+    let ext = 6.0;
+    let (a, b) = match from {
+        Side::Above | Side::Below => {
+            let y = p.off[1] + offset * p.scale;
+            ([p.lo[0] - ext, y], [p.hi[0] + ext, y])
+        }
+        Side::Left | Side::Right => {
+            let x = p.off[0] + offset * p.scale;
+            ([x, p.lo[1] - ext], [x, p.hi[1] + ext])
+        }
+    };
+    let mut prims = vec![Prim::Line {
+        a,
+        b,
+        style: LineStyle::Center,
+    }];
+    for e in [a, b] {
+        // Thick end strokes, arrow, letter.
+        let along = [b[0] - a[0], b[1] - a[1]];
+        let l = along[0].hypot(along[1]).max(1e-9);
+        let along = [along[0] / l, along[1] / l];
+        let inward = if e == a { 1.0 } else { -1.0 };
+        prims.push(Prim::Line {
+            a: e,
+            b: [
+                e[0] + along[0] * 4.0 * inward,
+                e[1] + along[1] * 4.0 * inward,
+            ],
+            style: LineStyle::Visible,
+        });
+        let tip = [e[0] + dir[0] * 7.0, e[1] + dir[1] * 7.0];
+        prims.push(Prim::Line {
+            a: e,
+            b: tip,
+            style: LineStyle::Thin,
+        });
+        prims.push(arrow(tip, dir));
+        prims.push(Prim::Text {
+            at: [
+                tip[0] + dir[0] * 2.0,
+                tip[1] + dir[1] * 2.0 - if dir[1] < 0.0 { TEXT } else { 0.0 },
+            ],
+            size: TEXT,
+            text: label.to_string(),
+            anchor: Anchor::Middle,
+            style: LineStyle::Thin,
+        });
+    }
+    Group {
+        id: format!("cut-{label}"),
+        label: format!("Cutting line {label}-{label} on {parent}"),
+        prims,
+    }
 }
 
 fn flag_box(prims: &mut Vec<Prim>, c: [f64; 2], msg: &str) -> ([f64; 2], [f64; 2]) {
@@ -1481,7 +1692,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
     let mut groups: Vec<Group> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
     let mut reports: Vec<ViewReport> = Vec::new();
-    let mut placed: HashMap<ViewId, Placed> = HashMap::new();
+    let mut placed: BTreeMap<ViewId, Placed> = BTreeMap::new();
     let mut dimensioned = [false; 3];
 
     for v in &dr.views {
@@ -1497,7 +1708,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             .copied()
             .filter(|b| unsupported.contains(b))
             .collect();
-        let shown: Vec<&BodyData> = bodies.iter().filter_map(|b| data.get(b)).collect();
+        let mut shown: Vec<&BodyData> = bodies.iter().filter_map(|b| data.get(b)).collect();
         let label = match &v.kind {
             ViewKind::Base { orientation, .. } => {
                 format!("{} {} (base)", v.id, orientation.label())
@@ -1505,7 +1716,46 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             ViewKind::Projected { parent, from } => {
                 format!("{} {} ({} {})", v.id, frame.name(), parent, from.label())
             }
+            ViewKind::Section { label, .. } => format!("SECTION {label}-{label}"),
         };
+        // Section views: the bodies cut by the section plane (part behind it).
+        let mut section_data: Vec<BodyData> = Vec::new();
+        let mut section_error: Option<String> = None;
+        let mut cut_plane: Option<k::Frame> = None;
+        if let ViewKind::Section { parent, offset, .. } = &v.kind
+            && !shown.is_empty()
+        {
+            let (pf, _, _) = dr.resolve(*parent)?;
+            let (_, from) = v.kind.parent().unwrap_or((*parent, Side::Below));
+            let axis = match from {
+                Side::Above | Side::Below => pf.up,
+                Side::Left | Side::Right => pf.right,
+            };
+            let plane = k::Frame {
+                origin: axis.map(|a| a * offset),
+                x: frame.right,
+                y: frame.up,
+                z: frame.toward,
+            };
+            cut_plane = Some(plane);
+            for b in &bodies {
+                let Some(body) = breps.get(b) else { continue };
+                match crate::regen::split_by_plane(body, &plane, FeatureId(0))
+                    .and_then(|(behind, _)| body_data(&behind, chord))
+                {
+                    Ok(d) => section_data.push(d),
+                    Err(e) => {
+                        section_error = Some(format!("{b}: {e}"));
+                        break;
+                    }
+                }
+            }
+            shown = if section_error.is_some() {
+                Vec::new()
+            } else {
+                section_data.iter().collect()
+            };
+        }
         let geom = (!shown.is_empty()).then(|| view_geometry(&shown, &frame, chord, spacing, diag));
         // Placement.
         let (glo, ghi) = match &geom {
@@ -1519,17 +1769,35 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         let half = if geom.is_some() { half } else { [30.0, 8.0] };
         let center = match &v.kind {
             ViewKind::Base { position, .. } => *position,
-            ViewKind::Projected { parent, from } => {
+            ViewKind::Projected { parent, from } | ViewKind::Section { parent, from, .. } => {
                 let p = placed.get(parent).ok_or_else(|| {
                     DocError::Validation(format!("{}: {} is placed before its parent", dr.id, v.id))
                 })?;
                 let pc = [(p.lo[0] + p.hi[0]) / 2.0, (p.lo[1] + p.hi[1]) / 2.0];
                 let ph = [(p.hi[0] - p.lo[0]) / 2.0, (p.hi[1] - p.lo[1]) / 2.0];
                 let d = from.placement(dr.projection);
-                [
+                let mut c = [
                     pc[0] + d[0] * (ph[0] + VIEW_GAP + half[0]),
                     pc[1] + d[1] * (ph[1] + VIEW_GAP + half[1]),
-                ]
+                ];
+                // Aligned with the parent; moved further out past any view
+                // already in that slot (deterministic: views in order).
+                for _ in 0..dr.views.len() {
+                    let hit = placed.values().find(|o| {
+                        (0..2).all(|i| {
+                            c[i] - half[i] < o.hi[i] + VIEW_GAP / 2.0
+                                && c[i] + half[i] > o.lo[i] - VIEW_GAP / 2.0
+                        })
+                    });
+                    let Some(o) = hit else { break };
+                    let i = if d[0] != 0.0 { 0 } else { 1 };
+                    c[i] = if d[i] > 0.0 {
+                        o.hi[i] + VIEW_GAP + half[i]
+                    } else {
+                        o.lo[i] - VIEW_GAP - half[i]
+                    };
+                }
+                c
             }
         };
         let gc = [(glo[0] + ghi[0]) / 2.0, (glo[1] + ghi[1]) / 2.0];
@@ -1585,6 +1853,14 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 &format!("{}: mesh body not drawn", v.id),
             );
             (lo, hi) = (a, b);
+        } else if let Some(e) = &section_error {
+            issues.push(format!("{} view {}: section failed: {e}", dr.id, v.id));
+            status = ViewStatus::Unsupported {
+                bodies: bodies.clone(),
+                reason: format!("section failed: {e}"),
+            };
+            let (a, b) = flag_box(&mut prims, center, &format!("{}: section failed", v.id));
+            (lo, hi) = (a, b);
         } else {
             lo = [off[0] + glo[0] * scale, off[1] + glo[1] * scale];
             hi = [off[0] + ghi[0] * scale, off[1] + ghi[1] * scale];
@@ -1616,6 +1892,17 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     b: [c[0], c[1] + e],
                     style: LineStyle::Center,
                 });
+            }
+            // Section hatching of the faces lying in the cutting plane.
+            if let Some(plane) = &cut_plane {
+                let tol = 1e-6 * diag;
+                for (a, b) in hatch(&shown, plane, &frame, HATCH_SPACING / scale, tol) {
+                    prims.push(Prim::Line {
+                        a: [off[0] + a[0] * scale, off[1] + a[1] * scale],
+                        b: [off[0] + b[0] * scale, off[1] + b[1] * scale],
+                        style: LineStyle::Thin,
+                    });
+                }
             }
             // Hole callouts (semantic; resolved now).
             let mut called: Vec<usize> = Vec::new();
@@ -1662,7 +1949,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     }
                 }
             }
-            if dr.auto_dimensions && missing.is_empty() {
+            if dr.auto_dimensions && missing.is_empty() && cut_plane.is_none() {
                 // Overall dimensions from the exact bounds, each world axis once.
                 let mut bb = k::Bounds {
                     min: [f64::INFINITY; 3],
@@ -1777,7 +2064,12 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         prims.push(Prim::Text {
             at: [
                 (lo[0] + hi[0]) / 2.0,
-                lo[1] - if dims_prims.is_empty() { 6.0 } else { 18.0 },
+                lo[1]
+                    - if dims.iter().any(|d| d.kind == "horizontal") {
+                        18.0
+                    } else {
+                        6.0
+                    },
             ],
             size: 2.5,
             text: label.clone(),
@@ -1807,7 +2099,30 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             hidden_curves: nhid,
             dimensions: dims,
         });
-        placed.insert(v.id, Placed { lo, hi });
+        placed.insert(
+            v.id,
+            Placed {
+                lo,
+                hi,
+                off,
+                scale,
+                frame,
+            },
+        );
+        if let (
+            ViewKind::Section {
+                parent,
+                from,
+                offset,
+                label,
+            },
+            Some(p),
+        ) = (
+            &v.kind,
+            placed.get(&v.kind.parent().map(|x| x.0).unwrap_or(v.id)),
+        ) {
+            groups.push(cutting_line(*parent, *from, *offset, label, p, &frame));
+        }
     }
     // Clipping check: everything drawn must be on the sheet inside the border.
     for (vid, p) in &placed {

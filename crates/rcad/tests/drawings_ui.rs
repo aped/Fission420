@@ -123,6 +123,16 @@ fn create_export_and_flag_a_drawing_from_the_browser() {
     );
     click(&mut h, &format!("Add iso view to {dname}"));
     assert_eq!(h.state().summary().drawings[0].views.len(), 4);
+    click(&mut h, &format!("Add section to {dname}"));
+    let views = h.state().summary().drawings[0].views.clone();
+    assert_eq!(views.len(), 5);
+    match &views[4].kind {
+        rcad_document::drawing::ViewKind::Section { offset, label, .. } => {
+            assert!((offset - 20.0).abs() < 1e-9, "through the middle: {offset}");
+            assert_eq!(label, "A");
+        }
+        k => panic!("{k:?}"),
+    }
 
     // A hole callout on the top view, then delete the hole: the next export
     // reports the dangling callout in the section (red), nothing silent.

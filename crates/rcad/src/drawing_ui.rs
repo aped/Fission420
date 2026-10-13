@@ -135,6 +135,72 @@ impl RcadApp {
                                 },
                             });
                         }
+                        // Section through the middle of the first base view
+                        // (vertical cutting line), seen from the right.
+                        let first_base = d.views.iter().find_map(|v| match &v.kind {
+                            ViewKind::Base {
+                                bodies,
+                                orientation,
+                                ..
+                            } => Some((v.id, bodies.clone(), *orientation)),
+                            _ => None,
+                        });
+                        if let Some((vid, bodies, o)) = first_base
+                            && o != Orientation::Iso
+                            && ui
+                                .small_button("+ Section")
+                                .named(&format!("Add section to {}", d.name))
+                                .on_hover_text(
+                                    "Full section through the middle of the base view, \
+                                     seen from the right",
+                                )
+                                .clicked()
+                        {
+                            let right = o.frame().right;
+                            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                            for b in self
+                                .summary
+                                .bodies
+                                .iter()
+                                .filter(|b| bodies.contains(&b.id))
+                            {
+                                if let Some(bb) = &b.bounds {
+                                    for i in 0..8 {
+                                        let p = [
+                                            if i & 1 == 0 { bb.min[0] } else { bb.max[0] },
+                                            if i & 2 == 0 { bb.min[1] } else { bb.max[1] },
+                                            if i & 4 == 0 { bb.min[2] } else { bb.max[2] },
+                                        ];
+                                        let t = p[0] * right[0] + p[1] * right[1] + p[2] * right[2];
+                                        lo = lo.min(t);
+                                        hi = hi.max(t);
+                                    }
+                                }
+                            }
+                            let used: Vec<String> = d
+                                .views
+                                .iter()
+                                .filter_map(|v| match &v.kind {
+                                    ViewKind::Section { label, .. } => Some(label.clone()),
+                                    _ => None,
+                                })
+                                .collect();
+                            let label = ('A'..='Z')
+                                .map(|c| c.to_string())
+                                .find(|c| !used.contains(c))
+                                .unwrap_or_else(|| "S".into());
+                            if lo.is_finite() {
+                                send.push(Command::AddDrawingView {
+                                    drawing: d.id,
+                                    view: ViewSpec::Section {
+                                        parent: vid,
+                                        from: rcad_document::drawing::Side::Right,
+                                        offset: (lo + hi) / 2.0,
+                                        label,
+                                    },
+                                });
+                            }
+                        }
                         if ui
                             .small_button("Export")
                             .named(&format!("Export {}", d.name))
@@ -164,6 +230,9 @@ impl RcadApp {
                                 orientation.label(),
                                 rcad_document::drawing::fmt_scale(*scale)
                             ),
+                            ViewKind::Section { label, .. } => {
+                                format!("{} section {label}-{label}", v.id)
+                            }
                             ViewKind::Projected { parent, from } => {
                                 format!("{} {parent} {}", v.id, from.label())
                             }

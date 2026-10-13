@@ -28,6 +28,15 @@ pub enum ViewSpec {
         parent: ViewId,
         from: Side,
     },
+    /// Full section `label`-`label` of `parent` seen from `from`, cutting
+    /// plane at `offset` model mm along the parent's up (above/below) or right
+    /// (left/right) axis.
+    Section {
+        parent: ViewId,
+        from: Side,
+        offset: f64,
+        label: String,
+    },
 }
 
 /// Export file format.
@@ -125,6 +134,20 @@ fn add_view(
             ViewKind::Projected {
                 parent: *parent,
                 from: *from,
+            }
+        }
+        ViewSpec::Section {
+            parent,
+            from,
+            offset,
+            label,
+        } => {
+            dr.view(*parent)?;
+            ViewKind::Section {
+                parent: *parent,
+                from: *from,
+                offset: *offset,
+                label: label.clone(),
             }
         }
     };
@@ -274,7 +297,7 @@ impl Session {
                         bodies_extent(m, bodies)?;
                         None
                     }
-                    ViewSpec::Projected { .. } => None,
+                    ViewSpec::Projected { .. } | ViewSpec::Section { .. } => None,
                 };
                 let spec = view.clone();
                 let vid = m.transact(&format!("Add view to {id}"), |d| {
@@ -311,10 +334,10 @@ impl Session {
                                 *o = x;
                             }
                         }
-                        ViewKind::Projected { .. } => {
+                        ViewKind::Projected { .. } | ViewKind::Section { .. } => {
                             if scale.is_some() || position.is_some() || orientation.is_some() {
                                 return Err(bad(format!(
-                                    "{vid} is a projected view: its scale, position and orientation follow its parent"
+                                    "{vid} is a projected or section view: its scale, position and orientation follow its parent"
                                 )));
                             }
                         }
@@ -326,24 +349,25 @@ impl Session {
             }
             Command::RemoveDrawingView { drawing, view } => {
                 let (id, vid) = (*drawing, *view);
-                self.model_mut()?.transact(&format!("Remove view {vid} from {id}"), |d| {
-                    let dr = d.drawing_mut(id)?;
-                    dr.view(vid)?;
-                    let children: Vec<String> = dr
-                        .views
-                        .iter()
-                        .filter(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == vid))
-                        .map(|v| v.id.to_string())
-                        .collect();
-                    if !children.is_empty() {
-                        return Err(bad(format!(
-                            "{vid} has projected views ({}); remove them first",
-                            children.join(", ")
-                        )));
-                    }
-                    dr.views.retain(|v| v.id != vid);
-                    Ok(())
-                })?;
+                self.model_mut()?
+                    .transact(&format!("Remove view {vid} from {id}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        dr.view(vid)?;
+                        let children: Vec<String> = dr
+                            .views
+                            .iter()
+                            .filter(|v| v.kind.parent().map(|p| p.0) == Some(vid))
+                            .map(|v| v.id.to_string())
+                            .collect();
+                        if !children.is_empty() {
+                            return Err(bad(format!(
+                                "{vid} has projected views ({}); remove them first",
+                                children.join(", ")
+                            )));
+                        }
+                        dr.views.retain(|v| v.id != vid);
+                        Ok(())
+                    })?;
                 r.drawing = Some(id);
             }
             Command::AddHoleCallout {

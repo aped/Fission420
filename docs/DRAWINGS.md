@@ -86,6 +86,24 @@ exact edges); the view is flagged.
 * A view whose outline extends past the 10 mm border is reported as an issue (it is still
   written; nothing is clipped silently).
 
+## Section views
+
+A section view (`{"kind":"section","parent","from","offset","label"}`) is a projected view
+of its parent with the material between the cutting plane and the viewer removed. The plane
+contains the parent's view direction and a cutting line in the parent: horizontal at `offset`
+along the parent's up axis for `from` above/below, vertical along its right axis for `from`
+left/right (`offset` is a world coordinate along that axis, e.g. x = 20 on a front view). The
+cut is the exact kernel cut used by Split Body (the part behind the plane; a plane that misses
+the part, or a cut that falls apart, flags the view with the reason). The cut body is drawn like
+any view (exact edges, sampled hidden lines); its faces lying in the plane are hatched with thin
+45° lines 2.5 mm apart on the sheet, clipped to the faces' tessellation (exact for straight
+boundaries, within the chord tolerance on arcs). The parent shows the cutting line (chain line
+past the outline, thick ends, arrows in the direction of sight, the label at both ends); the
+section is labelled `SECTION A-A` and gets no automatic dimensions. Labels are 1-3 letters or
+numbers, unique per drawing; sections of sections are refused. Projected and section views are
+placed aligned with their parent on the side the convention gives, moved further out past any
+view already there.
+
 ## Export
 
 `export_drawing {drawing, path, format?}` writes one sheet:
@@ -126,6 +144,12 @@ interpreter), independent of the writer's types:
   deleting the body flags every view (no geometry drawn); undo restores the drawing of it.
 * Ø20 × 30 cylinder: side views are 20 × 30 rectangles whose vertical sides are the exact
   silhouettes; the top view is one circle; dimensions {20, 20, 30, Ø20}.
+* Section A-A of the block through the hole axis, seen from the right: 30 × 10 outline and
+  the two hole walls at y = cy ± d/2 (6 visible lines, nothing hidden), every 45° hatch line
+  inside the cut face (none across the hole), "SECTION A-A", the cutting line on the front view
+  at x = 20 extending past it, labelled A twice, the view placed past the right view; it
+  follows Ø8 → Ø12 at a new position, shows one solid face after the hole is deleted, and a
+  cutting plane that misses the part is flagged ("section failed"), not drawn.
 * Invalid commands (unknown body, duplicate projected side, NaN scale, scaling a projected
   view, removing a parent view, unknown extension, unknown drawing) are refused unchanged;
   delete/undo/redo of a drawing.
@@ -142,7 +166,7 @@ interpreter), independent of the writer's types:
 
 ## Not supported (yet)
 
-Section views and hatching, detail views, broken/auxiliary views, user-placed linear/angular
+Half/offset/aligned/broken-out sections and hatch patterns per material, detail views, broken/auxiliary views, user-placed linear/angular
 dimensions, tolerances and fits, notes and leaders other than hole callouts, thread
 representation, BOM tables and balloons (no assembly model to count yet), multiple sheets per
 drawing, view grouping in DXF, a drawing editor canvas (views are placed numerically),
