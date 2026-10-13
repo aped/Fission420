@@ -489,6 +489,7 @@ fn drawing_of(s: &mut Session) -> DrawingId {
             material: None,
             bodies: vec![BodyId(1)],
             standard_views: None,
+            assembly: false,
         },
     )
     .drawing
@@ -669,6 +670,7 @@ fn drawing_commands_validate_and_undo() {
                 orientation: Orientation::Iso,
                 scale: None,
                 position: None,
+                assembly: false,
             },
         },
         Command::AddDrawingView {
@@ -719,6 +721,7 @@ fn drawing_commands_validate_and_undo() {
                 orientation: Orientation::Iso,
                 scale: Some(0.5),
                 position: Some([230.0, 150.0]),
+                assembly: false,
             },
         },
     )
@@ -908,6 +911,7 @@ fn title_block_fields_come_from_the_model_and_scale_applies() {
             material: None,
             bodies: vec![BodyId(1)],
             standard_views: None,
+            assembly: false,
         },
     )
     .drawing

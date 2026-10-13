@@ -282,8 +282,8 @@ fn assembly_v7_feature(_doc: &Document) -> Option<&'static str> {
 }
 
 /// Run-7 drawing / configuration / property additions.
-fn drawing_v7_feature(_doc: &Document) -> Option<&'static str> {
-    None
+fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
+    doc.drawings.iter().find_map(|d| d.v7_feature())
 }
 
 /// Run-7 part-modeling additions (sheet metal, surfaces, ...).

@@ -23,6 +23,9 @@ pub enum ViewSpec {
         scale: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         position: Option<[f64; 2]>,
+        /// Run 7: show the evaluated assembly (placed occurrences) too.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        assembly: bool,
     },
     Projected {
         parent: ViewId,
@@ -74,6 +77,9 @@ pub struct DrawingReport {
     pub issues: Vec<String>,
     pub sample_spacing: f64,
     pub chord: f64,
+    /// The BOM table rows as drawn (empty without a table).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bom: Vec<dw::BomRow>,
 }
 
 fn bad(m: String) -> DocError {
@@ -99,6 +105,63 @@ fn bodies_extent(m: &rcad_document::Model, bodies: &[BodyId]) -> Result<f64, Doc
             lo[i] = lo[i].min(bb.min[i]);
             hi[i] = hi[i].max(bb.max[i]);
         }
+    }
+    Ok((0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max))
+}
+
+/// Largest extent of `bodies` plus, with `assembly`, every evaluated
+/// occurrence (exact body bounds, placed: the 8 transformed box corners, a
+/// conservative box).
+fn view_extent(
+    m: &rcad_document::Model,
+    bodies: &[BodyId],
+    assembly: bool,
+) -> Result<f64, DocError> {
+    if !assembly {
+        return bodies_extent(m, bodies);
+    }
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    let mut grow = |bb: &k::Bounds, t: Option<&k::Rigid>| {
+        for c in 0..8 {
+            let p = [0, 1, 2].map(|i| {
+                if c >> i & 1 == 1 {
+                    bb.max[i]
+                } else {
+                    bb.min[i]
+                }
+            });
+            let p = t.map_or(p, |t| t.point(p));
+            for i in 0..3 {
+                lo[i] = lo[i].min(p[i]);
+                hi[i] = hi[i].max(p[i]);
+            }
+        }
+    };
+    let ev = m.evaluation();
+    let brep_bounds = |b: &BodyId| -> Result<k::Bounds, DocError> {
+        let eb = ev
+            .body_by_id(*b)
+            .ok_or_else(|| bad(format!("{b} is not an evaluated body")))?;
+        let g = eb.geometry.brep().ok_or_else(|| {
+            DocError::ProductLimit(format!(
+                "{b} is a mesh body; drawings need exact (B-rep) bodies"
+            ))
+        })?;
+        k::bounds(g).map_err(|e| bad(e.to_string()))
+    };
+    for b in bodies {
+        grow(&brep_bounds(b)?, None);
+    }
+    for o in &ev.occurrences {
+        for b in &o.bodies {
+            grow(&brep_bounds(b)?, Some(&o.transform));
+        }
+    }
+    if !lo[0].is_finite() {
+        return Err(bad(
+            "the assembly has no evaluated occurrences to draw".into()
+        ));
     }
     Ok((0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max))
 }
@@ -132,15 +195,22 @@ fn add_view(
             orientation,
             scale,
             position,
+            assembly,
         } => {
             for b in bodies {
                 d.body(*b)?;
+            }
+            if *assembly && d.assembly.occurrences.is_empty() {
+                return Err(bad(
+                    "the document has no component occurrences to draw".into()
+                ));
             }
             ViewKind::Base {
                 bodies: bodies.clone(),
                 orientation: *orientation,
                 scale: scale.or(auto_scale).unwrap_or(1.0),
                 position: position.unwrap_or_else(|| default_position(dr.sheet, dr.projection)),
+                assembly: *assembly,
             }
         }
         ViewSpec::Projected { parent, from } => {
@@ -214,13 +284,15 @@ impl Session {
                 material,
                 bodies,
                 standard_views,
+                assembly,
             } => {
                 let m = self.model_mut()?;
                 let sheet = sheet.unwrap_or_default();
-                let auto = if bodies.is_empty() {
+                let assembly = *assembly;
+                let auto = if bodies.is_empty() && !assembly {
                     None
                 } else {
-                    Some(default_scale(sheet, bodies_extent(m, bodies)?))
+                    Some(default_scale(sheet, view_extent(m, bodies, assembly)?))
                 };
                 let (name, projection) = (name.clone(), projection.unwrap_or_default());
                 let (title, pn, mat) = (title.clone(), part_number.clone(), material.clone());
@@ -238,7 +310,7 @@ impl Session {
                     dr.title.material = mat.unwrap_or_default();
                     dr.validate()?;
                     d.drawings.push(dr);
-                    if !bodies.is_empty() {
+                    if !bodies.is_empty() || assembly {
                         let base = add_view(
                             d,
                             id,
@@ -247,6 +319,7 @@ impl Session {
                                 orientation: Orientation::Front,
                                 scale: None,
                                 position: None,
+                                assembly,
                             },
                             auto,
                         )?;
@@ -254,6 +327,11 @@ impl Session {
                             for from in [Side::Above, Side::Right] {
                                 add_view(d, id, &ViewSpec::Projected { parent: base, from }, None)?;
                             }
+                        }
+                        if assembly {
+                            let dr = d.drawing_mut(id)?;
+                            dr.view_mut(base)?.annotations.push(Annotation::Balloons);
+                            dr.bom = Some(dw::BomTable::default());
                         }
                     }
                     Ok(id)
@@ -322,13 +400,16 @@ impl Session {
                     ViewSpec::Base {
                         bodies,
                         scale: None,
+                        assembly,
                         ..
                     } => {
                         let sheet = m.document().drawing(id)?.sheet;
-                        Some(default_scale(sheet, bodies_extent(m, bodies)?))
+                        Some(default_scale(sheet, view_extent(m, bodies, *assembly)?))
                     }
-                    ViewSpec::Base { bodies, .. } => {
-                        bodies_extent(m, bodies)?;
+                    ViewSpec::Base {
+                        bodies, assembly, ..
+                    } => {
+                        view_extent(m, bodies, *assembly)?;
                         None
                     }
                     ViewSpec::Projected { .. }
@@ -463,6 +544,152 @@ impl Session {
                         Ok(())
                     })?;
             }
+            Command::AddDrawingDimension {
+                drawing,
+                view,
+                a,
+                b,
+                tolerance,
+            } => {
+                let (id, vid, a, b, tolerance) = (*drawing, *view, *a, *b, *tolerance);
+                let m = self.model_mut()?;
+                // The references must resolve now (an existing dimension that
+                // later stops resolving is reported as dangling instead).
+                let probe = {
+                    let mut d = m.document().clone();
+                    let v = d.drawing_mut(id)?.view_mut(vid)?;
+                    v.annotations = vec![Annotation::Dimension { a, b, tolerance }];
+                    d.drawing(id)?.validate()?;
+                    let out = dw::render(&d, m.evaluation(), id)?;
+                    out.views
+                        .into_iter()
+                        .find(|x| x.id == vid)
+                        .and_then(|x| x.dimensions.into_iter().find_map(|d| d.dangling))
+                };
+                if let Some(why) = probe {
+                    return Err(bad(format!("dimension not added: {why}")));
+                }
+                m.transact(&format!("Add dimension to {vid}"), |d| {
+                    let dr = d.drawing_mut(id)?;
+                    dr.view_mut(vid)?
+                        .annotations
+                        .push(Annotation::Dimension { a, b, tolerance });
+                    dr.validate()
+                })?;
+                r.drawing = Some(id);
+                r.view = Some(vid);
+            }
+            Command::SetDimensionTolerance {
+                drawing,
+                view,
+                index,
+                tolerance,
+            } => {
+                let (id, vid, index, tol) = (*drawing, *view, *index, *tolerance);
+                self.model_mut()?
+                    .transact(&format!("Set tolerance in {vid}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        match dr.view_mut(vid)?.annotations.get_mut(index) {
+                            Some(Annotation::Dimension { tolerance, .. }) => *tolerance = tol,
+                            _ => {
+                                return Err(bad(format!(
+                                    "{vid} has no dimension at index {index}"
+                                )));
+                            }
+                        }
+                        dr.validate()
+                    })?;
+                r.drawing = Some(id);
+                r.view = Some(vid);
+            }
+            Command::RemoveDrawingAnnotation {
+                drawing,
+                view,
+                index,
+            } => {
+                let (id, vid, index) = (*drawing, *view, *index);
+                self.model_mut()?
+                    .transact(&format!("Remove annotation from {vid}"), |d| {
+                        let v = d.drawing_mut(id)?.view_mut(vid)?;
+                        if index >= v.annotations.len() {
+                            return Err(bad(format!("{vid} has no annotation {index}")));
+                        }
+                        v.annotations.remove(index);
+                        Ok(())
+                    })?;
+                r.drawing = Some(id);
+            }
+            Command::SetBalloons {
+                drawing,
+                view,
+                show,
+            } => {
+                let (id, vid, show) = (*drawing, *view, *show);
+                self.model_mut()?
+                    .transact(&format!("Balloons in {vid}"), |d| {
+                        let v = d.drawing_mut(id)?.view_mut(vid)?;
+                        let has = v.annotations.contains(&Annotation::Balloons);
+                        match (show, has) {
+                            (true, false) => v.annotations.push(Annotation::Balloons),
+                            (false, true) => v.annotations.retain(|a| *a != Annotation::Balloons),
+                            _ => {
+                                return Err(bad(format!(
+                                    "{vid} {} balloons",
+                                    if has { "already has" } else { "has no" }
+                                )));
+                            }
+                        }
+                        Ok(())
+                    })?;
+                r.drawing = Some(id);
+            }
+            Command::SetBomTable {
+                drawing,
+                show,
+                position,
+            } => {
+                let (id, show, position) = (*drawing, *show, *position);
+                self.model_mut()?
+                    .transact(&format!("BOM table of {id}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        dr.bom = show.then_some(dw::BomTable { position });
+                        dr.validate()
+                    })?;
+                r.drawing = Some(id);
+            }
+            Command::AddDrawingNote {
+                drawing,
+                text,
+                position,
+            } => {
+                let (id, note) = (
+                    *drawing,
+                    dw::Note {
+                        text: text.clone(),
+                        position: *position,
+                    },
+                );
+                self.model_mut()?
+                    .transact(&format!("Add note to {id}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        dr.notes.push(note);
+                        dr.validate()
+                    })?;
+                r.drawing = Some(id);
+            }
+            Command::RemoveDrawingNote { drawing, index } => {
+                let (id, index) = (*drawing, *index);
+                self.model_mut()?
+                    .transact(&format!("Remove note from {id}"), |d| {
+                        let dr = d.drawing_mut(id)?;
+                        if index >= dr.notes.len() {
+                            return Err(bad(format!("{id} has no note {}", index + 1)));
+                        }
+                        dr.notes.remove(index);
+                        Ok(())
+                    })?;
+                r.drawing = Some(id);
+            }
             Command::ExportDrawing {
                 drawing,
                 path,
@@ -520,6 +747,7 @@ impl Session {
                     issues: out.issues,
                     sample_spacing: out.sample_spacing,
                     chord: out.chord,
+                    bom: out.bom,
                 });
             }
             _ => return Ok(false),

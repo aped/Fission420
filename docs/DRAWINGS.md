@@ -174,10 +174,70 @@ interpreter), independent of the writer's types:
   number PN-STD-40 appear in the title block; an A3 sheet at 2:1 doubles every view while the
   dimension values stay 40/30/10/Ø8.
 
+## Run 7: assembly views, BOM and balloons, driven dimensions, tolerances, notes
+
+All stored in format **v7** (`Drawing::v7_feature`; written only when used, so a run-6
+build refuses such a file instead of dropping the annotations).
+
+* **Assembly views.** A base view with `assembly: true` draws every evaluated component
+  occurrence placed by its world transform (`Evaluation::occurrences`, nested ones
+  included; suppressed occurrences and occurrences a configuration excludes are not
+  evaluated and not drawn), plus its `bodies` as loose bodies. Projected/section views of
+  it follow. `create_drawing {assembly: true}` (browser: **New assembly drawing**) makes
+  Front + above + right views, balloons on the Front view and a BOM table.
+* **BOM table** (`set_bom_table`): columns ITEM, PART NUMBER, NAME, QTY, MATERIAL;
+  **flattened** quantities: one row per component with at least one evaluated
+  occurrence, quantity = evaluated occurrences of it anywhere in the hierarchy; component
+  order gives the item numbers. Part number and material come from the model (component
+  part number; distinct materials of its definition bodies). Long texts are cut with
+  "..." (Helvetica width estimate). Default position right-aligned on top of the title
+  block; overlap with a view is reported as an issue. `Response.drawing_report.bom` lists
+  the rows as drawn. A structured (indented) BOM is the assembly command's
+  (`bom`), not the sheet's.
+* **Balloons** (`set_balloons`, annotation `balloons`): one per BOM item shown in the
+  view, numbered as the table, with a leader to the centre of the item's first occurrence
+  (bounding-box centre of its placed bodies, projected) and a dot; balloons stand left or
+  right of the view by the anchor's side, stacked 9 mm apart. Reported as
+  `kind: "balloon"`, value = item number.
+* **Driven dimensions** (`add_drawing_dimension`, annotation `dimension`): between
+  semantic references only (never tessellation or face indices): a planar face by its
+  `FaceRef` (originating feature + role, resolved through `Evaluation::faces`) or a hole
+  axis by its Hole feature. Supported pairs: two parallel planar faces, a face and a
+  hole axis parallel to it, two parallel hole axes (perpendicular distance); one hole
+  reference alone = its diameter (drawn as a callout on its end-on circle). The measured
+  direction must lie in the view plane along the view's horizontal or vertical axis
+  (horizontal ones stack below the view, vertical ones left of it). Each render measures
+  the current model; when a reference stops resolving (feature deleted or suppressed,
+  face gone, hole not end-on, faces no longer parallel) the dimension is drawn in red as
+  `? distance: <reason>` **without a value** and listed in `issues`; it is never drawn from
+  an old value. Adding a dimension that does not resolve now is refused. Drawing
+  dimensions are driven annotations: they never change the model (driving dimensions stay
+  in sketches/features). Dimensions in assembly views are refused (they refer to
+  definition bodies).
+* **Tolerances** (`tolerance` on a dimension; `set_dimension_tolerance`): `symmetric`
+  (`40 ±0.1`), `deviation` (`40 +0.05/-0.02`), `limits` (`40.1/39.95`, upper over lower
+  as one line). Values to 3 decimals. No fit designations (H7/g6) or geometric tolerances.
+* **Notes** (`add_drawing_note`, `remove_drawing_note`): free text at a sheet position,
+  lines separated by `\n`, 1-500 characters, inside the sheet.
+* UI: browser Drawings section: **New assembly drawing**, per drawing **BOM table** and
+  **Balloons** check boxes, "Dimension / note" (view, from/to references from the
+  model's referenceable faces and holes, tolerance type and values, **Add dimension**;
+  note text, **Add note**), each annotation listed under its view with a × button.
+
+Evidence: `crates/rcad-commands/tests/drawings_run7.rs` (thickness ±0.1, hole position
+deviation, hole limits; values follow a Ø/position/thickness edit; deleting the hole makes
+both hole dimensions dangling with no value and no stale text in the SVG; undo restores;
+save/reopen as v7 gives the same report; assembly sheet: BOM rows/quantities/part numbers/
+materials, suppressed occurrence → quantity 2, balloons 1 and 2, notes, toggles, PDF/DXF
+export), `crates/rcad/tests/drawings_ui.rs`
+(`annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser`: the same through the
+real widgets).
+
 ## Not supported (yet)
 
-Half/offset/aligned/broken-out sections and hatch patterns per material, detail views, broken/auxiliary views, user-placed linear/angular
-dimensions, tolerances and fits, notes and leaders other than hole callouts, thread
-representation, BOM tables and balloons (no assembly model to count yet), multiple sheets per
+Half/offset/aligned/broken-out sections and hatch patterns per material, broken/auxiliary views, user-placed angular
+dimensions other than the run-7 subset above (angles, radii of arcs, chains/baselines,
+oblique), fits and geometric tolerances, leaders on notes, thread
+representation, multiple sheets per
 drawing, view grouping in DXF, a drawing editor canvas (views are placed numerically),
 tangent edges drawn as thin lines, the ISO projection symbol, dangling-reference repair UI.

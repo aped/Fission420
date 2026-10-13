@@ -835,6 +835,11 @@ pub enum Command {
         bodies: Vec<BodyId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         standard_views: Option<bool>,
+        /// Run 7: an assembly drawing: the base view shows the evaluated
+        /// assembly (every placed occurrence, plus `bodies` as loose bodies),
+        /// with balloons on it and a BOM table on the sheet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        assembly: bool,
     },
     /// Change drawing fields (empty `part_number` / `material`: from the model).
     EditDrawing {
@@ -890,6 +895,58 @@ pub enum Command {
         drawing: rcad_document::drawing::DrawingId,
         view: rcad_document::drawing::ViewId,
         feature: FeatureId,
+    },
+    /// Run 7: a driven dimension in a view between semantic references
+    /// (`{"face": {feature, role}}` planar face or `{"hole": F}` hole axis),
+    /// or the diameter of a hole (`b` omitted), with an optional tolerance
+    /// (`{"type": "symmetric", "value"}`, `deviation`/`limits` with
+    /// `upper`/`lower`). Measured at every render; a reference that stops
+    /// resolving is shown and reported as dangling.
+    AddDrawingDimension {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        a: rcad_document::drawing::DimRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        b: Option<rcad_document::drawing::DimRef>,
+        #[serde(default)]
+        tolerance: rcad_document::drawing::Tolerance,
+    },
+    /// Change the tolerance of annotation `index` (a dimension) of a view.
+    SetDimensionTolerance {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        index: usize,
+        tolerance: rcad_document::drawing::Tolerance,
+    },
+    /// Remove annotation `index` (0-based, in the view's annotation list) of a view.
+    RemoveDrawingAnnotation {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        index: usize,
+    },
+    /// Show (or hide) BOM balloons in a view.
+    SetBalloons {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        show: bool,
+    },
+    /// Show (or hide) the BOM table; `position`: its bottom-left corner
+    /// (sheet mm; default on the title block).
+    SetBomTable {
+        drawing: rcad_document::drawing::DrawingId,
+        show: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
+    },
+    /// Add a text note at a sheet position (mm); `Response.view` unused.
+    AddDrawingNote {
+        drawing: rcad_document::drawing::DrawingId,
+        text: String,
+        position: [f64; 2],
+    },
+    RemoveDrawingNote {
+        drawing: rcad_document::drawing::DrawingId,
+        index: usize,
     },
     /// Render the drawing from the current geometry and write it (`format`
     /// default from the extension: .svg / .pdf / .dxf). `Response.drawing_report`.
@@ -1016,6 +1073,13 @@ impl Command {
             Command::RemoveDrawingView { .. } => "remove_drawing_view",
             Command::AddHoleCallout { .. } => "add_hole_callout",
             Command::RemoveHoleCallout { .. } => "remove_hole_callout",
+            Command::AddDrawingDimension { .. } => "add_drawing_dimension",
+            Command::SetDimensionTolerance { .. } => "set_dimension_tolerance",
+            Command::RemoveDrawingAnnotation { .. } => "remove_drawing_annotation",
+            Command::SetBalloons { .. } => "set_balloons",
+            Command::SetBomTable { .. } => "set_bom_table",
+            Command::AddDrawingNote { .. } => "add_drawing_note",
+            Command::RemoveDrawingNote { .. } => "remove_drawing_note",
             Command::ExportDrawing { .. } => "export_drawing",
             Command::Measure => "measure",
             Command::Inspect => "inspect",
@@ -3652,6 +3716,13 @@ impl Session {
             | Command::RemoveDrawingView { .. }
             | Command::AddHoleCallout { .. }
             | Command::RemoveHoleCallout { .. }
+            | Command::AddDrawingDimension { .. }
+            | Command::SetDimensionTolerance { .. }
+            | Command::RemoveDrawingAnnotation { .. }
+            | Command::SetBalloons { .. }
+            | Command::SetBomTable { .. }
+            | Command::AddDrawingNote { .. }
+            | Command::RemoveDrawingNote { .. }
             | Command::ExportDrawing { .. } => {}
         }
         r.summary = Some(self.summary());
