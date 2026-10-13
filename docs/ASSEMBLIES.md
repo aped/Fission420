@@ -168,11 +168,22 @@ interference and export are unchanged. Persisted (v7) and undoable.
   `tools/check_step_assembly.sh` (hinge example: 7 solids with analytic volumes and centres,
   FreeCAD rebuilds the `Wing` App::Part under `Assembly` with leaf B and three screws, placed
   at the hinge angle). Evidence: `artifacts/step_assembly/hinge_tree_freecad.txt`.
-* **STEP import flattens**: placements of every instance are composed (including the
-  simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link, fixed in run 7) and bodies are named by
-  product, but no components/occurrences are recreated; the import notes say so ("assembly
-  structure flattened: N component usage(s) … not recreated"). A flattened import is not
-  assembly fidelity.
+* **STEP import, flattened** (`import_step`): placements of every instance are composed
+  (including the simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link, fixed in run 7) and
+  bodies are named by product, but no components/occurrences are recreated; the import notes
+  say so ("assembly structure flattened: … import_step_assembly does"). A flattened import is
+  not assembly fidelity.
+* **STEP import with hierarchy** (`import_step_assembly {path}`, run 7): the product structure
+  (`PRODUCT_DEFINITION`s, `NEXT_ASSEMBLY_USAGE_OCCURRENCE` + `CONTEXT_DEPENDENT_SHAPE_REPRESENTATION`
+  placements) becomes components (one per product reachable from a root; its solids, in the
+  product's own coordinates, embedded as a STEP copy behind an import feature), sub-assemblies
+  (products with usages) and one occurrence per usage with its rigid placement (named by the
+  usage); reused products give linked occurrences of one definition. One undo step. Verified on
+  R-CAD's own hierarchical export (hinge: same BOM, nested screw at the closed-form pose) and on
+  an OpenCascade/FreeCAD-written assembly fixture. Refused for files without usages, cyclic or
+  too deep product graphs, unresolvable placements, `MAPPED_ITEM` placements. Product metadata
+  beyond the name (part numbers, colours) is not read. UI: **External document** path +
+  **Import STEP assembly**.
 
 ## UI (browser "Assembly" section)
 

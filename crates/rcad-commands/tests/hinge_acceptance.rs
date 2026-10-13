@@ -616,3 +616,125 @@ fn committed_hinge_example() {
         "examples/hinge_assembly.rcad.json is stale: rerun the workflow with rcad-cli"
     );
 }
+
+/// Run 7: the hierarchical STEP export of the hinge example imports back with
+/// its structure (components per product, Wing as a sub-assembly holding three
+/// linked occurrences of one Screw definition), the same flattened BOM, and
+/// the closed-form placement of a nested screw; undo removes it in one step;
+/// save/reopen keeps it.
+#[test]
+fn hinge_step_assembly_round_trip_preserves_hierarchy() {
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Session::new();
+    ok(
+        &mut s,
+        json!({"cmd": "open", "path": repo.join("examples/hinge_assembly.rcad.json")}),
+    );
+    let step = dir.path().join("hinge_tree.step");
+    ok(
+        &mut s,
+        json!({"cmd": "export_assembly", "path": step, "format": "step_assembly"}),
+    );
+    let qty = |s: &mut Session| {
+        let mut q: Vec<(String, usize)> = out(ok(s, json!({"cmd": "bom"})))
+            .bom
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.name, r.quantity))
+            .collect();
+        q.sort();
+        q
+    };
+    let want = qty(&mut s);
+    let mut t = Session::new();
+    ok(&mut t, json!({"cmd": "new_document"}));
+    let r = ok(&mut t, json!({"cmd": "import_step_assembly", "path": step}));
+    assert!(r.message.unwrap().contains("product structure"));
+    let a = t.summary().assembly;
+    let names: Vec<&str> = a.components.iter().map(|c| c.name.as_str()).collect();
+    for n in [
+        "Assembly",
+        "LeafA",
+        "Pin",
+        "Screw copy",
+        "Wing",
+        "LeafB",
+        "Screw",
+    ] {
+        assert!(names.contains(&n), "{n} in {names:?}");
+    }
+    let screw = a.components.iter().find(|c| c.name == "Screw").unwrap();
+    let wing = a.components.iter().find(|c| c.name == "Wing").unwrap();
+    let screws: Vec<_> = a
+        .occurrences
+        .iter()
+        .filter(|o| o.component == screw.id)
+        .collect();
+    assert_eq!(screws.len(), 3);
+    assert!(screws.iter().all(|o| o.owner == Some(wing.id)));
+    assert_eq!(screw.bodies.len(), 1, "the definition is written once");
+    assert_eq!(qty(&mut t), want);
+    // Screw#2 centre (definition (20, 0, 4)) at the hinge pose: (-13, 35, 12).
+    let i = a
+        .instances
+        .iter()
+        .find(|i| i.path_name.ends_with("Wing#1/Screw#2"))
+        .expect("nested screw");
+    let p: [f64; 3] = std::array::from_fn(|k| {
+        (0..3)
+            .map(|j| i.world.r[k][j] * [20.0, 0.0, 4.0][j])
+            .sum::<f64>()
+            + i.world.t[k]
+    });
+    assert!(
+        (0..3).all(|k| (p[k] - [-13.0, 35.0, 12.0][k]).abs() < 1e-6),
+        "{p:?}"
+    );
+    let path = dir.path().join("imported.rcad.json");
+    ok(&mut t, json!({"cmd": "save", "path": path}));
+    let mut u = Session::new();
+    ok(&mut u, json!({"cmd": "open", "path": path}));
+    assert_eq!(u.model().unwrap().document(), t.model().unwrap().document());
+    ok(&mut t, json!({"cmd": "undo"}));
+    assert!(t.summary().assembly.components.is_empty());
+    // A file without assembly structure is refused (use import_step).
+    let flat = dir.path().join("flat.step");
+    ok(
+        &mut s,
+        json!({"cmd": "export_assembly", "path": flat, "format": "step"}),
+    );
+    let r = tray::exec(
+        &mut t,
+        &json!({"cmd": "import_step_assembly", "path": flat}),
+    );
+    assert!(!r.ok);
+}
+
+/// An OpenCascade-written assembly (FreeCAD, independent writer) imports with
+/// its two products as components under the root.
+#[test]
+fn occt_step_assembly_imports_with_structure() {
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut t = Session::new();
+    ok(&mut t, json!({"cmd": "new_document"}));
+    ok(
+        &mut t,
+        json!({"cmd": "import_step_assembly",
+               "path": repo.join("crates/rcad-kernel/tests/fixtures/step/two_boxes_assembly_mm.step")}),
+    );
+    let a = t.summary().assembly;
+    let names: Vec<&str> = a.components.iter().map(|c| c.name.as_str()).collect();
+    assert!(
+        names.contains(&"BoxA") && names.contains(&"BoxB"),
+        "{names:?}"
+    );
+    // Volumes 1000 each (README of the fixture).
+    let m = ok(&mut t, json!({"cmd": "mass_properties"}))
+        .mass_properties
+        .unwrap();
+    assert_eq!(m.occurrences.len(), 2);
+    for o in &m.occurrences {
+        assert!((o.volume.unwrap() - 1000.0).abs() < 1e-6);
+    }
+}

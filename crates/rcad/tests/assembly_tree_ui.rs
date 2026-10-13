@@ -519,3 +519,31 @@ fn joint_sweep_check_in_the_editor() {
     h.get_by_label_contains("interference at 7 of 21 samples");
     assert_eq!(h.state().summary().assembly.joints[0].value, 0.0);
 }
+
+/// Import STEP assembly from the browser: the OpenCascade two-box assembly
+/// arrives as components with occurrences under the root product.
+#[test]
+fn import_step_assembly_from_the_browser() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let f = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rcad-kernel/tests/fixtures/step/two_boxes_assembly_mm.step");
+    type_into(&mut h, "External document", f.to_str().unwrap());
+    click(&mut h, "Import STEP assembly");
+    let a = h.state().summary().assembly.clone();
+    assert_eq!(
+        a.components.len(),
+        3,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    // The tree shows the nested occurrence row.
+    assert!(
+        h.state()
+            .summary()
+            .assembly
+            .instances
+            .iter()
+            .any(|i| i.path_name.ends_with("/BoxB"))
+    );
+}

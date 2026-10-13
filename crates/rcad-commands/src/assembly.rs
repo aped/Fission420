@@ -894,6 +894,9 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                 }
             ));
         }
+        Command::ImportStepAssembly { path, units_to_mm } => {
+            r.message = Some(import_step_assembly(m, path, *units_to_mm)?);
+        }
         Command::UpdateExternalComponent { component } => {
             r.message = Some(update_external(m, *component)?);
             out.component = Some(*component);
@@ -1113,6 +1116,174 @@ fn insert_external(
         let o = d.assembly.new_occurrence(c, on, Placement::default());
         Ok((c, o))
     })
+}
+
+/// Import a STEP assembly with its product structure (see
+/// `Command::ImportStepAssembly`).
+fn import_step_assembly(
+    m: &mut Model,
+    path: &std::path::Path,
+    unit: Option<f64>,
+) -> Result<String, DocError> {
+    let bytes = read_source(path)?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| {
+        v(format!(
+            "{}: STEP file is not valid text: {e}",
+            path.display()
+        ))
+    })?;
+    let opts = k::StepImportOptions {
+        max_bytes: rcad_document::MAX_FILE_BYTES as usize,
+        unit_override_to_mm: unit,
+        ..Default::default()
+    };
+    let imp = k::import_step(text, &opts).map_err(|e| v(e.to_string()))?;
+    let Some(asm) = imp.assembly else {
+        return Err(v(format!(
+            "{}: no assembly structure (NEXT_ASSEMBLY_USAGE_OCCURRENCE); use import_step",
+            path.display()
+        )));
+    };
+    // Products reachable from the roots, parents first.
+    let mut order: Vec<usize> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack: Vec<usize> = asm.roots.iter().rev().copied().collect();
+    while let Some(p) = stack.pop() {
+        if !seen.insert(p) {
+            continue;
+        }
+        order.push(p);
+        for (c, _, _) in asm.products[p].children.iter().rev() {
+            stack.push(*c);
+        }
+    }
+    // Embedded STEP copy per product with solids (own coordinates).
+    let mut texts: BTreeMap<usize, (String, Vec<String>)> = BTreeMap::new();
+    for &p in &order {
+        let pr = &asm.products[p];
+        if pr.solids.is_empty() {
+            continue;
+        }
+        let names: Vec<String> = pr
+            .solids
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                s.name
+                    .clone()
+                    .unwrap_or_else(|| format!("{}-{}", pr.name, i + 1))
+            })
+            .collect();
+        let refs: Vec<(&str, &Body)> = names
+            .iter()
+            .zip(&pr.solids)
+            .map(|(n, s)| (n.as_str(), &s.body))
+            .collect();
+        let t = k::export_step_bodies(&refs, "R-CAD")
+            .map_err(|e| v(format!("{}: product '{}': {e}", path.display(), pr.name)))?;
+        texts.insert(p, (t, names));
+    }
+    let empty: std::collections::BTreeSet<usize> = order
+        .iter()
+        .copied()
+        .filter(|p| asm.products[*p].solids.is_empty() && asm.products[*p].children.is_empty())
+        .collect();
+    let file = path.file_name().map_or("assembly.step".to_string(), |f| {
+        f.to_string_lossy().into_owned()
+    });
+    let (nc, no) = m.transact(&format!("Import assembly {file}"), |d| {
+        let active = d.assembly.active.take();
+        let mut comp: BTreeMap<usize, ComponentId> = BTreeMap::new();
+        for &p in &order {
+            if empty.contains(&p) {
+                continue;
+            }
+            let pr = &asm.products[p];
+            let base = if pr.name.trim().is_empty() {
+                format!("Product{}", p + 1)
+            } else {
+                pr.name.trim().to_string()
+            };
+            let cname = (1..)
+                .map(|i| {
+                    if i == 1 {
+                        base.clone()
+                    } else {
+                        format!("{base} {i}")
+                    }
+                })
+                .find(|n| !d.assembly.components.iter().any(|c| &c.name == n))
+                .unwrap_or_default();
+            let mut bodies = Vec::new();
+            if let Some((t, names)) = texts.get(&p) {
+                let blob = d.add_blob(&format!("{cname}.step"), t.as_bytes());
+                for n in names {
+                    let b0 = format!("{cname}/{n}");
+                    let bn = (1..)
+                        .map(|i| {
+                            if i == 1 {
+                                b0.clone()
+                            } else {
+                                format!("{b0} {i}")
+                            }
+                        })
+                        .find(|x| !d.bodies.iter().any(|b| &b.name == x))
+                        .unwrap_or_default();
+                    bodies.push(d.add_body(bn));
+                }
+                let fname = d.default_name("Import");
+                d.push(
+                    fname,
+                    rcad_document::FeatureKind::ImportStep {
+                        blob,
+                        unit_override_to_mm: None,
+                        bodies: bodies.clone(),
+                    },
+                );
+            }
+            let c = d.assembly.new_component(cname, bodies, String::new());
+            comp.insert(p, c);
+        }
+        let mut occ = 0usize;
+        let mut place = |d: &mut rcad_document::Document,
+                         c: ComponentId,
+                         owner: Option<ComponentId>,
+                         name: &str,
+                         t: &Rigid|
+         -> Result<(), DocError> {
+            let cn = d.assembly.component(c)?.name.clone();
+            let n = if !name.trim().is_empty()
+                && !d.assembly.occurrences.iter().any(|o| o.name == name.trim())
+            {
+                name.trim().to_string()
+            } else {
+                d.assembly.default_occurrence_name(&cn)
+            };
+            let o = d.assembly.new_occurrence(c, n, placement_from_rigid(t));
+            d.assembly.occurrence_mut(o)?.owner = owner;
+            occ += 1;
+            Ok(())
+        };
+        for &r in &asm.roots {
+            if let Some(&c) = comp.get(&r) {
+                place(d, c, None, "", &Rigid::IDENTITY)?;
+            }
+        }
+        for &p in &order {
+            let Some(&pc) = comp.get(&p) else { continue };
+            for (c, n, t) in &asm.products[p].children {
+                if let Some(&cc) = comp.get(c) {
+                    place(d, cc, Some(pc), n, t)?;
+                }
+            }
+        }
+        d.assembly.active = active;
+        Ok((comp.len(), occ))
+    })?;
+    Ok(format!(
+        "imported {file} with its product structure: {nc} components, {no} occurrences \
+         (definitions embedded as STEP copies; placements from the file)"
+    ))
 }
 
 /// The import feature (and its blob) that holds an external component's copy.
