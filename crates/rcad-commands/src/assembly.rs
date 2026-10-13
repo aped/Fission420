@@ -1409,15 +1409,144 @@ pub fn interference(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssemblyFormat {
-    /// One STEP solid per placed body, named "occurrence" or "occurrence/body".
+    /// Flattened: one STEP solid per placed body, named "occurrence" or
+    /// "occurrence/body", in a single product (no hierarchy).
     Step,
+    /// Run 7: STEP with the product structure: one product per component
+    /// (reused definitions written once), sub-assemblies, and every
+    /// occurrence as a NEXT_ASSEMBLY_USAGE_OCCURRENCE with its placement.
+    StepAssembly,
     /// One 3MF object per placed body, same names.
     #[serde(rename = "3mf")]
     ThreeMf,
 }
 
+/// Hierarchical STEP: products per component, usages per occurrence.
+fn export_step_tree(m: &Model, path: &std::path::Path) -> Result<String, DocError> {
+    let ev = m.evaluation();
+    let d = m.document();
+    let a = &d.assembly;
+    let breps = |bodies: &[BodyId], what: &str| -> Result<Vec<(String, &Body)>, DocError> {
+        let mut out = Vec::new();
+        for b in bodies {
+            let eb = ev.body_by_id(*b).ok_or_else(|| {
+                v(format!(
+                    "{what}: body {b} is not evaluated (consumed, suppressed or rolled back)"
+                ))
+            })?;
+            match &eb.geometry {
+                BodyGeometry::Brep(g) => out.push((eb.name.clone(), g)),
+                BodyGeometry::Mesh(_) => {
+                    return Err(DocError::ProductLimit(format!(
+                        "{what}: mesh bodies cannot be exported as STEP solids"
+                    )));
+                }
+            }
+        }
+        Ok(out)
+    };
+    let locals = a.local_transforms()?;
+    let mut products: Vec<k::StepProduct> = vec![k::StepProduct {
+        name: "Assembly".into(),
+        solids: vec![],
+        children: vec![],
+    }];
+    let mut index: BTreeMap<ComponentId, usize> = BTreeMap::new();
+    // Components used in the (non-suppressed) tree, parents before children.
+    let mut stack: Vec<Option<ComponentId>> = vec![None];
+    let mut usages: Vec<(Option<ComponentId>, ComponentId, String, Rigid)> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(owner) = stack.pop() {
+        if !seen.insert(owner) {
+            continue;
+        }
+        for o in a.children_of(owner).filter(|o| !o.suppressed) {
+            let t = locals.get(&o.id).copied().unwrap_or(Rigid::IDENTITY);
+            usages.push((owner, o.component, o.name.clone(), t));
+            stack.push(Some(o.component));
+        }
+    }
+    for (_, c, _, _) in &usages {
+        if index.contains_key(c) {
+            continue;
+        }
+        let comp = a.component(*c)?;
+        index.insert(*c, products.len());
+        products.push(k::StepProduct {
+            name: comp.name.clone(),
+            solids: breps(&comp.bodies, &comp.name)?,
+            children: vec![],
+        });
+    }
+    let mut skipped = Vec::new();
+    for (owner, c, n, t) in usages {
+        let ci = index[&c];
+        if products[ci].solids.is_empty() && !a.children_of(Some(c)).any(|o| !o.suppressed) {
+            skipped.push(n);
+            continue;
+        }
+        let pi = owner.map_or(0, |o| index[&o]);
+        products[pi].children.push((ci, n, t));
+    }
+    // Loose visible bodies: one part each at the top level.
+    for b in &ev.bodies {
+        if !b.visible || a.component_of(b.id).is_some() {
+            continue;
+        }
+        if let BodyGeometry::Brep(g) = &b.geometry {
+            products.push(k::StepProduct {
+                name: b.name.clone(),
+                solids: vec![(b.name.clone(), g)],
+                children: vec![],
+            });
+            let i = products.len() - 1;
+            products[0]
+                .children
+                .push((i, b.name.clone(), Rigid::IDENTITY));
+        }
+    }
+    // Products only reachable through skipped empty usages are left out.
+    let used: std::collections::BTreeSet<usize> = products
+        .iter()
+        .flat_map(|p| p.children.iter().map(|c| c.0))
+        .collect();
+    if products[0].children.is_empty() {
+        return Err(v("nothing to export"));
+    }
+    let keep: Vec<usize> = (0..products.len())
+        .filter(|i| *i == 0 || used.contains(i))
+        .collect();
+    let remap: BTreeMap<usize, usize> = keep.iter().enumerate().map(|(n, o)| (*o, n)).collect();
+    let products: Vec<k::StepProduct> = keep
+        .iter()
+        .map(|i| {
+            let mut p = products[*i].clone();
+            for c in &mut p.children {
+                c.0 = remap[&c.0];
+            }
+            p
+        })
+        .collect();
+    let text = k::export_step_assembly(&products, 0, "R-CAD")
+        .map_err(|e| v(format!("STEP export: {e}")))?;
+    rcad_document::write_atomic(path, text.as_bytes())?;
+    let usages: usize = products.iter().map(|p| p.children.len()).sum();
+    Ok(format!(
+        "STEP assembly (hierarchy preserved): {} products, {usages} usages{}",
+        products.len(),
+        if skipped.is_empty() {
+            String::new()
+        } else {
+            format!("; empty occurrences left out: {}", skipped.join(", "))
+        }
+    ))
+}
+
 /// Every occurrence's placed bodies plus loose visible bodies, one object each.
 fn export(m: &Model, path: &std::path::Path, format: AssemblyFormat) -> Result<String, DocError> {
+    if format == AssemblyFormat::StepAssembly {
+        return export_step_tree(m, path);
+    }
     let ev = m.evaluation();
     let d = m.document();
     let mut items: Vec<(String, Body)> = Vec::new();
@@ -1446,6 +1575,7 @@ fn export(m: &Model, path: &std::path::Path, format: AssemblyFormat) -> Result<S
         return Err(v("nothing to export"));
     }
     let bytes = match format {
+        AssemblyFormat::StepAssembly => return Err(v("internal: hierarchical STEP")),
         AssemblyFormat::Step => {
             let refs: Vec<(&str, &Body)> = items.iter().map(|(n, b)| (n.as_str(), b)).collect();
             k::export_step_bodies(&refs, "R-CAD")

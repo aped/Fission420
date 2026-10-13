@@ -38,5 +38,6 @@
   {"cmd": "close"},
   {"cmd": "open", "path": "examples/hinge_assembly.rcad.json"},
   {"cmd": "export_assembly", "path": "artifacts/hinge_assembly.step", "format": "step"},
+  {"cmd": "export_assembly", "path": "artifacts/hinge_assembly_tree.step", "format": "step_assembly"},
   {"cmd": "inspect"}
 ]
