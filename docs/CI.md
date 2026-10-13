@@ -156,6 +156,61 @@ Next, in value order:
 1. Add the remote, push, and read the Windows and macOS results.
 2. Fix F1 and F3 (test and serialisation only, no geometry change), then promote Windows and macOS to gating.
 3. Fix L4, L5 and L6.
+4. Naming and identity cleanup (below): first the machine-independence and git-identity items, then the product rename once it is decided.
+
+## Naming and identity cleanup: plan (not yet applied)
+
+Counts are from `git grep -F` at `d49370c`. Nothing has been renamed yet. The product name
+is your decision (see the open decisions at the end of this section). Everything else here
+is mechanical once that is decided.
+
+### Names in use
+
+| name | where | hits | role |
+|---|---|---|---|
+| **RustCad** | `runs/run-{2,3,4,5}` specs only (`RustCad / Fission420 — Session N`, `RUSTCAD_SESSION_4.md`) | 8 in 4 files | working name in the specs; not in code or user-facing text |
+| **Fission420** / **fission420** | README, docs, app title and window, licence holder, repo name, `FORMAT_NAME = "fission420"` (`crates/f420-document/src/io.rs:12`), recovery dir `fission420/recovery` (`crates/f420-app/src/recovery.rs`), archive names `fission420-<platform>` | 92 + 46 in 98 files | product name, plus the identifier written into every native file |
+| **f420** / **F420** | 9 crate names (`f420-*`) and both binaries, the `.f420.json` extension, `F420_*` environment variables (`F420_RECOVERY_DIR`, `F420_AUTOSAVE_SECS`, `F420_WRITE_EXAMPLES`, …), code identifiers (`F420App`) | 1311 + 344 in 289 files | short prefix; part of the file format and the CLI |
+| personal: `<user>` | `tools/heavy.sh:7` and `tools/print/validate_examples.sh:15,23` (hard-coded `ROOT` / target dir), `tools/live/g_enclosure_params_export.txt:6`, run reports (`cd <repo>/...`), and the status bar of `docs/screenshots/18-run4-params.png`, `19-run4-measure.png`, `21-run4-print_export.png` | 13 in 10 files + 3 images | the developer's machine paths leaked into tooling and published screenshots |
+| git identity | **all 256 commits** authored `Your GitHub Username <your-github-email@example.com>` (placeholder global git config; `runs/STATUS.md:244`) | 256 commits | GitHub cannot attribute the history to an account |
+| licence holder | `LICENSE-MIT`: "The Fission420 contributors" | 1 | placeholder until a name is chosen |
+
+### Planned changes, in order
+
+1. **Machine-independence (do regardless of naming).**
+   - `tools/heavy.sh` and `tools/print/validate_examples.sh` derive `ROOT` from the script location (`$(cd "$(dirname "$0")/.." && pwd)`), as `tools/ci/container_check.sh` already does.
+   - The live-walkthrough script types a path relative to the repository.
+   - Recapture or crop the three screenshots so the status bar shows no home path.
+   - Run reports under `runs/` are historical records: leave them as written, or redact the home path to `<repo>` (decision 3).
+2. **Git identity.**
+   - Set the real `user.name`/`user.email` for future commits.
+   - For history, choose between a `.mailmap` (non-destructive; fixes `git log`/shortlog, but GitHub still shows the placeholder) and a rewrite with `git filter-repo --mailmap` plus a force-push. A rewrite is cheap now, while only `ci/github-actions` is pushed and the repo is private, and expensive later. Any rewrite needs coordinating with the run-5 session: rewrite its branch at a checkpoint, never under it.
+3. **Product rename (only if decided).** The rename touches persisted data, so it is staged:
+   - **Display name first:** README, docs, app title, window title, licence holder, archive names and the GitHub repo name. GitHub redirects the old URL after a repo rename.
+   - **Native format stays readable.** The loader accepts both the old `"format": "fission420"` header and the new one, and keeps opening `.f420.json` files. The writer emits the new name only together with a format version bump, so older builds refuse new files with the existing "newer version" error rather than "not a document". Record the change in `docs/FORMAT_SUPPORT.md` and an ADR.
+   - **Environment variables:** read the new prefix first and fall back to `F420_*` for one release. Note the fallback in `docs/COMMANDS.md`.
+   - **Recovery directory:** look in the old directory too, so autosaves from before the rename are still found.
+   - **Crate names last, or never.** The `f420-*` crates are workspace-internal and unpublished, so renaming them costs churn (around 1,300 hits, every import path, `Cargo.lock`) with no user benefit. Keeping `f420` as an internal codename is a legitimate outcome.
+
+### Tests that guard the rename
+
+| test | asserts |
+|---|---|
+| existing frozen native fixtures (`native_v1`…`native_v4`, `native_fuzz.rs`) | every pre-rename document still opens and regenerates to its analytic volume. These are the rename's main regression net and must stay unchanged |
+| new: `legacy_format_name_is_accepted` (f420-document) | a file with the old header loads; a re-save writes the new header and the new version; the old reader path refuses the new file with the "newer version" error, not "not a document" |
+| new: `wrong_format_name_is_refused` | an unrelated `format` value is still refused (the alias must not loosen the check) |
+| new: env-var alias test (f420-app `recovery.rs`) | the new variable wins; the old one still works when the new one is unset |
+| new: recovery migration test | an autosave in the old directory is offered for recovery |
+| new xtask stage `naming` (alongside `layout`) | no tracked file outside `runs/` contains an absolute home path (`/var/home/`, `/home/<user>/`), and the retired product name appears only on an allow-list (the alias constant, migration code, changelog, historical `runs/`). The same mechanism as the run-file layout check |
+| CI | all four legs; the Windows path-separator item (F1) touches the same workflow JSON, so do it first or in the same change |
+
+### Open decisions
+
+1. **Product name:** keep Fission420, adopt RustCad, or choose something else. Check crates.io, GitHub and trademark search for collisions before choosing any new name; that has not been checked.
+2. **Git history:** rewrite with a force-push, or add a `.mailmap` only.
+3. **Run records:** redact home paths in `runs/`, or keep them as historical evidence.
+4. **Copyright line** for `LICENSE-MIT`.
+5. **Crate prefix:** keep `f420` as an internal codename, or rename it with the product.
 
 ## Regression tests added with CI
 
