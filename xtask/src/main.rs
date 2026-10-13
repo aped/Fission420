@@ -167,6 +167,18 @@ fn main() -> ExitCode {
             ],
         ),
         (
+            "drawing set example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/drawing_set_workflow.json",
+            ],
+        ),
+        (
             "scenario A example",
             &[
                 "run",

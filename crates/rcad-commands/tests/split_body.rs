@@ -133,3 +133,36 @@ fn split_refusals_leave_the_document_unchanged() {
     assert!(!r.ok, "a split leaving two separate arms was accepted");
     assert_eq!(u.model().unwrap().document(), &before);
 }
+
+/// Run 7: the drawing-set plate (80 × 50 × 10, Ø8 hole at (22, 25), Ø6 at
+/// (60, 25)) split by the plane x = 20, which crosses the Ø8 hole 2 mm off
+/// its axis. Truck's boolean panics on this cut; the half-space tool extruded
+/// along an in-plane axis parallel to the holes (Z) uses the exact slab
+/// construction. Left part: (20·50 − (16π/3 − 4√3))·10 (the circular segment
+/// of the hole left of a chord 2 mm from its centre).
+#[test]
+fn split_through_a_hole_off_its_axis() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 80.0, "height": 50.0, "center": [40.0, 25.0]}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "hole", "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+                   "center": [22.0, 25.0], "diameter": 8.0}),
+            json!({"cmd": "hole", "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+                   "center": [60.0, 25.0], "diameter": 6.0}),
+        ],
+    );
+    let total = (4000.0 - PI * (16.0 + 9.0)) * 10.0;
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "split_body", "body": 1, "body_name": "Right",
+                "plane": {"Offset": {"base": "WorldYZ", "distance": 20.0}}}),
+    );
+    let left = (1000.0 - (16.0 * PI / 3.0 - 4.0 * 3f64.sqrt())) * 10.0;
+    assert!((vol(&s, 1) - left).abs() < 1e-6, "{} vs {left}", vol(&s, 1));
+    assert!((vol(&s, 2) - (total - left)).abs() < 1e-6, "{}", vol(&s, 2));
+}

@@ -298,10 +298,33 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         .map_or("null".to_string(), |(par, v)| {
             format!("{{\"parallel\":{par},\"value\":{v}}}")
         });
+    // Run 7: assembly, configurations and drawings.
+    let joints: Vec<String> = s
+        .assembly
+        .joints
+        .iter()
+        .map(|j| format!("\"{}\":{}", j.id, j.value))
+        .collect();
+    let run7 = format!(
+        "\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
+        s.assembly.occurrences.len(),
+        s.assembly.total_dof,
+        joints.join(","),
+        s.assembly
+            .active
+            .map_or("null".to_string(), |c| format!("\"{c}\"")),
+        s.configurations.len(),
+        s.active_configuration
+            .as_ref()
+            .map_or("null".to_string(), |c| format!("\"{}\"", esc(c))),
+        s.drawings.len(),
+        app.last_drawing_issues()
+            .map_or("null".to_string(), |n| n.to_string()),
+    );
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
-        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply},\"section\":{section},\"measure\":{measure}}}",
+        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply},\"section\":{section},\"measure\":{measure},{run7}}}",
         s.open,
         s.revision,
         s.features.len(),

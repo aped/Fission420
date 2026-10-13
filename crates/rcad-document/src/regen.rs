@@ -2394,8 +2394,56 @@ pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Bod
                 other => other,
             })
     };
-    let behind = cut((0.0, hi[2] + m), "part behind the plane")?;
-    let front = cut((lo[2] - m, 0.0), "part in front of the plane")?;
+    // Run 7: the same half-space box extruded along an in-plane axis instead
+    // of the plane normal. When the body's curved faces (holes, bosses) are
+    // parallel to that axis the exact slab construction applies where Truck's
+    // boolean fails (e.g. a section plane crossing a hole off its axis).
+    // `normal_side`: (u0, u1) along the plane normal.
+    let in_plane = |normal_side: (f64, f64), what: &str| -> Result<Body> {
+        let mut last: Option<DocError> = None;
+        // (extrusion axis, in-profile axis, its index in lo/hi, extrusion index)
+        for (ax, other, oi, ei) in [(pf.y, pf.x, 0usize, 1usize), (pf.x, pf.y, 1, 0)] {
+            // Right-handed frame with z = ax and the plane normal in it.
+            let (fx, fy) = if ei == 1 {
+                (pf.z, other)
+            } else {
+                (other, pf.z)
+            };
+            let f2 = Frame {
+                origin: pf.origin,
+                x: fx,
+                y: fy,
+                z: ax,
+            };
+            let (n0, n1) = normal_side;
+            let (o0, o1) = (lo[oi] - m, hi[oi] + m);
+            let pts = if ei == 1 {
+                // x = normal, y = other in-plane axis.
+                vec![[n0, o0], [n1, o0], [n1, o1], [n0, o1]]
+            } else {
+                // x = other in-plane axis, y = normal.
+                vec![[o0, n0], [o1, n0], [o1, n1], [o0, n1]]
+            };
+            let span = (lo[ei] - m, hi[ei] + m);
+            let tool = ExtrudeOut {
+                start: f2,
+                distance: span.1 - span.0,
+                profile: SketchProfile::Polygon(pts),
+                span,
+                nominal: span,
+                ..piece(span)
+            };
+            match apply_tool(t, &tool, &f2, Some(what), id, None) {
+                Ok((b, _)) => return Ok(b),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| DocError::Validation(format!("{id}: split failed"))))
+    };
+    let behind = cut((0.0, hi[2] + m), "part behind the plane")
+        .or_else(|e| in_plane((0.0, hi[2] + m), "part behind the plane").map_err(|_| e))?;
+    let front = cut((lo[2] - m, 0.0), "part in front of the plane")
+        .or_else(|e| in_plane((lo[2] - m, 0.0), "part in front of the plane").map_err(|_| e))?;
     Ok((behind, front))
 }
 
@@ -4493,11 +4541,21 @@ fn bind_link(
             link.source_feature()
         ),
     };
+    // Stored pin of a projected point: (x, y), either may be absent
+    // (FixedX / FixedY pin one coordinate; review run 6 #16).
     let stored = |p: rcad_sketch::PointId, s: &rcad_sketch::Sketch| {
-        s.constraints.iter().find_map(|c| match c {
-            rcad_sketch::Constraint::FixedPoint { p: q, x, y } if *q == p => Some([*x, *y]),
-            _ => None,
-        })
+        let (mut x, mut y) = (None, None);
+        for c in &s.constraints {
+            match c {
+                rcad_sketch::Constraint::FixedPoint { p: q, x: a, y: b } if *q == p => {
+                    (x, y) = (Some(*a), Some(*b));
+                }
+                rcad_sketch::Constraint::FixedX { p: q, x: a } if *q == p => x = Some(*a),
+                rcad_sketch::Constraint::FixedY { p: q, y: b } if *q == p => y = Some(*b),
+                _ => {}
+            }
+        }
+        (x, y)
     };
     // Assignment: for every linked curve, its new geometry.
     let mut assigned: Vec<(&LinkedCurve, k::Curve2)> = Vec::new();
@@ -4532,7 +4590,9 @@ fn bind_link(
             };
             for ll in &link.loops {
                 let kinds: Vec<Option<u8>> = ll.iter().map(|lc| entity_kind(lc.entity)).collect();
+                // Best and second-best placement (distance, loop, rotation).
                 let mut best: Option<(f64, usize, usize)> = None;
+                let mut second: Option<f64> = None;
                 for (ci, cl) in curves.iter().enumerate() {
                     if used[ci] || cl.len() != ll.len() {
                         continue;
@@ -4547,19 +4607,42 @@ fn bind_link(
                         for j in 0..n {
                             let pts = curve_points(&cl[(j + rot) % n].0);
                             for (p, q) in pts.iter().zip(&ll[j].points) {
-                                if let Some(o) = stored(*q, s) {
-                                    d += (p[0] - o[0]).hypot(p[1] - o[1]);
-                                }
+                                d += match stored(*q, s) {
+                                    (Some(x), Some(y)) => (p[0] - x).hypot(p[1] - y),
+                                    (Some(x), None) => (p[0] - x).abs(),
+                                    (None, Some(y)) => (p[1] - y).abs(),
+                                    (None, None) => 0.0,
+                                };
                             }
                         }
-                        if best.is_none_or(|(bd, _, _)| d < bd) {
-                            best = Some((d, ci, rot));
+                        match best {
+                            Some((bd, _, _)) if d >= bd => {
+                                if second.is_none_or(|sd| d < sd) {
+                                    second = Some(d);
+                                }
+                            }
+                            _ => {
+                                if let Some((bd, _, _)) = best {
+                                    second = Some(bd);
+                                }
+                                best = Some((d, ci, rot));
+                            }
                         }
                     }
                 }
-                let (_, ci, rot) = best.ok_or_else(|| {
+                let (bd, ci, rot) = best.ok_or_else(|| {
                     broken("a boundary loop changed its number or kinds of edges".into())
                 })?;
+                // Two placements equally close to the stored points (a
+                // symmetric outline with too few pins): which sketch curve
+                // drives which edge would depend on the kernel's loop order.
+                if second.is_some_and(|sd| sd - bd <= k::tol::KERNEL_LINEAR) {
+                    return Err(broken(
+                        "a boundary loop matches its stored points equally well in two \
+                         placements (symmetric outline); the edge correspondence is ambiguous"
+                            .into(),
+                    ));
+                }
                 used[ci] = true;
                 let n = ll.len();
                 for (j, lc) in ll.iter().enumerate() {

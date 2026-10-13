@@ -29,6 +29,10 @@ pub struct FaceMeasureReport {
     /// Distance / angle between `a` and `b`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pair: Option<FacePairMeasure>,
+    /// Run 7: area of planar face `a` (mm², exact for line and arc
+    /// boundaries, holes subtracted); None for other faces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<f64>,
 }
 
 pub(crate) fn classify(model: &Model, p: FacePick) -> Result<DirectFace, DocError> {
@@ -78,6 +82,22 @@ pub fn report(
             "exact face measurement supports planes and circular cylinders only".into(),
         ));
     }
+    let area = match fa {
+        DirectFace::Plane { .. } => {
+            let g = model
+                .evaluation()
+                .body_by_id(a.body)
+                .and_then(|b| b.geometry.brep());
+            match g {
+                Some(g) => Some(
+                    k::planar_face_area(g, a.face as usize)
+                        .map_err(|e| DocError::Validation(e.to_string()))?,
+                ),
+                None => None,
+            }
+        }
+        _ => None,
+    };
     Ok(FaceMeasureReport {
         units: "world; mm, degrees".into(),
         a: fa,
@@ -85,5 +105,6 @@ pub fn report(
         diameter,
         b: fb,
         pair,
+        area,
     })
 }

@@ -88,6 +88,12 @@ fn open_box_stays_open_then_fills_to_a_solid() {
     tray::ok(&mut t, &json!({"cmd": "open", "path": p}));
     assert!((volume(&t, 2).unwrap() - 24000.0).abs() < 1e-6);
     assert_eq!(volume(&t, 1), None);
+    // The open source body is not exported as a (malformed) solid.
+    let r = tray::exec(
+        &mut t,
+        &json!({"cmd": "export_step", "path": dir.path().join("open.step"), "bodies": [1]}),
+    );
+    assert!(!r.ok);
     // The repaired solid exports as a STEP solid.
     let out = dir.path().join("box.step");
     tray::ok(
