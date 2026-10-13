@@ -652,6 +652,14 @@ pub enum FeatureKind {
         unit_override_to_mm: Option<f64>,
         body: BodyId,
     },
+    /// Mesh repair (run 7, format v7; docs/MESH.md): a repaired copy of mesh
+    /// body `source` as new body `body` (`rcad_exchange::mesh_repair`); the
+    /// source is kept. Parameter "weld_tolerance".
+    MeshRepair {
+        source: BodyId,
+        options: rcad_exchange::mesh_repair::RepairOptions,
+        body: BodyId,
+    },
     /// Stitch (run 7, format v7) the faces of surface body `source` within
     /// healing `tolerance` mm into new body `body` (closed: a solid); the
     /// source body is kept. Parameter "tolerance".
@@ -914,7 +922,8 @@ impl Feature {
             FeatureKind::ImportSurfaces { .. }
             | FeatureKind::SurfaceStitch { .. }
             | FeatureKind::SurfaceFill { .. }
-            | FeatureKind::Thicken { .. } => vec![],
+            | FeatureKind::Thicken { .. }
+            | FeatureKind::MeshRepair { .. } => vec![],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::ScaleBody { .. } => vec![],
             FeatureKind::AlignBody { from, to, .. } => vec![from.feature, to.feature],
@@ -955,7 +964,8 @@ impl Feature {
             | FeatureKind::ImportSurfaces { body, .. }
             | FeatureKind::SurfaceStitch { body, .. }
             | FeatureKind::SurfaceFill { body, .. }
-            | FeatureKind::Thicken { body, .. } => vec![*body],
+            | FeatureKind::Thicken { body, .. }
+            | FeatureKind::MeshRepair { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -1009,7 +1019,8 @@ impl Feature {
             // Run 7 surface operations read their source body (kept).
             FeatureKind::SurfaceStitch { source, .. }
             | FeatureKind::SurfaceFill { source, .. }
-            | FeatureKind::Thicken { source, .. } => vec![*source],
+            | FeatureKind::Thicken { source, .. }
+            | FeatureKind::MeshRepair { source, .. } => vec![*source],
             _ => vec![],
         }
     }
@@ -1172,6 +1183,9 @@ impl Feature {
                 vec![("tolerance".into(), *tolerance)]
             }
             FeatureKind::Thicken { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::MeshRepair { options, .. } => {
+                vec![("weld_tolerance".into(), options.weld_tolerance)]
+            }
             FeatureKind::SheetFlat { .. } | FeatureKind::ImportSurfaces { .. } => vec![],
             FeatureKind::MoveBody {
                 translate, angle, ..
@@ -1590,6 +1604,14 @@ impl Feature {
                     "start_offset" => *start_offset = value,
                     _ => *end_offset = value,
                 }
+                Ok(())
+            }
+            FeatureKind::MeshRepair { options, .. } if name == "weld_tolerance" => {
+                let mut o = *options;
+                o.weld_tolerance = value;
+                o.validate()
+                    .map_err(|e| DocError::Validation(format!("{id}.weld_tolerance: {e}")))?;
+                *options = o;
                 Ok(())
             }
             FeatureKind::SurfaceStitch { tolerance, .. }

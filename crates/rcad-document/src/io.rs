@@ -311,6 +311,13 @@ fn assembly_v7_feature(doc: &Document) -> Option<&'static str> {
 
 /// Run-7 drawing / configuration / property additions.
 fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
+    if doc
+        .features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::MeshRepair { .. }))
+    {
+        return Some("mesh repair");
+    }
     doc.drawings.iter().find_map(|d| d.v7_feature())
 }
 

@@ -156,6 +156,9 @@ pub fn provenance(b: &BodySummary) -> String {
         BodySource::ImportedMesh { file_name } => {
             format!("Imported from {file_name} — triangle mesh, no feature history")
         }
+        BodySource::RepairedMesh { source } => {
+            format!("Repaired copy of mesh {source} — triangle mesh (mesh repair feature)")
+        }
     }
 }
 
@@ -340,6 +343,7 @@ impl RcadApp {
             self.combine_ui(ui, b.id);
         }
         if b.kind == "mesh" {
+            self.mesh_repair_ui(ui, b.id);
             ui.colored_label(
                 Color32::from_rgb(255, 200, 120),
                 "mesh: exact operations unavailable (no sketching on its faces, no join/cut, no STEP export). Display, hide/show, save and STL export only.",

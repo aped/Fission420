@@ -430,6 +430,7 @@ pub struct RcadApp {
     /// Browser Drawings section: export path, last export report (run 6).
     pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
     pub(crate) config_table: crate::config_ui::ConfigTableUi,
+    pub(crate) mesh_repair: crate::mesh_repair_ui::MeshRepairUi,
     /// Body material form and last mass-properties report (run 6).
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state (run 6).
@@ -537,6 +538,7 @@ impl RcadApp {
             config_form: Default::default(),
             drawing_ui: Default::default(),
             config_table: Default::default(),
+            mesh_repair: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
             assembly_ui: Default::default(),
@@ -1119,6 +1121,7 @@ impl RcadApp {
         self.sheet_surface.on_reply(&response, &summary, &command);
         self.assembly_ui.on_reply(&response, &summary);
         self.drawing_ui.on_reply(&response, &summary);
+        self.mesh_repair.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;

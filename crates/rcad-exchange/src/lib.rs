@@ -22,6 +22,7 @@ pub mod drawing;
 pub mod drawing_dxf;
 pub mod dxf;
 pub mod mesh;
+pub mod mesh_repair;
 pub mod pdf;
 pub mod stl;
 pub mod svg;
