@@ -82,6 +82,7 @@ fn v3_document_with_dangling_body_target_is_refused_on_load() {
         FeatureKind::Sketch {
             plane: SketchPlane::WorldXY,
             sketch: rcad_sketch::Sketch::centered_rectangle(10.0, 10.0).unwrap(),
+            links: Vec::new(),
         },
     );
     d.push_extrude("E", s, 1.0);

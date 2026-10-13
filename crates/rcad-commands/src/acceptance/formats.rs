@@ -369,6 +369,7 @@ fn c_box_hole(r: &mut Run<'_>) {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     });
     if r.ok("extrude cut through_all, target = imported body", &x)
         .is_none()
@@ -891,6 +892,7 @@ fn d_stl(r: &mut Run<'_>) {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         });
         r.check_refused("Cut into a mesh body", &x, &["mesh"]);
         r.check_unchanged("cut refused: document unchanged", &before);
@@ -1153,6 +1155,7 @@ fn d_dxf(r: &mut Run<'_>) {
         reverse: false,
         body_name: Some("Slot plate".into()),
         region: None,
+        options: Default::default(),
     });
     r.ok("extrude new body 5 mm", &x);
     let slot_body = r.created_bodies("slot plate", &x, 1).first().copied();
@@ -1267,6 +1270,7 @@ fn d_dxf(r: &mut Run<'_>) {
                 reverse: false,
                 body_name: Some("Notch plate".into()),
                 region: None,
+                options: Default::default(),
             });
             r.ok("extrude notch 3 mm", &x);
             if let Some(&id) = r.created_bodies("notch", &x, 1).first() {

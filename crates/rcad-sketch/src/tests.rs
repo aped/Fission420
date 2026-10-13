@@ -237,6 +237,7 @@ fn profile_ccw_even_when_lines_drawn_clockwise() {
     let s = Sketch {
         construction: Default::default(),
         retired_entity_ids: 0,
+        texts: vec![],
         origin: None,
         points: vec![
             SketchPoint {
@@ -286,6 +287,7 @@ fn profile_rejects_self_intersecting_bowtie() {
     let s = Sketch {
         construction: Default::default(),
         retired_entity_ids: 0,
+        texts: vec![],
         origin: None,
         points: pts
             .iter()

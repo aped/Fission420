@@ -548,6 +548,9 @@ impl RcadApp {
                     SketchTool::Extend,
                     SketchTool::Offset,
                     SketchTool::Fillet,
+                    SketchTool::Slot,
+                    SketchTool::Polygon,
+                    SketchTool::Text,
                 ] {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
@@ -558,8 +561,28 @@ impl RcadApp {
                         ed.set_tool(t);
                     }
                 }
+                if ed.tool == SketchTool::Polygon {
+                    let l = ui.label("Sides");
+                    ui.add(egui::DragValue::new(&mut ed.polygon_sides).range(3..=64))
+                        .labelled_by(l.id);
+                    let mut circ = ed.polygon_fit == rcad_sketch::PolygonFit::Circumscribed;
+                    if ui
+                        .checkbox(&mut circ, "Across flats")
+                        .on_hover_text("Circumscribed: the dimension is the diameter across flats")
+                        .changed()
+                    {
+                        ed.polygon_fit = if circ {
+                            rcad_sketch::PolygonFit::Circumscribed
+                        } else {
+                            rcad_sketch::PolygonFit::Inscribed
+                        };
+                    }
+                }
                 ui.separator();
                 // Constraint actions live in the inspector ("Constrain selection").
+                if action(ui, "Pattern…", ed.pattern_disabled_reason()) {
+                    ed.begin_pattern();
+                }
                 if action(ui, "Construction", ed.construction_disabled_reason()) {
                     ed.toggle_construction();
                 }
@@ -650,7 +673,24 @@ impl RcadApp {
         let mut rename = None;
         let mut delete = None;
         let feats = self.summary.features.clone();
-        for f in &feats {
+        let first_rolled = feats.iter().position(|f| f.rolled_back);
+        for (i, f) in feats.iter().enumerate() {
+            if Some(i) == first_rolled {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("▶ timeline marker (later features rolled back)")
+                            .color(Color32::from_rgb(255, 200, 90))
+                            .small(),
+                    );
+                    if ui
+                        .small_button("Roll to end")
+                        .probe("Roll to end")
+                        .clicked()
+                    {
+                        self.request(Command::SetRollback { at: None });
+                    }
+                });
+            }
             let sel = self.selected == Some(f.id);
             let kind = match f.kind.as_str() {
                 "sketch" => "Sketch",
@@ -675,12 +715,16 @@ impl RcadApp {
                 );
                 let label = if f.suppressed {
                     RichText::new(&f.name).weak().strikethrough()
+                } else if f.rolled_back {
+                    RichText::new(&f.name).weak().italics()
                 } else {
                     RichText::new(&f.name)
                 };
                 let r = ui.selectable_label(sel, label).probe(&f.name);
                 if f.suppressed {
                     ui.label(RichText::new("suppressed").weak().small());
+                } else if f.rolled_back {
+                    ui.label(RichText::new("rolled back").weak().small());
                 }
                 if r.clicked() {
                     clicked = Some(f.id);
@@ -925,6 +969,37 @@ impl RcadApp {
                 }
             }
         });
+        // Run 6: timeline marker and reorder (each one Undo step; a move that
+        // breaks a dependency or does not regenerate is refused unchanged).
+        ui.horizontal_wrapped(|ui| {
+            let ids: Vec<FeatureId> = self.summary.features.iter().map(|x| x.id).collect();
+            let pos = ids.iter().position(|x| *x == f.id);
+            if ui
+                .small_button("Roll back here")
+                .probe("Roll back here")
+                .on_hover_text(
+                    "Evaluate history up to this feature; later ones are kept but not \
+                     evaluated, and new features are inserted here",
+                )
+                .clicked()
+            {
+                self.request(Command::SetRollback { at: Some(f.id) });
+            }
+            if let Some(p) = pos {
+                if p > 0 && ui.small_button("Move up").probe("Move up").clicked() {
+                    self.request(Command::MoveFeature {
+                        feature: f.id,
+                        before: Some(ids[p - 1]),
+                    });
+                }
+                if p + 1 < ids.len() && ui.small_button("Move down").probe("Move down").clicked() {
+                    self.request(Command::MoveFeature {
+                        feature: f.id,
+                        before: ids.get(p + 2).copied(),
+                    });
+                }
+            }
+        });
         if let Some((t, c)) = state_text(&f) {
             ui.label(RichText::new(t).color(c));
         }
@@ -959,6 +1034,7 @@ impl RcadApp {
                         });
                     }
                 });
+                self.projection_ui(ui, &f);
                 match &f.profile_error {
                     None => {
                         ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
@@ -1020,7 +1096,21 @@ impl RcadApp {
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
-                    for fs in &f.faces {
+                    // Text glyph walls (run 6) are many small faces: not listed
+                    // as buttons (pick them in the view instead).
+                    let text_side = |r: &rcad_document::FaceRole| match r {
+                        rcad_document::FaceRole::ExtrudeSide { entity } => {
+                            rcad_sketch::text::text_edge_parts(rcad_sketch::EntityId(*entity))
+                                .is_some()
+                        }
+                        _ => false,
+                    };
+                    let hidden = f
+                        .faces
+                        .iter()
+                        .filter(|fs| text_side(&fs.reference.role))
+                        .count();
+                    for fs in f.faces.iter().filter(|fs| !text_side(&fs.reference.role)) {
                         let label =
                             format!("Sketch on {}", crate::face_role_label(&fs.reference.role));
                         if ui.button(label).clicked() {
@@ -1028,6 +1118,11 @@ impl RcadApp {
                                 plane: SketchPlane::Face(fs.reference),
                             });
                         }
+                    }
+                    if hidden > 0 {
+                        ui.small(format!(
+                            "{hidden} text side faces not listed (pick one in the view)"
+                        ));
                     }
                 });
             }
@@ -2179,4 +2274,86 @@ pub(crate) fn feature_combo(
                 ui.selectable_value(sel, Some(f.id), format!("{}: {}", f.id, f.name));
             }
         });
+}
+
+impl RcadApp {
+    /// Run 6 (SK03): project a planar face or another sketch into this
+    /// sketch (associative), and unlink existing projections.
+    fn projection_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        let Some(z) = f.frame.map(|fr| fr.z) else {
+            return;
+        };
+        let pos = |id: FeatureId| self.summary.features.iter().position(|x| x.id == id);
+        let me = pos(f.id);
+        let parallel = |w: [f64; 3]| (w[0] * z[0] + w[1] * z[1] + w[2] * z[2]).abs() > 1.0 - 1e-9;
+        // Faces of earlier features parallel to the sketch, and earlier
+        // sketches on parallel planes.
+        let mut choices: Vec<(String, rcad_document::ProjectSource)> = Vec::new();
+        for g in &self.summary.features {
+            if pos(g.id) >= me {
+                continue;
+            }
+            for fc in &g.faces {
+                if parallel(fc.frame.z) {
+                    choices.push((
+                        format!("{} {:?}", g.name, fc.reference.role),
+                        rcad_document::ProjectSource::Face(fc.reference),
+                    ));
+                }
+            }
+            if g.kind == "sketch" && g.frame.is_some_and(|fr| parallel(fr.z)) {
+                choices.push((
+                    format!("Sketch {}", g.name),
+                    rcad_document::ProjectSource::Sketch(g.id),
+                ));
+            }
+        }
+        ui.collapsing("Project geometry into this sketch", |ui| {
+            if choices.is_empty() {
+                ui.weak("No earlier parallel face or sketch to project.");
+            }
+            for (label, src) in choices {
+                ui.horizontal(|ui| {
+                    ui.label(&label);
+                    if ui
+                        .small_button("Project")
+                        .named(&format!("Project {label}"))
+                        .clicked()
+                    {
+                        self.request(Command::Project {
+                            sketch: f.id,
+                            source: src,
+                            construction: false,
+                        });
+                    }
+                    if ui.small_button("as construction").clicked() {
+                        self.request(Command::Project {
+                            sketch: f.id,
+                            source: src,
+                            construction: true,
+                        });
+                    }
+                });
+            }
+            ui.small(
+                "Projected lines/arcs follow their source at every regeneration; if the source \
+                 changes shape the sketch reports a broken reference until you unlink it.",
+            );
+            for (i, p) in f.projections.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Link {}: {p:?}", i + 1));
+                    if ui
+                        .small_button("Unlink")
+                        .named(&format!("Unlink {}", i + 1))
+                        .clicked()
+                    {
+                        self.request(Command::UnlinkProjection {
+                            sketch: f.id,
+                            link: i,
+                        });
+                    }
+                });
+            }
+        });
+    }
 }

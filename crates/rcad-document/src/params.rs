@@ -673,8 +673,16 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::Extrude { .. } | FeatureKind::Chamfer { .. } if name == "distance" => {
             Some(SlotKind::Length)
         }
+        FeatureKind::Extrude { .. } if name == "taper_deg" => {
+            kind_has(kind, name).then_some(SlotKind::Angle)
+        }
+        FeatureKind::Extrude { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Pocket { .. } if name == "depth" => Some(SlotKind::Length),
         FeatureKind::Shell { .. } if name == "thickness" => Some(SlotKind::Length),
+        FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
+        FeatureKind::MoveBody { .. } if matches!(name, "tx" | "ty" | "tz") => {
+            Some(SlotKind::Length)
+        }
         FeatureKind::DirectEdit { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "diameter" => Some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "angle_deg" => Some(SlotKind::Angle),

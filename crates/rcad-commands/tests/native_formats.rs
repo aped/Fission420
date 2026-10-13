@@ -233,3 +233,30 @@ fn committed_printable_examples() {
         mounting_bracket(),
     );
 }
+
+/// Frozen run-5 (v5) documents, saved before run 6 changed the format: a
+/// 40 x 30 x 10 box with two r 3 vertical edge fillets and a suppressed Ø6 cut,
+/// and a loft between 40 x 30 and 60 x 50 at 20 mm. They open, regenerate to
+/// the analytic volume and re-save as v5, identical (no run-6 feature used).
+#[test]
+fn v5_run5_documents() {
+    let d = repo().join("crates/rcad-commands/tests/fixtures/native_v5");
+    let rounded = 12000.0 - 2.0 * (9.0 - 9.0 * PI / 4.0) * 10.0;
+    let loft = 20.0 * (40.0 * 30.0 + (40.0 * 20.0 + 30.0 * 20.0) / 2.0 + 400.0 / 3.0);
+    for (name, want) in [("rounded_box", rounded), ("loft", loft)] {
+        let path = d.join(format!("{name}.rcad.json"));
+        assert_eq!(version(&path), 5, "{name}");
+        let mut s = Session::new();
+        let r = s.execute(&Command::Open { path: path.clone() });
+        assert!(r.ok, "{name}: {:?}", r.error);
+        let v = total_volume(&s);
+        assert!((v - want).abs() <= 1e-6, "{name}: {v} vs {want}");
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("resaved.rcad.json");
+        assert!(s.execute(&Command::Save { path: out.clone() }).ok);
+        assert_eq!(version(&out), 5, "{name}");
+        let mut t = Session::new();
+        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
+    }
+}

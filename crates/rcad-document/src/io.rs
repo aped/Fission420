@@ -29,8 +29,11 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// as v5 only when it uses one of them ([`required_version`]); otherwise it
 /// stays v4, byte for byte as before, so older builds keep reading it and
 /// refuse (rather than misread) a v5 file.
-/// v6 (run 6): direct edits of imported bodies (`FeatureKind::DirectEdit`);
-/// written only when used ([`run6_feature`]), like v5.
+/// v6 (run 6): extrusion options (`ExtrudeOptions`: symmetric, two sides,
+/// start offset, up to a plane, thin, taper) and the Intersect operation, plus
+/// the other run-6 additions listed in [`v6_feature`]. Written only when used
+/// (otherwise v5 or v4 as before), so a run-5 build refuses the file instead
+/// of silently ignoring a field it does not know.
 pub const FORMAT_VERSION: u32 = 6;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
@@ -165,19 +168,76 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
         .and_then(scan)
 }
 
-/// What in `doc` needs format v6 (run 6, kernel worker), if anything.
-pub fn run6_feature(doc: &Document) -> Option<&'static str> {
-    let has = |p: fn(&crate::FeatureKind) -> bool| doc.features.iter().any(|f| p(&f.kind));
-    if has(|k| matches!(k, crate::FeatureKind::DirectEdit { .. })) {
-        return Some("direct edits of imported bodies");
+/// What in `doc` needs format v6, if anything (see [`FORMAT_VERSION`]).
+/// Every run-6 addition that an older build would ignore or misread must be
+/// listed here.
+pub fn v6_feature(doc: &Document) -> Option<&'static str> {
+    if doc.rollback.is_some() {
+        return Some("a rolled-back timeline marker");
     }
-    has(|k| matches!(k, crate::FeatureKind::Countersink { .. })).then_some("countersinks")
+    for f in &doc.features {
+        if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
+            return Some("direct edits of imported bodies");
+        }
+        if matches!(f.kind, crate::FeatureKind::Countersink { .. }) {
+            return Some("countersinks");
+        }
+        if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
+            return Some("body moves/copies");
+        }
+        if let crate::FeatureKind::Sketch { links, .. } = &f.kind
+            && !links.is_empty()
+        {
+            return Some("projected sketch geometry (projection links)");
+        }
+        if let crate::FeatureKind::Extrude {
+            options, operation, ..
+        } = &f.kind
+        {
+            if !options.is_plain() {
+                return Some(
+                    "extrusion options (symmetric, two sides, offset start, to plane, thin, taper)",
+                );
+            }
+            if matches!(operation, crate::Operation::Intersect { .. }) {
+                return Some("intersect extrusions");
+            }
+        }
+    }
+    sketch_v6_feature(doc)
 }
 
-/// The oldest format version that can hold `doc`: 6 when it uses a run-6
-/// feature, 5 for a run-5 feature, else 4.
+/// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and
+/// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
+/// a run-5 build would silently drop unknown fields or refuse with a misleading
+/// message. Separate from the other v6 checks so it can be folded into
+/// `v6_feature`.
+pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
+    let sketches = doc.features.iter().filter_map(|f| match &f.kind {
+        crate::FeatureKind::Sketch { sketch, .. } => Some(sketch),
+        _ => None,
+    });
+    for s in sketches {
+        if !s.texts.is_empty() {
+            return Some("sketch text");
+        }
+        if s.constraints.iter().any(|c| {
+            matches!(
+                c,
+                rcad_sketch::Constraint::PatternStep { .. }
+                    | rcad_sketch::Constraint::PatternRotate { .. }
+            )
+        }) {
+            return Some("sketch patterns");
+        }
+    }
+    None
+}
+
+/// The oldest format version that can hold `doc`: 6 / 5 when it uses a
+/// run-6 / run-5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if run6_feature(doc).is_some() {
+    if v6_feature(doc).is_some() {
         6
     } else if v5_feature(doc).is_some() {
         5
@@ -311,7 +371,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
         )));
     }
     if nf.version < 6
-        && let Some(what) = run6_feature(&nf.document)
+        && let Some(what) = v6_feature(&nf.document)
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v6 feature)",

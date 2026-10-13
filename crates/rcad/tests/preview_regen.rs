@@ -42,6 +42,7 @@ fn cut(sketch: rcad_document::FeatureId, d: f64) -> Command {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     }
 }
 
@@ -70,6 +71,7 @@ fn preview_direction_matches_regeneration_on_a_split_face() {
             reverse: true,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
     );
     // A slot across the whole width splits the top face in two.
@@ -96,6 +98,7 @@ fn preview_direction_matches_regeneration_on_a_split_face() {
         through_all: false,
         reverse: false,
         region: None,
+        more: Default::default(),
     };
     assert_eq!(form.side(&sum.features, &sum.bodies), Some(1.0));
     assert_eq!(form.direction(&sum.features, &sum.bodies), -1.0);

@@ -99,6 +99,24 @@ enum Eq {
         v: f64,
         k: usize,
     },
+    /// `x[to] − x[from] − k (x[b] − x[a])` (one axis; pattern step, run 6).
+    Step {
+        to: usize,
+        from: usize,
+        a: usize,
+        b: usize,
+        k: f64,
+    },
+    /// Axis `axis` of `to − c − R (from − c)`, R the rotation by (cs, sn)
+    /// (point x columns; circular pattern copy, run 6).
+    Rot {
+        to: usize,
+        from: usize,
+        c: usize,
+        cs: f64,
+        sn: f64,
+        axis: usize,
+    },
     /// `x[p+k] − x[q+k] − v · w_k`, `w` the unit direction `c -> q`.
     VertRadial {
         p: usize,
@@ -188,6 +206,22 @@ impl Eq {
                 let (ux, uy, _) = unit(x, a, b);
                 let n = [-uy, ux];
                 x[p + k] - x[q + k] - v * n[k]
+            }
+            Eq::Step { to, from, a, b, k } => x[to] - x[from] - k * (x[b] - x[a]),
+            Eq::Rot {
+                to,
+                from,
+                c,
+                cs,
+                sn,
+                axis,
+            } => {
+                let (dx, dy) = (x[from] - x[c], x[from + 1] - x[c + 1]);
+                if axis == 0 {
+                    x[to] - x[c] - (cs * dx - sn * dy)
+                } else {
+                    x[to + 1] - x[c + 1] - (sn * dx + cs * dy)
+                }
             }
             Eq::VertRadial { p, q, c, v, k } => {
                 let (wx, wy, _) = unit(x, c, q);
@@ -346,6 +380,29 @@ impl Eq {
                 j[(row, q + k)] -= 1.0;
                 let g = if k == 0 { (0.0, v) } else { (-v, 0.0) };
                 add_unit_grad(x, j, row, a, b, g);
+            }
+            Eq::Step { to, from, a, b, k } => {
+                j[(row, to)] += 1.0;
+                j[(row, from)] -= 1.0;
+                j[(row, b)] -= k;
+                j[(row, a)] += k;
+            }
+            Eq::Rot {
+                to,
+                from,
+                c,
+                cs,
+                sn,
+                axis,
+            } => {
+                // d/d(from) of R(from − c) row `axis`, and of −c + R c.
+                let (rx, ry) = if axis == 0 { (cs, -sn) } else { (sn, cs) };
+                j[(row, to + axis)] += 1.0;
+                j[(row, c + axis)] -= 1.0;
+                j[(row, from)] -= rx;
+                j[(row, from + 1)] -= ry;
+                j[(row, c)] += rx;
+                j[(row, c + 1)] += ry;
             }
             Eq::VertRadial { p, q, c, v, k } => {
                 j[(row, p + k)] += 1.0;
@@ -552,6 +609,50 @@ impl System {
                             k: angle_scale,
                             perp: matches!(c, Constraint::Perpendicular { .. }),
                         });
+                    }
+                }
+                Constraint::PatternStep {
+                    from,
+                    to,
+                    a,
+                    b,
+                    k,
+                    axis,
+                } => {
+                    let (from, to, a, b) =
+                        (point_col[from], point_col[to], point_col[a], point_col[b]);
+                    for ax in 0..2usize {
+                        if axis.is_none_or(|x| usize::from(x) == ax) {
+                            push(Eq::Step {
+                                to: to + ax,
+                                from: from + ax,
+                                a: a + ax,
+                                b: b + ax,
+                                k: f64::from(*k),
+                            });
+                        }
+                    }
+                }
+                Constraint::PatternRotate {
+                    from,
+                    to,
+                    center,
+                    k,
+                    dim,
+                    axis,
+                } => {
+                    let (sn, cs) = (f64::from(*k) * dim.value.to_radians()).sin_cos();
+                    for ax in 0..2usize {
+                        if axis.is_none_or(|x| usize::from(x) == ax) {
+                            push(Eq::Rot {
+                                to: point_col[to],
+                                from: point_col[from],
+                                c: point_col[center],
+                                cs,
+                                sn,
+                                axis: ax,
+                            });
+                        }
                     }
                 }
                 Constraint::Angle { a, b, dim } => {
@@ -961,6 +1062,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 pt(0, 0.3, -0.2),
                 pt(1, 4.1, 1.7),
@@ -1067,6 +1169,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 pt(0, 0.4, -0.3),
                 pt(1, 9.1, 1.2),
@@ -1183,6 +1286,7 @@ mod tests {
             origin: None,
             construction: Default::default(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 SketchPoint {
                     id: PointId(0),

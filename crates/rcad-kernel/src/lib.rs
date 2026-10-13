@@ -16,9 +16,11 @@ mod measure;
 mod mesh;
 mod ops;
 pub mod prismatic;
+mod project;
 mod step;
 mod step_in;
 mod sweep;
+mod transform;
 mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
@@ -43,12 +45,14 @@ pub use ops::{
     bounds, coplanar_face_side, cut_prism, cut_region, extent_along, has_implicit_edges,
     join_prism, join_region, plane_has_face, profile_within_face, through_all_margin,
 };
+pub use project::{Curve2, face_boundary_curves};
 pub use step::{export_step, export_step_bodies};
 pub use step_in::{
     ImportedPlanarFace, ImportedSolid, LengthUnit, StepImport, StepImportOptions, StepStats,
     import_step,
 };
 pub use sweep::{PathSegment, sweep};
+pub use transform::{Rigid, transform_body};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
     verify_prism_boolean, verify_prisms_boolean,

@@ -200,8 +200,13 @@ fn fillet_refusals() {
         origin: [0.0, 0.0, 5.0],
         ..Frame::XY
     };
-    let e = fillet_edge(&l, &wall, &step, 1.0).unwrap_err().to_string();
-    assert!(e.contains("concave"), "{e}");
+    // Concave (run 6): the corner region is added, (r² − πr²/4)·length.
+    let filled = fillet_edge(&l, &wall, &step, 1.0).unwrap();
+    let want = volume(&l) + (1.0 - std::f64::consts::PI / 4.0) * 20.0;
+    assert!((volume(&filled) - want).abs() < 1e-6, "{}", volume(&filled));
+    // The wall above the step is 5 mm tall: radius 6 does not fit.
+    let e = fillet_edge(&l, &wall, &step, 6.0).unwrap_err().to_string();
+    assert!(e.contains("does not fit"), "{e}");
     // Not prismatic along the edge: a round hole across it.
     let holed = cut_prism(
         &b,

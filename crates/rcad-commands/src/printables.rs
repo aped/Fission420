@@ -81,6 +81,7 @@ fn new_body(name: &str, sketch: u32, d: f64, body: &str) -> Step {
         reverse: false,
         body_name: Some(body.into()),
         region: None,
+        options: Default::default(),
     })
 }
 
@@ -95,6 +96,7 @@ fn modify(name: &str, sketch: u32, d: f64, op: ExtrudeOp, target: u32, through: 
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     })
 }
 

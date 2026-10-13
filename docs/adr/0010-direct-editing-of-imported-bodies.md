@@ -79,7 +79,7 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   are kept); faces removed by an edit leave the table (references to them break).
 * `Evaluation::imported_face_ids` exposes the valid maps, for picking a face in the UI
   and for the `imported_faces` command.
-* Native format **v6**, written only when a `DirectEdit` exists (`io::run6_feature`);
+* Native format **v6**, written only when a `DirectEdit` exists (`io::v6_feature`);
   v5/v4 builds refuse such a file. Regeneration re-imports the embedded STEP blob and
   replays the edits, so save/reopen and undo/redo need no source file.
 

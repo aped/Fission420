@@ -23,7 +23,8 @@ pub use model::*;
 pub use params::{ParamUnit, Parameter, SlotKind};
 pub use regen::{
     BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FaceCandidate, FeatureResult,
-    MeshBody, RegenCache, ResolvedFace, regenerate, regenerate_cached, regenerate_cached_opts,
+    MeshBody, RegenCache, ResolvedFace, projection_curves, regenerate, regenerate_cached,
+    regenerate_cached_opts,
 };
 pub use session::{Model, ParamChange};
 

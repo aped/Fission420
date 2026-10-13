@@ -29,7 +29,14 @@ fn circ(d: f64, x: f64, y: f64) -> Sketch {
 }
 
 fn sketch(d: &mut Document, plane: SketchPlane, s: Sketch) -> FeatureId {
-    d.push("S", FeatureKind::Sketch { plane, sketch: s })
+    d.push(
+        "S",
+        FeatureKind::Sketch {
+            plane,
+            sketch: s,
+            links: Vec::new(),
+        },
+    )
 }
 
 fn face(feature: FeatureId, role: FaceRole) -> SketchPlane {
@@ -380,6 +387,7 @@ fn join_on_a_face_ignores_reverse_so_old_files_still_load() {
                 extent: Extent::Distance,
                 reverse,
                 region: None,
+                options: Default::default(),
             },
         );
         let e = regenerate(&d).unwrap_or_else(|e| panic!("reverse={reverse}: {e}"));

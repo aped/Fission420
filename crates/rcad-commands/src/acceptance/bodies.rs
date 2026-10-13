@@ -109,6 +109,7 @@ impl Run<'_> {
             reverse: false,
             body_name: body_name.map(Into::into),
             region: None,
+            options: Default::default(),
         })
     }
 
@@ -287,6 +288,7 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
         "choose a target body",
     );
@@ -409,6 +411,7 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
         "does not touch",
     );
@@ -424,6 +427,7 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
         "does not intersect",
     );

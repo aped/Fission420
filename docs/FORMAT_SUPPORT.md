@@ -228,9 +228,22 @@ documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/
 (`suppression.rs::frozen_v4_fixtures_load_unchanged`: load, regenerate to the cached volume,
 re-save as an identical v4 document).
 
+**v6 (run 6)** = v5 plus extrusion options (`"options"` on an `Extrude`: symmetric, two
+sides, start offset, up to a plane, thin, taper, further regions) and the `Intersect`
+operation (`rcad_document::io::v6_feature` lists every run-6 addition). Written only when used,
+otherwise v5/v4 as before; a file labelled v5 or older that contains a v6 feature is refused
+(a run-5 build would silently ignore the unknown fields and build a different solid). Frozen
+v5 documents (saved by run-6's build before the change, with run-5 features only) are in
+`crates/rcad-commands/tests/fixtures/native_v5/` (`native_formats.rs::v5_run5_documents`:
+open, analytic volume, re-save as an identical v5 document).
 **v6 (run 6)** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
-written only when present (`io::run6_feature`); otherwise the file stays v5/v4 as before.
+written only when present (`io::v6_feature`); otherwise the file stays v5/v4 as before.
 Imported bodies edited this way regenerate from the embedded STEP bytes plus the edit list.
+**v6 (run 6)** = v5 plus sketch text (`Sketch.texts`: string, font request, placement and the
+resolved glyph outlines with the font's file name and FNV-1a 64 content hash) and sketch pattern
+constraints (`PatternStep`, `PatternRotate`). Written only when a sketch uses one of them
+(`io.rs::sketch_v6_feature`, folded into `v6_feature`); a file labelled v5 or older that contains them is refused. Loading and regenerating never needs the font (the stored outlines are
+authoritative); only changing a text's string or font does.
 
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named

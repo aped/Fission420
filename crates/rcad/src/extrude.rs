@@ -38,6 +38,112 @@ pub struct ExtrudeForm {
     pub reverse: bool,
     /// Picked sketch region (None: the whole profile, the default).
     pub region: Option<RegionRef>,
+    /// Run-6 extent and shape options (see `rcad_document::ExtrudeOptions`).
+    pub more: ExtrudeMore,
+}
+
+/// How the far end of an extrusion is given (run 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExtentMode {
+    #[default]
+    OneSide,
+    Symmetric,
+    TwoSides,
+    ToPlane,
+}
+
+/// Edit buffers of the run-6 Extrude options.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtrudeMore {
+    pub mode: ExtentMode,
+    pub distance2: String,
+    pub start_offset: String,
+    pub thin: bool,
+    pub thin_t: String,
+    pub taper_deg: String,
+    /// Up-to plane: base (a world plane or the face selected when the
+    /// dialog opened) and offset along its normal.
+    pub to_base: rcad_document::PlaneBase,
+    pub to_face: Option<(
+        rcad_document::FaceRef,
+        String,
+        Option<rcad_kernel::FacePlane>,
+    )>,
+    pub to_offset: String,
+}
+
+impl Default for ExtrudeMore {
+    fn default() -> Self {
+        Self {
+            mode: ExtentMode::OneSide,
+            distance2: "5".into(),
+            start_offset: "0".into(),
+            thin: false,
+            thin_t: "2".into(),
+            taper_deg: "0".into(),
+            to_base: rcad_document::PlaneBase::WorldXY,
+            to_face: None,
+            to_offset: "0".into(),
+        }
+    }
+}
+
+impl ExtrudeMore {
+    /// The options these buffers describe (errors name the field).
+    pub fn options(&self) -> Result<rcad_document::ExtrudeOptions, String> {
+        let mut o = rcad_document::ExtrudeOptions::default();
+        match self.mode {
+            ExtentMode::OneSide => {}
+            ExtentMode::Symmetric => o.symmetric = true,
+            ExtentMode::TwoSides => {
+                o.distance2 = parse_num("second side distance", &self.distance2)?
+            }
+            ExtentMode::ToPlane => {
+                let off = parse_num("to-plane offset", &self.to_offset)?;
+                o.to = Some(if off == 0.0 {
+                    self.to_base.plane()
+                } else {
+                    rcad_document::SketchPlane::Offset {
+                        base: self.to_base,
+                        distance: off,
+                        angle: 0.0,
+                    }
+                });
+            }
+        }
+        o.start_offset = parse_num("start offset", &self.start_offset)?;
+        if self.thin {
+            o.thin = Some(parse_num("thin wall thickness", &self.thin_t)?);
+        }
+        o.taper = parse_num("taper", &self.taper_deg)?.to_radians();
+        Ok(o)
+    }
+
+    /// Signed position along `sketch` normal of the up-to plane (world
+    /// planes, or the selected face's exact plane), for the preview.
+    fn to_height(&self, frame: &PlaneFrame) -> Option<f64> {
+        use rcad_document::PlaneBase as B;
+        let (pt, n) = match self.to_base {
+            B::WorldXY => ([0.0; 3], [0.0, 0.0, 1.0]),
+            B::WorldXZ => ([0.0; 3], [0.0, -1.0, 0.0]),
+            B::WorldYZ => ([0.0; 3], [1.0, 0.0, 0.0]),
+            B::Face(_) => {
+                let p = self.to_face.as_ref()?.2?;
+                (p.point, p.normal)
+            }
+        };
+        let off: f64 = self.to_offset.trim().parse().ok()?;
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        if dot(n, frame.z).abs() < 1.0 - 1e-9 {
+            return None;
+        }
+        let q = [
+            pt[0] + n[0] * off - frame.origin[0],
+            pt[1] + n[1] * off - frame.origin[1],
+            pt[2] + n[2] * off - frame.origin[2],
+        ];
+        Some(dot(q, frame.z))
+    }
 }
 
 /// A closed loop at the near and far end of the preview tool (world).
@@ -270,16 +376,27 @@ impl ExtrudeForm {
             through_all: false,
             reverse: false,
             region: None,
+            more: ExtrudeMore {
+                to_face: app
+                    .selected_face()
+                    .and_then(|f| f.reference.map(|r| (r, f.description.clone(), f.plane))),
+                ..ExtrudeMore::default()
+            },
         }
     }
 
     pub fn command(&self) -> Result<Command, String> {
         let sketch = self.sketch.ok_or("choose a profile sketch")?;
         let through_all = self.through_all && self.op == ExtrudeOp::Cut;
-        let distance = if through_all {
+        let distance = if through_all || self.more.mode == ExtentMode::ToPlane {
             0.0
         } else {
             parse_num("distance", &self.distance)?
+        };
+        let options = if through_all {
+            Default::default()
+        } else {
+            self.more.options()?
         };
         let target = match self.op {
             ExtrudeOp::NewBody => None,
@@ -295,6 +412,7 @@ impl ExtrudeForm {
             reverse: self.reverse,
             body_name: None,
             region: self.region.clone(),
+            options,
         })
     }
 
@@ -321,7 +439,7 @@ impl ExtrudeForm {
     /// Cut from a face of the target goes into the material, a Join away from it).
     pub fn direction(&self, features: &[FeatureSummary], bodies: &[BodySummary]) -> f64 {
         let base = match (self.op, self.side(features, bodies)) {
-            (ExtrudeOp::Cut, Some(side)) => -side,
+            (ExtrudeOp::Cut | ExtrudeOp::Intersect, Some(side)) => -side,
             (ExtrudeOp::Join, Some(side)) => side,
             _ => 1.0,
         };
@@ -369,11 +487,29 @@ impl RcadApp {
             let margin = THROUGH_MARGIN_MM + THROUGH_MARGIN_REL * (hi - lo);
             [lo.min(0.0) - margin, hi.max(0.0) + margin]
         } else {
-            let d = form.distance.trim().parse::<f64>().ok()?;
-            if !(d.is_finite() && d > 0.0) {
+            // Same span rule as the regenerator (ExtrudeOptions).
+            let num = |t: &str| t.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+            let s0 = num(&form.more.start_offset)?;
+            let (dir, u0, u1) = if form.more.mode == ExtentMode::ToPlane {
+                let h = form.more.to_height(&frame)?;
+                (h.signum(), s0, h.abs())
+            } else {
+                let d = num(&form.distance).filter(|d| *d > 0.0)?;
+                let dir = form.direction(fs, &self.summary.bodies);
+                match form.more.mode {
+                    ExtentMode::Symmetric => (dir, s0 - d / 2.0, s0 + d / 2.0),
+                    ExtentMode::TwoSides => (
+                        dir,
+                        s0 - num(&form.more.distance2).filter(|v| *v > 0.0)?,
+                        s0 + d,
+                    ),
+                    _ => (dir, s0, s0 + d),
+                }
+            };
+            if u1 <= u0 {
                 return None;
             }
-            [0.0, form.direction(fs, &self.summary.bodies) * d]
+            [dir * u0, dir * u1]
         };
         let at = |p: [f64; 2], h: f64| {
             let w = frame.to_world(p);
@@ -561,6 +697,7 @@ impl RcadApp {
             ExtrudeOp::NewBody => "New body",
             ExtrudeOp::Join => "Join",
             ExtrudeOp::Cut => "Cut",
+            ExtrudeOp::Intersect => "Intersect",
         };
         // Fixed spot at the bottom of the view, right of the axis gizmo and
         // clear of the dialog (the run-3 label next to the prism collided with
@@ -651,6 +788,8 @@ impl RcadApp {
                 .probe("Join");
             ui.radio_value(&mut form.op, ExtrudeOp::Cut, "Cut")
                 .probe("Cut");
+            ui.radio_value(&mut form.op, ExtrudeOp::Intersect, "Intersect")
+                .probe("Intersect");
         });
         if form.op != ExtrudeOp::NewBody {
             let breps: Vec<&BodySummary> = self
@@ -698,7 +837,7 @@ impl RcadApp {
         if form.through_all {
             ui.small("Through All: both sides of the sketch plane, through the target's extent along the sketch normal (derived from the target, plus a small margin).");
         } else {
-            crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
+            self.extent_ui(ui, form);
         }
         let on_face = !form.through_all && form.side(features, &self.summary.bodies).is_some();
         if !form.through_all && form.side_ambiguous(features, &self.summary.bodies) {
@@ -736,6 +875,78 @@ impl RcadApp {
             RichText::new("Units: mm. Translucent preview only; nothing changes until OK.")
                 .small()
                 .weak(),
+        );
+    }
+}
+
+impl RcadApp {
+    /// Extent and shape options of the Extrude dialog (run 6).
+    fn extent_ui(&self, ui: &mut egui::Ui, form: &mut ExtrudeForm) {
+        use rcad_document::PlaneBase as B;
+        let m = &mut form.more;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Extent");
+            ui.radio_value(&mut m.mode, ExtentMode::OneSide, "One side")
+                .probe("One side");
+            ui.radio_value(&mut m.mode, ExtentMode::Symmetric, "Symmetric")
+                .probe("Symmetric");
+            ui.radio_value(&mut m.mode, ExtentMode::TwoSides, "Two sides")
+                .probe("Two sides");
+            ui.radio_value(&mut m.mode, ExtentMode::ToPlane, "To plane")
+                .probe("To plane");
+        });
+        match m.mode {
+            ExtentMode::ToPlane => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Up to");
+                    ui.radio_value(&mut m.to_base, B::WorldXY, "World XY");
+                    ui.radio_value(&mut m.to_base, B::WorldXZ, "World XZ");
+                    ui.radio_value(&mut m.to_base, B::WorldYZ, "World YZ");
+                    match &m.to_face {
+                        Some((r, _, _)) => {
+                            ui.radio_value(&mut m.to_base, B::Face(*r), "Selected face")
+                                .probe("To selected face");
+                        }
+                        None => {
+                            ui.add_enabled(false, egui::RadioButton::new(false, "Selected face"))
+                                .on_disabled_hover_text(
+                                    "Select a planar face before opening the Extrude dialog",
+                                );
+                        }
+                    }
+                });
+                if let (B::Face(_), Some((_, d, _))) = (m.to_base, &m.to_face) {
+                    ui.small(format!("Face: {d}"));
+                }
+                crate::panels::num_field(ui, "Offset from that plane (mm)", &mut m.to_offset);
+                ui.small(
+                    "The extrusion runs from the (offset) sketch plane up to this plane, which \
+                     must be parallel to the sketch; it follows the plane when that changes.",
+                );
+            }
+            ExtentMode::Symmetric => {
+                crate::panels::num_field(ui, "Whole length (mm)", &mut form.distance);
+                ui.small("Symmetric: half the length on each side of the sketch plane.");
+            }
+            ExtentMode::TwoSides => {
+                crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
+                crate::panels::num_field(ui, "Second side (mm)", &mut m.distance2);
+            }
+            ExtentMode::OneSide => {
+                crate::panels::num_field(ui, "Extrude distance (mm)", &mut form.distance);
+            }
+        }
+        crate::panels::num_field(ui, "Start offset (mm)", &mut m.start_offset);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut m.thin, "Thin").probe("Thin");
+            if m.thin {
+                crate::panels::num_field(ui, "Wall (mm)", &mut m.thin_t);
+            }
+        });
+        crate::panels::num_field(ui, "Taper (°)", &mut m.taper_deg);
+        ui.small(
+            "Thin: walls of that thickness inside the closed profile. Taper (New Body, \
+             polygons/circles): positive shrinks the profile along the extrusion.",
         );
     }
 }

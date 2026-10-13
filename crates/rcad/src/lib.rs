@@ -14,6 +14,7 @@ pub mod exchange;
 pub mod extrude;
 pub mod panels;
 pub mod params_ui;
+pub mod pattern_ui;
 pub mod place;
 pub mod probe;
 pub mod reattach;
@@ -22,6 +23,7 @@ pub mod scenes;
 pub mod section;
 pub mod sketch_edit;
 pub mod sketch_view;
+pub mod text_ui;
 pub mod view3d;
 
 pub use app::{
@@ -29,21 +31,30 @@ pub use app::{
 };
 pub use engine::{ExecMode, Reply};
 
+/// "side face (…)" naming of a sketch entity, or of a sketch text edge (run 6).
+fn side_label(entity: u32) -> String {
+    match rcad_sketch::text::text_edge_parts(rcad_sketch::EntityId(entity)) {
+        Some((t, g, c, e)) => format!(
+            "side face (text {t}, character {}, contour {c}, edge {e})",
+            g + 1
+        ),
+        None => format!("side face (sketch entity {entity})"),
+    }
+}
+
 /// Human-readable name of a semantic face role.
 pub(crate) fn face_role_label(role: &rcad_document::FaceRole) -> String {
     use rcad_document::FaceRole;
     match role {
         FaceRole::ExtrudeEndCap => "end cap".into(),
         FaceRole::ExtrudeStartCap => "start cap".into(),
-        FaceRole::ExtrudeSide { entity } => format!("side face (sketch entity {entity})"),
+        FaceRole::ExtrudeSide { entity } => side_label(*entity),
         FaceRole::Imported { body, face } => format!("imported face {face} of {body}"),
         FaceRole::Copy { instance, tool, of } => {
             let of = match of {
                 rcad_document::CopiedRole::EndCap => "end cap".to_string(),
                 rcad_document::CopiedRole::StartCap => "start cap".to_string(),
-                rcad_document::CopiedRole::Side { entity } => {
-                    format!("side face (sketch entity {entity})")
-                }
+                rcad_document::CopiedRole::Side { entity } => side_label(*entity),
             };
             let tool = if *tool > 0 {
                 format!(", tool {}", tool + 1)

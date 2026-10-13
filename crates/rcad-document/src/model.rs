@@ -263,6 +263,8 @@ pub enum Operation {
     Join { target: BodyId },
     /// Subtract the tool from `target`.
     Cut { target: BodyId },
+    /// Keep only the part of `target` inside the tool (run 6, format v6).
+    Intersect { target: BodyId },
 }
 
 impl Default for Operation {
@@ -295,6 +297,11 @@ pub enum FeatureKind {
     Sketch {
         plane: SketchPlane,
         sketch: Sketch,
+        /// Projected geometry kept associative (run 6, format v6): each link
+        /// drives sketch entities pinned by `FixedPoint` constraints, updated
+        /// from the source at every regeneration.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        links: Vec<ProjectionLink>,
     },
     /// New-body revolve of a sketch profile about the sketch's local Y axis.
     /// `angle` is in radians (exposed as parameter `angle_deg`).
@@ -322,6 +329,9 @@ pub enum FeatureKind {
         /// `BrokenReference`, never another region.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<rcad_sketch::RegionRef>,
+        /// Run-6 extent options (format v6; absent = run-5 behaviour).
+        #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
+        options: ExtrudeOptions,
     },
     /// Legacy (v1/v2) circular through-all cut; see [`FeatureKind::Extrude`] with
     /// [`Operation::Cut`] for general cuts.
@@ -359,10 +369,7 @@ pub enum FeatureKind {
     },
     /// Base feature: mesh bodies from an embedded 3MF package, one per build item
     /// in file order (units declared by the file).
-    Import3mf {
-        blob: BlobId,
-        bodies: Vec<BodyId>,
-    },
+    Import3mf { blob: BlobId, bodies: Vec<BodyId> },
     /// Repeat the tool of `seed` (an Extrude Join/Cut or a Hole) `count - 1` more
     /// times (count 1 = the seed only, no copies; run 5), each
     /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
@@ -376,10 +383,7 @@ pub enum FeatureKind {
     /// Apply the reflection of `seed`'s tool (an Extrude Join or Cut) across
     /// `plane` (a world plane through the origin or a planar face) to the seed's
     /// target body. The seed itself stays; this adds the mirrored copy.
-    Mirror {
-        seed: FeatureId,
-        plane: SketchPlane,
-    },
+    Mirror { seed: FeatureId, plane: SketchPlane },
     /// Repeat the tool of `seed` (an Extrude Join/Cut) `count - 1` more times,
     /// each rotated by a further `angle` (radians; parameter `angle_deg`, counter-
     /// clockwise about the seed sketch's normal) about `center` (seed sketch-plane
@@ -402,11 +406,7 @@ pub enum FeatureKind {
     /// both. Scope (`rcad_kernel::fillet_edge`): the body is prismatic along
     /// the edge (planar faces parallel/perpendicular to it), end faces
     /// perpendicular; refused otherwise with the reason. Parameter "radius".
-    Fillet {
-        a: FaceRef,
-        b: FaceRef,
-        radius: f64,
-    },
+    Fillet { a: FaceRef, b: FaceRef, radius: f64 },
     /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
     /// `a` and `b` on parallel planes, as new body `body`: equal-count
     /// polygons whose corresponding edges are parallel (planar sides; vertex
@@ -456,6 +456,25 @@ pub enum FeatureKind {
         open: FaceRole,
         thickness: f64,
     },
+    /// Rigid move of body `body` (run 6, format v6): rotate `angle` rad
+    /// (parameter `angle_deg`) about the axis through `origin` along `axis`,
+    /// then translate by `translate` (parameters `tx`, `ty`, `tz`). With
+    /// `copy`, the moved result is the new, independent body `copy` and
+    /// `body` stays. Faces made before the move keep resolving (references
+    /// are transformed); pattern/mirror/shell seeds made before a move of
+    /// their body are refused.
+    MoveBody {
+        body: BodyId,
+        translate: [f64; 3],
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default = "z_axis")]
+        axis: [f64; 3],
+        #[serde(default)]
+        angle: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        copy: Option<BodyId>,
+    },
     /// Direct edit (run 6, ADR 0010) of an imported STEP body: `face` is an
     /// imported face (`FaceRole::Imported`, by stable import index) and `op`
     /// what is done to it, exactly (`rcad_kernel::{offset_face,
@@ -463,10 +482,7 @@ pub enum FeatureKind {
     /// recovered feature history (STEP has none). Applies only while the body
     /// has been changed by nothing but its import and direct edits; a face
     /// removed by an earlier edit is a `BrokenReference`.
-    DirectEdit {
-        face: FaceRef,
-        op: DirectOp,
-    },
+    DirectEdit { face: FaceRef, op: DirectOp },
     /// Exact countersink (run 6, coverage SO06) at the entry of the hole made
     /// by Hole feature `hole`: a cone of `diameter` mm at the entry face and
     /// included `angle` (radians; parameter `angle_deg`, default 90°), built
@@ -480,6 +496,96 @@ pub enum FeatureKind {
         diameter: f64,
         angle: f64,
     },
+}
+
+fn z_axis() -> [f64; 3] {
+    [0.0, 0.0, 1.0]
+}
+
+/// Run-6 options of a [`FeatureKind::Extrude`] (SESSION_6 §B, docs/COMMANDS.md).
+/// All lengths in mm along the sketch normal, angles in radians. The tool is
+/// the profile region swept over a span `[lo, hi]` of the sketch normal:
+///
+/// * plain: `[s, s + d]` along the direction (`d` = `distance`, `s` =
+///   `start_offset` measured along the direction);
+/// * `symmetric`: `[s − d/2, s + d/2]` (`distance` is the whole length);
+/// * `distance2 > 0` (two sides): `[s − distance2, s + d]` along the direction;
+/// * `to`: from `s` up to the plane `to` (parallel to the sketch plane; a face,
+///   world or construction plane; its offset is the "to object" offset);
+///   `distance` is then unused. The direction is towards that plane.
+///
+/// `thin`: wall thickness; the region becomes the band between its outer loop
+/// and that loop offset inward by `thin` (closed profiles without holes).
+/// `taper`: draft angle (positive: the profile shrinks along the direction).
+/// `regions`: further regions extruded with the first (Join/Cut).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExtrudeOptions {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub symmetric: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub distance2: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub start_offset: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<SketchPlane>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub taper: f64,
+    /// Further regions of the same sketch extruded with the first (`region`)
+    /// in one feature (e.g. the glyphs of a text); Join/Cut only. Their side
+    /// faces are not referencable by role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<rcad_sketch::RegionRef>,
+}
+
+impl ExtrudeOptions {
+    /// No run-6 option set (a run-5 extrusion).
+    pub fn is_plain(&self) -> bool {
+        *self == ExtrudeOptions::default()
+    }
+}
+
+/// What a sketch projection reads (run 6, SESSION_6 §B / SK03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectSource {
+    /// Every boundary edge of a planar face (parallel to the sketch plane),
+    /// all loops. Lines and circular arcs only (exact).
+    Face(FaceRef),
+    /// The non-construction lines, arcs and circles of another sketch on a
+    /// parallel plane, matched by entity id.
+    Sketch(FeatureId),
+}
+
+/// One projected curve: the sketch entity it drives and its pinned points
+/// (line: a, b; arc: centre, start, end; circle: centre, rim point).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedCurve {
+    pub entity: rcad_sketch::EntityId,
+    pub points: Vec<rcad_sketch::PointId>,
+    /// Sketch source: the source entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<rcad_sketch::EntityId>,
+}
+
+/// An associative projection into a sketch: the source and, loop by loop,
+/// the curves it drives. Regeneration recomputes the source curves and moves
+/// the pinned points; a source whose shape changed (loop count, curve kinds,
+/// a missing source entity) is a `BrokenReference` naming the link, never a
+/// silent rebinding. Unlinking keeps the geometry as plain fixed curves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectionLink {
+    pub source: ProjectSource,
+    pub loops: Vec<Vec<LinkedCurve>>,
+}
+
+impl ProjectionLink {
+    pub fn source_feature(&self) -> FeatureId {
+        match self.source {
+            ProjectSource::Face(r) => r.feature,
+            ProjectSource::Sketch(f) => f,
+        }
+    }
 }
 
 /// Edit of a [`FeatureKind::DirectEdit`] (run 6, ADR 0010).
@@ -513,6 +619,7 @@ impl FeatureKind {
             extent: Extent::Distance,
             reverse: false,
             region: None,
+            options: ExtrudeOptions::default(),
         }
     }
 }
@@ -543,11 +650,18 @@ impl Feature {
     /// Features this one depends on.
     pub fn dependencies(&self) -> Vec<FeatureId> {
         match &self.kind {
-            FeatureKind::Sketch { plane, .. } => {
-                plane.face().map(|r| r.feature).into_iter().collect()
-            }
-            FeatureKind::Extrude { sketch, .. }
-            | FeatureKind::Cut { sketch, .. }
+            FeatureKind::Sketch { plane, links, .. } => plane
+                .face()
+                .map(|r| r.feature)
+                .into_iter()
+                .chain(links.iter().map(ProjectionLink::source_feature))
+                .collect(),
+            FeatureKind::Extrude {
+                sketch, options, ..
+            } => std::iter::once(*sketch)
+                .chain(options.to.and_then(|p| p.face()).map(|r| r.feature))
+                .collect(),
+            FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
             FeatureKind::Loft { a, b, .. } => vec![*a, *b],
@@ -569,6 +683,7 @@ impl Feature {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
             FeatureKind::Shell { extrude, .. } => vec![*extrude],
+            FeatureKind::MoveBody { .. } => vec![],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             FeatureKind::ImportStep { .. }
@@ -587,7 +702,10 @@ impl Feature {
             | FeatureKind::Revolve { body, .. }
             | FeatureKind::Loft { body, .. }
             | FeatureKind::Sweep { body, .. }
-            | FeatureKind::ImportMesh { body, .. } => vec![*body],
+            | FeatureKind::ImportMesh { body, .. }
+            | FeatureKind::MoveBody {
+                copy: Some(body), ..
+            } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -599,12 +717,16 @@ impl Feature {
     pub fn target_body(&self) -> Option<BodyId> {
         match &self.kind {
             FeatureKind::Extrude {
-                operation: Operation::Join { target } | Operation::Cut { target },
+                operation:
+                    Operation::Join { target }
+                    | Operation::Cut { target }
+                    | Operation::Intersect { target },
                 ..
             }
             | FeatureKind::Cut { target, .. }
             | FeatureKind::Pocket { target, .. }
-            | FeatureKind::Hole { target, .. } => Some(*target),
+            | FeatureKind::Hole { target, .. }
+            | FeatureKind::MoveBody { body: target, .. } => Some(*target),
             FeatureKind::DirectEdit {
                 face:
                     FaceRef {
@@ -630,7 +752,7 @@ impl Feature {
     /// Editable named parameters (mm).
     pub fn parameters(&self) -> Vec<(String, f64)> {
         match &self.kind {
-            FeatureKind::Sketch { sketch, plane } => {
+            FeatureKind::Sketch { sketch, plane, .. } => {
                 let mut p = sketch.dimensions();
                 if let Some((x, y)) = anchor(sketch) {
                     p.push(("center_x".into(), x));
@@ -651,7 +773,34 @@ impl Feature {
                 extent: Extent::ThroughAll,
                 ..
             } => vec![],
-            FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Extrude {
+                distance, options, ..
+            } => {
+                let mut v = Vec::new();
+                if options.to.is_none() {
+                    v.push(("distance".into(), *distance));
+                }
+                if options.distance2 != 0.0 {
+                    v.push(("distance2".into(), options.distance2));
+                }
+                if options.start_offset != 0.0 {
+                    v.push(("start_offset".into(), options.start_offset));
+                }
+                if let Some(t) = options.thin {
+                    v.push(("thin".into(), t));
+                }
+                if options.taper != 0.0 {
+                    v.push(("taper_deg".into(), options.taper.to_degrees()));
+                }
+                match options.to {
+                    Some(SketchPlane::Offset { distance, .. }) => {
+                        v.push(("to_offset".into(), distance));
+                    }
+                    Some(_) => v.push(("to_offset".into(), 0.0)),
+                    None => {}
+                }
+                v
+            }
             // Run 5: an offset mirror plane's distance is a parameter.
             FeatureKind::Mirror {
                 plane:
@@ -678,6 +827,14 @@ impl Feature {
                 diameter, angle, ..
             } => vec![
                 ("diameter".into(), *diameter),
+                ("angle_deg".into(), angle.to_degrees()),
+            ],
+            FeatureKind::MoveBody {
+                translate, angle, ..
+            } => vec![
+                ("tx".into(), translate[0]),
+                ("ty".into(), translate[1]),
+                ("tz".into(), translate[2]),
                 ("angle_deg".into(), angle.to_degrees()),
             ],
             FeatureKind::DirectEdit { op, .. } => match op {
@@ -882,8 +1039,84 @@ impl Feature {
                 Ok(())
             }
             FeatureKind::Extrude {
-                distance, extent, ..
-            } if name == "distance" && *extent == Extent::Distance => {
+                options, extent, ..
+            } if *extent == Extent::Distance
+                && matches!(
+                    name,
+                    "distance2" | "start_offset" | "thin" | "taper_deg" | "to_offset"
+                ) =>
+            {
+                let has = |b: bool| -> Result<()> {
+                    if b {
+                        Ok(())
+                    } else {
+                        Err(DocError::UnknownParameter {
+                            feature: id,
+                            name: name.into(),
+                        })
+                    }
+                };
+                match name {
+                    "distance2" => {
+                        has(options.distance2 != 0.0)?;
+                        if value <= 0.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.distance2: the second side's distance must be > 0 mm, \
+                                 got {value}"
+                            )));
+                        }
+                        options.distance2 = value;
+                    }
+                    "start_offset" => {
+                        has(options.start_offset != 0.0)?;
+                        options.start_offset = value;
+                    }
+                    "thin" => {
+                        has(options.thin.is_some())?;
+                        if value <= 0.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.thin: the wall thickness must be > 0 mm, got {value}"
+                            )));
+                        }
+                        options.thin = Some(value);
+                    }
+                    "taper_deg" => {
+                        has(options.taper != 0.0)?;
+                        if value == 0.0 || value.abs() >= 89.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.taper_deg: the taper must be non-zero and within ±89°, \
+                                 got {value}"
+                            )));
+                        }
+                        options.taper = value.to_radians();
+                    }
+                    _ => match options.to.as_mut() {
+                        Some(SketchPlane::Offset { distance, .. }) => *distance = value,
+                        Some(p) => {
+                            let base = match *p {
+                                SketchPlane::WorldXY => PlaneBase::WorldXY,
+                                SketchPlane::WorldXZ => PlaneBase::WorldXZ,
+                                SketchPlane::WorldYZ => PlaneBase::WorldYZ,
+                                SketchPlane::Face(r) => PlaneBase::Face(r),
+                                SketchPlane::Offset { .. } => unreachable!("matched above"),
+                            };
+                            *p = SketchPlane::Offset {
+                                base,
+                                distance: value,
+                                angle: 0.0,
+                            };
+                        }
+                        None => has(false)?,
+                    },
+                }
+                Ok(())
+            }
+            FeatureKind::Extrude {
+                distance,
+                extent,
+                options,
+                ..
+            } if name == "distance" && *extent == Extent::Distance && options.to.is_none() => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.distance: extrusion thickness must be > 0 mm, got {value}"
@@ -913,6 +1146,24 @@ impl Feature {
                     )));
                 }
                 *angle = value.to_radians();
+                Ok(())
+            }
+            FeatureKind::MoveBody {
+                translate, angle, ..
+            } if matches!(name, "tx" | "ty" | "tz" | "angle_deg") => {
+                match name {
+                    "tx" => translate[0] = value,
+                    "ty" => translate[1] = value,
+                    "tz" => translate[2] = value,
+                    _ => {
+                        if value.abs() > 360.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.angle_deg: the rotation must be within ±360°, got {value}"
+                            )));
+                        }
+                        *angle = value.to_radians();
+                    }
+                }
                 Ok(())
             }
             FeatureKind::Shell { thickness, .. } if name == "thickness" => {
@@ -1120,6 +1371,12 @@ pub struct Document {
     /// Named user parameters (v4), in display order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<crate::Parameter>,
+    /// Timeline marker (run 6, format v6): history is evaluated up to and
+    /// including this feature; later features are rolled back (kept, not
+    /// evaluated) and new features are inserted right after it (the marker
+    /// then moves to the new feature). None: at the end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback: Option<FeatureId>,
 }
 
 fn one() -> u32 {
@@ -1136,6 +1393,7 @@ impl Document {
             blobs: Vec::new(),
             next_blob_id: 1,
             parameters: Vec::new(),
+            rollback: None,
         }
     }
 
@@ -1292,8 +1550,27 @@ impl Document {
     /// Every evaluated feature's dependencies are evaluated: a feature that is
     /// not suppressed may not depend on a suppressed one.
     pub fn check_suppression(&self) -> Result<()> {
-        for f in self.features.iter().filter(|f| !f.suppressed) {
+        if let Some(m) = self.rollback {
+            self.feature(m).map_err(|_| {
+                DocError::Validation(format!("the timeline marker names missing feature {m}"))
+            })?;
+        }
+        for f in self
+            .features
+            .iter()
+            .filter(|f| !f.suppressed && !self.is_rolled_back(f.id))
+        {
             for d in self.dependencies_of(f) {
+                if self.is_rolled_back(d) {
+                    return Err(DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!(
+                            "{} ({}) depends on {d}, which is after the timeline marker; move \
+                             the marker past {d}",
+                            f.id, f.name
+                        ),
+                    });
+                }
                 if let Ok(g) = self.feature(d)
                     && g.suppressed
                 {
@@ -1445,15 +1722,119 @@ impl Document {
     pub fn push(&mut self, name: impl Into<String>, kind: FeatureKind) -> FeatureId {
         let id = FeatureId(self.next_id.clamp(1, u32::MAX - 1));
         self.next_id = id.0.saturating_add(1);
-        self.features.push(Feature {
+        let f = Feature {
             id,
             name: name.into(),
             kind,
             notes: vec![],
             expressions: Default::default(),
             suppressed: false,
-        });
+        };
+        // With the timeline rolled back, insert at the marker and move it.
+        match self
+            .rollback
+            .and_then(|m| self.features.iter().position(|x| x.id == m))
+        {
+            Some(p) => {
+                self.features.insert(p + 1, f);
+                self.rollback = Some(id);
+            }
+            None => self.features.push(f),
+        }
         id
+    }
+
+    /// Whether `id` lies after the timeline marker (rolled back).
+    pub fn is_rolled_back(&self, id: FeatureId) -> bool {
+        let pos = |x: FeatureId| self.features.iter().position(|f| f.id == x);
+        match (self.rollback.and_then(pos), pos(id)) {
+            (Some(m), Some(p)) => p > m,
+            _ => false,
+        }
+    }
+
+    /// Move the timeline marker after `at` (None: to the end). The marker at
+    /// the last feature is stored as None.
+    pub fn set_rollback(&mut self, at: Option<FeatureId>) -> Result<()> {
+        if let Some(a) = at {
+            self.feature(a)?;
+        }
+        self.rollback = at.filter(|a| self.features.last().map(|f| f.id) != Some(*a));
+        Ok(())
+    }
+
+    /// Reorder: move `id` before `before` (None: to the end of history).
+    /// Allowed only when every feature it depends on stays before it and every
+    /// feature depending on it stays after it (`dependencies_of`, face and
+    /// plane references, patterns' seeds); regeneration then decides whether
+    /// the new order of operations on a body still builds. Refused otherwise
+    /// with the blocking feature named.
+    pub fn move_feature(&mut self, id: FeatureId, before: Option<FeatureId>) -> Result<()> {
+        if before == Some(id) {
+            return Ok(());
+        }
+        let from = self
+            .features
+            .iter()
+            .position(|f| f.id == id)
+            .ok_or(DocError::UnknownFeature(id))?;
+        let f = self.features.remove(from);
+        let to = match before {
+            Some(b) => self
+                .features
+                .iter()
+                .position(|x| x.id == b)
+                .ok_or(DocError::UnknownFeature(b))?,
+            None => self.features.len(),
+        };
+        self.features.insert(to, f);
+        let pos = |x: FeatureId| self.features.iter().position(|g| g.id == x);
+        let me = self.feature(id)?.clone();
+        for d in self.dependencies_of(&me) {
+            if pos(d).is_some_and(|p| p > to) {
+                let g = self.feature(d)?;
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move before {d} ({}), which it depends on",
+                    me.name, g.name
+                )));
+            }
+        }
+        for u in self.dependents_of(id) {
+            if pos(u).is_some_and(|p| p < to) {
+                let g = self.feature(u)?;
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move after {u} ({}), which depends on it",
+                    me.name, g.name
+                )));
+            }
+        }
+        // A body must be created before anything that modifies it.
+        if let Some(b) = self.modified_body(&me) {
+            let creator = self
+                .features
+                .iter()
+                .position(|x| x.created_bodies().contains(&b));
+            if creator.is_some_and(|c| c > to) {
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move before the feature that creates {b}",
+                    me.name
+                )));
+            }
+        }
+        for b in me.created_bodies() {
+            if let Some(u) = self
+                .features
+                .iter()
+                .take(to)
+                .find(|x| self.modified_body(x) == Some(b))
+            {
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) creates {b}; it cannot move after {} ({}), which modifies it",
+                    me.name, u.id, u.name
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Append a new-body distance extrusion of `sketch`, allocating its body

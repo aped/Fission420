@@ -118,6 +118,7 @@ fn offset_from_the_cavity_floor_bound_to_a_parameter() {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
     )
     .feature

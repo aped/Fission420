@@ -86,6 +86,7 @@ fn op(sketch: FeatureId, d: f64, op: ExtrudeOp) -> Command {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     }
 }
 

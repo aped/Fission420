@@ -19,7 +19,7 @@
 //! * every vertex created by a polygon boolean lies outside every circle's
 //!   sag band (it is a line–line crossing, not a chord artefact) —
 //!   [`Rings::check_output`];
-//! * no line or circle is tangent to a circle except at a shared vertex.
+//! * no line or circle is tangent to a used arc of a circle except at a shared vertex.
 use super::{Contour, Region, SAME, snap};
 use crate::tol;
 use std::collections::HashMap;
@@ -109,6 +109,50 @@ fn angle(c: &Circ, p: P2) -> f64 {
 
 fn on_circle(c: &Circ, t: f64) -> P2 {
     [c.c[0] + c.r * t.cos(), c.c[1] + c.r * t.sin()]
+}
+
+/// Angular spans `(start, sweep)` of circle `k` that the loops' arcs use (a
+/// full circle is `(0, 2π)`). Where no arc of a circle runs, the circle has
+/// no boundary: tangency or near-contact there touches nothing (e.g. two
+/// fillet arcs whose full circles touch beyond both arcs).
+fn arc_cover(loops: &[ELoop], circles: &[Circ], k: usize) -> Vec<(f64, f64)> {
+    use std::f64::consts::TAU;
+    let c = &circles[k];
+    let mut out = Vec::new();
+    for l in loops {
+        let n = l.pts.len();
+        for i in 0..n {
+            let Kind::Arc { circle, ccw } = l.kind[i] else {
+                continue;
+            };
+            if circle != k {
+                continue;
+            }
+            if n == 1 {
+                out.push((0.0, TAU));
+                continue;
+            }
+            let (s, e) = (l.pts[i], l.pts[(i + 1) % n]);
+            let (a0, a1) = if ccw {
+                (angle(c, s), angle(c, e))
+            } else {
+                (angle(c, e), angle(c, s))
+            };
+            let sweep = (a1 - a0).rem_euclid(TAU);
+            out.push((a0, if sweep == 0.0 { TAU } else { sweep }));
+        }
+    }
+    out
+}
+
+/// Whether `p` (near circle `c`) lies within `slack` radians of a span of
+/// `cover`.
+fn covered(cover: &[(f64, f64)], c: &Circ, p: P2, slack: f64) -> bool {
+    use std::f64::consts::TAU;
+    let ap = angle(c, p);
+    cover
+        .iter()
+        .any(|&(a0, sweep)| (ap - a0 + slack).rem_euclid(TAU) <= sweep + 2.0 * slack)
 }
 
 /// Place every loop vertex within [`CIRCLE_MATCH`] of one circle exactly on
@@ -222,6 +266,9 @@ pub(super) struct Rings {
     /// Every point of the polygonized inputs and rings (an output vertex not
     /// in it was created by a polygon boolean).
     known: std::collections::HashSet<[i64; 2]>,
+    /// Per circle: the angular spans its input arcs use ([`arc_cover`]).
+    cover: Vec<Vec<(f64, f64)>>,
+    max_step: f64,
 }
 
 impl Rings {
@@ -231,6 +278,9 @@ impl Rings {
     /// between consecutive ring points; at least two chords join consecutive
     /// special points (so no line can coincide with a chord).
     pub fn new(circles: &[Circ], loops: &[ELoop], max_step: f64) -> FResult<Rings> {
+        let cover: Vec<Vec<(f64, f64)>> = (0..circles.len())
+            .map(|k| arc_cover(loops, circles, k))
+            .collect();
         let mut special: Vec<Vec<P2>> = vec![Vec::new(); circles.len()];
         for l in loops {
             for &p in &l.pts {
@@ -299,7 +349,8 @@ impl Rings {
                                 && (d[0] * u[1] - d[1] * u[0]).abs() <= 1e-9 * lu
                         })
                     };
-                    for x in line_circle(a, b, c, &special[k], &tangent_ok)? {
+                    let used = |p: P2| covered(&cover[k], c, p, CIRCLE_MATCH / c.r);
+                    for x in line_circle(a, b, c, &special[k], &tangent_ok, &used)? {
                         special[k].push(x);
                     }
                 }
@@ -321,7 +372,10 @@ impl Rings {
                     let u = [(b.c[0] - a.c[0]) / d, (b.c[1] - a.c[1]) / d];
                     let s = if ext || a.r >= b.r { 1.0 } else { -1.0 };
                     let t = [a.c[0] + s * a.r * u[0], a.c[1] + s * a.r * u[1]];
-                    if !junction(i, Some(j), t) {
+                    if !junction(i, Some(j), t)
+                        && covered(&cover[i], a, t, CIRCLE_MATCH / a.r)
+                        && covered(&cover[j], b, t, CIRCLE_MATCH / b.r)
+                    {
                         return Err(Fail::Refuse(format!(
                             "two circles (r {:.6} and {:.6} mm) are tangent at ({:.6}, {:.6}); \
                              tangent contact is ambiguous",
@@ -390,6 +444,8 @@ impl Rings {
             rings,
             at,
             known,
+            cover,
+            max_step,
         })
     }
 
@@ -501,6 +557,11 @@ impl Rings {
                 }
                 let d = dist(p, c.c);
                 if d >= c.r + SAME {
+                    continue;
+                }
+                // Away from every arc of this circle (by more than two ring
+                // chords) no ring chord is in any contour: nothing to resolve.
+                if !covered(&self.cover[k], c, p, 2.0 * self.max_step + SAME / c.r) {
                     continue;
                 }
                 if d > c.r - SAME {
@@ -646,13 +707,14 @@ impl Rings {
 
 /// Exact intersections of segment `ab` with circle `c` strictly inside the
 /// segment (not at a point already special on the circle); a tangent contact
-/// away from a shared vertex is refused.
+/// away from a shared vertex, on an arc some loop uses, is refused.
 fn line_circle(
     a: P2,
     b: P2,
     c: &Circ,
     special: &[P2],
     tangent_ok: &dyn Fn(P2) -> bool,
+    used: &dyn Fn(P2) -> bool,
 ) -> FResult<Vec<P2>> {
     let d = [b[0] - a[0], b[1] - a[1]];
     let len = d[0].hypot(d[1]);
@@ -669,7 +731,7 @@ fn line_circle(
     if (h - c.r).abs() <= TANGENT {
         let touches = t_foot > -SAME && t_foot < len + SAME;
         let junction = tangent_ok(foot);
-        if touches && !junction {
+        if touches && !junction && used(foot) {
             return Err(Fail::Refuse(format!(
                 "a straight edge is tangent to a circle (r {:.6} mm) at ({:.6}, {:.6}); \
                  tangent contact is ambiguous",

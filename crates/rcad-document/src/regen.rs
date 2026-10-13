@@ -3,9 +3,10 @@
 use crate::hole::{check_hole_inside, to_kernel};
 use crate::import::{self, ImportedPlanarFace};
 use crate::{
-    BodyId, CopiedRole, DocError, Document, Extent, FaceRef, FaceRole, FeatureId, FeatureKind,
-    Operation, Result, SketchPlane,
+    BodyId, CopiedRole, DocError, Document, Extent, ExtrudeOptions, FaceRef, FaceRole, FeatureId,
+    FeatureKind, Operation, Result, SketchPlane,
 };
+use crate::{LinkedCurve, ProjectSource, ProjectionLink};
 use rcad_kernel::{self as k, Body, Frame, Measurements};
 use rcad_sketch::{EntityId, Profile as SketchProfile, SolveReport};
 use serde::{Deserialize, Serialize};
@@ -324,6 +325,12 @@ struct ExtrudeOut {
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
     joined: bool,
+    /// Intersect (run 6): no face of the result is referencable by role.
+    intersect: bool,
+    /// No run-6 option (start on the sketch plane, one side, no thin/taper).
+    plain: bool,
+    /// Several regions in one feature (patterns/mirrors do not copy it).
+    multi: bool,
     body: BodyId,
 }
 
@@ -354,9 +361,33 @@ struct Snapshot {
     /// Body ids in creation order.
     created: Vec<BodyId>,
     results: Vec<FeatureResult>,
+    /// Evaluation index of every evaluated feature (run 6).
+    index: HashMap<FeatureId, usize>,
+    /// Rigid moves of bodies (body, evaluation index of the move, transform),
+    /// in order: faces made before a move are found moved with the body.
+    moves: Vec<(BodyId, usize, k::Rigid)>,
 }
 
 impl Snapshot {
+    /// The transform carrying faces made by `feature` on `body` to where
+    /// `body` is now (the moves after `feature`).
+    fn placement(&self, body: BodyId, feature: FeatureId) -> k::Rigid {
+        let at = self.index.get(&feature).copied().unwrap_or(0);
+        self.moves
+            .iter()
+            .filter(|(b, i, _)| *b == body && *i > at)
+            .fold(k::Rigid::IDENTITY, |acc, (_, _, t)| t.after(&acc))
+    }
+
+    /// Whether `body` was moved after `feature`.
+    fn moved_since(&self, body: Option<BodyId>, feature: FeatureId) -> bool {
+        body.is_some_and(|b| !self.placement(b, feature).is_identity())
+    }
+
+    fn body_of_extrude(&self, f: FeatureId) -> Option<BodyId> {
+        self.extrudes.get(&f).map(|e| e.body)
+    }
+
     fn new() -> Self {
         Self {
             sketches: HashMap::new(),
@@ -369,6 +400,8 @@ impl Snapshot {
             bodies: BTreeMap::new(),
             created: Vec::new(),
             results: Vec::new(),
+            index: HashMap::new(),
+            moves: Vec::new(),
         }
     }
 }
@@ -449,6 +482,9 @@ fn prefix_keys(doc: &Document, order: &[FeatureId]) -> Result<Vec<String>> {
         let f = serde_json::to_string(feature)
             .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
         key.push_str(&f);
+        if doc.is_rolled_back(*id) {
+            key.push_str("\trolled back");
+        }
         // A missing blob fails regeneration of this feature anyway.
         if let Some(b) = feature.blob().and_then(|b| doc.blob(b).ok()) {
             key.push_str(&format!("\tblob {} {}", b.len, b.fnv64));
@@ -516,9 +552,29 @@ fn brep_target(st: &Snapshot, id: FeatureId, target: BodyId) -> Result<Body> {
 /// `EvalBody::measurements == None` (deferred measurement).
 pub fn regenerate_cached_opts(
     doc: &Document,
-    mut cache: Option<&mut RegenCache>,
+    cache: Option<&mut RegenCache>,
     measure_body: bool,
 ) -> Result<Evaluation> {
+    match regen_impl(doc, cache, measure_body, None)? {
+        Regen::Done(e) => Ok(*e),
+        Regen::Stopped(_) => Err(DocError::Validation(
+            "internal: regeneration stopped early".into(),
+        )),
+    }
+}
+
+/// A full evaluation, or the state just before feature `stop`.
+enum Regen {
+    Done(Box<Evaluation>),
+    Stopped(Box<Snapshot>),
+}
+
+fn regen_impl(
+    doc: &Document,
+    mut cache: Option<&mut RegenCache>,
+    measure_body: bool,
+    stop: Option<FeatureId>,
+) -> Result<Regen> {
     let order = doc.evaluation_order()?;
     doc.validate_bodies()?;
     doc.check_suppression()?;
@@ -539,6 +595,10 @@ pub fn regenerate_cached_opts(
     }
 
     for (i, id) in order.iter().copied().enumerate().skip(start) {
+        if stop == Some(id) {
+            return Ok(Regen::Stopped(Box::new(st)));
+        }
+        st.index.insert(id, i);
         let f = doc.feature(id)?;
         let mut r = FeatureResult {
             id,
@@ -552,9 +612,13 @@ pub fn regenerate_cached_opts(
             body: None,
             notes: vec![],
         };
-        if f.suppressed {
+        if f.suppressed || doc.is_rolled_back(id) {
             // Not evaluated (no dependent is evaluated: `check_suppression`).
-            r.notes.push("suppressed: not evaluated".into());
+            r.notes.push(if f.suppressed {
+                "suppressed: not evaluated".into()
+            } else {
+                "rolled back: after the timeline marker, not evaluated".into()
+            });
             st.results.push(r);
             if let Some(c) = cache.as_deref_mut() {
                 c.insert(keys[i].clone(), st.clone());
@@ -562,9 +626,17 @@ pub fn regenerate_cached_opts(
             continue;
         }
         match &f.kind {
-            FeatureKind::Sketch { plane, sketch } => {
+            FeatureKind::Sketch {
+                plane,
+                sketch,
+                links,
+            } => {
                 let (frame, resolved) = plane_frame(id, plane, &st)?;
                 let mut s = sketch.clone();
+                for (li, link) in links.iter().enumerate() {
+                    let curves = link_curves(id, &frame, &link.source, &st)?;
+                    bind_link(id, li, link, &curves, &mut s)?;
+                }
                 let report = s.solve();
                 if !report.is_success() {
                     let culprits: Vec<String> = report
@@ -683,6 +755,7 @@ pub fn regenerate_cached_opts(
                 extent,
                 reverse,
                 region,
+                options,
             } => {
                 let out = extrude_feature(
                     &mut st,
@@ -693,6 +766,7 @@ pub fn regenerate_cached_opts(
                     *extent,
                     *reverse,
                     region.as_ref(),
+                    options,
                 )?;
                 r.body = Some(out.body);
                 st.extrudes.insert(id, out);
@@ -856,11 +930,47 @@ pub fn regenerate_cached_opts(
                 st.holes.insert(id, tools);
                 r.body = Some(*target);
             }
+            FeatureKind::MoveBody {
+                body,
+                translate,
+                origin,
+                axis,
+                angle,
+                copy,
+            } => {
+                let t = k::Rigid::new(*translate, *origin, *axis, *angle)
+                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+                let b = brep_target(&st, id, *body)?;
+                let moved = k::transform_body(&b, &t).map_err(kernel(id))?;
+                match copy {
+                    Some(c) => {
+                        create_body(
+                            &mut st,
+                            id,
+                            *c,
+                            BodyGeometry::Brep(moved),
+                            BodySource::Modeled,
+                        )?;
+                        r.body = Some(*c);
+                    }
+                    None => {
+                        replace_body(&mut st, id, *body, moved);
+                        st.moves.push((*body, i, t));
+                        r.body = Some(*body);
+                    }
+                }
+            }
             FeatureKind::Shell {
                 extrude,
                 open,
                 thickness,
             } => {
+                if st.moved_since(st.body_of_extrude(*extrude), *extrude) {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: shell: the body of {extrude} was moved after it; the scoped \
+                         shell needs it in place (shell before the move)"
+                    )));
+                }
                 let (body, tool) = shell_tool(doc, &st, id, *extrude, *open, *thickness)?;
                 let target = brep_target(&st, id, body)?;
                 r.frame = Some(tool.start);
@@ -1067,7 +1177,7 @@ pub fn regenerate_cached_opts(
         imported_face_ids,
     };
     eval.refresh_legacy_view();
-    Ok(eval)
+    Ok(Regen::Done(Box::new(eval)))
 }
 
 /// Every semantic planar face (extrusion caps and line sides, pattern/mirror
@@ -1214,6 +1324,7 @@ fn extrude_feature(
     extent: Extent,
     reverse: bool,
     pick: Option<&rcad_sketch::RegionRef>,
+    opts: &ExtrudeOptions,
 ) -> Result<ExtrudeOut> {
     let s = st
         .sketches
@@ -1222,22 +1333,98 @@ fn extrude_feature(
         .clone();
     let region = s.region(id, sketch, pick)?;
     let (profile, entities) = (region.outer, region.outer_entities);
-    let holes = region.holes;
-    let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
-    // Join/Cut with inner loops: only the exact slab construction builds them
-    // (`apply_tool`, ADR 0007); elsewhere it refuses with the reason.
-    let kp = to_kernel(&profile);
+    let mut holes = region.holes;
+    let mut extra = Vec::new();
+    for r in &opts.regions {
+        let x = s.region(id, sketch, Some(r))?;
+        extra.push((x.outer, x.outer_entities, x.holes));
+    }
     let frame = s.frame;
-    if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: {m}"));
+    let invalid = |m: String| DocError::Validation(format!("{id}: {m}"));
+    // Option combinations (ExtrudeOptions): one way to give the far end.
+    if opts.symmetric && (opts.distance2 != 0.0 || opts.to.is_some()) {
+        return Err(invalid(
+            "symmetric extrusions have one length; clear 'two sides' / 'to plane'".into(),
+        ));
+    }
+    if opts.to.is_some() && opts.distance2 != 0.0 {
+        return Err(invalid(
+            "'to plane' and 'two sides' cannot be combined".into(),
+        ));
+    }
+    if extent == Extent::ThroughAll && !opts.is_plain() {
+        return Err(invalid(
+            "'through all' takes no symmetric/two-sides/offset/to-plane/thin/taper option".into(),
+        ));
+    }
+    for (name, v) in [
+        ("distance2", opts.distance2),
+        ("start_offset", opts.start_offset),
+        ("taper", opts.taper),
+    ] {
+        if !v.is_finite() {
+            return Err(invalid(format!("{name} must be finite, got {v}")));
+        }
+    }
+    if opts.distance2 < 0.0 {
+        return Err(invalid(format!(
+            "distance2: the second side's distance must be > 0 mm, got {}",
+            opts.distance2
+        )));
+    }
+    // Thin: the band between the outer loop and its inward offset.
+    if let Some(t) = opts.thin {
+        if !t.is_finite() || t <= 0.0 {
+            return Err(invalid(format!(
+                "thin: wall thickness must be > 0 mm, got {t}"
+            )));
+        }
+        if !holes.is_empty() {
+            return Err(limit(
+                "a thin extrusion needs a single closed loop (the region has inner loops)".into(),
+            ));
+        }
+        let inner = rcad_sketch::offset_profile(&profile, -t).map_err(|x| {
+            limit(format!(
+                "thin: wall thickness {t} mm does not fit the profile (inward offset: {x})"
+            ))
+        })?;
+        holes.push((inner, Vec::new()));
+        for (p, _, h) in extra.iter_mut() {
+            if !h.is_empty() {
+                return Err(limit(
+                    "a thin extrusion needs single closed loops (a region has inner loops)".into(),
+                ));
+            }
+            let inner = rcad_sketch::offset_profile(p, -t).map_err(|x| {
+                limit(format!(
+                    "thin: wall thickness {t} mm does not fit a region (inward offset: {x})"
+                ))
+            })?;
+            h.push((inner, Vec::new()));
+        }
+    }
+    if !extra.is_empty() && !matches!(operation, Operation::Join { .. } | Operation::Cut { .. }) {
+        return Err(limit(
+            "several regions are extruded together only by Join or Cut (New Body would make \
+             separate solids; Intersect keeps one region)"
+                .into(),
+        ));
+    }
+    let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
+    let kp = to_kernel(&profile);
+    if opts.to.is_none() && extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0)
+    {
         return Err(DocError::Validation(format!(
             "{id}.distance: extrusion distance must be > 0 mm, got {distance}"
         )));
     }
     let target = match operation {
         Operation::NewBody { .. } => None,
-        Operation::Join { target } | Operation::Cut { target } => {
-            Some((target, brep_target(st, id, target)?))
-        }
+        Operation::Join { target }
+        | Operation::Cut { target }
+        | Operation::Intersect { target } => Some((target, brep_target(st, id, target)?)),
     };
     // Sketch on a face of the target: +1/-1 when the face's outward normal is
     // along/against the sketch normal (material lies on the other side).
@@ -1246,26 +1433,56 @@ fn extrude_feature(
         None => None,
     };
     // Direction semantics (ADR 0003): along the sketch normal, except when the
-    // sketch plane holds a face of the target. A Cut then goes into the material
-    // by default (`reverse` flips it). A Join goes away from the material and
-    // ignores `reverse`: the other way only adds nothing, and documents saved
-    // before this rule set `reverse` exactly when it pointed away.
+    // sketch plane holds a face of the target. A Cut (or Intersect) then goes
+    // into the material by default (`reverse` flips it). A Join goes away from
+    // the material and ignores `reverse`: the other way only adds nothing, and
+    // documents saved before this rule set `reverse` exactly when it pointed
+    // away.
     let base = match (operation, side) {
-        (Operation::Cut { .. }, Some(side)) => -side,
+        (Operation::Cut { .. } | Operation::Intersect { .. }, Some(side)) => -side,
         (Operation::Join { .. }, Some(side)) => side,
         _ => 1.0,
     };
-    let dir = match (operation, side) {
+    let mut dir = match (operation, side) {
         (Operation::Join { .. }, Some(side)) => side,
         _ if reverse => -base,
         _ => base,
     };
-    // Tool = prism of the profile over [a, b] along the sketch normal.
-    let (mut a, mut b) = if dir > 0.0 {
-        (0.0, distance)
+    // Span along the direction, u ∈ [u0, u1] (ExtrudeOptions).
+    let s0 = opts.start_offset;
+    let mut distance = distance;
+    let (u0, u1) = if let Some(to) = &opts.to {
+        let (tf, _) = plane_frame(id, to, st)?;
+        if dot(tf.z, frame.z).abs() < 1.0 - 1e-9 {
+            return Err(limit(
+                "'to plane' needs a plane parallel to the sketch plane (curved or oblique \
+                 targets are not supported)"
+                    .into(),
+            ));
+        }
+        let h = dot(sub(tf.origin, frame.origin), frame.z);
+        if h.abs() <= k::tol::MIN_LENGTH {
+            return Err(invalid("the 'to' plane is the sketch plane itself".into()));
+        }
+        dir = h.signum();
+        if dir * s0 >= h.abs() - k::tol::MIN_LENGTH && s0 != 0.0 {
+            return Err(invalid(format!(
+                "the start offset {s0} mm reaches the 'to' plane ({:.6} mm away)",
+                h.abs()
+            )));
+        }
+        distance = h.abs() - s0;
+        (s0, h.abs())
+    } else if opts.symmetric {
+        (s0 - distance / 2.0, s0 + distance / 2.0)
     } else {
-        (-distance, 0.0)
+        (s0 - opts.distance2, s0 + distance)
     };
+    if extent == Extent::Distance && u1 - u0 <= k::tol::MIN_LENGTH {
+        return Err(invalid("the extrusion has no length".into()));
+    }
+    // Tool = prism of the profile over [a, b] along the sketch normal.
+    let (mut a, mut b) = if dir > 0.0 { (u0, u1) } else { (-u1, -u0) };
     let mut out = ExtrudeOut {
         start: frame,
         distance,
@@ -1275,12 +1492,29 @@ fn extrude_feature(
         entities,
         holes,
         span: (0.0, 0.0),
-        nominal: (0.0, 0.0),
+        nominal: (a, b),
         side,
         removes: false,
         joined: false,
+        intersect: false,
+        plain: opts.is_plain(),
+        multi: false,
         body: BodyId(0),
     };
+    if opts.taper != 0.0 {
+        if !matches!(operation, Operation::NewBody { .. }) {
+            return Err(limit(
+                "a tapered extrusion is only available as New Body so far (Join/Cut/Intersect \
+                 with a taper: not yet supported)"
+                    .into(),
+            ));
+        }
+        if !khole.is_empty() {
+            return Err(limit(
+                "a tapered extrusion needs a region without inner loops".into(),
+            ));
+        }
+    }
     match (operation, target) {
         (Operation::NewBody { body }, _) => {
             if extent == Extent::ThroughAll {
@@ -1288,8 +1522,11 @@ fn extrude_feature(
                     "{id}: 'through all' needs a Cut target body"
                 )));
             }
-            let solid =
-                k::extrude_region(&kp, &khole, &frame.offset(a), b - a).map_err(kernel(id))?;
+            let solid = if opts.taper != 0.0 {
+                tapered_solid(id, &out.profile, &frame, (a, b), dir, opts.taper)?
+            } else {
+                k::extrude_region(&kp, &khole, &frame.offset(a), b - a).map_err(kernel(id))?
+            };
             create_body(st, id, body, BodyGeometry::Brep(solid), BodySource::Modeled)?;
             out.body = body;
         }
@@ -1300,7 +1537,6 @@ fn extrude_feature(
                 )));
             }
             out.joined = true;
-            out.nominal = (a, b);
             if side.is_some() {
                 // Report a tool that misses the target as such, before the
                 // face-containment rule (the sketch plane may merely be coplanar
@@ -1318,14 +1554,26 @@ fn extrude_feature(
                     });
                 }
             }
-            let (joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
+            for (i, (p, ents, h)) in extra.iter().enumerate() {
+                let o = ExtrudeOut {
+                    profile: p.clone(),
+                    entities: ents.clone(),
+                    holes: h.clone(),
+                    ..out.clone()
+                };
+                let w = format!("region {}", i + 2);
+                joined = apply_tool(&joined, &o, &frame, Some(&w), id, None)?.0;
+            }
             replace_body(st, id, target, joined);
             out.body = target;
+            out.multi = !extra.is_empty();
         }
         (Operation::Cut { .. }, Some((target, t))) => {
             out.removes = true;
             if extent == Extent::Distance
+                && opts.is_plain()
                 && let Some(side) = side
                 && dir * side > 0.0
             {
@@ -1333,18 +1581,156 @@ fn extrude_feature(
                     "{id}: the cut points away from the material of {target}; clear 'reverse'"
                 )));
             }
-            out.nominal = (a, b);
-            let (cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
+            for (i, (p, ents, h)) in extra.iter().enumerate() {
+                let o = ExtrudeOut {
+                    profile: p.clone(),
+                    entities: ents.clone(),
+                    holes: h.clone(),
+                    ..out.clone()
+                };
+                let w = format!("region {}", i + 2);
+                cut = apply_tool(&cut, &o, &frame, Some(&w), id, None)?.0;
+            }
             replace_body(st, id, target, cut);
             out.body = target;
+            out.multi = !extra.is_empty();
         }
-        (Operation::Join { .. } | Operation::Cut { .. }, None) => {
+        (Operation::Intersect { .. }, Some((target, t))) => {
+            out.intersect = true;
+            let kept = intersect_tool(&t, &out, &frame, id)?;
+            replace_body(st, id, target, kept);
+            out.body = target;
+        }
+        (Operation::Join { .. } | Operation::Cut { .. } | Operation::Intersect { .. }, None) => {
             return Err(DocError::Validation(format!("{id}: missing target body")));
         }
     }
     out.span = (a, b);
     Ok(out)
+}
+
+/// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:
+/// the far end (along `dir`) is the profile offset by `−(b − a)·tan(taper)`
+/// (positive taper shrinks it), lofted exactly (ADR 0008: polygons have
+/// parallel corresponding edges, circles give a cone frustum).
+fn tapered_solid(
+    id: FeatureId,
+    profile: &SketchProfile,
+    frame: &Frame,
+    (a, b): (f64, f64),
+    dir: f64,
+    taper: f64,
+) -> Result<Body> {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: taper: {m}"));
+    let delta = -(b - a) * taper.tan();
+    let far = rcad_sketch::offset_profile(profile, delta).map_err(|x| {
+        limit(format!(
+            "the profile offset by {delta:.6} mm at the far end is not valid ({x}); reduce the \
+             taper or the distance"
+        ))
+    })?;
+    let (near_at, far_at) = if dir > 0.0 { (a, b) } else { (b, a) };
+    k::loft(
+        &to_kernel(profile),
+        &frame.offset(near_at),
+        &to_kernel(&far),
+        &frame.offset(far_at),
+    )
+    .map_err(|e| {
+        limit(format!(
+            "{e} (tapered profiles are lofted: polygons and circles)"
+        ))
+    })
+}
+
+/// Intersect: keep the material of `t` inside `e`'s tool. Built as cuts by
+/// the tool's complement within a box around `t` (each an exact slab cut
+/// checked against its nominal tool, ADR 0005/0006): the box with the profile
+/// as a hole over the tool span, every inner loop of the profile over the
+/// span, and the whole box below / above the span.
+fn intersect_tool(t: &Body, e: &ExtrudeOut, frame: &Frame, id: FeatureId) -> Result<Body> {
+    let err = kernel(id);
+    let bb = k::bounds(t).map_err(&err)?;
+    // Box around the target in sketch-frame coordinates.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for i in 0..8 {
+        let p = [
+            if i & 1 == 0 { bb.min[0] } else { bb.max[0] },
+            if i & 2 == 0 { bb.min[1] } else { bb.max[1] },
+            if i & 4 == 0 { bb.min[2] } else { bb.max[2] },
+        ];
+        let d = sub(p, frame.origin);
+        let q = [dot(d, frame.x), dot(d, frame.y), dot(d, frame.z)];
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
+        }
+    }
+    let m = k::through_all_margin(t).map_err(&err)?;
+    let (x0, x1, y0, y1) = (lo[0] - m, hi[0] + m, lo[1] - m, hi[1] + m);
+    let boxp = SketchProfile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let (a, b) = e.nominal;
+    let piece = |profile: SketchProfile,
+                 holes: Vec<(SketchProfile, Vec<EntityId>)>,
+                 span: (f64, f64)| ExtrudeOut {
+        start: *frame,
+        distance: span.1 - span.0,
+        dir: 1.0,
+        extent: Extent::Distance,
+        profile,
+        entities: vec![],
+        holes,
+        span,
+        nominal: span,
+        side: None,
+        removes: true,
+        joined: false,
+        intersect: false,
+        plain: true,
+        multi: false,
+        body: e.body,
+    };
+    let mut pieces = vec![piece(
+        boxp.clone(),
+        vec![(e.profile.clone(), e.entities.clone())],
+        (a, b),
+    )];
+    for (h, ents) in &e.holes {
+        pieces.push(piece(h.clone(), vec![], (a, b)));
+        let _ = ents;
+    }
+    if a > lo[2] + k::tol::KERNEL_LINEAR {
+        pieces.push(piece(boxp.clone(), vec![], (lo[2] - m, a)));
+    }
+    if b < hi[2] - k::tol::KERNEL_LINEAR {
+        pieces.push(piece(boxp, vec![], (b, hi[2] + m)));
+    }
+    let mut body = t.clone();
+    for p in &pieces {
+        if k::prismatic::not_applicable(&body, &to_kernel(&p.profile), frame).is_some()
+            && !p.holes.is_empty()
+        {
+            let why = k::prismatic::not_applicable(&body, &to_kernel(&p.profile), frame)
+                .unwrap_or_default();
+            return Err(DocError::ProductLimit(format!(
+                "{id}: intersect is built from exact slab cuts, which do not apply to this \
+                 target ({why})"
+            )));
+        }
+        let (next, _) =
+            apply_tool(&body, p, frame, Some("intersect"), id, None).map_err(|x| match x {
+                DocError::Kernel { detail, .. } if detail.contains("disconnected") => {
+                    DocError::ProductLimit(format!(
+                        "{id}: intersect leaves disconnected pieces of the target ({detail})"
+                    ))
+                }
+                other => other,
+            })?;
+        body = next;
+    }
+    Ok(body)
 }
 
 /// Which end of a blind cut stayed on a coplanar face because moving it would
@@ -1636,9 +2022,11 @@ fn apply_tool(
         return Ok((out, span));
     }
     let (a, b) = e.nominal;
+    // The support face matters only when the tool starts on it (run 6: a
+    // symmetric, two-sided or offset join crosses or leaves the face).
+    let on_face = (e.dir > 0.0 && a == 0.0) || (e.dir < 0.0 && b == 0.0);
     let span = match e.side {
-        None => (a, b),
-        Some(side) => {
+        Some(side) if on_face => {
             // A tool end lying on a face of the target would make coplanar
             // boolean faces (Truck 0.6 returns no result): move that end into
             // the material, which is only exact when the profile lies on the
@@ -1689,6 +2077,7 @@ fn apply_tool(
                 (a, -side * delta)
             }
         }
+        _ => (a, b),
     };
     let truck = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0)
         .map_err(err)
@@ -1875,7 +2264,7 @@ fn shell_tool(
     let e = st
         .extrudes
         .get(&extrude)
-        .filter(|e| !e.removes && !e.joined && e.extent == Extent::Distance)
+        .filter(|e| !e.removes && !e.joined && e.plain && e.extent == Extent::Distance)
         .ok_or_else(|| {
             limit(format!(
                 "{extrude} is not a New Body extrusion; the scoped shell hollows a body made by \
@@ -1955,6 +2344,9 @@ fn shell_tool(
             side: Some(side),
             removes: true,
             joined: false,
+            intersect: false,
+            plain: true,
+            multi: false,
             body: e.body,
         },
     ))
@@ -2060,6 +2452,9 @@ fn hole_tools(
             side: Some(side),
             removes: true,
             joined: false,
+            intersect: false,
+            plain: true,
+            multi: false,
             body: target,
         }
     };
@@ -2096,6 +2491,17 @@ fn hole_tools(
 /// Pattern/mirror seeds: an evaluated Extrude Join or Cut, or a Hole (its
 /// counterbore and hole tools, applied in that order).
 fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<ExtrudeOut>> {
+    let body = st
+        .holes
+        .get(&seed)
+        .and_then(|t| t.first())
+        .map(|e| e.body)
+        .or(st.body_of_extrude(seed));
+    if st.moved_since(body, seed) {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: the body of {seed} was moved after it; pattern or mirror it before the move"
+        )));
+    }
     if let Some(tools) = st.holes.get(&seed) {
         return Ok(tools.clone());
     }
@@ -2107,6 +2513,17 @@ fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<Extrud
             from: id,
             detail: format!("{seed} is not an evaluated extrusion or hole"),
         })?;
+    if e.intersect || e.multi {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: patterns and mirrors copy single-region Extrude Join or Cut features ({seed} \
+             is {})",
+            if e.intersect {
+                "an intersect"
+            } else {
+                "a multi-region extrusion"
+            }
+        )));
+    }
     if !e.removes && !e.joined {
         return Err(DocError::ProductLimit(format!(
             "{id}: patterns and mirrors copy Extrude Join or Cut features ({seed} creates a \
@@ -2545,6 +2962,16 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
         y: cross(z, x),
         z,
     };
+    if e.intersect {
+        return Err(broken(format!(
+            "{} is an intersect extrusion; its faces are not referencable by role",
+            fr.feature
+        )));
+    }
+    // Cap positions along the sketch normal: the far end along the direction
+    // (end cap) and the near end (start cap) of the nominal span.
+    let (lo, hi) = e.nominal;
+    let (end_at, start_at) = if e.dir > 0.0 { (hi, lo) } else { (lo, hi) };
     match fr.role {
         FaceRole::ExtrudeEndCap | FaceRole::ExtrudeStartCap if e.extent == Extent::ThroughAll => {
             Err(broken(format!(
@@ -2555,23 +2982,29 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
         FaceRole::ExtrudeEndCap => {
             let origin = f.to_world([0.0, 0.0]);
             let origin = [
-                origin[0] + z_dir[0] * e.distance,
-                origin[1] + z_dir[1] * e.distance,
-                origin[2] + z_dir[2] * e.distance,
+                origin[0] + f.z[0] * end_at,
+                origin[1] + f.z[1] * end_at,
+                origin[2] + f.z[2] * end_at,
             ];
             // New/Join: outward along the extrusion; cut floor: back toward the opening.
             let z = if e.removes { scale(z_dir, -1.0) } else { z_dir };
             Ok(frame_from(origin, z, f.x))
         }
         FaceRole::ExtrudeStartCap => {
-            if e.removes || e.joined {
+            if (e.removes || e.joined) && start_at == 0.0 {
                 return Err(broken(format!(
                     "{} has no start cap face (a {} starts on its support)",
                     fr.feature,
                     if e.removes { "cut" } else { "join" }
                 )));
             }
-            Ok(frame_from(f.origin, scale(z_dir, -1.0), f.x))
+            let o = f.origin;
+            let origin = [
+                o[0] + f.z[0] * start_at,
+                o[1] + f.z[1] * start_at,
+                o[2] + f.z[2] * start_at,
+            ];
+            Ok(frame_from(origin, scale(z_dir, -1.0), f.x))
         }
         FaceRole::ExtrudeSide { entity } => {
             // Outer loop first, then the holes (whose walls face into the hole).
@@ -2858,6 +3291,310 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
+/// `frame` carried back through `t` (the inverse of a rigid transform).
+fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
+    let tr = |v: [f64; 3]| {
+        [
+            t.r[0][0] * v[0] + t.r[1][0] * v[1] + t.r[2][0] * v[2],
+            t.r[0][1] * v[0] + t.r[1][1] * v[1] + t.r[2][1] * v[2],
+            t.r[0][2] * v[0] + t.r[1][2] * v[1] + t.r[2][2] * v[2],
+        ]
+    };
+    Frame {
+        origin: tr(sub(frame.origin, t.t)),
+        x: tr(frame.x),
+        y: tr(frame.y),
+        z: tr(frame.z),
+    }
+}
+
+/// Projection source curves, loop by loop, each with its source entity.
+pub type SourceCurves = Vec<Vec<(k::Curve2, Option<EntityId>)>>;
+
+/// Source curves of a projection into the sketch on `frame` (2-D sketch
+/// coordinates), loop by loop, each with its source entity (sketch sources).
+/// The source plane must be parallel to the sketch plane (projection along
+/// the sketch normal is then a translation: lines and arcs stay exact).
+fn link_curves(
+    id: FeatureId,
+    frame: &Frame,
+    source: &ProjectSource,
+    st: &Snapshot,
+) -> Result<SourceCurves> {
+    let broken = |detail: String| DocError::BrokenReference { from: id, detail };
+    let (src_frame, loops): (Frame, SourceCurves) = match source {
+        ProjectSource::Face(r) => {
+            let rf = resolve_face(id, r, st)?;
+            let body = brep_target(st, id, rf.body)?;
+            let loops = k::face_boundary_curves(&body, &rf.frame)
+                .map_err(|e| broken(format!("projection of {} {:?}: {e}", r.feature, r.role)))?;
+            (
+                rf.frame,
+                loops
+                    .into_iter()
+                    .map(|l| l.into_iter().map(|c| (c, None)).collect())
+                    .collect(),
+            )
+        }
+        ProjectSource::Sketch(f) => {
+            let so = st.sketches.get(f).ok_or_else(|| {
+                broken(format!("projection source {f} is not an evaluated sketch"))
+            })?;
+            let sk = &so.solved;
+            let pt = |p: rcad_sketch::PointId| -> Result<[f64; 2]> {
+                sk.points
+                    .iter()
+                    .find(|q| q.id == p)
+                    .map(|q| [q.x, q.y])
+                    .ok_or_else(|| broken(format!("sketch {f} lost point {p:?}")))
+            };
+            let mut out = Vec::new();
+            for e in sk
+                .entities
+                .iter()
+                .filter(|e| !sk.construction.contains(&e.id()))
+            {
+                let c = match e {
+                    rcad_sketch::Entity::Line { a, b, .. } => k::Curve2::Line {
+                        a: pt(*a)?,
+                        b: pt(*b)?,
+                    },
+                    rcad_sketch::Entity::Arc {
+                        center, start, end, ..
+                    } => k::Curve2::Arc {
+                        c: pt(*center)?,
+                        a: pt(*start)?,
+                        b: pt(*end)?,
+                        ccw: true,
+                    },
+                    rcad_sketch::Entity::Circle { center, radius, .. } => k::Curve2::Circle {
+                        c: pt(*center)?,
+                        r: *radius,
+                    },
+                };
+                out.push((c, Some(e.id())));
+            }
+            (so.frame, vec![out])
+        }
+    };
+    if dot(src_frame.z, frame.z).abs() < 1.0 - 1e-9 {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: projection needs a source parallel to the sketch plane (an oblique source \
+             would project arcs to ellipses)"
+        )));
+    }
+    let to2 = |p: [f64; 2]| {
+        let w = sub(src_frame.to_world(p), frame.origin);
+        [dot(w, frame.x), dot(w, frame.y)]
+    };
+    // A mirrored in-plane orientation flips arc directions.
+    let flip = dot(src_frame.z, frame.z) < 0.0;
+    Ok(loops
+        .into_iter()
+        .map(|l| {
+            l.into_iter()
+                .map(|(c, e)| {
+                    let c = match c {
+                        k::Curve2::Line { a, b } => k::Curve2::Line {
+                            a: to2(a),
+                            b: to2(b),
+                        },
+                        k::Curve2::Arc { c, a, b, ccw } => k::Curve2::Arc {
+                            c: to2(c),
+                            a: to2(a),
+                            b: to2(b),
+                            ccw: ccw != flip,
+                        },
+                        k::Curve2::Circle { c, r } => k::Curve2::Circle { c: to2(c), r },
+                    };
+                    (c, e)
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// The points a curve pins: line a, b; arc centre, start, end (sketch arcs
+/// run counter-clockwise from start to end); circle centre and rim point.
+fn curve_points(c: &k::Curve2) -> Vec<[f64; 2]> {
+    match *c {
+        k::Curve2::Line { a, b } => vec![a, b],
+        k::Curve2::Arc { c, a, b, ccw } => {
+            if ccw {
+                vec![c, a, b]
+            } else {
+                vec![c, b, a]
+            }
+        }
+        k::Curve2::Circle { c, r } => vec![c, [c[0] + r, c[1]]],
+    }
+}
+
+fn curve_kind(c: &k::Curve2) -> u8 {
+    match c {
+        k::Curve2::Line { .. } => 0,
+        k::Curve2::Arc { .. } => 1,
+        k::Curve2::Circle { .. } => 2,
+    }
+}
+
+/// Move the pinned points of `link` in `s` to the source curves. Sketch
+/// sources match by source entity; face sources loop by loop (same count and
+/// sequence of curve kinds, up to where the loop starts), choosing the
+/// rotation nearest to the stored positions. Anything else is a
+/// BrokenReference naming the link.
+fn bind_link(
+    id: FeatureId,
+    li: usize,
+    link: &ProjectionLink,
+    curves: &[Vec<(k::Curve2, Option<EntityId>)>],
+    s: &mut rcad_sketch::Sketch,
+) -> Result<()> {
+    let broken = |why: String| DocError::BrokenReference {
+        from: id,
+        detail: format!(
+            "projection {} (from {}) no longer matches its source: {why}; unlink it or project \
+             again",
+            li + 1,
+            link.source_feature()
+        ),
+    };
+    let stored = |p: rcad_sketch::PointId, s: &rcad_sketch::Sketch| {
+        s.constraints.iter().find_map(|c| match c {
+            rcad_sketch::Constraint::FixedPoint { p: q, x, y } if *q == p => Some([*x, *y]),
+            _ => None,
+        })
+    };
+    // Assignment: for every linked curve, its new geometry.
+    let mut assigned: Vec<(&LinkedCurve, k::Curve2)> = Vec::new();
+    match link.source {
+        ProjectSource::Sketch(_) => {
+            let all: Vec<&(k::Curve2, Option<EntityId>)> = curves.iter().flatten().collect();
+            for lc in link.loops.iter().flatten() {
+                let from = lc
+                    .from
+                    .ok_or_else(|| broken("no source entity recorded".into()))?;
+                let (c, _) = all
+                    .iter()
+                    .find(|(_, e)| *e == Some(from))
+                    .ok_or_else(|| broken(format!("source entity {from:?} was removed")))?;
+                assigned.push((lc, *c));
+            }
+        }
+        ProjectSource::Face(_) => {
+            if curves.len() != link.loops.len() {
+                return Err(broken(format!(
+                    "the face had {} boundary loop(s), now {}",
+                    link.loops.len(),
+                    curves.len()
+                )));
+            }
+            let mut used = vec![false; curves.len()];
+            let entity_kind = |e: EntityId| match s.entities.iter().find(|x| x.id() == e) {
+                Some(rcad_sketch::Entity::Line { .. }) => Some(0u8),
+                Some(rcad_sketch::Entity::Arc { .. }) => Some(1),
+                Some(rcad_sketch::Entity::Circle { .. }) => Some(2),
+                None => None,
+            };
+            for ll in &link.loops {
+                let kinds: Vec<Option<u8>> = ll.iter().map(|lc| entity_kind(lc.entity)).collect();
+                let mut best: Option<(f64, usize, usize)> = None;
+                for (ci, cl) in curves.iter().enumerate() {
+                    if used[ci] || cl.len() != ll.len() {
+                        continue;
+                    }
+                    let n = cl.len();
+                    for rot in 0..n {
+                        let ok = (0..n).all(|j| Some(curve_kind(&cl[(j + rot) % n].0)) == kinds[j]);
+                        if !ok {
+                            continue;
+                        }
+                        let mut d = 0.0;
+                        for j in 0..n {
+                            let pts = curve_points(&cl[(j + rot) % n].0);
+                            for (p, q) in pts.iter().zip(&ll[j].points) {
+                                if let Some(o) = stored(*q, s) {
+                                    d += (p[0] - o[0]).hypot(p[1] - o[1]);
+                                }
+                            }
+                        }
+                        if best.is_none_or(|(bd, _, _)| d < bd) {
+                            best = Some((d, ci, rot));
+                        }
+                    }
+                }
+                let (_, ci, rot) = best.ok_or_else(|| {
+                    broken("a boundary loop changed its number or kinds of edges".into())
+                })?;
+                used[ci] = true;
+                let n = ll.len();
+                for (j, lc) in ll.iter().enumerate() {
+                    assigned.push((lc, curves[ci][(j + rot) % n].0));
+                }
+            }
+        }
+    }
+    for (lc, c) in assigned {
+        let pts = curve_points(&c);
+        if pts.len() != lc.points.len() {
+            return Err(broken(format!("{:?} changed kind", lc.entity)));
+        }
+        for (p, q) in pts.iter().zip(&lc.points) {
+            let fixed = s.constraints.iter_mut().find_map(|c| match c {
+                rcad_sketch::Constraint::FixedPoint { p: r, x, y } if r == q => Some((x, y)),
+                _ => None,
+            });
+            let Some((x, y)) = fixed else {
+                return Err(broken(format!(
+                    "pinned point {q:?} lost its fixed constraint"
+                )));
+            };
+            (*x, *y) = (p[0], p[1]);
+            if let Some(sp) = s.points.iter_mut().find(|sp| sp.id == *q) {
+                (sp.x, sp.y) = (p[0], p[1]);
+            }
+        }
+        if let k::Curve2::Circle { r, .. } = c
+            && let Some(rcad_sketch::Entity::Circle { radius, .. }) =
+                s.entities.iter_mut().find(|e| e.id() == lc.entity)
+        {
+            *radius = r;
+        }
+    }
+    Ok(())
+}
+
+/// Source curves for a new projection into sketch `sketch` (the history
+/// state just before it, in its frame).
+pub fn projection_curves(
+    doc: &Document,
+    sketch: FeatureId,
+    source: &ProjectSource,
+) -> Result<SourceCurves> {
+    let FeatureKind::Sketch { plane, .. } = &doc.feature(sketch)?.kind else {
+        return Err(DocError::Validation(format!("{sketch} is not a sketch")));
+    };
+    // The source must come first in history (no cycle).
+    let pos = |f: FeatureId| doc.features.iter().position(|x| x.id == f);
+    let src = match source {
+        ProjectSource::Face(r) => r.feature,
+        ProjectSource::Sketch(f) => *f,
+    };
+    if src == sketch || pos(src) > pos(sketch) || doc.with_dependents(sketch).contains(&src) {
+        return Err(DocError::Validation(format!(
+            "{sketch} cannot project {src}: it comes later in history or depends on the sketch \
+             (a cycle)"
+        )));
+    }
+    match regen_impl(doc, None, false, Some(sketch))? {
+        Regen::Stopped(st) => {
+            let (frame, _) = plane_frame(sketch, plane, &st)?;
+            link_curves(sketch, &frame, source, &st)
+        }
+        Regen::Done(_) => Err(DocError::Validation(format!("{sketch} was not evaluated"))),
+    }
+}
+
 fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<ResolvedFace> {
     // The generating tool and its extrusion role, for telling coplanar faces
     // apart by the tool's own footprint.
@@ -2912,6 +3649,9 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         }
     };
     let tool = tool_of;
+    // Faces made before a move of their body are found moved with it.
+    let moved = st.placement(owner, fr.feature);
+    let frame = moved.frame(&frame);
     let state = st.bodies.get(&owner).ok_or(DocError::BrokenReference {
         from,
         detail: format!("body {owner} no longer exists"),
@@ -2932,7 +3672,9 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         // The face is the one this tool's footprint overlaps (review run 5:
         // also when the plane holds one face, which may be another tool's —
         // e.g. an occurrence's floor cut away and the seed's still there).
-        let (outline, curved) = footprint(e, role, &frame);
+        // The footprint is computed where the tool was made, then moved.
+        let (outline, curved) = footprint(e, role, &moved_back(&moved, &frame));
+        let outline: Vec<[f64; 3]> = outline.into_iter().map(|p| moved.point(p)).collect();
         if polygon_area(&outline) > 0.0 {
             let (hits, inside) = k::planar_faces_overlapping(body, &frame, &outline, curved)
                 .map_err(kernel(from))?;

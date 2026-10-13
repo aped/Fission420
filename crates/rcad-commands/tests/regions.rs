@@ -81,6 +81,7 @@ fn extrude(sketch: FeatureId, d: f64, op: ExtrudeOp, region: Option<RegionRef>) 
         reverse: false,
         body_name: None,
         region,
+        options: Default::default(),
     }
 }
 
@@ -107,6 +108,7 @@ fn rev(c: Command) -> Command {
             reverse: true,
             body_name,
             region,
+            options: Default::default(),
         },
         c => c,
     }

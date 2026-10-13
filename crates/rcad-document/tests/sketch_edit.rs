@@ -55,6 +55,7 @@ fn add_sketch(m: &mut Model, s: Sketch) -> FeatureId {
             FeatureKind::Sketch {
                 plane: SketchPlane::WorldXY,
                 sketch: s,
+                links: Vec::new(),
             },
         ))
     })

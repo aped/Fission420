@@ -19,10 +19,14 @@
 mod arc;
 mod edit;
 pub mod fillet;
+pub mod font;
 pub mod offset;
+pub mod pattern;
 mod profile;
 mod region;
+pub mod shapes;
 mod solver;
+pub mod text;
 
 pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
 pub use edit::{DragOutcome, DragResult, fmt_mm};
@@ -34,6 +38,8 @@ pub use fillet::FilletResult;
 pub use offset::{OffsetPair, OffsetResult, offset_profile};
 pub use profile::{LoopSegment, Profile};
 pub use region::{Region, RegionRef, SketchRegion};
+pub use shapes::{PolygonFit, PolygonResult, SlotResult};
+pub use text::{FontSpec, HAlign, SketchText, TextLoop, TextSpec, VAlign};
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -214,6 +220,31 @@ pub enum Constraint {
         b: EntityId,
         dim: Dimension,
     },
+    /// Linear sketch pattern copy (run 6, [`pattern`]): `to − from = k (b − a)`,
+    /// the step vector being the (construction) line `a -> b`. 2 equations, or 1
+    /// (only coordinate `axis`, 0 = x, 1 = y) for the one point of a copied arc
+    /// whose second equation would duplicate the arc's implied radius equation.
+    PatternStep {
+        from: PointId,
+        to: PointId,
+        a: PointId,
+        b: PointId,
+        k: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<u8>,
+    },
+    /// Circular sketch pattern copy (run 6): `to = c + R(k θ) (from − c)`, θ =
+    /// `dim.value` degrees counter-clockwise (0 < θ < 360). 2 equations, or 1
+    /// (`axis`) as for [`Constraint::PatternStep`].
+    PatternRotate {
+        from: PointId,
+        to: PointId,
+        center: PointId,
+        k: u32,
+        dim: Dimension,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<u8>,
+    },
 }
 
 impl Constraint {
@@ -230,6 +261,7 @@ impl Constraint {
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
             | Constraint::Angle { dim, .. }
+            | Constraint::PatternRotate { dim, .. }
             | Constraint::Offset { dim, .. } => Some(dim),
             _ => None,
         }
@@ -243,6 +275,7 @@ impl Constraint {
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
             | Constraint::Angle { dim, .. }
+            | Constraint::PatternRotate { dim, .. }
             | Constraint::Offset { dim, .. } => Some(dim),
             _ => None,
         }
@@ -328,6 +361,13 @@ pub enum SketchError {
     /// radius beyond [`MAX_ARC_RADIUS_RATIO`] × chord).
     #[error("degenerate arc: {0}")]
     DegenerateArc(String),
+    /// Sketch text: the requested font is not installed or cannot be read
+    /// (run 6). Stored text keeps its outlines; only re-resolving needs it.
+    #[error("font not found: {0}")]
+    FontNotFound(String),
+    /// Sketch text: invalid string/height or an unusable font (run 6).
+    #[error("text: {0}")]
+    Text(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -349,6 +389,10 @@ pub struct Sketch {
     /// Only raised by [`Sketch::remove_entity`]; absent (0) otherwise.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retired_entity_ids: u32,
+    /// Text items (run 6, [`text`]): their glyph outlines are profile loops.
+    /// Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<SketchText>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -507,6 +551,7 @@ impl Sketch {
             origin: None,
             construction: BTreeSet::new(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 p(0, 0.0, 0.0),
                 p(1, -hw, -hh),
@@ -553,6 +598,7 @@ impl Sketch {
             origin: None,
             construction: BTreeSet::new(),
             retired_entity_ids: 0,
+            texts: vec![],
             points: vec![
                 SketchPoint {
                     id: PointId(0),
@@ -591,9 +637,15 @@ impl Sketch {
     }
 
     /// Named driving dimensions in constraint order.
+    /// Named dimensions in constraint order. The copies of one circular
+    /// pattern share their `pattern_angle` dimension (listed once).
     pub fn dimensions(&self) -> Vec<(String, f64)> {
+        let mut seen = HashSet::new();
         self.constraints
             .iter()
+            .filter(|c| {
+                !matches!(c, Constraint::PatternRotate { dim, .. } if !dim.name.is_empty() && !seen.insert(dim.name.clone()))
+            })
             .filter_map(Constraint::dimension)
             .map(|d| (d.name.clone(), d.value))
             .collect()
@@ -613,13 +665,30 @@ impl Sketch {
                 value,
             });
         }
-        let dim = self
+        let is_pattern_angle = self
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::PatternRotate { dim, .. } if dim.name == name));
+        if is_pattern_angle && value >= 360.0 {
+            return Err(SketchError::InvalidDimension {
+                name: name.to_owned(),
+                value,
+            });
+        }
+        let mut found = false;
+        // Every copy of a circular pattern carries the shared angle.
+        for d in self
             .constraints
             .iter_mut()
             .filter_map(Constraint::dimension_mut)
-            .find(|d| d.name == name)
-            .ok_or_else(|| SketchError::UnknownDimension(name.to_owned()))?;
-        dim.value = value;
+            .filter(|d| d.name == name)
+        {
+            d.value = value;
+            found = true;
+        }
+        if !found {
+            return Err(SketchError::UnknownDimension(name.to_owned()));
+        }
         Ok(())
     }
 
@@ -799,6 +868,48 @@ impl Sketch {
                         )));
                     }
                 }
+                Constraint::PatternStep {
+                    from,
+                    to,
+                    a,
+                    b,
+                    k,
+                    axis,
+                } => {
+                    for p in [from, to, a, b] {
+                        need_point(p)?;
+                    }
+                    if *k == 0 || from == to || a == b || axis.is_some_and(|x| x > 1) {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: pattern step needs k >= 1, distinct points and \
+                             axis 0 or 1"
+                        )));
+                    }
+                }
+                Constraint::PatternRotate {
+                    from,
+                    to,
+                    center,
+                    k,
+                    dim,
+                    axis,
+                } => {
+                    for p in [from, to, center] {
+                        need_point(p)?;
+                    }
+                    if *k == 0 || from == to || axis.is_some_and(|x| x > 1) {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: pattern rotation needs k >= 1, distinct points and \
+                             axis 0 or 1"
+                        )));
+                    }
+                    if !(dim.value > 0.0 && dim.value < 360.0) {
+                        return Err(SketchError::InvalidDimension {
+                            name: dim.name.clone(),
+                            value: dim.value,
+                        });
+                    }
+                }
                 Constraint::PointOnLine { point, line } => {
                     need_point(point)?;
                     if let Entity::Line { a, b, .. } = need_entity(i, line, "line")?
@@ -813,7 +924,22 @@ impl Sketch {
             }
             if let Some(d) = c.dimension() {
                 check_dim_value(&d.name, d.value)?;
-                if !d.name.is_empty() && !names.insert(d.name.as_str()) {
+                // One circular pattern's copies share their angle dimension
+                // (same name and value, all PatternRotate).
+                let shared = |name: &str| {
+                    let mut it = self
+                        .constraints
+                        .iter()
+                        .filter_map(|c| c.dimension().map(|d| (c, d)))
+                        .filter(|(_, d)| d.name == name);
+                    it.clone().all(|(c, x)| {
+                        matches!(c, Constraint::PatternRotate { .. }) && x.value == d.value
+                    }) && it.next().is_some()
+                };
+                if !d.name.is_empty()
+                    && !names.insert(d.name.as_str())
+                    && !(matches!(c, Constraint::PatternRotate { .. }) && shared(&d.name))
+                {
                     return Err(SketchError::DuplicateDimension(d.name.clone()));
                 }
             }
@@ -824,6 +950,7 @@ impl Sketch {
         if let Some(c) = self.construction.iter().find(|c| !kinds.contains_key(c)) {
             return Err(SketchError::MissingEntity(*c));
         }
+        text::validate_texts(self)?;
         let unknowns = self.unknown_count();
         if unknowns > MAX_UNKNOWNS {
             return Err(SketchError::TooLarge {
@@ -861,6 +988,10 @@ impl Sketch {
             if let Constraint::FixedPoint { x, y, .. } = c {
                 s = s.max(x.abs()).max(y.abs());
             }
+        }
+        for t in &self.texts {
+            let p = t.spec.position;
+            s = s.max(p[0].abs()).max(p[1].abs()).max(t.spec.height.abs());
         }
         if s.is_finite() { s } else { 1.0 }
     }

@@ -346,6 +346,7 @@ fn direct_edit_after_a_modeled_feature_is_refused() {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
     );
     let hole_face = FaceRef {

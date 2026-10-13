@@ -1,5 +1,5 @@
-//! Exact constant-radius fillet of a straight convex edge between two planar
-//! faces (run 5, SESSION_5 §6/§9.7).
+//! Exact constant-radius fillet of a straight edge between two planar faces
+//! (run 5, SESSION_5 §6/§9.7: convex; run 6: concave edges add the region).
 //!
 //! The edge is named by its two faces exactly as for [`crate::chamfer_edge`].
 //! In the plane perpendicular to the edge, with interior angle θ between the
@@ -14,7 +14,7 @@
 //! faces, and the cut must remove exactly the corner region along the edge
 //! (no other feature within reach). The result also passes the independent
 //! result check (ADR 0005).
-use crate::chamfer::{ConvexEdge, convex_edge, on_face};
+use crate::chamfer::{ConvexEdge, on_face, straight_edge};
 use crate::ops::through_all_margin;
 use crate::prismatic::{SlabOp, not_applicable, prism_boolean};
 use crate::{Body, Frame, KernelError, LoopSegment, Prism, PrismOp, Profile, Result};
@@ -36,15 +36,18 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
             crate::tol::MIN_LENGTH
         )));
     }
-    let ConvexEdge {
-        p,
-        e,
-        t1,
-        t2,
-        smin,
-        smax,
-        ..
-    } = convex_edge(body, f1, f2, 1e-3f64.min(0.25 * r), "fillet")?;
+    let (
+        ConvexEdge {
+            p,
+            e,
+            t1,
+            t2,
+            smin,
+            smax,
+            ..
+        },
+        convex,
+    ) = straight_edge(body, f1, f2, 1e-3f64.min(0.25 * r), "fillet")?;
     // Interior angle between the faces and the tangent distance.
     let theta = t1.dot(t2).clamp(-1.0, 1.0).acos();
     if theta < 1e-6 || theta > std::f64::consts::PI - 1e-6 {
@@ -53,6 +56,10 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
         ));
     }
     let t = r / (theta / 2.0).tan();
+    // Convex: the corner region between the faces and the arc is cut away.
+    // Concave (run 6): the arc lies in the air wedge between the faces and
+    // the same region (corner, tangent points, arc) is added; θ is then the
+    // air wedge's angle, so the area formula is the same.
     let mid = p + e * (0.5 * (smin + smax));
     for (f, tv, which) in [(f1, t1, "first"), (f2, t2, "second")] {
         if !on_face(body, f, mid + tv * t)? {
@@ -64,7 +71,13 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
     }
     // Section frame: x = t1, y = e × t1, normal e; the tool spans the edge
     // plus a margin at both ends.
-    let m = through_all_margin(body)?;
+    // A cut runs past both ends (air); a join spans the edge exactly (its
+    // ends are flush with the end faces, which are perpendicular to it).
+    let m = if convex {
+        through_all_margin(body)?
+    } else {
+        0.0
+    };
     let frame = Frame {
         origin: arr(p + e * (smin - m)),
         x: arr(t1),
@@ -101,9 +114,11 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
         )));
     }
     let len = smax - smin + 2.0 * m;
-    let out = prism_boolean(body, &profile, &frame, len, SlabOp::Cut)
+    let op = if convex { SlabOp::Cut } else { SlabOp::Join };
+    let out = prism_boolean(body, &profile, &frame, len, op)
         .map_err(|x| KernelError::InvalidInput(format!("fillet: {x}")))?;
-    // Exactly the corner region along the edge must have gone.
+    // Exactly the corner region along the edge must have gone (convex) or
+    // been added (concave).
     let area = t * r - (std::f64::consts::PI - theta) * r * r / 2.0;
     let want = area * (smax - smin);
     let vol = |b: &Body| match crate::measure(b)?.volume {
@@ -117,18 +132,19 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
         ))),
     };
     let ((v0, e0), (v1, e1)) = (vol(body)?, vol(&out)?);
-    let removed = v0 - v1;
+    let removed = if convex { v0 - v1 } else { v1 - v0 };
     let tol = (1e-7 * v0).max(1e-6) + 3.0 * (e0 + e1);
     if (removed - want).abs() > tol {
+        let verb = if convex { "remove" } else { "add" };
         return Err(KernelError::InvalidInput(format!(
-            "fillet: would remove {removed:.6} mm^3 instead of the edge corner {want:.6} mm^3 \
+            "fillet: would {verb} {removed:.6} mm^3 instead of the edge corner {want:.6} mm^3 \
              (another feature lies within the fillet's reach)"
         )));
     }
     crate::verify_prism_boolean(
         body,
         &out,
-        PrismOp::Cut,
+        if convex { PrismOp::Cut } else { PrismOp::Join },
         &Prism {
             profile: &profile,
             holes: &[],
