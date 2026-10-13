@@ -271,3 +271,53 @@ fn projected_sketches_are_fully_constrained_not_redundant() {
         fs.solve_conflicts
     );
 }
+
+/// Review run 6 #16: a projected loop whose points are no longer pinned
+/// matches every rotation of a square equally well. Which sketch line drives
+/// which edge would then depend on the kernel's loop order, so the link is
+/// refused as ambiguous (BrokenReference), never bound silently.
+#[test]
+fn ambiguous_loop_correspondence_is_a_broken_reference() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 30.0, "height": 30.0}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[30.0, 30.0], [31.0, 30.0], [30.0, 31.0]]}),
+            json!({"cmd": "project", "sketch": 3, "source": top_face()}),
+        ],
+    );
+    let mut sk = s.summary().features[2].sketch.clone().unwrap();
+    let before = sk.constraints.len();
+    sk.constraints.retain(|c| {
+        !matches!(
+            c,
+            rcad_sketch::Constraint::FixedPoint { .. }
+                | rcad_sketch::Constraint::FixedX { .. }
+                | rcad_sketch::Constraint::FixedY { .. }
+        )
+    });
+    assert!(
+        sk.constraints.len() < before,
+        "the projection pins its points"
+    );
+    let rev = s.summary().revision;
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "edit_sketch", "feature": 3, "sketch": sk}),
+    );
+    let msg = format!("{:?}", r.error);
+    assert!(!r.ok, "unpinned symmetric projection accepted");
+    assert!(msg.contains("ambiguous"), "{msg}");
+    assert_eq!(s.summary().revision, rev, "refusal changed the document");
+    // The pinned projection still follows an upstream edit (30 -> 36).
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "width", "value": 36.0}),
+    );
+}

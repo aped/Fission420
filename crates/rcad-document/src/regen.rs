@@ -4493,11 +4493,21 @@ fn bind_link(
             link.source_feature()
         ),
     };
+    // Stored pin of a projected point: (x, y), either may be absent
+    // (FixedX / FixedY pin one coordinate; review run 6 #16).
     let stored = |p: rcad_sketch::PointId, s: &rcad_sketch::Sketch| {
-        s.constraints.iter().find_map(|c| match c {
-            rcad_sketch::Constraint::FixedPoint { p: q, x, y } if *q == p => Some([*x, *y]),
-            _ => None,
-        })
+        let (mut x, mut y) = (None, None);
+        for c in &s.constraints {
+            match c {
+                rcad_sketch::Constraint::FixedPoint { p: q, x: a, y: b } if *q == p => {
+                    (x, y) = (Some(*a), Some(*b));
+                }
+                rcad_sketch::Constraint::FixedX { p: q, x: a } if *q == p => x = Some(*a),
+                rcad_sketch::Constraint::FixedY { p: q, y: b } if *q == p => y = Some(*b),
+                _ => {}
+            }
+        }
+        (x, y)
     };
     // Assignment: for every linked curve, its new geometry.
     let mut assigned: Vec<(&LinkedCurve, k::Curve2)> = Vec::new();
@@ -4532,7 +4542,9 @@ fn bind_link(
             };
             for ll in &link.loops {
                 let kinds: Vec<Option<u8>> = ll.iter().map(|lc| entity_kind(lc.entity)).collect();
+                // Best and second-best placement (distance, loop, rotation).
                 let mut best: Option<(f64, usize, usize)> = None;
+                let mut second: Option<f64> = None;
                 for (ci, cl) in curves.iter().enumerate() {
                     if used[ci] || cl.len() != ll.len() {
                         continue;
@@ -4547,19 +4559,42 @@ fn bind_link(
                         for j in 0..n {
                             let pts = curve_points(&cl[(j + rot) % n].0);
                             for (p, q) in pts.iter().zip(&ll[j].points) {
-                                if let Some(o) = stored(*q, s) {
-                                    d += (p[0] - o[0]).hypot(p[1] - o[1]);
-                                }
+                                d += match stored(*q, s) {
+                                    (Some(x), Some(y)) => (p[0] - x).hypot(p[1] - y),
+                                    (Some(x), None) => (p[0] - x).abs(),
+                                    (None, Some(y)) => (p[1] - y).abs(),
+                                    (None, None) => 0.0,
+                                };
                             }
                         }
-                        if best.is_none_or(|(bd, _, _)| d < bd) {
-                            best = Some((d, ci, rot));
+                        match best {
+                            Some((bd, _, _)) if d >= bd => {
+                                if second.is_none_or(|sd| d < sd) {
+                                    second = Some(d);
+                                }
+                            }
+                            _ => {
+                                if let Some((bd, _, _)) = best {
+                                    second = Some(bd);
+                                }
+                                best = Some((d, ci, rot));
+                            }
                         }
                     }
                 }
-                let (_, ci, rot) = best.ok_or_else(|| {
+                let (bd, ci, rot) = best.ok_or_else(|| {
                     broken("a boundary loop changed its number or kinds of edges".into())
                 })?;
+                // Two placements equally close to the stored points (a
+                // symmetric outline with too few pins): which sketch curve
+                // drives which edge would depend on the kernel's loop order.
+                if second.is_some_and(|sd| sd - bd <= k::tol::KERNEL_LINEAR) {
+                    return Err(broken(
+                        "a boundary loop matches its stored points equally well in two \
+                         placements (symmetric outline); the edge correspondence is ambiguous"
+                            .into(),
+                    ));
+                }
                 used[ci] = true;
                 let n = ll.len();
                 for (j, lc) in ll.iter().enumerate() {
