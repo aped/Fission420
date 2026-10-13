@@ -108,7 +108,15 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   approximate pcurves for the planar faces' circular edges), so that check uses 5e-6.
 * Our STEP writer emits imported cylinders as `SURFACE_OF_REVOLUTION`, which our own
   importer does not read yet: an edited body cannot be re-imported into R-CAD (FreeCAD
-  reads it). Recorded as a gap.
+  reads it). Recorded as a gap. Attempted (run 6, not kept): reading
+  `SURFACE_OF_REVOLUTION` (LINE or B-spline generatrix, AXIS1_PLACEMENT) as a Truck
+  revolved curve with the generatrix reversed for the ISO normal. The re-imported
+  `direct_composed` export then measured the right exact volume and classified its holes
+  and boss correctly, but its tessellation at chord 0.01 had 128 misoriented / 128
+  non-manifold edges (mesh volume 53344.2 vs 53550.7), so one revolved face meshes
+  reversed; anchoring the generatrix elsewhere made it worse. Repro: export the
+  `edits_compose_and_export` body, import it with that branch, `check_mesh(tessellate(..,
+  0.01))`. Left unsupported rather than import a body that meshes wrong.
 * Direct edits must come before modeled features on an imported body.
 
 ## Addendum: countersink (task 2, same machinery)
