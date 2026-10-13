@@ -943,6 +943,9 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
+/// (point on axis, unit axis, axial range along it).
+type AxisSpan = ([f64; 3], [f64; 3], (f64, f64));
+
 /// Per-body data reused by every view of one render.
 struct BodyData {
     edges: Vec<EdgeCurve>,
@@ -953,7 +956,7 @@ struct BodyData {
     cylinders: Vec<([f64; 3], [f64; 3], f64)>,
     /// Run 7: (point on axis, unit axis, axial range) of each cylindrical
     /// face, from its tessellation, for centre lines.
-    axes: Vec<([f64; 3], [f64; 3], (f64, f64))>,
+    axes: Vec<AxisSpan>,
     bounds: k::Bounds,
 }
 
