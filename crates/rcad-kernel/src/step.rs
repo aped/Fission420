@@ -405,6 +405,450 @@ fn step_string(s: &str) -> String {
     out
 }
 
+/// One product of a hierarchical STEP export ([`export_step_assembly`]).
+#[derive(Debug, Clone)]
+pub struct StepProduct<'a> {
+    /// Product name (component name).
+    pub name: String,
+    /// Named solids in the product's own coordinates (empty for a pure
+    /// assembly).
+    pub solids: Vec<(String, &'a Body)>,
+    /// Usages of other products inside this one: (child product index,
+    /// occurrence name, rigid placement of the child in this product's
+    /// coordinates).
+    pub children: Vec<(usize, String, crate::Rigid)>,
+}
+
+/// One `#N = ...;` statement of a DATA section.
+struct Stmt {
+    id: u64,
+    body: String,
+}
+
+/// DATA statements of a STEP text (multi-line statements joined).
+fn data_statements(text: &str) -> Result<Vec<Stmt>> {
+    let start = text
+        .find("\nDATA;\n")
+        .ok_or_else(|| KernelError::Internal("STEP text without DATA section".into()))?
+        + 7;
+    let end = text
+        .rfind("\nENDSEC;")
+        .filter(|e| *e >= start)
+        .ok_or_else(|| KernelError::Internal("STEP text without ENDSEC".into()))?;
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for line in text[start..end].lines() {
+        if !cur.is_empty() {
+            cur.push('\n');
+        }
+        cur.push_str(line);
+        if line.trim_end().ends_with(';') {
+            let (id, body) = cur
+                .split_once(" = ")
+                .ok_or_else(|| KernelError::Internal(format!("STEP statement: {cur}")))?;
+            let id = id
+                .trim()
+                .strip_prefix('#')
+                .and_then(|n| n.parse::<u64>().ok())
+                .ok_or_else(|| KernelError::Internal(format!("STEP statement id: {cur}")))?;
+            out.push(Stmt {
+                id,
+                body: body.to_string(),
+            });
+            cur.clear();
+        }
+    }
+    if !cur.trim().is_empty() {
+        return Err(KernelError::Internal("unterminated STEP statement".into()));
+    }
+    Ok(out)
+}
+
+/// Rewrite every `#N` reference outside string literals through `map`.
+fn renumber(body: &str, map: &dyn Fn(u64) -> u64) -> String {
+    let b = body.as_bytes();
+    let mut out = String::with_capacity(body.len() + 8);
+    let (mut i, mut in_str) = (0, false);
+    while i < b.len() {
+        let c = b[i];
+        if c == b'\'' {
+            in_str = !in_str;
+            out.push('\'');
+            i += 1;
+            continue;
+        }
+        if !in_str && c == b'#' {
+            let mut j = i + 1;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if let Ok(n) = body[i + 1..j].parse::<u64>() {
+                out.push_str(&format!("#{}", map(n)));
+                i = j;
+                continue;
+            }
+        }
+        // Copy one UTF-8 character.
+        let ch = body[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Last `#N` reference in a statement body (truck writes the representation
+/// context last).
+fn last_ref(body: &str) -> Option<u64> {
+    let k = body.rfind('#')?;
+    body[k + 1..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// Export an assembly with its product structure into one STEP AP214 file:
+/// one `PRODUCT` per entry of `products` (each written once even when used
+/// several times), parts carrying their solids in an
+/// `ADVANCED_BREP_SHAPE_REPRESENTATION` (via a `SHAPE_REPRESENTATION_RELATIONSHIP`
+/// from the product's `SHAPE_REPRESENTATION`), and every usage as a
+/// `NEXT_ASSEMBLY_USAGE_OCCURRENCE` with a `CONTEXT_DEPENDENT_SHAPE_REPRESENTATION`
+/// whose `ITEM_DEFINED_TRANSFORMATION` maps the child's frame to its placement
+/// axis in the parent (the AP203/AP214 pattern OpenCascade writes and reads).
+/// `root` is the top product. Refused: unknown indices, cyclic usage, a product
+/// with neither solids nor children, non-rigid placements, no solid at all, or
+/// any solid [`export_step_bodies`] refuses.
+pub fn export_step_assembly(
+    products: &[StepProduct],
+    root: usize,
+    organization_system: &str,
+) -> Result<String> {
+    let bad = |m: String| Err(KernelError::InvalidInput(m));
+    if root >= products.len() {
+        return bad("STEP assembly: root product index out of range".into());
+    }
+    for (i, p) in products.iter().enumerate() {
+        if p.solids.is_empty() && p.children.is_empty() {
+            return bad(format!("STEP assembly: product '{}' is empty", p.name));
+        }
+        for (c, n, t) in &p.children {
+            if *c >= products.len() {
+                return bad(format!("STEP assembly: '{n}' uses an unknown product"));
+            }
+            if *c == i {
+                return bad(format!("STEP assembly: '{}' uses itself", p.name));
+            }
+            let r = t.r;
+            let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+                - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+                + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+            let mut ok =
+                (det - 1.0).abs() <= 1e-9 && r.iter().flatten().chain(&t.t).all(|x| x.is_finite());
+            for a in 0..3 {
+                for b in 0..3 {
+                    let d: f64 = (0..3).map(|k| r[k][a] * r[k][b]).sum();
+                    ok &= (d - if a == b { 1.0 } else { 0.0 }).abs() <= 1e-9;
+                }
+            }
+            if !ok {
+                return bad(format!("STEP assembly: placement of '{n}' is not rigid"));
+            }
+        }
+    }
+    // Cycles (depth-first with colours).
+    fn visit(p: &[StepProduct], i: usize, st: &mut [u8]) -> bool {
+        match st[i] {
+            1 => return false,
+            2 => return true,
+            _ => {}
+        }
+        st[i] = 1;
+        for (c, _, _) in &p[i].children {
+            if !visit(p, *c, st) {
+                return false;
+            }
+        }
+        st[i] = 2;
+        true
+    }
+    let mut st = vec![0u8; products.len()];
+    for i in 0..products.len() {
+        if !visit(products, i, &mut st) {
+            return bad("STEP assembly: cyclic product usage".into());
+        }
+    }
+    guarded("export_step_assembly", || -> Result<String> {
+        let mut stmts: Vec<Stmt> = Vec::new();
+        let mut next: u64 = 0;
+        // Shared contexts (from the first part).
+        let mut ctx: Option<(u64, u64, u64)> = None; // product ctx, pd ctx, rep ctx
+        let mut app_ctx: Option<u64> = None;
+        // Per product: (product def id, shape rep id, extra items to list).
+        let mut pd = vec![0u64; products.len()];
+        let mut sr = vec![0u64; products.len()];
+        let mut absr: Vec<Option<u64>> = vec![None; products.len()];
+        let mut sdr_fix: Vec<Option<usize>> = vec![None; products.len()];
+        for (i, p) in products.iter().enumerate() {
+            if p.solids.is_empty() {
+                continue;
+            }
+            let refs: Vec<(&str, &Body)> = p.solids.iter().map(|(n, b)| (n.as_str(), *b)).collect();
+            let text = export_step_bodies(&refs, organization_system)?;
+            let part = data_statements(&text)?;
+            let first = app_ctx.is_none();
+            let base = next;
+            // In later parts, the application context (and its protocol
+            // definition) map to the first part's.
+            let app_local = part
+                .iter()
+                .find(|x| x.body.starts_with("APPLICATION_CONTEXT("))
+                .map(|x| x.id);
+            let app_prev = app_ctx;
+            let map = |n: u64| -> u64 {
+                if !first && Some(n) == app_local {
+                    app_prev.unwrap_or(n + base)
+                } else {
+                    n + base
+                }
+            };
+            for x in &part {
+                if !first
+                    && (Some(x.id) == app_local
+                        || x.body.starts_with("APPLICATION_PROTOCOL_DEFINITION("))
+                {
+                    continue;
+                }
+                let id = map(x.id);
+                next = next.max(id);
+                let mut body = renumber(&x.body, &map);
+                if body.starts_with("PRODUCT('','','',") {
+                    let n = step_string(&p.name);
+                    body = body.replacen("PRODUCT('','',", &format!("PRODUCT('{n}','{n}',"), 1);
+                }
+                if body.starts_with("PRODUCT_DEFINITION(") {
+                    pd[i] = id;
+                }
+                if body.starts_with("SHAPE_DEFINITION_REPRESENTATION(") {
+                    sdr_fix[i] = Some(stmts.len());
+                }
+                if body.starts_with("ADVANCED_BREP_SHAPE_REPRESENTATION(") {
+                    absr[i] = Some(id);
+                    if ctx.is_none() {
+                        ctx = Some((0, 0, last_ref(&body).unwrap_or(0)));
+                    }
+                }
+                if first && body.starts_with("APPLICATION_CONTEXT(") {
+                    app_ctx = Some(id);
+                }
+                if let Some(c) = ctx.as_mut() {
+                    if c.0 == 0 && body.starts_with("PRODUCT_CONTEXT(") {
+                        c.0 = id;
+                    }
+                    if c.1 == 0 && body.starts_with("PRODUCT_DEFINITION_CONTEXT(") {
+                        c.1 = id;
+                    }
+                }
+                stmts.push(Stmt { id, body });
+            }
+            if pd[i] == 0 || absr[i].is_none() || sdr_fix[i].is_none() {
+                return Err(KernelError::Internal(
+                    "STEP writer output lacks the product entities".into(),
+                ));
+            }
+        }
+        // The first part's contexts (product/definition contexts appear
+        // before the representation in truck's output, so look them up).
+        let (pc, pdc, rc) = {
+            let find = |k: &str| stmts.iter().find(|x| x.body.starts_with(k)).map(|x| x.id);
+            match (
+                find("PRODUCT_CONTEXT("),
+                find("PRODUCT_DEFINITION_CONTEXT("),
+                ctx.map(|c| c.2),
+            ) {
+                (Some(a), Some(b), Some(c)) if c != 0 => (a, b, c),
+                _ => {
+                    return Err(KernelError::InvalidInput(
+                        "STEP assembly: no product has solids".into(),
+                    ));
+                }
+            }
+        };
+        let mut push = |body: String, stmts: &mut Vec<Stmt>| -> u64 {
+            next += 1;
+            stmts.push(Stmt { id: next, body });
+            next
+        };
+        let axis = |t: &crate::Rigid,
+                    stmts: &mut Vec<Stmt>,
+                    push: &mut dyn FnMut(String, &mut Vec<Stmt>) -> u64| {
+            let r = |x: f64| step_real(x);
+            let o = push(
+                format!(
+                    "CARTESIAN_POINT('', ({}, {}, {}));",
+                    r(t.t[0]),
+                    r(t.t[1]),
+                    r(t.t[2])
+                ),
+                stmts,
+            );
+            let z = push(
+                format!(
+                    "DIRECTION('', ({}, {}, {}));",
+                    r(t.r[0][2]),
+                    r(t.r[1][2]),
+                    r(t.r[2][2])
+                ),
+                stmts,
+            );
+            let x = push(
+                format!(
+                    "DIRECTION('', ({}, {}, {}));",
+                    r(t.r[0][0]),
+                    r(t.r[1][0]),
+                    r(t.r[2][0])
+                ),
+                stmts,
+            );
+            push(format!("AXIS2_PLACEMENT_3D('', #{o}, #{z}, #{x});"), stmts)
+        };
+        // Product entities of pure assemblies.
+        for (i, p) in products.iter().enumerate() {
+            if !p.solids.is_empty() {
+                continue;
+            }
+            let n = step_string(&p.name);
+            let prod = push(format!("PRODUCT('{n}','{n}','', (#{pc}));"), &mut stmts);
+            let pdf = push(
+                format!("PRODUCT_DEFINITION_FORMATION('','', #{prod});"),
+                &mut stmts,
+            );
+            pd[i] = push(
+                format!("PRODUCT_DEFINITION('design','', #{pdf}, #{pdc});"),
+                &mut stmts,
+            );
+        }
+        // Placement axes: identity per product, one per usage.
+        let mut items: Vec<Vec<u64>> = vec![vec![]; products.len()];
+        let mut ident = vec![0u64; products.len()];
+        for i in 0..products.len() {
+            ident[i] = axis(&crate::Rigid::IDENTITY, &mut stmts, &mut push);
+            items[i].push(ident[i]);
+        }
+        let mut usage_axes: Vec<Vec<u64>> = vec![vec![]; products.len()];
+        for (i, p) in products.iter().enumerate() {
+            for (_, _, t) in &p.children {
+                let a = axis(t, &mut stmts, &mut push);
+                items[i].push(a);
+                usage_axes[i].push(a);
+            }
+        }
+        // Shape representations (+ link to the solids) and SDRs.
+        for (i, p) in products.iter().enumerate() {
+            let list = items[i]
+                .iter()
+                .map(|x| format!("#{x}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sr[i] = push(
+                format!(
+                    "SHAPE_REPRESENTATION('{}', ({list}), #{rc});",
+                    step_string(&p.name)
+                ),
+                &mut stmts,
+            );
+            match (absr[i], sdr_fix[i]) {
+                (Some(a), Some(k)) => {
+                    push(
+                        format!(
+                            "SHAPE_REPRESENTATION_RELATIONSHIP('','', #{a}, #{});",
+                            sr[i]
+                        ),
+                        &mut stmts,
+                    );
+                    // The part's definition shape is now the shape representation.
+                    let b = &stmts[k].body;
+                    let pds = b
+                        .trim_start_matches("SHAPE_DEFINITION_REPRESENTATION(")
+                        .split(',')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    stmts[k].body = format!("SHAPE_DEFINITION_REPRESENTATION({pds}, #{});", sr[i]);
+                }
+                _ => {
+                    let pds = push(
+                        format!("PRODUCT_DEFINITION_SHAPE('','', #{});", pd[i]),
+                        &mut stmts,
+                    );
+                    push(
+                        format!("SHAPE_DEFINITION_REPRESENTATION(#{pds}, #{});", sr[i]),
+                        &mut stmts,
+                    );
+                }
+            }
+        }
+        // Usages.
+        for (i, p) in products.iter().enumerate() {
+            for (k, (c, n, _)) in p.children.iter().enumerate() {
+                let n = step_string(n);
+                let idt = push(
+                    format!(
+                        "ITEM_DEFINED_TRANSFORMATION('','', #{}, #{});",
+                        ident[i], usage_axes[i][k]
+                    ),
+                    &mut stmts,
+                );
+                let rr = push(
+                    format!(
+                        "( REPRESENTATION_RELATIONSHIP('','', #{}, #{}) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#{idt}) SHAPE_REPRESENTATION_RELATIONSHIP() );",
+                        sr[*c], sr[i]
+                    ),
+                    &mut stmts,
+                );
+                let nauo = push(
+                    format!(
+                        "NEXT_ASSEMBLY_USAGE_OCCURRENCE('{n}','{n}','', #{}, #{}, $);",
+                        pd[i], pd[*c]
+                    ),
+                    &mut stmts,
+                );
+                let pds = push(
+                    format!("PRODUCT_DEFINITION_SHAPE('','', #{nauo});"),
+                    &mut stmts,
+                );
+                push(
+                    format!("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#{rr}, #{pds});"),
+                    &mut stmts,
+                );
+            }
+        }
+        let _ = root;
+        // Reassemble with truck's header.
+        let head_src = {
+            let refs: Vec<(&str, &Body)> = products
+                .iter()
+                .flat_map(|p| p.solids.iter().map(|(n, b)| (n.as_str(), *b)))
+                .take(1)
+                .collect();
+            export_step_bodies(&refs, organization_system)?
+        };
+        let head_end = head_src
+            .find("\nDATA;\n")
+            .ok_or_else(|| KernelError::Internal("STEP header".into()))?;
+        let mut out = String::with_capacity(stmts.iter().map(|x| x.body.len() + 12).sum());
+        out.push_str(&head_src[..head_end]);
+        out.push_str("\nDATA;\n");
+        for x in &stmts {
+            out.push_str(&format!("#{} = {}\n", x.id, x.body));
+        }
+        out.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+        check_unique_ids(&out)?;
+        Ok(round_reals(&out))
+    })?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

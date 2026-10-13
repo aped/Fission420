@@ -100,6 +100,26 @@ pub struct Component {
     /// source's later edits). Provenance only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derived_from: Option<ComponentId>,
+    /// Run 7: the component was inserted from another native document (its
+    /// bodies are an embedded STEP copy of that document's evaluated solids).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<ExternalSource>,
+}
+
+/// Provenance of an external component (run 7). The geometry is always the
+/// embedded copy; the source file is only read by an explicit update.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExternalSource {
+    /// Source file name (provenance).
+    pub file_name: String,
+    /// Path given at insertion when the component is *linked* (updatable on
+    /// request); `None` = embedded only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// FNV-1a 64 (hex) and size of the source file bytes the embedded copy was
+    /// made from: the pinned content identity (change detection, not security).
+    pub fnv64: String,
+    pub len: u64,
 }
 
 /// Editable placement: rotate `angle` rad about the axis through the origin
@@ -684,6 +704,7 @@ impl Assembly {
             bodies,
             part_number,
             derived_from: None,
+            external: None,
         });
         id
     }

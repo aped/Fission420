@@ -62,7 +62,7 @@ pub use ops::{
     join_prism, join_region, plane_has_face, profile_within_face, through_all_margin,
 };
 pub use project::{Curve2, face_boundary_curves};
-pub use step::{export_step, export_step_bodies};
+pub use step::{StepProduct, export_step, export_step_assembly, export_step_bodies};
 pub use step_in::{
     ImportedPlanarFace, ImportedSolid, ImportedSurfaces, LengthUnit, StepImport, StepImportOptions,
     StepStats, import_step,

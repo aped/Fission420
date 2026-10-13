@@ -26,6 +26,23 @@ pub struct AssemblyOut {
     /// Run 7: indented BOM (quantity per parent; see [`structured_bom`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_bom: Option<Vec<StructuredBomRow>>,
+    /// Run 7: status of external components (`check_external_components`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<Vec<ExternalStatus>>,
+}
+
+/// Source status of an external component (run 7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExternalStatus {
+    pub component: ComponentId,
+    pub name: String,
+    pub file_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// `embedded` (not linked), `up_to_date`, `modified` (the file differs
+    /// from the pinned copy; update explicitly) or `missing`.
+    pub status: String,
+    pub detail: String,
 }
 
 /// One row of the structured (indented) BOM: a component used under one
@@ -786,6 +803,28 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                 },
             )?;
         }
+        Command::InsertExternalComponent { path, name, linked } => {
+            let (c, o) = insert_external(m, path, name.as_deref(), *linked)?;
+            out.component = Some(c);
+            out.occurrence = Some(o);
+            r.message = Some(format!(
+                "inserted {} as component {} ({})",
+                path.display(),
+                m.document().assembly.component(c)?.name,
+                if *linked {
+                    "linked: update explicitly with update_external_component"
+                } else {
+                    "embedded copy"
+                }
+            ));
+        }
+        Command::UpdateExternalComponent { component } => {
+            r.message = Some(update_external(m, *component)?);
+            out.component = Some(*component);
+        }
+        Command::CheckExternalComponents => {
+            out.external = Some(external_status(m));
+        }
         Command::Bom => {
             out.bom = Some(bom(m));
             out.structured_bom = Some(structured_bom(m)?);
@@ -800,6 +839,261 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
     }
     r.assembly = Some(out);
     Ok(())
+}
+
+/// An external native document's evaluated solids as one STEP text (named
+/// by instance path / body name), with the source bytes' identity.
+fn external_step(
+    path: &std::path::Path,
+) -> Result<(String, rcad_document::assembly::ExternalSource, usize), DocError> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| DocError::File(format!("external component {}: {e}", path.display())))?;
+    if bytes.len() as u64 > rcad_document::MAX_FILE_BYTES {
+        return Err(DocError::File(format!(
+            "external component {}: file too large",
+            path.display()
+        )));
+    }
+    let nf = rcad_document::load_file(path)?;
+    let model = Model::from_document(nf.document)?;
+    let ev = model.evaluation();
+    let mut items: Vec<(String, Body)> = Vec::new();
+    for (i, o) in ev.occurrences.iter().enumerate() {
+        let bodies = placed(&model, i)?;
+        let multi = bodies.len() > 1;
+        for (b, id) in bodies.into_iter().zip(o.bodies.iter()) {
+            let n = if multi {
+                let bn = model
+                    .document()
+                    .body(*id)
+                    .map_or(String::new(), |x| x.name.clone());
+                format!("{}/{bn}", o.path_name)
+            } else {
+                o.path_name.clone()
+            };
+            items.push((n, b));
+        }
+    }
+    for b in &ev.bodies {
+        if !b.visible || model.document().assembly.component_of(b.id).is_some() {
+            continue;
+        }
+        match &b.geometry {
+            BodyGeometry::Brep(g) => items.push((b.name.clone(), g.clone())),
+            BodyGeometry::Mesh(_) => {
+                return Err(DocError::ProductLimit(format!(
+                    "external component {}: mesh body '{}' cannot be embedded as an exact solid",
+                    path.display(),
+                    b.name
+                )));
+            }
+        }
+    }
+    if items.is_empty() {
+        return Err(v(format!(
+            "external component {}: the document has no visible solid",
+            path.display()
+        )));
+    }
+    let refs: Vec<(&str, &Body)> = items.iter().map(|(n, b)| (n.as_str(), b)).collect();
+    let text = k::export_step_bodies(&refs, "R-CAD")
+        .map_err(|e| v(format!("external component {}: {e}", path.display())))?;
+    let id = rcad_document::Blob::new(rcad_document::BlobId(1), "", &bytes);
+    let file_name = path
+        .file_name()
+        .map_or("external".to_string(), |f| f.to_string_lossy().into_owned());
+    Ok((
+        text,
+        rcad_document::assembly::ExternalSource {
+            file_name,
+            path: None,
+            fnv64: id.fnv64,
+            len: bytes.len() as u64,
+        },
+        items.len(),
+    ))
+}
+
+fn insert_external(
+    m: &mut Model,
+    path: &std::path::Path,
+    name: Option<&str>,
+    linked: bool,
+) -> Result<(ComponentId, OccurrenceId), DocError> {
+    let (text, mut src, n) = external_step(path)?;
+    if linked {
+        src.path = Some(path.to_string_lossy().into_owned());
+    }
+    let stem = path.file_stem().map_or("External".to_string(), |f| {
+        f.to_string_lossy().trim_end_matches(".rcad").to_string()
+    });
+    let cname = valid_name(name.unwrap_or(&stem), "component")?;
+    // Check the embedded copy parses back (names, solid count) before the edit.
+    let imp = rcad_document::import::step(text.as_bytes(), None)?;
+    if imp.solids.len() != n {
+        return Err(DocError::ProductLimit(format!(
+            "external component: {n} solids written, {} read back",
+            imp.solids.len()
+        )));
+    }
+    let names: Vec<String> = imp
+        .solids
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            s.name
+                .clone()
+                .unwrap_or_else(|| format!("{cname}-{}", i + 1))
+        })
+        .collect();
+    let blob_name = format!("{stem}.step");
+    m.transact(&format!("Insert {}", src.file_name), |d| {
+        if d.assembly.components.iter().any(|c| c.name == cname) {
+            return Err(v(format!("another component is named '{cname}'")));
+        }
+        let active = d.assembly.active.take();
+        let blob = d.add_blob(&blob_name, text.as_bytes());
+        let mut bodies = Vec::new();
+        for n in &names {
+            let base = format!("{cname}/{n}");
+            let bn = (1..)
+                .map(|i| {
+                    if i == 1 {
+                        base.clone()
+                    } else {
+                        format!("{base} {i}")
+                    }
+                })
+                .find(|x| !d.bodies.iter().any(|b| &b.name == x))
+                .unwrap_or_default();
+            bodies.push(d.add_body(bn));
+        }
+        let fname = d.default_name("External");
+        d.push(
+            fname,
+            rcad_document::FeatureKind::ImportStep {
+                blob,
+                unit_override_to_mm: None,
+                bodies: bodies.clone(),
+            },
+        );
+        d.assembly.active = active;
+        let c = d
+            .assembly
+            .new_component(cname.clone(), bodies, String::new());
+        d.assembly.component_mut(c)?.external = Some(src.clone());
+        let on = d.assembly.default_occurrence_name(&cname);
+        let o = d.assembly.new_occurrence(c, on, Placement::default());
+        Ok((c, o))
+    })
+}
+
+/// The import feature (and its blob) that holds an external component's copy.
+fn external_feature(
+    d: &rcad_document::Document,
+    c: ComponentId,
+) -> Result<(rcad_document::FeatureId, rcad_document::BlobId, usize), DocError> {
+    let comp = d.assembly.component(c)?;
+    d.features
+        .iter()
+        .find_map(|f| match &f.kind {
+            rcad_document::FeatureKind::ImportStep { blob, bodies, .. }
+                if bodies.iter().any(|b| comp.bodies.contains(b)) =>
+            {
+                Some((f.id, *blob, bodies.len()))
+            }
+            _ => None,
+        })
+        .ok_or_else(|| v(format!("'{}' has no embedded copy", comp.name)))
+}
+
+fn update_external(m: &mut Model, c: ComponentId) -> Result<String, DocError> {
+    let d = m.document();
+    let comp = d.assembly.component(c)?.clone();
+    let Some(src) = comp.external.clone() else {
+        return Err(v(format!("'{}' is not an external component", comp.name)));
+    };
+    let Some(p) = src.path.clone() else {
+        return Err(v(format!(
+            "'{}' is an embedded copy (not linked): insert the file again to change it",
+            comp.name
+        )));
+    };
+    let path = std::path::PathBuf::from(&p);
+    if !path.exists() {
+        return Err(DocError::File(format!(
+            "'{}': source {p} is missing; the embedded copy ({} bytes, fnv {}) is kept unchanged",
+            comp.name, src.len, src.fnv64
+        )));
+    }
+    let (text, mut new_src, n) = external_step(&path)?;
+    if new_src.fnv64 == src.fnv64 && new_src.len == src.len {
+        return Ok(format!("'{}' is up to date with {p}", comp.name));
+    }
+    new_src.path = Some(p.clone());
+    let (_, blob, have) = external_feature(d, c)?;
+    if have != n {
+        return Err(DocError::ProductLimit(format!(
+            "'{}': the source now has {n} solids instead of {have}; updating would change the \
+             component's bodies (insert it again as a new component)",
+            comp.name
+        )));
+    }
+    let blob_name = d.blob(blob)?.file_name.clone();
+    m.transact(&format!("Update {}", comp.name), |d| {
+        let b = d
+            .blobs
+            .iter_mut()
+            .find(|b| b.id == blob)
+            .ok_or_else(|| v("embedded copy missing"))?;
+        *b = rcad_document::Blob::new(blob, &blob_name, text.as_bytes());
+        d.assembly.component_mut(c)?.external = Some(new_src.clone());
+        Ok(())
+    })?;
+    Ok(format!(
+        "'{}' updated from {p} (fnv {} → {})",
+        comp.name, src.fnv64, new_src.fnv64
+    ))
+}
+
+/// Read-only source status of every external component.
+pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
+    let d = m.document();
+    d.assembly
+        .components
+        .iter()
+        .filter_map(|c| {
+            let src = c.external.as_ref()?;
+            let (status, detail) = match &src.path {
+                None => ("embedded", "embedded copy; not linked to a file".to_string()),
+                Some(p) => match std::fs::read(p) {
+                    Err(e) => ("missing", format!("{p}: {e}; the embedded copy is used")),
+                    Ok(bytes) => {
+                        let f = rcad_document::Blob::new(rcad_document::BlobId(1), "", &bytes).fnv64;
+                        if f == src.fnv64 && bytes.len() as u64 == src.len {
+                            ("up_to_date", format!("{p} matches the pinned copy (fnv {f})"))
+                        } else {
+                            (
+                                "modified",
+                                format!(
+                                    "{p} changed (fnv {} → {f}); the model keeps the pinned copy until update_external_component",
+                                    src.fnv64
+                                ),
+                            )
+                        }
+                    }
+                },
+            };
+            Some(ExternalStatus {
+                component: c.id,
+                name: c.name.clone(),
+                file_name: src.file_name.clone(),
+                path: src.path.clone(),
+                status: status.into(),
+                detail,
+            })
+        })
+        .collect()
 }
 
 /// Validate a new joint against the current document; return its rest pose
@@ -1409,15 +1703,144 @@ pub fn interference(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssemblyFormat {
-    /// One STEP solid per placed body, named "occurrence" or "occurrence/body".
+    /// Flattened: one STEP solid per placed body, named "occurrence" or
+    /// "occurrence/body", in a single product (no hierarchy).
     Step,
+    /// Run 7: STEP with the product structure: one product per component
+    /// (reused definitions written once), sub-assemblies, and every
+    /// occurrence as a NEXT_ASSEMBLY_USAGE_OCCURRENCE with its placement.
+    StepAssembly,
     /// One 3MF object per placed body, same names.
     #[serde(rename = "3mf")]
     ThreeMf,
 }
 
+/// Hierarchical STEP: products per component, usages per occurrence.
+fn export_step_tree(m: &Model, path: &std::path::Path) -> Result<String, DocError> {
+    let ev = m.evaluation();
+    let d = m.document();
+    let a = &d.assembly;
+    let breps = |bodies: &[BodyId], what: &str| -> Result<Vec<(String, &Body)>, DocError> {
+        let mut out = Vec::new();
+        for b in bodies {
+            let eb = ev.body_by_id(*b).ok_or_else(|| {
+                v(format!(
+                    "{what}: body {b} is not evaluated (consumed, suppressed or rolled back)"
+                ))
+            })?;
+            match &eb.geometry {
+                BodyGeometry::Brep(g) => out.push((eb.name.clone(), g)),
+                BodyGeometry::Mesh(_) => {
+                    return Err(DocError::ProductLimit(format!(
+                        "{what}: mesh bodies cannot be exported as STEP solids"
+                    )));
+                }
+            }
+        }
+        Ok(out)
+    };
+    let locals = a.local_transforms()?;
+    let mut products: Vec<k::StepProduct> = vec![k::StepProduct {
+        name: "Assembly".into(),
+        solids: vec![],
+        children: vec![],
+    }];
+    let mut index: BTreeMap<ComponentId, usize> = BTreeMap::new();
+    // Components used in the (non-suppressed) tree, parents before children.
+    let mut stack: Vec<Option<ComponentId>> = vec![None];
+    let mut usages: Vec<(Option<ComponentId>, ComponentId, String, Rigid)> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(owner) = stack.pop() {
+        if !seen.insert(owner) {
+            continue;
+        }
+        for o in a.children_of(owner).filter(|o| !o.suppressed) {
+            let t = locals.get(&o.id).copied().unwrap_or(Rigid::IDENTITY);
+            usages.push((owner, o.component, o.name.clone(), t));
+            stack.push(Some(o.component));
+        }
+    }
+    for (_, c, _, _) in &usages {
+        if index.contains_key(c) {
+            continue;
+        }
+        let comp = a.component(*c)?;
+        index.insert(*c, products.len());
+        products.push(k::StepProduct {
+            name: comp.name.clone(),
+            solids: breps(&comp.bodies, &comp.name)?,
+            children: vec![],
+        });
+    }
+    let mut skipped = Vec::new();
+    for (owner, c, n, t) in usages {
+        let ci = index[&c];
+        if products[ci].solids.is_empty() && !a.children_of(Some(c)).any(|o| !o.suppressed) {
+            skipped.push(n);
+            continue;
+        }
+        let pi = owner.map_or(0, |o| index[&o]);
+        products[pi].children.push((ci, n, t));
+    }
+    // Loose visible bodies: one part each at the top level.
+    for b in &ev.bodies {
+        if !b.visible || a.component_of(b.id).is_some() {
+            continue;
+        }
+        if let BodyGeometry::Brep(g) = &b.geometry {
+            products.push(k::StepProduct {
+                name: b.name.clone(),
+                solids: vec![(b.name.clone(), g)],
+                children: vec![],
+            });
+            let i = products.len() - 1;
+            products[0]
+                .children
+                .push((i, b.name.clone(), Rigid::IDENTITY));
+        }
+    }
+    // Products only reachable through skipped empty usages are left out.
+    let used: std::collections::BTreeSet<usize> = products
+        .iter()
+        .flat_map(|p| p.children.iter().map(|c| c.0))
+        .collect();
+    if products[0].children.is_empty() {
+        return Err(v("nothing to export"));
+    }
+    let keep: Vec<usize> = (0..products.len())
+        .filter(|i| *i == 0 || used.contains(i))
+        .collect();
+    let remap: BTreeMap<usize, usize> = keep.iter().enumerate().map(|(n, o)| (*o, n)).collect();
+    let products: Vec<k::StepProduct> = keep
+        .iter()
+        .map(|i| {
+            let mut p = products[*i].clone();
+            for c in &mut p.children {
+                c.0 = remap[&c.0];
+            }
+            p
+        })
+        .collect();
+    let text = k::export_step_assembly(&products, 0, "R-CAD")
+        .map_err(|e| v(format!("STEP export: {e}")))?;
+    rcad_document::write_atomic(path, text.as_bytes())?;
+    let usages: usize = products.iter().map(|p| p.children.len()).sum();
+    Ok(format!(
+        "STEP assembly (hierarchy preserved): {} products, {usages} usages{}",
+        products.len(),
+        if skipped.is_empty() {
+            String::new()
+        } else {
+            format!("; empty occurrences left out: {}", skipped.join(", "))
+        }
+    ))
+}
+
 /// Every occurrence's placed bodies plus loose visible bodies, one object each.
 fn export(m: &Model, path: &std::path::Path, format: AssemblyFormat) -> Result<String, DocError> {
+    if format == AssemblyFormat::StepAssembly {
+        return export_step_tree(m, path);
+    }
     let ev = m.evaluation();
     let d = m.document();
     let mut items: Vec<(String, Body)> = Vec::new();
@@ -1446,6 +1869,7 @@ fn export(m: &Model, path: &std::path::Path, format: AssemblyFormat) -> Result<S
         return Err(v("nothing to export"));
     }
     let bytes = match format {
+        AssemblyFormat::StepAssembly => return Err(v("internal: hierarchical STEP")),
         AssemblyFormat::Step => {
             let refs: Vec<(&str, &Body)> = items.iter().map(|(n, b)| (n.as_str(), b)).collect();
             k::export_step_bodies(&refs, "R-CAD")
@@ -1528,6 +1952,9 @@ pub struct ComponentSummary {
     /// Run 7: made as an independent copy of this component.
     #[serde(default)]
     pub derived_from: Option<ComponentId>,
+    /// Run 7: inserted from another document (pinned copy).
+    #[serde(default)]
+    pub external: Option<rcad_document::assembly::ExternalSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1632,6 +2059,7 @@ pub fn summary(m: &Model) -> AssemblySummary {
                 instances: tree.iter().filter(|e| e.component == c.id).count(),
                 children: a.children_of(Some(c.id)).map(|o| o.id).collect(),
                 derived_from: c.derived_from,
+                external: c.external.clone(),
             })
             .collect(),
         total_dof: occurrences

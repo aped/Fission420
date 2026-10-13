@@ -858,3 +858,46 @@ fn cylindrical_pin_slot_planar_and_ball_joints() {
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert!(near3(p(&t), [0.0, 20.0, 0.0], 1e-9));
 }
+
+#[test]
+fn step_assembly_export_keeps_the_product_structure() {
+    let mut f = fixture();
+    let s = &mut f.s;
+    let dir = tempfile::tempdir().unwrap();
+    let tree = dir.path().join("tree.step");
+    let r = ok(
+        s,
+        json!({"cmd": "export_assembly", "path": tree, "format": "step_assembly"}),
+    );
+    // Products: top, Module, Plate, Bolt; usages: 2 modules + plate + 2 bolts.
+    assert!(
+        r.message
+            .as_deref()
+            .unwrap()
+            .contains("4 products, 5 usages"),
+        "{:?}",
+        r.message
+    );
+    let text = std::fs::read_to_string(&tree).unwrap();
+    assert_eq!(text.matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE(").count(), 5);
+    assert_eq!(text.matches("MANIFOLD_SOLID_BREP(").count(), 2);
+    for n in ["'Module#2'", "'Bolt#2'", "'Module'", "'Plate'"] {
+        assert!(text.contains(n), "{n}");
+    }
+    // A suppressed sub-assembly occurrence is not exported.
+    ok(
+        s,
+        json!({"cmd": "set_occurrence_suppressed", "occurrence": f.o_mod2, "suppressed": true}),
+    );
+    let r = ok(
+        s,
+        json!({"cmd": "export_assembly", "path": dir.path().join("tree2.step"), "format": "step_assembly"}),
+    );
+    assert!(r.message.unwrap().contains("4 products, 4 usages"));
+    // Re-read (R-CAD's importer, flattens): 6 placed solids and an explicit
+    // flatten note (FreeCAD is the independent check: tools/check_step_assembly.sh).
+    let r = ok(s, json!({"cmd": "import_step", "path": tree}));
+    let msg = r.message.unwrap_or_default();
+    assert!(msg.contains("6 solid(s)"), "{msg}");
+    assert!(msg.contains("assembly structure flattened"), "{msg}");
+}

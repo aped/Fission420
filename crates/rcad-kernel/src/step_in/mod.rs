@@ -315,6 +315,17 @@ fn import_parsed(
         }
     }
     stats.solids = solids.len();
+    // Run 7: the product structure is read only for placements and names; say
+    // so rather than present the placed bodies as a preserved assembly.
+    let usages = idx.all_with("NEXT_ASSEMBLY_USAGE_OCCURRENCE").len();
+    if usages > 0 {
+        warnings.push(format!(
+            "assembly structure flattened: {usages} component usage(s) \
+             (NEXT_ASSEMBLY_USAGE_OCCURRENCE) became {} placed solid bodies named by product; \
+             the hierarchy and the reuse of definitions (linked occurrences) are not recreated",
+            solids.len()
+        ));
+    }
     Ok(StepImport {
         solids,
         surfaces,
