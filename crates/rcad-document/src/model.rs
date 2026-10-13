@@ -1570,7 +1570,7 @@ impl Feature {
                 ..
             } if matches!(name, "angle_deg" | "length" | "start_offset" | "end_offset") => {
                 let ok = match name {
-                    "angle_deg" => value > 0.0 && value < 180.0,
+                    "angle_deg" => value > 0.0 && value <= 180.0,
                     "length" => value > 0.0,
                     _ => value >= 0.0,
                 };
@@ -1578,7 +1578,7 @@ impl Feature {
                     return Err(DocError::Validation(format!(
                         "{id}.{name}: {}, got {value}",
                         match name {
-                            "angle_deg" => "the bend angle must be in (0, 180) degrees",
+                            "angle_deg" => "the bend angle must be in (0, 180] degrees",
                             "length" => "must be > 0 mm",
                             _ => "must be >= 0 mm",
                         }

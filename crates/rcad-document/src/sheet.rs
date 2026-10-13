@@ -523,7 +523,8 @@ pub struct FlangeDef {
     pub id: FeatureId,
     /// Sketch line entity (of the base profile) the flange is attached to.
     pub edge: u32,
-    /// Bend angle (rad), in (0, π): 90° makes the flange perpendicular.
+    /// Bend angle (rad), in (0, π]: 90° makes the flange perpendicular, π
+    /// folds it back over the plate (open hem, gap 2R).
     pub angle: f64,
     /// Straight flange length beyond the bend (tangent line to flange end).
     pub length: f64,
@@ -797,9 +798,9 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
     let mut on_seg: Vec<Vec<(usize, f64, f64)>> = vec![Vec::new(); n_out];
     for (fi, f) in m.flanges.iter().enumerate() {
         let bad = |s: String| DocError::Validation(format!("{}: flange: {s}", f.id));
-        if !(f.angle.is_finite() && f.angle > 1e-6 && f.angle < std::f64::consts::PI - 1e-6) {
+        if !(f.angle.is_finite() && f.angle > 1e-6 && f.angle <= std::f64::consts::PI + 1e-12) {
             return Err(bad(format!(
-                "bend angle must be in (0°, 180°), got {:.6}° (180° hems are not supported)",
+                "bend angle must be in (0°, 180°] (180° = open hem), got {:.6}°",
                 f.angle.to_degrees()
             )));
         }

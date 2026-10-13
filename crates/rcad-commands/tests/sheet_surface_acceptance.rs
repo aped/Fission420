@@ -139,6 +139,34 @@ fn acceptance_6_u_channel() {
     assert_eq!(s.summary().features.len(), n + 1);
 }
 
+/// Item 10 pull-forward: an open hem (180° flange, gap 2R) for external
+/// validation: base 60 × 40, t 1, R 0.5, hem of 10 on the 60 mm edge y = 0.
+#[test]
+fn hem_evidence() {
+    let (dir, _keep) = out_dir();
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                "width": 60, "height": 40, "center": [30, 20]}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1, "radius": 0.5, "k_factor": 0.5}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": 1, "angle_deg": 180, "length": 10}),
+    );
+    let want = 3000.0 + 60.0 * PI;
+    assert!((vol(&s, 1).unwrap() - want).abs() < 1e-6);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "export_step", "path": dir.join("hem_plate.step"), "bodies": [1]}),
+    );
+}
+
 #[test]
 fn acceptance_7_open_box_repair_and_thicken() {
     let (dir, _keep) = out_dir();

@@ -272,9 +272,9 @@ impl Session {
             }
             Command::SheetFlange(a) => {
                 let a = a.clone();
-                if !(a.angle_deg > 0.0 && a.angle_deg < 180.0) {
+                if !(a.angle_deg > 0.0 && a.angle_deg <= 180.0) {
                     return Err(DocError::Validation(format!(
-                        "flange angle must be in (0, 180) degrees, got {}",
+                        "flange angle must be in (0, 180] degrees (180 = open hem), got {}",
                         a.angle_deg
                     )));
                 }

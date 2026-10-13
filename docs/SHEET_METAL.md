@@ -42,8 +42,9 @@ Every flange and the flat pattern regenerate from it.
 * **Length = straight leg beyond the bend**, from the bend's tangent line to the flange end,
   measured along the flange. This is the "between tangent points" convention of SESSION_7
   acceptance 6; it is not an outside (mold-line) dimension.
-* **Angle** θ in (0°, 180°): 90° makes the flange perpendicular to the plate. 180° (hems) is
-  refused.
+* **Angle** θ in (0°, 180°]: 90° makes the flange perpendicular to the plate; **180° is an open
+  hem**: the leg lies back over the plate with a gap of 2R (inside radius from the rule). Closed
+  (zero-gap) and rolled/teardrop hems are not implemented.
 * **Direction**: up = toward the base sketch normal (default), `down` = away from it. Up bends
   have the plate's top as their inside surface, down bends the bottom.
 * **Width**: the whole edge minus `start_offset` / `end_offset` (measured along the edge from its
@@ -66,7 +67,7 @@ w·t·(Σ straights) + Σ w·θ/2·((R+t)² − R²).
 * two flanges (with their reliefs) overlapping on one edge,
 * **impossible reliefs**: an offset that leaves no room for the relief width, a relief that cuts
   through the plate (the outline would self-intersect),
-* bend angle ≤ 0° or ≥ 180° (hems), length ≤ 0, offsets that leave no flange, a line that is not
+* bend angle ≤ 0° or > 180°, length ≤ 0, offsets that leave no flange, a line that is not
   a straight edge of the base outline, an invalid rule (t, R, relief ≤ 0, K outside [0, 1]),
 * a flange after a non-sheet edit of the body.
 
@@ -101,11 +102,11 @@ Verified in `crates/rcad-commands/tests/sheet_flanges.rs` and `sheet_surface_acc
 (closed-form volume, bounding box, point membership, independent DXF parse; thickness/radius
 edit to t 2, R 3; refused self-overlapping flanges) and externally by FreeCAD
 (`tools/validate_sheet_surface.sh`: folded and flat STEP volume/bbox/validity, DXF closed CUT
-wire area = 40·L, bend lines, `$INSUNITS`).
+wire area = 40·L, bend lines, `$INSUNITS`; also an open-hem plate).
 
 ## Not implemented (tracked)
 
-Hems and 180° folds, flanges on flange edges or on arcs, flange position options (material
+Closed / rolled / teardrop hems, flanges on flange edges or on arcs, flange position options (material
 inside / bend inside), partial flanges with tapered sides, miters / corner closing, lofted or
 conical bends, forming tools, K-factor tables per material, bend deduction tables, unfolding of
 arbitrary solids, flat-pattern drawings with bend tables, face references to sheet faces for

@@ -429,8 +429,8 @@ fn invalid_flanges_and_reliefs_are_refused_atomically() {
         json!({"cmd": "sheet_flange", "base": 2, "edge": left, "angle_deg": 90.0, "length": 5.0}),
         // Impossible relief: offset smaller than the relief width (t = 1).
         json!({"cmd": "sheet_flange", "base": 2, "edge": top, "length": 5.0, "start_offset": 0.5}),
-        // Hem (180°) unsupported; zero length.
-        json!({"cmd": "sheet_flange", "base": 2, "edge": top, "angle_deg": 180.0, "length": 5.0}),
+        // Beyond a hem (> 180°); zero length.
+        json!({"cmd": "sheet_flange", "base": 2, "edge": top, "angle_deg": 190.0, "length": 5.0}),
         json!({"cmd": "sheet_flange", "base": 2, "edge": top, "length": 0.0}),
         // Not a line of the base.
         json!({"cmd": "sheet_flange", "base": 2, "edge": 999, "length": 5.0}),
@@ -531,4 +531,54 @@ fn concave_corner_needs_an_offset() {
     let want = base + folded(25.0, 1.0, 1.0, 5.0, &[PI / 2.0]);
     let v = body_volume(&s, 1);
     assert!((v - want).abs() < 1e-6, "{v} vs {want}");
+}
+
+#[test]
+fn open_hem_folds_back_over_the_plate() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    rect_sketch(&mut s, 60.0, 40.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 0.5,
+                "k_factor": 0.5}),
+    );
+    let bottom = line_id(&s, 1, |p| p[1].abs() < 1e-9);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "angle_deg": 180.0,
+                "length": 10.0}),
+    );
+    // Half annulus R 0.5..1.5 plus a 10 mm leg lying back over the plate,
+    // 2R = 1 mm above it (z 2..3).
+    let want = 2400.0 + folded(60.0, 1.0, 0.5, 10.0, &[PI]);
+    let v = body_volume(&s, 1);
+    assert!((v - want).abs() < 1e-6, "{v} vs {want}");
+    let (lo, hi) = bounds(&s, 1);
+    assert!(
+        (lo[1] + 1.5).abs() < 1e-9 && (hi[2] - 3.0).abs() < 1e-9,
+        "{lo:?} {hi:?}"
+    );
+    let p = probe(
+        &s,
+        1,
+        &[[30.0, 5.0, 2.5], [30.0, 5.0, 1.5], [30.0, 12.0, 2.5]],
+    );
+    assert_eq!(p, vec![Some(true), Some(false), Some(false)]);
+    // Flat: the strip is BA + 10 = π(0.5 + 0.5) + 10 wide.
+    let dir = tempfile::tempdir().unwrap();
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "export_flat_pattern", "feature": 3, "path": dir.path().join("h.dxf")}),
+    );
+    let w = 40.0 + PI + 10.0;
+    assert!(r.message.unwrap().contains(&format!("60.000000 x {w:.6}")));
+    // A hem leg longer than the plate is deep runs into the opposite hem.
+    let top = line_id(&s, 1, |p| (p[1] - 40.0).abs() < 1e-9);
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": top, "angle_deg": 180.0,
+                "length": 35.0}),
+    );
+    assert!(!r.ok, "colliding hems accepted");
 }
