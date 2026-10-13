@@ -95,3 +95,26 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   importer does not read yet: an edited body cannot be re-imported into R-CAD (FreeCAD
   reads it). Recorded as a gap.
 * Direct edits must come before modeled features on an imported body.
+
+## Addendum: countersink (task 2, same machinery)
+
+`rcad_kernel::countersink(body, axis_point, axis, hole_d, d, angle)` inserts an exact cone
+at the entry of an existing round hole: the entry-loop vertices move `h = (R − r) /
+tan(angle/2)` down the hole wall, the entry-loop arcs are translated with them, their
+radial images (`R / r`, affine) become the new inner loop of the entry face, and each
+entry arc gets one conical face, the homotopy of its lower and upper arcs (identical
+knots and weights, so every generator is a straight line of the exact cone; the kernel
+test samples it on a 21 x 21 grid to 1e-9). Wires of compressed faces are stored as for a
+non-inverted face, so the effective (outward) loop is reversed when a face's
+`orientation` is false; the new faces respect that. Refused: hole wall not reaching
+deeper than `h`, countersink not clear of the entry face's other edges (exact distance),
+other faces meeting the entry loop, free-form entry edges. `FeatureKind::Countersink
+{ hole, diameter, angle }` applies it to a Hole feature's hole (its last tool's frame and
+circle); counterbored holes are refused; patterns/mirrors of the hole do not copy it.
+
+Independent check: `tools/check_direct_edit_expected.sh` has FreeCAD build each expected
+solid from Part primitives (`makeCone` for countersinks) and computes the symmetric
+difference with the exported STEP: 0.000 mm³ for every direct edit and both countersink
+exports, and the control (the countersunk export against the block without the
+countersink) differs by the countersink volume (269.0 vs 268.08 mm³ analytic, OCC's
+own integration error on these exports).

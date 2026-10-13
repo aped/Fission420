@@ -1126,6 +1126,7 @@ impl RcadApp {
                     }
                 });
             }
+            "hole" => self.countersink_action(ui, f.id),
             _ => {}
         }
         ui.separator();
