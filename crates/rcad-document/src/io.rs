@@ -167,10 +167,11 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
 
 /// What in `doc` needs format v6 (run 6, kernel worker), if anything.
 pub fn run6_feature(doc: &Document) -> Option<&'static str> {
-    doc.features
-        .iter()
-        .any(|f| matches!(f.kind, crate::FeatureKind::DirectEdit { .. }))
-        .then_some("direct edits of imported bodies")
+    let has = |p: fn(&crate::FeatureKind) -> bool| doc.features.iter().any(|f| p(&f.kind));
+    if has(|k| matches!(k, crate::FeatureKind::DirectEdit { .. })) {
+        return Some("direct edits of imported bodies");
+    }
+    has(|k| matches!(k, crate::FeatureKind::Countersink { .. })).then_some("countersinks")
 }
 
 /// The oldest format version that can hold `doc`: 6 when it uses a run-6

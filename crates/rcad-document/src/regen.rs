@@ -868,6 +868,58 @@ pub fn regenerate_cached_opts(
                 replace_body(&mut st, id, body, out);
                 r.body = Some(body);
             }
+            FeatureKind::Countersink {
+                hole,
+                diameter,
+                angle,
+            } => {
+                let target = doc
+                    .feature(*hole)
+                    .ok()
+                    .and_then(|f| match f.kind {
+                        FeatureKind::Hole {
+                            counterbore: None,
+                            target,
+                            ..
+                        } => Some(Ok(target)),
+                        FeatureKind::Hole { .. } => Some(Err(DocError::ProductLimit(format!(
+                            "{id}: a countersink on a counterbored hole is not supported"
+                        )))),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        DocError::Validation(format!("{id}: {hole} is not a Hole feature"))
+                    })??;
+                let tool = st.holes.get(hole).and_then(|t| t.last()).ok_or_else(|| {
+                    DocError::BrokenReference {
+                        from: id,
+                        detail: format!("{hole} is not an evaluated hole"),
+                    }
+                })?;
+                let SketchProfile::Circle { center, radius } = tool.profile else {
+                    return Err(DocError::Validation(format!("{id}: hole profile")));
+                };
+                let frame = tool.start;
+                let body = brep_target(&st, id, target)?;
+                let out = k::countersink(
+                    &body,
+                    frame.to_world(center),
+                    frame.z,
+                    2.0 * radius,
+                    *diameter,
+                    *angle,
+                )
+                .map_err(|e| match e {
+                    k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
+                    other => DocError::Kernel {
+                        feature: id,
+                        detail: other.to_string(),
+                    },
+                })?;
+                replace_body(&mut st, id, target, out);
+                r.frame = Some(frame);
+                r.body = Some(target);
+            }
             FeatureKind::DirectEdit { face, op } => {
                 let bid = doc.face_body(face).ok_or_else(|| {
                     DocError::Validation(format!("{id}: a direct edit needs an imported face"))

@@ -467,6 +467,19 @@ pub enum FeatureKind {
         face: FaceRef,
         op: DirectOp,
     },
+    /// Exact countersink (run 6, coverage SO06) at the entry of the hole made
+    /// by Hole feature `hole`: a cone of `diameter` mm at the entry face and
+    /// included `angle` (radians; parameter `angle_deg`, default 90°), built
+    /// directly into the topology (`rcad_kernel::countersink`; Truck cannot
+    /// boolean a cone). Entry face planar and perpendicular to the hole, no
+    /// counterbore; refused with the reason when the countersink leaves the
+    /// face or reaches the end of the hole. Patterns/mirrors of the hole do not
+    /// copy it. Parameters "diameter", "angle_deg".
+    Countersink {
+        hole: FeatureId,
+        diameter: f64,
+        angle: f64,
+    },
 }
 
 /// Edit of a [`FeatureKind::DirectEdit`] (run 6, ADR 0010).
@@ -557,6 +570,7 @@ impl Feature {
             }
             FeatureKind::Shell { extrude, .. } => vec![*extrude],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
+            FeatureKind::Countersink { hole, .. } => vec![*hole],
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -660,6 +674,12 @@ impl Feature {
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
+            FeatureKind::Countersink {
+                diameter, angle, ..
+            } => vec![
+                ("diameter".into(), *diameter),
+                ("angle_deg".into(), angle.to_degrees()),
+            ],
             FeatureKind::DirectEdit { op, .. } => match op {
                 DirectOp::OffsetFace { distance } => vec![("distance".into(), *distance)],
                 DirectOp::ResizeCylinder { diameter } => vec![("diameter".into(), *diameter)],
@@ -986,6 +1006,25 @@ impl Feature {
                 }
                 Ok(())
             }
+            FeatureKind::Countersink { diameter, .. } if name == "diameter" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.diameter: countersink diameter must be > 0 mm, got {value}"
+                    )));
+                }
+                *diameter = value;
+                Ok(())
+            }
+            FeatureKind::Countersink { angle, .. } if name == "angle_deg" => {
+                if !(value > 0.0 && value < 180.0) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.angle_deg: countersink angle must be between 0 and 180 degrees, \
+                         got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
+                Ok(())
+            }
             FeatureKind::DirectEdit {
                 op: DirectOp::OffsetFace { distance },
                 ..
@@ -1189,6 +1228,9 @@ impl Document {
                 .feature(*extrude)
                 .ok()
                 .and_then(|e| e.created_bodies().first().copied()),
+            FeatureKind::Countersink { hole, .. } => {
+                self.feature(*hole).ok().and_then(Feature::target_body)
+            }
             _ => None,
         }
     }
