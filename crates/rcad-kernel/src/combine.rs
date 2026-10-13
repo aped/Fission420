@@ -124,6 +124,14 @@ pub fn boolean(a: &Body, b: &Body, op: CombineOp) -> Result<Body> {
             }
         )));
     }
+    // Review run 6 #18a: when the tool encloses the target, Truck's Cut returns
+    // the target unchanged (observed with truck-shapeops 0.4); refuse it as an
+    // empty result instead.
+    if op == CombineOp::Cut && contains(b, a, &ab, &bb)? {
+        return Err(KernelError::InvalidResult(
+            "cut: the tool contains the whole target; the result would be empty".into(),
+        ));
+    }
     let what = match op {
         CombineOp::Join => "join",
         CombineOp::Cut => "cut",
@@ -165,6 +173,29 @@ pub fn boolean(a: &Body, b: &Body, op: CombineOp) -> Result<Body> {
         "{what}: {}",
         failures.join("; ")
     )))
+}
+
+/// Every tessellation vertex of `inner` lies inside or on `outer` (bounds
+/// first, so the usual case costs nothing). Used only to refuse, never to
+/// accept a result.
+fn contains(outer: &Body, inner: &Body, ib: &Bounds, ob: &Bounds) -> Result<bool> {
+    if (0..3).any(|i| {
+        ib.min[i] < ob.min[i] - crate::tol::KERNEL_LINEAR
+            || ib.max[i] > ob.max[i] + crate::tol::KERNEL_LINEAR
+    }) {
+        return Ok(false);
+    }
+    let diag = (0..3)
+        .map(|i| (ob.max[i] - ob.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let chord = (diag * 1.0e-4).clamp(1.0e-3, 0.02);
+    let (mo, mi) = (tessellate(outer, chord)?, tessellate(inner, chord)?);
+    let on = 5.0 * chord + 1.0e-6 * diag;
+    Ok(mi
+        .positions
+        .iter()
+        .all(|&p| inside(&mo, p) == Some(true) || near(&mo, p, on)))
 }
 
 /// Combine `target` with `tools` (in order) and check the result independently

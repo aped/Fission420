@@ -73,3 +73,21 @@ fn disjoint_bodies_are_refused_before_any_boolean() {
         ));
     }
 }
+
+/// Review run 6 #18a: a Cut whose tool encloses the target is refused as an
+/// empty result, not as a failed boolean; a partial overlap still cuts.
+#[test]
+fn cut_by_an_enclosing_tool_is_refused_as_empty() {
+    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+    let tool = boxed(-5.0, -5.0, -5.0, 20.0, 20.0, 20.0);
+    match boolean(&a, &tool, BoolOp::Cut) {
+        Err(KernelError::InvalidResult(m)) => {
+            assert!(m.contains("contains the whole target"), "{m}")
+        }
+        other => panic!("{other:?}"),
+    }
+    // The tool shifted so that a 10 x 10 x 1 slab of the target sticks out.
+    let partial = boxed(-5.0, -5.0, -9.0, 20.0, 20.0, 18.0);
+    let r = boolean(&a, &partial, BoolOp::Cut).unwrap();
+    assert!((volume(&r) - 100.0).abs() < 1e-6);
+}
