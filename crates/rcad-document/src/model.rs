@@ -260,6 +260,8 @@ pub enum Operation {
     Join { target: BodyId },
     /// Subtract the tool from `target`.
     Cut { target: BodyId },
+    /// Keep only the part of `target` inside the tool (run 6, format v6).
+    Intersect { target: BodyId },
 }
 
 impl Default for Operation {
@@ -319,6 +321,9 @@ pub enum FeatureKind {
         /// `BrokenReference`, never another region.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<rcad_sketch::RegionRef>,
+        /// Run-6 extent options (format v6; absent = run-5 behaviour).
+        #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
+        options: ExtrudeOptions,
     },
     /// Legacy (v1/v2) circular through-all cut; see [`FeatureKind::Extrude`] with
     /// [`Operation::Cut`] for general cuts.
@@ -455,6 +460,50 @@ pub enum FeatureKind {
     },
 }
 
+/// Run-6 options of a [`FeatureKind::Extrude`] (SESSION_6 §B, docs/COMMANDS.md).
+/// All lengths in mm along the sketch normal, angles in radians. The tool is
+/// the profile region swept over a span `[lo, hi]` of the sketch normal:
+///
+/// * plain: `[s, s + d]` along the direction (`d` = `distance`, `s` =
+///   `start_offset` measured along the direction);
+/// * `symmetric`: `[s − d/2, s + d/2]` (`distance` is the whole length);
+/// * `distance2 > 0` (two sides): `[s − distance2, s + d]` along the direction;
+/// * `to`: from `s` up to the plane `to` (parallel to the sketch plane; a face,
+///   world or construction plane; its offset is the "to object" offset);
+///   `distance` is then unused. The direction is towards that plane.
+///
+/// `thin`: wall thickness; the region becomes the band between its outer loop
+/// and that loop offset inward by `thin` (closed profiles without holes).
+/// `taper`: draft angle (positive: the profile shrinks along the direction).
+/// `regions`: further regions extruded with the first (Join/Cut).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExtrudeOptions {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub symmetric: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub distance2: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub start_offset: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<SketchPlane>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub taper: f64,
+    /// Further regions of the same sketch extruded with the first (`region`)
+    /// in one feature (e.g. the glyphs of a text); Join/Cut only. Their side
+    /// faces are not referencable by role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<rcad_sketch::RegionRef>,
+}
+
+impl ExtrudeOptions {
+    /// No run-6 option set (a run-5 extrusion).
+    pub fn is_plain(&self) -> bool {
+        *self == ExtrudeOptions::default()
+    }
+}
+
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Counterbore {
@@ -472,6 +521,7 @@ impl FeatureKind {
             extent: Extent::Distance,
             reverse: false,
             region: None,
+            options: ExtrudeOptions::default(),
         }
     }
 }
@@ -505,8 +555,12 @@ impl Feature {
             FeatureKind::Sketch { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
-            FeatureKind::Extrude { sketch, .. }
-            | FeatureKind::Cut { sketch, .. }
+            FeatureKind::Extrude {
+                sketch, options, ..
+            } => std::iter::once(*sketch)
+                .chain(options.to.and_then(|p| p.face()).map(|r| r.feature))
+                .collect(),
+            FeatureKind::Cut { sketch, .. }
             | FeatureKind::Pocket { sketch, .. }
             | FeatureKind::Revolve { sketch, .. } => vec![*sketch],
             FeatureKind::Loft { a, b, .. } => vec![*a, *b],
@@ -556,7 +610,10 @@ impl Feature {
     pub fn target_body(&self) -> Option<BodyId> {
         match &self.kind {
             FeatureKind::Extrude {
-                operation: Operation::Join { target } | Operation::Cut { target },
+                operation:
+                    Operation::Join { target }
+                    | Operation::Cut { target }
+                    | Operation::Intersect { target },
                 ..
             }
             | FeatureKind::Cut { target, .. }
@@ -600,7 +657,34 @@ impl Feature {
                 extent: Extent::ThroughAll,
                 ..
             } => vec![],
-            FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Extrude {
+                distance, options, ..
+            } => {
+                let mut v = Vec::new();
+                if options.to.is_none() {
+                    v.push(("distance".into(), *distance));
+                }
+                if options.distance2 != 0.0 {
+                    v.push(("distance2".into(), options.distance2));
+                }
+                if options.start_offset != 0.0 {
+                    v.push(("start_offset".into(), options.start_offset));
+                }
+                if let Some(t) = options.thin {
+                    v.push(("thin".into(), t));
+                }
+                if options.taper != 0.0 {
+                    v.push(("taper_deg".into(), options.taper.to_degrees()));
+                }
+                match options.to {
+                    Some(SketchPlane::Offset { distance, .. }) => {
+                        v.push(("to_offset".into(), distance));
+                    }
+                    Some(_) => v.push(("to_offset".into(), 0.0)),
+                    None => {}
+                }
+                v
+            }
             // Run 5: an offset mirror plane's distance is a parameter.
             FeatureKind::Mirror {
                 plane:
@@ -820,8 +904,84 @@ impl Feature {
                 Ok(())
             }
             FeatureKind::Extrude {
-                distance, extent, ..
-            } if name == "distance" && *extent == Extent::Distance => {
+                options, extent, ..
+            } if *extent == Extent::Distance
+                && matches!(
+                    name,
+                    "distance2" | "start_offset" | "thin" | "taper_deg" | "to_offset"
+                ) =>
+            {
+                let has = |b: bool| -> Result<()> {
+                    if b {
+                        Ok(())
+                    } else {
+                        Err(DocError::UnknownParameter {
+                            feature: id,
+                            name: name.into(),
+                        })
+                    }
+                };
+                match name {
+                    "distance2" => {
+                        has(options.distance2 != 0.0)?;
+                        if value <= 0.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.distance2: the second side's distance must be > 0 mm, \
+                                 got {value}"
+                            )));
+                        }
+                        options.distance2 = value;
+                    }
+                    "start_offset" => {
+                        has(options.start_offset != 0.0)?;
+                        options.start_offset = value;
+                    }
+                    "thin" => {
+                        has(options.thin.is_some())?;
+                        if value <= 0.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.thin: the wall thickness must be > 0 mm, got {value}"
+                            )));
+                        }
+                        options.thin = Some(value);
+                    }
+                    "taper_deg" => {
+                        has(options.taper != 0.0)?;
+                        if value == 0.0 || value.abs() >= 89.0 {
+                            return Err(DocError::Validation(format!(
+                                "{id}.taper_deg: the taper must be non-zero and within ±89°, \
+                                 got {value}"
+                            )));
+                        }
+                        options.taper = value.to_radians();
+                    }
+                    _ => match options.to.as_mut() {
+                        Some(SketchPlane::Offset { distance, .. }) => *distance = value,
+                        Some(p) => {
+                            let base = match *p {
+                                SketchPlane::WorldXY => PlaneBase::WorldXY,
+                                SketchPlane::WorldXZ => PlaneBase::WorldXZ,
+                                SketchPlane::WorldYZ => PlaneBase::WorldYZ,
+                                SketchPlane::Face(r) => PlaneBase::Face(r),
+                                SketchPlane::Offset { .. } => unreachable!("matched above"),
+                            };
+                            *p = SketchPlane::Offset {
+                                base,
+                                distance: value,
+                                angle: 0.0,
+                            };
+                        }
+                        None => has(false)?,
+                    },
+                }
+                Ok(())
+            }
+            FeatureKind::Extrude {
+                distance,
+                extent,
+                options,
+                ..
+            } if name == "distance" && *extent == Extent::Distance && options.to.is_none() => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.distance: extrusion thickness must be > 0 mm, got {value}"

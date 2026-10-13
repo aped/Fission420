@@ -75,7 +75,13 @@ fn fillet_reference_prism_four_vertical_edges() {
     );
     assert_eq!(
         p,
-        vec![Some(true), Some(false), Some(false), Some(true), Some(false)]
+        vec![
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(true),
+            Some(false)
+        ]
     );
     // Topology: one solid, 4 planar sides + 4 cylinders + 2 caps.
     let summ = s.summary();
@@ -159,7 +165,11 @@ fn concave_fillet_of_an_inside_corner() {
     let r = tray::exec(&mut s, &fillet(side(3), side(4), 4.0));
     assert!(r.ok, "concave fillet: {:?}", r.error);
     let want = base + (16.0 - PI * 4.0) * 20.0;
-    assert!((tray::volume(&s) - want).abs() < 1e-6, "{}", tray::volume(&s));
+    assert!(
+        (tray::volume(&s) - want).abs() < 1e-6,
+        "{}",
+        tray::volume(&s)
+    );
     let d = 4.0 - 4.0 * std::f64::consts::FRAC_1_SQRT_2;
     let p = tray::probe(
         &s,
@@ -224,7 +234,11 @@ fn loft_reference_sections_and_volume() {
         tray::ok(&mut s, &v);
     }
     let want = taper_volume(20.0, (40.0, 30.0), (60.0, 50.0));
-    assert!((tray::volume(&s) - want).abs() < 1e-6, "{}", tray::volume(&s));
+    assert!(
+        (tray::volume(&s) - want).abs() < 1e-6,
+        "{}",
+        tray::volume(&s)
+    );
     // Sections at z = 5, 10, 15: half-sizes (20 + z/2, 15 + z/2). Probe just
     // inside / outside each side: no twist, linear interpolation.
     let mut pts = vec![];
@@ -245,7 +259,12 @@ fn loft_reference_sections_and_volume() {
     }
     assert_eq!(tray::probe(&s, &pts), expect);
     let b = s.summary().bodies[0].bounds.unwrap();
-    for (got, want) in b.min.iter().chain(b.max.iter()).zip([-30.0, -25.0, 0.0, 30.0, 25.0, 20.0]) {
+    for (got, want) in b
+        .min
+        .iter()
+        .chain(b.max.iter())
+        .zip([-30.0, -25.0, 0.0, 30.0, 25.0, 20.0])
+    {
         assert!((got - want).abs() < 1e-6, "bounds {b:?}");
     }
 }
@@ -294,12 +313,20 @@ fn sweep_reference_circle_along_quarter_circle() {
     let v = tray::volume(&s);
     assert!((v - want).abs() < 1e-6, "{v} vs {want}");
     let b = s.summary().bodies[0].bounds.unwrap();
-    for (got, want) in b.min.iter().chain(b.max.iter()).zip([-25.0, -3.0, 0.0, 3.0, 3.0, 28.0]) {
+    for (got, want) in b
+        .min
+        .iter()
+        .chain(b.max.iter())
+        .zip([-25.0, -3.0, 0.0, 3.0, 3.0, 28.0])
+    {
         assert!((got - want).abs() < 1e-6, "bounds {b:?}");
     }
     // Sections: at 45° along the bend the tube is centred on
     // (−25 + 25cos45°, 0, 25 sin45°); the end cap lies in the plane x = −25.
-    let (c, sn) = (25.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2), 25.0 * std::f64::consts::FRAC_1_SQRT_2);
+    let (c, sn) = (
+        25.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
+        25.0 * std::f64::consts::FRAC_1_SQRT_2,
+    );
     let p = tray::probe(
         &s,
         &[
@@ -313,7 +340,14 @@ fn sweep_reference_circle_along_quarter_circle() {
     );
     assert_eq!(
         p,
-        vec![Some(true), Some(false), Some(false), Some(true), Some(false), Some(false)]
+        vec![
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(true),
+            Some(false),
+            Some(false)
+        ]
     );
 }
 
@@ -335,7 +369,11 @@ fn sweep_noncircular_profile_keeps_its_orientation() {
         &json!({"cmd": "sweep", "profile": 1, "path": 2, "body_name": "Bar"}),
     );
     let want = 32.0 * (PI * 25.0 / 2.0);
-    assert!((tray::volume(&s) - want).abs() < 1e-6, "{}", tray::volume(&s));
+    assert!(
+        (tray::volume(&s) - want).abs() < 1e-6,
+        "{}",
+        tray::volume(&s)
+    );
     let p = tray::probe(
         &s,
         &[

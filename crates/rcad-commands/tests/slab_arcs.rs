@@ -55,6 +55,7 @@ fn cut(sketch: FeatureId, d: f64, through: bool) -> Command {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     }
 }
 
@@ -261,6 +262,7 @@ fn seedhole_repro_overlapping_blind_round_cuts_on_a_boss() {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
     );
     let h1 = sketch(&mut s, top(boss), circle(4.0, [15.0, 0.0]));
@@ -433,6 +435,7 @@ fn region_cut(s: &mut Session, sk: FeatureId, d: f64) -> Command {
         reverse: false,
         body_name: None,
         region: Some(holed.id),
+        options: Default::default(),
     }
 }
 

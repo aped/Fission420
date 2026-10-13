@@ -167,6 +167,7 @@ fn extrude(
         reverse,
         body_name: None,
         region: None,
+        options: Default::default(),
     })
 }
 

@@ -155,6 +155,7 @@ fn lip_opening_by_offset_matches_the_analytic_lid_volume_and_follows_wall() {
             reverse: false,
             body_name: None,
             region: Some(region),
+            options: Default::default(),
         },
     )
     .feature

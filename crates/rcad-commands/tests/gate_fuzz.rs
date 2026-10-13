@@ -117,6 +117,7 @@ fn random_features_are_exact_or_refused() {
                                 reverse: false,
                                 body_name: None,
                                 region: None,
+                                options: Default::default(),
                             }],
                             -fw * fh * d,
                         )
@@ -147,6 +148,7 @@ fn random_features_are_exact_or_refused() {
                                 reverse: false,
                                 body_name: None,
                                 region: None,
+                                options: Default::default(),
                             }],
                             fw * fh * hgt,
                         )
@@ -350,6 +352,7 @@ fn overlapping_pockets_are_exact_or_refused() {
                 reverse: false,
                 body_name: None,
                 region: None,
+                options: Default::default(),
             });
             if r.ok {
                 accepted += 1;
@@ -499,6 +502,7 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
                 reverse: false,
                 body_name: None,
                 region: None,
+                options: Default::default(),
             });
             let what = format!(
                 "case {case} #{n} {} [{i0},{j0}]-[{i1},{j1}] cells, {d} deep",

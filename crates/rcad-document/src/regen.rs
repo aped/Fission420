@@ -3,8 +3,8 @@
 use crate::hole::{check_hole_inside, to_kernel};
 use crate::import::{self, ImportedPlanarFace};
 use crate::{
-    BodyId, CopiedRole, DocError, Document, Extent, FaceRef, FaceRole, FeatureId, FeatureKind,
-    Operation, Result, SketchPlane,
+    BodyId, CopiedRole, DocError, Document, Extent, ExtrudeOptions, FaceRef, FaceRole, FeatureId,
+    FeatureKind, Operation, Result, SketchPlane,
 };
 use rcad_kernel::{self as k, Body, Frame, Measurements};
 use rcad_sketch::{EntityId, Profile as SketchProfile, SolveReport};
@@ -319,6 +319,12 @@ struct ExtrudeOut {
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
     joined: bool,
+    /// Intersect (run 6): no face of the result is referencable by role.
+    intersect: bool,
+    /// No run-6 option (start on the sketch plane, one side, no thin/taper).
+    plain: bool,
+    /// Several regions in one feature (patterns/mirrors do not copy it).
+    multi: bool,
     body: BodyId,
 }
 
@@ -675,6 +681,7 @@ pub fn regenerate_cached_opts(
                 extent,
                 reverse,
                 region,
+                options,
             } => {
                 let out = extrude_feature(
                     &mut st,
@@ -685,6 +692,7 @@ pub fn regenerate_cached_opts(
                     *extent,
                     *reverse,
                     region.as_ref(),
+                    options,
                 )?;
                 r.body = Some(out.body);
                 st.extrudes.insert(id, out);
@@ -1113,6 +1121,7 @@ fn replace_body(st: &mut Snapshot, id: FeatureId, body: BodyId, b: Body) {
 const JOIN_OVERLAP: f64 = 0.5;
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn extrude_feature(
     st: &mut Snapshot,
     id: FeatureId,
@@ -1122,6 +1131,7 @@ fn extrude_feature(
     extent: Extent,
     reverse: bool,
     pick: Option<&rcad_sketch::RegionRef>,
+    opts: &ExtrudeOptions,
 ) -> Result<ExtrudeOut> {
     let s = st
         .sketches
@@ -1130,22 +1140,99 @@ fn extrude_feature(
         .clone();
     let region = s.region(id, sketch, pick)?;
     let (profile, entities) = (region.outer, region.outer_entities);
-    let holes = region.holes;
-    let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
-    // Join/Cut with inner loops: only the exact slab construction builds them
-    // (`apply_tool`, ADR 0007); elsewhere it refuses with the reason.
-    let kp = to_kernel(&profile);
+    let mut holes = region.holes;
+    let mut extra = Vec::new();
+    for r in &opts.regions {
+        let x = s.region(id, sketch, Some(r))?;
+        extra.push((x.outer, x.outer_entities, x.holes));
+    }
     let frame = s.frame;
-    if extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0) {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: {m}"));
+    let invalid = |m: String| DocError::Validation(format!("{id}: {m}"));
+    // Option combinations (ExtrudeOptions): one way to give the far end.
+    if opts.symmetric && (opts.distance2 != 0.0 || opts.to.is_some()) {
+        return Err(invalid(
+            "symmetric extrusions have one length; clear 'two sides' / 'to plane'".into(),
+        ));
+    }
+    if opts.to.is_some() && opts.distance2 != 0.0 {
+        return Err(invalid(
+            "'to plane' and 'two sides' cannot be combined".into(),
+        ));
+    }
+    if extent == Extent::ThroughAll && !opts.is_plain() {
+        return Err(invalid(
+            "'through all' takes no symmetric/two-sides/offset/to-plane/thin/taper option".into(),
+        ));
+    }
+    for (name, v) in [
+        ("distance2", opts.distance2),
+        ("start_offset", opts.start_offset),
+        ("taper", opts.taper),
+    ] {
+        if !v.is_finite() {
+            return Err(invalid(format!("{name} must be finite, got {v}")));
+        }
+    }
+    if opts.distance2 < 0.0 {
+        return Err(invalid(format!(
+            "distance2: the second side's distance must be > 0 mm, got {}",
+            opts.distance2
+        )));
+    }
+    // Thin: the band between the outer loop and its inward offset.
+    let profile = profile;
+    if let Some(t) = opts.thin {
+        if !t.is_finite() || t <= 0.0 {
+            return Err(invalid(format!(
+                "thin: wall thickness must be > 0 mm, got {t}"
+            )));
+        }
+        if !holes.is_empty() {
+            return Err(limit(
+                "a thin extrusion needs a single closed loop (the region has inner loops)".into(),
+            ));
+        }
+        let inner = rcad_sketch::offset_profile(&profile, -t).map_err(|x| {
+            limit(format!(
+                "thin: wall thickness {t} mm does not fit the profile (inward offset: {x})"
+            ))
+        })?;
+        holes.push((inner, Vec::new()));
+        for (p, _, h) in extra.iter_mut() {
+            if !h.is_empty() {
+                return Err(limit(
+                    "a thin extrusion needs single closed loops (a region has inner loops)".into(),
+                ));
+            }
+            let inner = rcad_sketch::offset_profile(p, -t).map_err(|x| {
+                limit(format!(
+                    "thin: wall thickness {t} mm does not fit a region (inward offset: {x})"
+                ))
+            })?;
+            h.push((inner, Vec::new()));
+        }
+    }
+    if !extra.is_empty() && !matches!(operation, Operation::Join { .. } | Operation::Cut { .. }) {
+        return Err(limit(
+            "several regions are extruded together only by Join or Cut (New Body would make \
+             separate solids; Intersect keeps one region)"
+                .into(),
+        ));
+    }
+    let khole: Vec<k::Profile> = holes.iter().map(|(p, _)| to_kernel(p)).collect();
+    let kp = to_kernel(&profile);
+    if opts.to.is_none() && extent == Extent::Distance && (!distance.is_finite() || distance <= 0.0)
+    {
         return Err(DocError::Validation(format!(
             "{id}.distance: extrusion distance must be > 0 mm, got {distance}"
         )));
     }
     let target = match operation {
         Operation::NewBody { .. } => None,
-        Operation::Join { target } | Operation::Cut { target } => {
-            Some((target, brep_target(st, id, target)?))
-        }
+        Operation::Join { target }
+        | Operation::Cut { target }
+        | Operation::Intersect { target } => Some((target, brep_target(st, id, target)?)),
     };
     // Sketch on a face of the target: +1/-1 when the face's outward normal is
     // along/against the sketch normal (material lies on the other side).
@@ -1154,26 +1241,56 @@ fn extrude_feature(
         None => None,
     };
     // Direction semantics (ADR 0003): along the sketch normal, except when the
-    // sketch plane holds a face of the target. A Cut then goes into the material
-    // by default (`reverse` flips it). A Join goes away from the material and
-    // ignores `reverse`: the other way only adds nothing, and documents saved
-    // before this rule set `reverse` exactly when it pointed away.
+    // sketch plane holds a face of the target. A Cut (or Intersect) then goes
+    // into the material by default (`reverse` flips it). A Join goes away from
+    // the material and ignores `reverse`: the other way only adds nothing, and
+    // documents saved before this rule set `reverse` exactly when it pointed
+    // away.
     let base = match (operation, side) {
-        (Operation::Cut { .. }, Some(side)) => -side,
+        (Operation::Cut { .. } | Operation::Intersect { .. }, Some(side)) => -side,
         (Operation::Join { .. }, Some(side)) => side,
         _ => 1.0,
     };
-    let dir = match (operation, side) {
+    let mut dir = match (operation, side) {
         (Operation::Join { .. }, Some(side)) => side,
         _ if reverse => -base,
         _ => base,
     };
-    // Tool = prism of the profile over [a, b] along the sketch normal.
-    let (mut a, mut b) = if dir > 0.0 {
-        (0.0, distance)
+    // Span along the direction, u ∈ [u0, u1] (ExtrudeOptions).
+    let s0 = opts.start_offset;
+    let mut distance = distance;
+    let (u0, u1) = if let Some(to) = &opts.to {
+        let (tf, _) = plane_frame(id, to, st)?;
+        if dot(tf.z, frame.z).abs() < 1.0 - 1e-9 {
+            return Err(limit(
+                "'to plane' needs a plane parallel to the sketch plane (curved or oblique \
+                 targets are not supported)"
+                    .into(),
+            ));
+        }
+        let h = dot(sub(tf.origin, frame.origin), frame.z);
+        if h.abs() <= k::tol::MIN_LENGTH {
+            return Err(invalid("the 'to' plane is the sketch plane itself".into()));
+        }
+        dir = h.signum();
+        if dir * s0 >= h.abs() - k::tol::MIN_LENGTH && s0 != 0.0 {
+            return Err(invalid(format!(
+                "the start offset {s0} mm reaches the 'to' plane ({:.6} mm away)",
+                h.abs()
+            )));
+        }
+        distance = h.abs() - s0;
+        (s0, h.abs())
+    } else if opts.symmetric {
+        (s0 - distance / 2.0, s0 + distance / 2.0)
     } else {
-        (-distance, 0.0)
+        (s0 - opts.distance2, s0 + distance)
     };
+    if u1 - u0 <= k::tol::MIN_LENGTH {
+        return Err(invalid("the extrusion has no length".into()));
+    }
+    // Tool = prism of the profile over [a, b] along the sketch normal.
+    let (mut a, mut b) = if dir > 0.0 { (u0, u1) } else { (-u1, -u0) };
     let mut out = ExtrudeOut {
         start: frame,
         distance,
@@ -1183,12 +1300,29 @@ fn extrude_feature(
         entities,
         holes,
         span: (0.0, 0.0),
-        nominal: (0.0, 0.0),
+        nominal: (a, b),
         side,
         removes: false,
         joined: false,
+        intersect: false,
+        plain: opts.is_plain(),
+        multi: false,
         body: BodyId(0),
     };
+    if opts.taper != 0.0 {
+        if !matches!(operation, Operation::NewBody { .. }) {
+            return Err(limit(
+                "a tapered extrusion is only available as New Body so far (Join/Cut/Intersect \
+                 with a taper: not yet supported)"
+                    .into(),
+            ));
+        }
+        if !khole.is_empty() {
+            return Err(limit(
+                "a tapered extrusion needs a region without inner loops".into(),
+            ));
+        }
+    }
     match (operation, target) {
         (Operation::NewBody { body }, _) => {
             if extent == Extent::ThroughAll {
@@ -1196,8 +1330,11 @@ fn extrude_feature(
                     "{id}: 'through all' needs a Cut target body"
                 )));
             }
-            let solid =
-                k::extrude_region(&kp, &khole, &frame.offset(a), b - a).map_err(kernel(id))?;
+            let solid = if opts.taper != 0.0 {
+                tapered_solid(id, &out.profile, &frame, (a, b), dir, opts.taper)?
+            } else {
+                k::extrude_region(&kp, &khole, &frame.offset(a), b - a).map_err(kernel(id))?
+            };
             create_body(st, id, body, BodyGeometry::Brep(solid), BodySource::Modeled)?;
             out.body = body;
         }
@@ -1208,7 +1345,6 @@ fn extrude_feature(
                 )));
             }
             out.joined = true;
-            out.nominal = (a, b);
             if side.is_some() {
                 // Report a tool that misses the target as such, before the
                 // face-containment rule (the sketch plane may merely be coplanar
@@ -1226,14 +1362,26 @@ fn extrude_feature(
                     });
                 }
             }
-            let (joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut joined, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
+            for (i, (p, ents, h)) in extra.iter().enumerate() {
+                let o = ExtrudeOut {
+                    profile: p.clone(),
+                    entities: ents.clone(),
+                    holes: h.clone(),
+                    ..out.clone()
+                };
+                let w = format!("region {}", i + 2);
+                joined = apply_tool(&joined, &o, &frame, Some(&w), id, None)?.0;
+            }
             replace_body(st, id, target, joined);
             out.body = target;
+            out.multi = !extra.is_empty();
         }
         (Operation::Cut { .. }, Some((target, t))) => {
             out.removes = true;
             if extent == Extent::Distance
+                && opts.is_plain()
                 && let Some(side) = side
                 && dir * side > 0.0
             {
@@ -1241,18 +1389,156 @@ fn extrude_feature(
                     "{id}: the cut points away from the material of {target}; clear 'reverse'"
                 )));
             }
-            out.nominal = (a, b);
-            let (cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
+            let (mut cut, used) = apply_tool(&t, &out, &frame, None, id, None)?;
             (a, b) = used;
+            for (i, (p, ents, h)) in extra.iter().enumerate() {
+                let o = ExtrudeOut {
+                    profile: p.clone(),
+                    entities: ents.clone(),
+                    holes: h.clone(),
+                    ..out.clone()
+                };
+                let w = format!("region {}", i + 2);
+                cut = apply_tool(&cut, &o, &frame, Some(&w), id, None)?.0;
+            }
             replace_body(st, id, target, cut);
             out.body = target;
+            out.multi = !extra.is_empty();
         }
-        (Operation::Join { .. } | Operation::Cut { .. }, None) => {
+        (Operation::Intersect { .. }, Some((target, t))) => {
+            out.intersect = true;
+            let kept = intersect_tool(&t, &out, &frame, id)?;
+            replace_body(st, id, target, kept);
+            out.body = target;
+        }
+        (Operation::Join { .. } | Operation::Cut { .. } | Operation::Intersect { .. }, None) => {
             return Err(DocError::Validation(format!("{id}: missing target body")));
         }
     }
     out.span = (a, b);
     Ok(out)
+}
+
+/// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:
+/// the far end (along `dir`) is the profile offset by `−(b − a)·tan(taper)`
+/// (positive taper shrinks it), lofted exactly (ADR 0008: polygons have
+/// parallel corresponding edges, circles give a cone frustum).
+fn tapered_solid(
+    id: FeatureId,
+    profile: &SketchProfile,
+    frame: &Frame,
+    (a, b): (f64, f64),
+    dir: f64,
+    taper: f64,
+) -> Result<Body> {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: taper: {m}"));
+    let delta = -(b - a) * taper.tan();
+    let far = rcad_sketch::offset_profile(profile, delta).map_err(|x| {
+        limit(format!(
+            "the profile offset by {delta:.6} mm at the far end is not valid ({x}); reduce the \
+             taper or the distance"
+        ))
+    })?;
+    let (near_at, far_at) = if dir > 0.0 { (a, b) } else { (b, a) };
+    k::loft(
+        &to_kernel(profile),
+        &frame.offset(near_at),
+        &to_kernel(&far),
+        &frame.offset(far_at),
+    )
+    .map_err(|e| {
+        limit(format!(
+            "{e} (tapered profiles are lofted: polygons and circles)"
+        ))
+    })
+}
+
+/// Intersect: keep the material of `t` inside `e`'s tool. Built as cuts by
+/// the tool's complement within a box around `t` (each an exact slab cut
+/// checked against its nominal tool, ADR 0005/0006): the box with the profile
+/// as a hole over the tool span, every inner loop of the profile over the
+/// span, and the whole box below / above the span.
+fn intersect_tool(t: &Body, e: &ExtrudeOut, frame: &Frame, id: FeatureId) -> Result<Body> {
+    let err = kernel(id);
+    let bb = k::bounds(t).map_err(&err)?;
+    // Box around the target in sketch-frame coordinates.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for i in 0..8 {
+        let p = [
+            if i & 1 == 0 { bb.min[0] } else { bb.max[0] },
+            if i & 2 == 0 { bb.min[1] } else { bb.max[1] },
+            if i & 4 == 0 { bb.min[2] } else { bb.max[2] },
+        ];
+        let d = sub(p, frame.origin);
+        let q = [dot(d, frame.x), dot(d, frame.y), dot(d, frame.z)];
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
+        }
+    }
+    let m = k::through_all_margin(t).map_err(&err)?;
+    let (x0, x1, y0, y1) = (lo[0] - m, hi[0] + m, lo[1] - m, hi[1] + m);
+    let boxp = SketchProfile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let (a, b) = e.nominal;
+    let piece = |profile: SketchProfile,
+                 holes: Vec<(SketchProfile, Vec<EntityId>)>,
+                 span: (f64, f64)| ExtrudeOut {
+        start: *frame,
+        distance: span.1 - span.0,
+        dir: 1.0,
+        extent: Extent::Distance,
+        profile,
+        entities: vec![],
+        holes,
+        span,
+        nominal: span,
+        side: None,
+        removes: true,
+        joined: false,
+        intersect: false,
+        plain: true,
+        multi: false,
+        body: e.body,
+    };
+    let mut pieces = vec![piece(
+        boxp.clone(),
+        vec![(e.profile.clone(), e.entities.clone())],
+        (a, b),
+    )];
+    for (h, ents) in &e.holes {
+        pieces.push(piece(h.clone(), vec![], (a, b)));
+        let _ = ents;
+    }
+    if a > lo[2] + k::tol::KERNEL_LINEAR {
+        pieces.push(piece(boxp.clone(), vec![], (lo[2] - m, a)));
+    }
+    if b < hi[2] - k::tol::KERNEL_LINEAR {
+        pieces.push(piece(boxp, vec![], (b, hi[2] + m)));
+    }
+    let mut body = t.clone();
+    for p in &pieces {
+        if k::prismatic::not_applicable(&body, &to_kernel(&p.profile), frame).is_some()
+            && !p.holes.is_empty()
+        {
+            let why = k::prismatic::not_applicable(&body, &to_kernel(&p.profile), frame)
+                .unwrap_or_default();
+            return Err(DocError::ProductLimit(format!(
+                "{id}: intersect is built from exact slab cuts, which do not apply to this \
+                 target ({why})"
+            )));
+        }
+        let (next, _) =
+            apply_tool(&body, p, frame, Some("intersect"), id, None).map_err(|x| match x {
+                DocError::Kernel { detail, .. } if detail.contains("disconnected") => {
+                    DocError::ProductLimit(format!(
+                        "{id}: intersect leaves disconnected pieces of the target ({detail})"
+                    ))
+                }
+                other => other,
+            })?;
+        body = next;
+    }
+    Ok(body)
 }
 
 /// Which end of a blind cut stayed on a coplanar face because moving it would
@@ -1544,9 +1830,11 @@ fn apply_tool(
         return Ok((out, span));
     }
     let (a, b) = e.nominal;
+    // The support face matters only when the tool starts on it (run 6: a
+    // symmetric, two-sided or offset join crosses or leaves the face).
+    let on_face = (e.dir > 0.0 && a == 0.0) || (e.dir < 0.0 && b == 0.0);
     let span = match e.side {
-        None => (a, b),
-        Some(side) => {
+        Some(side) if on_face => {
             // A tool end lying on a face of the target would make coplanar
             // boolean faces (Truck 0.6 returns no result): move that end into
             // the material, which is only exact when the profile lies on the
@@ -1597,6 +1885,7 @@ fn apply_tool(
                 (a, -side * delta)
             }
         }
+        _ => (a, b),
     };
     let truck = k::join_prism(body, &kp, &frame.offset(span.0), span.1 - span.0)
         .map_err(err)
@@ -1783,7 +2072,7 @@ fn shell_tool(
     let e = st
         .extrudes
         .get(&extrude)
-        .filter(|e| !e.removes && !e.joined && e.extent == Extent::Distance)
+        .filter(|e| !e.removes && !e.joined && e.plain && e.extent == Extent::Distance)
         .ok_or_else(|| {
             limit(format!(
                 "{extrude} is not a New Body extrusion; the scoped shell hollows a body made by \
@@ -1863,6 +2152,9 @@ fn shell_tool(
             side: Some(side),
             removes: true,
             joined: false,
+            intersect: false,
+            plain: true,
+            multi: false,
             body: e.body,
         },
     ))
@@ -1968,6 +2260,9 @@ fn hole_tools(
             side: Some(side),
             removes: true,
             joined: false,
+            intersect: false,
+            plain: true,
+            multi: false,
             body: target,
         }
     };
@@ -2015,6 +2310,17 @@ fn copy_seed(st: &Snapshot, id: FeatureId, seed: FeatureId) -> Result<Vec<Extrud
             from: id,
             detail: format!("{seed} is not an evaluated extrusion or hole"),
         })?;
+    if e.intersect || e.multi {
+        return Err(DocError::ProductLimit(format!(
+            "{id}: patterns and mirrors copy single-region Extrude Join or Cut features ({seed} \
+             is {})",
+            if e.intersect {
+                "an intersect"
+            } else {
+                "a multi-region extrusion"
+            }
+        )));
+    }
     if !e.removes && !e.joined {
         return Err(DocError::ProductLimit(format!(
             "{id}: patterns and mirrors copy Extrude Join or Cut features ({seed} creates a \
@@ -2453,6 +2759,16 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
         y: cross(z, x),
         z,
     };
+    if e.intersect {
+        return Err(broken(format!(
+            "{} is an intersect extrusion; its faces are not referencable by role",
+            fr.feature
+        )));
+    }
+    // Cap positions along the sketch normal: the far end along the direction
+    // (end cap) and the near end (start cap) of the nominal span.
+    let (lo, hi) = e.nominal;
+    let (end_at, start_at) = if e.dir > 0.0 { (hi, lo) } else { (lo, hi) };
     match fr.role {
         FaceRole::ExtrudeEndCap | FaceRole::ExtrudeStartCap if e.extent == Extent::ThroughAll => {
             Err(broken(format!(
@@ -2463,23 +2779,29 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
         FaceRole::ExtrudeEndCap => {
             let origin = f.to_world([0.0, 0.0]);
             let origin = [
-                origin[0] + z_dir[0] * e.distance,
-                origin[1] + z_dir[1] * e.distance,
-                origin[2] + z_dir[2] * e.distance,
+                origin[0] + f.z[0] * end_at,
+                origin[1] + f.z[1] * end_at,
+                origin[2] + f.z[2] * end_at,
             ];
             // New/Join: outward along the extrusion; cut floor: back toward the opening.
             let z = if e.removes { scale(z_dir, -1.0) } else { z_dir };
             Ok(frame_from(origin, z, f.x))
         }
         FaceRole::ExtrudeStartCap => {
-            if e.removes || e.joined {
+            if (e.removes || e.joined) && start_at == 0.0 {
                 return Err(broken(format!(
                     "{} has no start cap face (a {} starts on its support)",
                     fr.feature,
                     if e.removes { "cut" } else { "join" }
                 )));
             }
-            Ok(frame_from(f.origin, scale(z_dir, -1.0), f.x))
+            let o = f.origin;
+            let origin = [
+                o[0] + f.z[0] * start_at,
+                o[1] + f.z[1] * start_at,
+                o[2] + f.z[2] * start_at,
+            ];
+            Ok(frame_from(origin, scale(z_dir, -1.0), f.x))
         }
         FaceRole::ExtrudeSide { entity } => {
             // Outer loop first, then the holes (whose walls face into the hole).

@@ -73,7 +73,11 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
     // plus a margin at both ends.
     // A cut runs past both ends (air); a join spans the edge exactly (its
     // ends are flush with the end faces, which are perpendicular to it).
-    let m = if convex { through_all_margin(body)? } else { 0.0 };
+    let m = if convex {
+        through_all_margin(body)?
+    } else {
+        0.0
+    };
     let frame = Frame {
         origin: arr(p + e * (smin - m)),
         x: arr(t1),

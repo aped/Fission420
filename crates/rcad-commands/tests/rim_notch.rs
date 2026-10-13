@@ -42,6 +42,7 @@ fn cut(sketch: FeatureId, d: f64) -> Command {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     }
 }
 

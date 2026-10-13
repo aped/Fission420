@@ -52,6 +52,7 @@ fn extrude(s: &mut Session, sk: FeatureId, d: f64, op: ExtrudeOp, name: Option<&
             reverse: false,
             body_name: name.map(str::to_string),
             region: None,
+            options: Default::default(),
         },
     )
     .feature

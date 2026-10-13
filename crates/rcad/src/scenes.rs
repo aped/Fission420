@@ -125,6 +125,7 @@ fn two_bodies() -> Vec<SceneStep> {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         }),
     ]
 }
@@ -216,6 +217,7 @@ impl RcadApp {
                     reverse: false,
                     body_name: None,
                     region: None,
+                    options: Default::default(),
                 }),
                 Ui(|a| {
                     let s = a.feature_by_name("Side slot").map(|f| f.id);

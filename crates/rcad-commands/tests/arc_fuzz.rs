@@ -432,6 +432,7 @@ fn arc_corpus(only: Option<usize>) {
                 reverse: false,
                 body_name: None,
                 region: None,
+                options: Default::default(),
             });
             let what = format!(
                 "case {case} #{n} {} {shape:?}",
@@ -634,6 +635,7 @@ fn tangent_round_cut_beside_a_shallow_rounded_pocket() {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         });
         if i == 4 {
             assert!(

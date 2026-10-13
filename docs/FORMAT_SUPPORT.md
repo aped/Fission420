@@ -228,6 +228,15 @@ documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/
 (`suppression.rs::frozen_v4_fixtures_load_unchanged`: load, regenerate to the cached volume,
 re-save as an identical v4 document).
 
+**v6 (run 6)** = v5 plus extrusion options (`"options"` on an `Extrude`: symmetric, two
+sides, start offset, up to a plane, thin, taper, further regions) and the `Intersect`
+operation (`rcad_document::io::v6_feature` lists every run-6 addition). Written only when used,
+otherwise v5/v4 as before; a file labelled v5 or older that contains a v6 feature is refused
+(a run-5 build would silently ignore the unknown fields and build a different solid). Frozen
+v5 documents (saved by run-6's build before the change, with run-5 features only) are in
+`crates/rcad-commands/tests/fixtures/native_v5/` (`native_formats.rs::v5_run5_documents`:
+open, analytic volume, re-save as an identical v5 document).
+
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
 `*.f420.json`. They load unchanged; no version changed with the name, and the extension is

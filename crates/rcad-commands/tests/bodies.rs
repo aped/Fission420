@@ -53,6 +53,7 @@ fn extrude(
         reverse,
         body_name: None,
         region: None,
+        options: Default::default(),
     }
 }
 
@@ -269,6 +270,7 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     });
     assert!(r.ok, "{r:?}");
     assert!((body_volume(&s, b) - want / 2.0).abs() < 1e-7 * want);

@@ -29,7 +29,12 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// as v5 only when it uses one of them ([`required_version`]); otherwise it
 /// stays v4, byte for byte as before, so older builds keep reading it and
 /// refuse (rather than misread) a v5 file.
-pub const FORMAT_VERSION: u32 = 5;
+/// v6 (run 6): extrusion options (`ExtrudeOptions`: symmetric, two sides,
+/// start offset, up to a plane, thin, taper) and the Intersect operation, plus
+/// the other run-6 additions listed in [`v6_feature`]. Written only when used
+/// (otherwise v5 or v4 as before), so a run-5 build refuses the file instead
+/// of silently ignoring a field it does not know.
+pub const FORMAT_VERSION: u32 = 6;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -163,10 +168,38 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
         .and_then(scan)
 }
 
-/// The oldest format version that can hold `doc`: 5 when it uses a run-5
-/// feature, else 4.
+/// What in `doc` needs format v6, if anything (see [`FORMAT_VERSION`]).
+/// Every run-6 addition that an older build would ignore or misread must be
+/// listed here.
+pub fn v6_feature(doc: &Document) -> Option<&'static str> {
+    for f in &doc.features {
+        if let crate::FeatureKind::Extrude {
+            options, operation, ..
+        } = &f.kind
+        {
+            if !options.is_plain() {
+                return Some(
+                    "extrusion options (symmetric, two sides, offset start, to plane, thin, taper)",
+                );
+            }
+            if matches!(operation, crate::Operation::Intersect { .. }) {
+                return Some("intersect extrusions");
+            }
+        }
+    }
+    None
+}
+
+/// The oldest format version that can hold `doc`: 6 / 5 when it uses a
+/// run-6 / run-5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if v5_feature(doc).is_some() { 5 } else { 4 }
+    if v6_feature(doc).is_some() {
+        6
+    } else if v5_feature(doc).is_some() {
+        5
+    } else {
+        4
+    }
 }
 
 /// Save atomically (see [`write_atomic`]). On any error the previous file is untouched.
@@ -290,6 +323,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v5 feature)",
+            nf.version
+        )));
+    }
+    if nf.version < 6
+        && let Some(what) = v6_feature(&nf.document)
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain {what} (v6 feature)",
             nf.version
         )));
     }

@@ -11,8 +11,9 @@ pub mod scenarios;
 pub mod sketches;
 
 use rcad_document::{
-    BodyGeometry, BodyId, BodySource, DocError, Document, Extent, FaceCandidate, FaceRef, FaceRole,
-    FeatureId, FeatureKind, Model, Operation, SketchPlane, load_file, save_file, write_atomic,
+    BodyGeometry, BodyId, BodySource, DocError, Document, Extent, ExtrudeOptions, FaceCandidate,
+    FaceRef, FaceRole, FeatureId, FeatureKind, Model, Operation, SketchPlane, load_file, save_file,
+    write_atomic,
 };
 use rcad_kernel::{self as k, Frame, Measurements, MeshCheck};
 use rcad_sketch::{Sketch, SolveStatus};
@@ -80,6 +81,11 @@ pub enum Command {
         /// its holes) as before. See docs/behavior/sketching.md.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<rcad_sketch::RegionRef>,
+        /// Run-6 options (symmetric, two sides `distance2`, `start_offset`,
+        /// up `to` a parallel plane, `thin` wall, `taper`, further `regions`);
+        /// see `rcad_document::ExtrudeOptions`. Format v6 when used.
+        #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
+        options: ExtrudeOptions,
     },
     /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis).
     Revolve {
@@ -415,6 +421,7 @@ impl Command {
             reverse: false,
             body_name: None,
             region: None,
+            options: ExtrudeOptions::default(),
         }
     }
 
@@ -490,6 +497,8 @@ pub enum ExtrudeOp {
     NewBody,
     Join,
     Cut,
+    /// Keep only the target's material inside the tool (run 6).
+    Intersect,
 }
 
 impl ExtrudeOp {
@@ -880,10 +889,12 @@ impl Session {
                 reverse,
                 body_name,
                 region,
+                options,
             } => {
                 let (name, sketch, distance, reverse) =
                     (name.clone(), *sketch, *distance, *reverse);
                 let region = region.clone();
+                let options = options.clone();
                 let extent = if *through_all {
                     if *op != ExtrudeOp::Cut {
                         return Err(DocError::Validation(
@@ -892,7 +903,8 @@ impl Session {
                     }
                     Extent::ThroughAll
                 } else {
-                    if !distance.is_finite() || distance <= 0.0 {
+                    // Up to a plane: the plane gives the length.
+                    if options.to.is_none() && (!distance.is_finite() || distance <= 0.0) {
                         return Err(DocError::Validation(format!(
                             "extrusion distance must be > 0 mm, got {distance}"
                         )));
@@ -912,6 +924,7 @@ impl Session {
                     let operation = match (op, target) {
                         (ExtrudeOp::Join, Some(target)) => Operation::Join { target },
                         (ExtrudeOp::Cut, Some(target)) => Operation::Cut { target },
+                        (ExtrudeOp::Intersect, Some(target)) => Operation::Intersect { target },
                         _ => {
                             let n = match &body_name {
                                 Some(n) => valid_name(n, "body")?,
@@ -941,6 +954,7 @@ impl Session {
                             extent,
                             reverse,
                             region,
+                            options,
                         },
                     ))
                 })?;

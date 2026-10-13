@@ -108,6 +108,7 @@ fn queue_slow_edits(h: &mut Harness<'_, RcadApp>) {
         reverse: false,
         body_name: None,
         region: None,
+        options: Default::default(),
     });
     app.request(Command::LinearPattern {
         name: None,

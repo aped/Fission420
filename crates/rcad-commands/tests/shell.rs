@@ -229,6 +229,7 @@ fn refusals_leave_the_document_unchanged() {
             reverse: false,
             body_name: None,
             region: None,
+            options: Default::default(),
         },
     )
     .feature
