@@ -149,9 +149,33 @@ Checked and fine (audit):
 
 ### Status (2026-10-12)
 
-Workflow and tests are on branch `ci/github-actions`. The repository has **no git remote**,
-so no GitHub run has happened yet: every statement about Windows and macOS is a prediction
-from the audit until the first run.
+Workflow and tests are on branch `ci/github-actions`, pushed to
+https://github.com/aped/Fission420 (public since 2026-10-13).
+
+**First GitHub run** ([38342360431](https://github.com/aped/Fission420/actions/runs/38342360431),
+commit `8946b8d`, the original four-legs-on-every-push layout). Conclusion **success**:
+
+| leg | result | duration |
+|---|---|---|
+| ubuntu-24.04 | pass: full `cargo xtask check` | 27 min |
+| debian-13 | pass | 28 min |
+| macos-arm64 | pass: every test, acceptance and every replay. **F3 and L1 did not occur** | 17 min |
+| windows-x64 (non-gating) | **fail: exactly F1.** `scenario_{a,b,r}_example_is_current_and_replays`; all other tests passed, including the timing-sensitive UI tests (L6). Once `\\` is normalised to `/`, all three workflows compare equal, so the solver's floats are bit-identical on the UCRT as well: **F3 did not occur**. xtask stops at the first failing stage, so acceptance and the example replays (and with them L2) have not run on Windows yet | 31 min |
+
+**Validation run of the current layout** ([38344936649](https://github.com/aped/Fission420/actions/runs/38344936649),
+`workflow_dispatch`, warm caches). Conclusion success. Ubuntu and Debian took 9 min, macOS
+11 min (all pass), Windows 22 min (F1 again).
+
+- **Linux and macOS archives:** published. The Linux archive was downloaded and checked: it
+  contains the binaries, the licence files, `THIRD_PARTY_LICENSES.txt` (260 crates), the
+  examples and `BUILD_INFO.txt`, and runs `f420-cli run examples/plate_workflow.json`.
+- **Windows archive:** not uploaded, because the upload step's implicit `success()` was
+  false after the failed check. Fixed (`!cancelled()`).
+- **L3 seen from the user's side:** an extracted archive without an `artifacts/` directory
+  made the CLI exit 1 on that example. Archives now ship an empty `artifacts/`.
+
+The next step is F1 alone. After it, Windows can be promoted to gating once one run is green,
+and macOS can be promoted now.
 
 Local evidence from base `f0bcf6c` plus this change (logs in `artifacts/ci/`, untracked):
 

@@ -98,6 +98,8 @@ jobs:
             "dist/$name/THIRD_PARTY_LICENSES.txt"
           git checkout -- examples   # ship the committed examples, not replay output
           cp -r examples "dist/$name/examples"
+          # The example workflows export into artifacts/, which the CLI does not create (L3).
+          mkdir -p "dist/$name/artifacts" && touch "dist/$name/artifacts/.keep"
           {
             echo "commit: ${GITHUB_SHA}"
             echo "platform: ${{ inputs.name }}"
@@ -114,7 +116,9 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v7
-        if: steps.package.outcome == 'success'
+        # !cancelled(): without a status function `if` implies success(), which is false on a
+        # non-gating leg whose check failed, so its archive would never upload.
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: fission420-${{ inputs.artifact }}
           path: |
