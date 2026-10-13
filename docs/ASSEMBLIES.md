@@ -21,8 +21,12 @@ Format v6 (`document.assembly`; `io::v6_feature` "components, occurrences and jo
   placed. A component with no occurrences shows its bodies in place.
 * **Joints** (tree solver): `rigid` (0 DOF), `revolute` (value in degrees about an axis
   through `origin`), `slider` (value in mm along `axis`), each with optional `min`/`max`
-  limits. `origin`/`axis` are in the parent occurrence's definition coordinates (read a
-  cylinder axis with `measure_faces` if needed). The child follows
+  limits. `origin`/`axis` are in the parent occurrence's definition coordinates, given
+  explicitly or taken exactly from the parent's faces with `axis_from`: `{"cylinder": {"face":
+  {body, face}}}` (a hole/boss axis) or `{"edge": {"a": …, "b": …}}` (the line where two
+  non-parallel planar faces meet). Face indices are those of the current evaluation
+  (`measure_faces`); the axis is captured when the joint is made and does not follow later
+  edits of those faces. The child follows
   `T_child = T_parent ∘ M(value) ∘ rest`, `rest` captured when the joint is added (the child
   does not jump). Each occurrence is the child of at most one joint; a joint that would close
   a loop, a second joint on the same child (over-constraint), a grounded child, a value or

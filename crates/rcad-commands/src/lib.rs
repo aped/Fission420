@@ -451,6 +451,10 @@ pub enum Command {
         origin: [f64; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis: Option<[f64; 3]>,
+        /// Take `origin`/`axis` from a cylinder face or the line where two
+        /// planar faces of the parent's definition bodies meet (overrides them).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_from: Option<assembly::AxisFrom>,
         #[serde(default)]
         value: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
