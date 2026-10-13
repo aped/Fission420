@@ -1049,6 +1049,7 @@ impl RcadApp {
                     }
                 });
                 self.projection_ui(ui, &f);
+                self.sheet_ui(ui, &f);
                 match &f.profile_error {
                     None => {
                         ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
@@ -1065,6 +1066,7 @@ impl RcadApp {
                     ui.small(format!("Used by {}", c.name));
                 }
             }
+            "sheet_metal" => self.flat_pattern_ui(ui, &f),
             "extrude" => {
                 // Scoped shell of a New Body extrusion (dialog: extrude.rs).
                 if matches!(f.operation, Some(rcad_document::Operation::NewBody { .. }))
@@ -2527,5 +2529,67 @@ impl RcadApp {
                 }
             });
         header.header_response.probe("Configurations header");
+    }
+}
+
+impl RcadApp {
+    /// Run 6: sheet-metal flange from this sketch's open line chain, and the
+    /// flat-pattern export of a flange feature (docs/SHEET_METAL.md).
+    fn sheet_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        let mut send = None;
+        let header = egui::CollapsingHeader::new("Sheet metal flange")
+            .id_salt(("sheet_ui", f.id.0))
+            .show(ui, |ui| {
+                let b = &mut self.sheet_form;
+                for (i, l) in ["Thickness (mm)", "Inner bend radius (mm)", "K-factor", "Width (mm)"]
+                    .iter()
+                    .enumerate()
+                {
+                    num_field(ui, l, &mut b[i]);
+                }
+                let v: Vec<Option<f64>> = b
+                    .iter()
+                    .map(|t| t.trim().parse::<f64>().ok().filter(|x| x.is_finite()))
+                    .collect();
+                if ui
+                    .add_enabled(v.iter().all(Option::is_some), egui::Button::new("Create flange"))
+                    .probe("Create flange")
+                    .clicked()
+                {
+                    send = Some(Command::SheetMetal {
+                        name: None,
+                        sketch: f.id,
+                        thickness: v[0].unwrap_or(1.0),
+                        radius: v[1].unwrap_or(1.0),
+                        k_factor: v[2].unwrap_or(0.44),
+                        width: v[3].unwrap_or(10.0),
+                        flip: false,
+                        body_name: None,
+                    });
+                }
+                ui.small("Open chain of lines = one sheet surface; material to the right of the chain; bends at the corners (inner radius); flat length by K-factor.");
+            });
+        header.header_response.probe("Sheet metal flange");
+        if let Some(c) = send {
+            self.request(c);
+        }
+    }
+
+    /// Flat-pattern DXF export of a sheet-metal flange feature.
+    pub(crate) fn flat_pattern_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
+        ui.horizontal(|ui| {
+            text_field(ui, "Flat pattern DXF path", &mut self.flat_path);
+            if ui
+                .button("Export flat pattern")
+                .probe("Export flat pattern")
+                .clicked()
+            {
+                let c = Command::ExportFlatPattern {
+                    feature: f.id,
+                    path: self.flat_path.clone().into(),
+                };
+                self.request(c);
+            }
+        });
     }
 }

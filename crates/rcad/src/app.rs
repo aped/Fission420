@@ -403,6 +403,9 @@ pub struct RcadApp {
     /// Inline rename of a body row in the browser.
     pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) move_form: crate::bodies::MoveForm,
+    /// Sheet-metal flange form: thickness, radius, K, width; flat-pattern path.
+    pub(crate) sheet_form: [String; 4],
+    pub(crate) flat_path: String,
     /// Split-by-plane form: world plane (0 XY, 1 XZ, 2 YZ), offset text.
     pub(crate) split_form: (u8, String),
     /// Configuration name / part number being typed (run 6).
@@ -497,6 +500,8 @@ impl RcadApp {
             rename: None,
             body_rename: None,
             move_form: Default::default(),
+            sheet_form: ["1".into(), "2".into(), "0.44".into(), "40".into()],
+            flat_path: String::new(),
             split_form: (0, "0".into()),
             config_form: Default::default(),
             doc_dim_edit: None,

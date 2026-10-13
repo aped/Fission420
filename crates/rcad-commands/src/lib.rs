@@ -416,6 +416,31 @@ pub enum Command {
         #[serde(default)]
         overwrite: bool,
     },
+    /// Sheet-metal contour flange (run 6; docs/SHEET_METAL.md): the open
+    /// line chain of `sketch` with `thickness`, inner bend `radius`,
+    /// `k_factor` (default 0.44) and `width`; `flip` puts the material on the
+    /// left of the chain. A new body (`body_name`).
+    SheetMetal {
+        #[serde(default)]
+        name: Option<String>,
+        sketch: FeatureId,
+        thickness: f64,
+        radius: f64,
+        #[serde(default = "default_k")]
+        k_factor: f64,
+        width: f64,
+        #[serde(default)]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+    },
+    /// Write the flat pattern of sheet-metal feature `feature` as an R12 DXF
+    /// (mm): outline on layer CUT, bend centre lines on layer BEND. The
+    /// response message carries the flat length.
+    ExportFlatPattern {
+        feature: FeatureId,
+        path: PathBuf,
+    },
     /// Split `body` by `plane` (run 6; one undo step): the body keeps the
     /// part behind the plane, a new body (`body_name`) the part in front.
     SplitBody {
@@ -631,6 +656,8 @@ impl Command {
             Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
             Command::SplitBody { .. } => "split_body",
+            Command::SheetMetal { .. } => "sheet_metal",
+            Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
             Command::MoveFeature { .. } => "move_feature",
@@ -658,6 +685,10 @@ impl Command {
             Command::Inspect => "inspect",
         }
     }
+}
+
+fn default_k() -> f64 {
+    0.44
 }
 
 /// One entry of [`Command::SetUserParameters`].
@@ -2373,6 +2404,94 @@ impl Session {
                 result?;
                 r.message = Some(format!("wrote {}", written.join(", ")));
             }
+            Command::SheetMetal {
+                name,
+                sketch,
+                thickness,
+                radius,
+                k_factor,
+                width,
+                flip,
+                body_name,
+            } => {
+                let (name, sketch, body_name) = (name.clone(), *sketch, body_name.clone());
+                let (thickness, radius, k_factor, width, flip) =
+                    (*thickness, *radius, *k_factor, *width, *flip);
+                let id = self.model_mut()?.transact("Sheet metal flange", |d| {
+                    let n = match &body_name {
+                        Some(n) => valid_name(n, "body")?,
+                        None => d.default_body_name(),
+                    };
+                    if d.bodies.iter().any(|b| b.name == n) {
+                        return Err(DocError::Validation(format!(
+                            "another body is already named '{n}'"
+                        )));
+                    }
+                    let body = d.add_body(n);
+                    let n = name.unwrap_or_else(|| d.default_name("Flange"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::SheetMetal {
+                            sketch,
+                            thickness,
+                            radius,
+                            k_factor,
+                            width,
+                            flip,
+                            body,
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ExportFlatPattern { feature, path } => {
+                let (feature, path) = (*feature, path.clone());
+                let m = self.model_mut()?;
+                let FeatureKind::SheetMetal {
+                    sketch,
+                    thickness,
+                    radius,
+                    k_factor,
+                    width,
+                    flip,
+                    ..
+                } = m.document().feature(feature)?.kind.clone()
+                else {
+                    return Err(DocError::Validation(format!(
+                        "{feature} is not a sheet-metal feature"
+                    )));
+                };
+                let solved = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == sketch)
+                    .and_then(|f| f.solved_sketch.clone())
+                    .ok_or_else(|| {
+                        DocError::Validation(format!("{sketch} is not an evaluated sketch"))
+                    })?;
+                let chain = rcad_document::sheet::line_chain(&solved)
+                    .map_err(|e| DocError::Validation(format!("{feature}: {e}")))?;
+                let part = rcad_document::sheet::contour_flange(
+                    feature, &chain, thickness, radius, k_factor, flip,
+                )?;
+                let flat = rcad_document::sheet::flat_pattern_sketch(&part, width);
+                let text = rcad_exchange::dxf::export(
+                    &flat,
+                    &rcad_exchange::dxf::DxfExportOptions {
+                        layer: "CUT".into(),
+                        include_construction: true,
+                        construction_layer: "BEND".into(),
+                    },
+                )
+                .map_err(|e| DocError::File(e.to_string()))?;
+                write_atomic(&path, text.as_bytes())?;
+                r.message = Some(format!(
+                    "flat pattern {:.6} x {width} mm, {} bend line(s)",
+                    part.flat_length,
+                    part.bend_lines.len()
+                ));
+            }
             Command::SplitBody {
                 name,
                 body,
@@ -3003,6 +3122,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
+                FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),
             };

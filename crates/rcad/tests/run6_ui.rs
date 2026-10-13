@@ -371,3 +371,32 @@ fn split_a_body_from_the_inspector() {
     };
     assert!((v(0) - 4800.0).abs() < 1e-6 && (v(1) - 7200.0).abs() < 1e-6);
 }
+
+#[test]
+fn sheet_metal_flange_and_flat_pattern_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[0.0, 22.0], [0.0, 0.0], [64.0, 0.0], [64.0, 22.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..3 {
+        sk.add_line(p[i], p[i + 1]);
+    }
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, SketchTemplate::Custom { sketch: sk });
+    let n = fname(&h, s1);
+    click(&mut h, &n);
+    click(&mut h, "Sheet metal flange");
+    type_into(&mut h, "K-factor", "0.4");
+    click(&mut h, "Create flange");
+    let want = 40.0 * 100.0 + 40.0 * 2.0 * (PI / 4.0) * (9.0 - 4.0);
+    assert!((h.state().volume().unwrap() - want).abs() < 1e-6, "{:?}", h.state().volume());
+    let f = h.state().summary().features.last().unwrap().clone();
+    click(&mut h, &f.name);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.dxf");
+    type_into(&mut h, "Flat pattern DXF path", path.to_str().unwrap());
+    click(&mut h, "Export flat pattern");
+    assert!(path.is_file());
+}

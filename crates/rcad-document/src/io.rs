@@ -190,6 +190,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         {
             return Some("revolve axis/direction options");
         }
+        if matches!(f.kind, crate::FeatureKind::SheetMetal { .. }) {
+            return Some("sheet-metal flanges");
+        }
         if matches!(f.kind, crate::FeatureKind::SplitBody { .. }) {
             return Some("split bodies");
         }

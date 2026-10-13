@@ -493,6 +493,23 @@ pub enum FeatureKind {
         plane: SketchPlane,
         new_body: BodyId,
     },
+    /// Sheet-metal contour flange (run 6 pull-forward, `crate::sheet`,
+    /// format v6): the open line chain of sketch `sketch` is one surface of a
+    /// sheet `thickness` thick (material right of the chain, left with
+    /// `flip`), with cylindrical bends of inner `radius` at its corners,
+    /// extruded `width` along the sketch normal as new body `body`. Flat
+    /// pattern by K-factor (`k_factor`). Parameters "thickness", "radius",
+    /// "k_factor", "width".
+    SheetMetal {
+        sketch: FeatureId,
+        thickness: f64,
+        radius: f64,
+        k_factor: f64,
+        width: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        body: BodyId,
+    },
     /// Direct edit (run 6, ADR 0010) of an imported STEP body: `face` is an
     /// imported face (`FaceRole::Imported`, by stable import index) and `op`
     /// what is done to it, exactly (`rcad_kernel::{offset_face,
@@ -725,6 +742,7 @@ impl Feature {
             FeatureKind::SplitBody { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
+            FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             FeatureKind::ImportStep { .. }
@@ -747,7 +765,8 @@ impl Feature {
             | FeatureKind::MoveBody {
                 copy: Some(body), ..
             }
-            | FeatureKind::SplitBody { new_body: body, .. } => vec![*body],
+            | FeatureKind::SplitBody { new_body: body, .. }
+            | FeatureKind::SheetMetal { body, .. } => vec![*body],
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
@@ -883,6 +902,18 @@ impl Feature {
                 ("plane_angle_deg".into(), angle.to_degrees()),
             ],
             FeatureKind::SplitBody { .. } => vec![],
+            FeatureKind::SheetMetal {
+                thickness,
+                radius,
+                k_factor,
+                width,
+                ..
+            } => vec![
+                ("thickness".into(), *thickness),
+                ("radius".into(), *radius),
+                ("k_factor".into(), *k_factor),
+                ("width".into(), *width),
+            ],
             FeatureKind::MoveBody {
                 translate, angle, ..
             } => vec![
@@ -1208,6 +1239,35 @@ impl Feature {
                     )));
                 }
                 *angle = value.to_radians();
+                Ok(())
+            }
+            FeatureKind::SheetMetal {
+                thickness,
+                radius,
+                k_factor,
+                width,
+                ..
+            } if matches!(name, "thickness" | "radius" | "k_factor" | "width") => {
+                let ok = match name {
+                    "k_factor" => (0.0..=1.0).contains(&value),
+                    _ => value > 0.0,
+                };
+                if !ok {
+                    return Err(DocError::Validation(format!(
+                        "{id}.{name}: {}, got {value}",
+                        if name == "k_factor" {
+                            "the K-factor must be in [0, 1]"
+                        } else {
+                            "must be > 0 mm"
+                        }
+                    )));
+                }
+                *match name {
+                    "thickness" => thickness,
+                    "radius" => radius,
+                    "k_factor" => k_factor,
+                    _ => width,
+                } = value;
                 Ok(())
             }
             FeatureKind::MoveBody {

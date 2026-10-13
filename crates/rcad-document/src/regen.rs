@@ -975,6 +975,48 @@ fn regen_impl(
                     }
                 }
             }
+            FeatureKind::SheetMetal {
+                sketch,
+                thickness,
+                radius,
+                k_factor,
+                width,
+                flip,
+                body,
+            } => {
+                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+                let chain = crate::sheet::line_chain(&so.solved)
+                    .map_err(|m| DocError::Validation(format!("{id}: sheet metal profile: {m}")))?;
+                let part = crate::sheet::contour_flange(
+                    id, &chain, *thickness, *radius, *k_factor, *flip,
+                )?;
+                if !(width.is_finite() && *width > 0.0) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.width: must be > 0 mm, got {width}"
+                    )));
+                }
+                let solid = k::extrude_region(&to_kernel(&part.section), &[], &so.frame, *width)
+                    .map_err(kernel(id))?;
+                r.frame = Some(so.frame);
+                r.notes.push(format!(
+                    "flat length {:.6} mm (K {}), bend lines at {}",
+                    part.flat_length,
+                    k_factor,
+                    part.bend_lines
+                        .iter()
+                        .map(|x| format!("{x:.6}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
             FeatureKind::SplitBody {
                 body,
                 plane,
