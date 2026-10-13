@@ -7,6 +7,7 @@
 Constraint-based sketches · feature history · exact B-rep solids · named parameters ·
 STEP / STL / 3MF / DXF / SVG · a headless command API
 
+[![CI](https://github.com/aped/Fission420/actions/workflows/ci.yml/badge.svg)](https://github.com/aped/Fission420/actions/workflows/ci.yml)
 ![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 ![Kernel](https://img.shields.io/badge/kernel-Truck%20B--rep-6f42c1)
