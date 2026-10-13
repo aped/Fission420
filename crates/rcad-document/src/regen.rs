@@ -104,6 +104,10 @@ pub enum BodySource {
     ImportedMesh {
         file_name: String,
     },
+    /// Run 7: a repaired copy of mesh body `source` (FeatureKind::MeshRepair).
+    RepairedMesh {
+        source: BodyId,
+    },
 }
 
 /// One evaluated body.
@@ -1237,6 +1241,35 @@ fn regen_impl(
                     *body,
                     BodyGeometry::Brep(geom),
                     BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::MeshRepair {
+                source,
+                options,
+                body,
+            } => {
+                let bs = st
+                    .bodies
+                    .get(source)
+                    .ok_or_else(|| DocError::BrokenReference {
+                        from: id,
+                        detail: format!("mesh repair source {source} is not in the model"),
+                    })?;
+                let BodyGeometry::Mesh(m) = &bs.geometry else {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: {source} is an exact (B-rep) body; mesh repair applies to \
+                         mesh bodies (STL/3MF imports)"
+                    )));
+                };
+                let (mesh, notes) = import::repaired(m, options)?;
+                r.notes = notes;
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Mesh(Arc::new(mesh)),
+                    BodySource::RepairedMesh { source: *source },
                 )?;
                 r.body = Some(*body);
             }

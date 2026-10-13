@@ -2184,11 +2184,24 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         let bodies = dr.bodies(v.id)?;
         let keys = view_keys(dr, v.id, eval)?;
         let assembly_view = keys.iter().any(|k| k.0 != 0);
-        let missing: Vec<BodyId> = bodies
+        // Review run 7 #15: occurrence bodies that are not evaluated
+        // (consumed, suppressed, rolled back) are reported, not skipped.
+        let mut missing_occ: Vec<BodyId> = keys
+            .iter()
+            .filter(|k| k.0 != 0 && eval.body_by_id(k.1).is_none())
+            .map(|k| k.1)
+            .collect();
+        missing_occ.dedup();
+        let mut missing: Vec<BodyId> = bodies
             .iter()
             .copied()
             .filter(|b| eval.body_by_id(*b).is_none())
             .collect();
+        for b in missing_occ {
+            if !missing.contains(&b) {
+                missing.push(b);
+            }
+        }
         let unsup: Vec<BodyId> = bodies
             .iter()
             .copied()
@@ -3108,13 +3121,56 @@ fn resolve_ref(
                 .find(|r| r.id == *feature)
                 .and_then(|r| r.frame)
                 .ok_or_else(|| format!("hole {feature} was not evaluated"))?;
+            let (p, d) = (fr.to_world(*center), fr.z);
+            // Review run 7 #3: the hole's frame is where it was made. Require
+            // its cylinder in the current body on that axis (a later move,
+            // scale or fill of the body makes the reference dangle instead of
+            // printing a stale value).
+            if !hole_cylinder_present(eval, *target, p, d, diameter / 2.0) {
+                return Err(format!(
+                    "hole {feature}'s cylinder is no longer in {target} at its modelled place \
+                     (moved, scaled or filled)"
+                ));
+            }
             Ok(RefGeom::Axis {
-                p: fr.to_world(*center),
-                d: fr.z,
+                p,
+                d,
                 dia: *diameter,
             })
         }
     }
+}
+
+/// Whether `body` has a cylindrical face of radius `r` whose axis is the line
+/// through `p` along `d` (kernel linear tolerance, relative 1e-9 on angles).
+fn hole_cylinder_present(
+    eval: &Evaluation,
+    body: BodyId,
+    p: [f64; 3],
+    d: [f64; 3],
+    r: f64,
+) -> bool {
+    let Some(b) = eval.body_by_id(body).and_then(|b| b.geometry.brep()) else {
+        return false;
+    };
+    let tol = k::tol::KERNEL_LINEAR.max(1e-9 * r);
+    (0..k::face_count(b)).any(|i| match k::face_geometry(b, i) {
+        Ok(k::DirectFace::Cylinder {
+            origin,
+            axis,
+            radius,
+            ..
+        }) => {
+            let a = norm(axis);
+            let w = sub(p, origin);
+            let along = dot(w, a);
+            let off = [0, 1, 2].map(|k| w[k] - along * a[k]);
+            (radius - r).abs() <= tol
+                && dot(a, d).abs() >= 1.0 - 1e-9
+                && dot(off, off).sqrt() <= tol
+        }
+        _ => false,
+    })
 }
 
 /// Measure a dimension in the current model and check it can be drawn in

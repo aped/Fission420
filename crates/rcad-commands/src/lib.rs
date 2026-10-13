@@ -9,6 +9,18 @@ pub mod assembly;
 pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
+pub mod mesh_repair;
+
+/// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
+/// revision comes from `RCAD_GIT_REV` at build time (tools/release.sh sets it).
+pub fn version_string() -> String {
+    format!(
+        "R-CAD {} ({}, native format v{})",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("RCAD_GIT_REV").unwrap_or("dev build"),
+        rcad_document::FORMAT_VERSION
+    )
+}
 pub mod print;
 pub mod printables;
 pub mod scenarios;
@@ -502,6 +514,20 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
         index: usize,
     },
+    /// Run 7: redefine a joint's axis (`origin`/`axis`, or `axis_from` faces of
+    /// the parent, and `dir2`), keeping its values and the child's current pose
+    /// (as-built: the rest pose is recaptured, nothing moves).
+    SetJointAxis {
+        joint: rcad_document::assembly::JointId,
+        #[serde(default)]
+        origin: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<[f64; 3]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_from: Option<assembly::AxisFrom>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir2: Option<[f64; 3]>,
+    },
     /// Run 7: set all values of a multi-DOF joint at once (atomic).
     SetJointValues {
         joint: rcad_document::assembly::JointId,
@@ -910,6 +936,13 @@ pub enum Command {
     },
     /// Remove a feature that nothing depends on (one undoable step). Refused
     /// with the dependent features named otherwise.
+    /// Run 7 (ME01, docs/MESH.md): preview or apply a bounded repair of a mesh
+    /// body (weld within `options.weld_tolerance`, remove degenerate and
+    /// duplicate triangles, orient, fill planar holes up to
+    /// `options.fill_holes_max_edges` edges) as a new mesh body; the source is
+    /// kept. `Response.mesh_repair` reports every change and the diagnosis
+    /// before/after. `preview`: nothing changes.
+    RepairMesh(mesh_repair::RepairMeshArgs),
     DeleteFeature {
         feature: FeatureId,
     },
@@ -1164,6 +1197,7 @@ impl Command {
             Command::AlignBody { .. } => "align_body",
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
+            Command::RepairMesh(_) => "repair_mesh",
             Command::SheetBase(_) => "sheet_base",
             Command::SheetFlange(_) => "sheet_flange",
             Command::EditSheetRule(_) => "edit_sheet_rule",
@@ -1196,6 +1230,7 @@ impl Command {
             Command::Interference { .. } => "interference",
             Command::ExportAssembly { .. } => "export_assembly",
             Command::SetJointValues { .. } => "set_joint_values",
+            Command::SetJointAxis { .. } => "set_joint_axis",
             Command::InsertExternalComponent { .. } => "insert_external_component",
             Command::UpdateExternalComponent { .. } => "update_external_component",
             Command::CheckExternalComponents => "check_external_components",
@@ -1497,6 +1532,9 @@ pub struct Response {
     /// `analyze_surface`: free edges, gaps, loops, orientation (run 7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_analysis: Option<rcad_kernel::ShellAnalysis>,
+    /// `repair_mesh`: what the repair changes / changed (run 7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_repair: Option<rcad_exchange::mesh_repair::RepairReport>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1670,6 +1708,9 @@ impl Session {
             return Ok(());
         }
         if self.run_sheet_surface(cmd, r)? {
+            return Ok(());
+        }
+        if self.run_mesh(cmd, r)? {
             return Ok(());
         }
         match cmd {
@@ -2371,6 +2412,18 @@ impl Session {
                             *e = params::rename_in(e, &old, &new);
                         }
                     }
+                    // Review run 7 #7: configurations follow the rename (keys
+                    // and expressions).
+                    for c in &mut d.configurations {
+                        let values = std::mem::take(&mut c.values);
+                        c.values = values
+                            .into_iter()
+                            .map(|(k, e)| {
+                                let k = if k == old { new.clone() } else { k };
+                                (k, params::rename_in(&e, &old, &new))
+                            })
+                            .collect();
+                    }
                     Ok(())
                 })?;
                 r.message = Some(format!(
@@ -2388,7 +2441,17 @@ impl Session {
                         detail: "no such parameter".into(),
                     });
                 }
-                let users = params::users_of(m.document(), &name);
+                let mut users = params::users_of(m.document(), &name);
+                // Review run 7 #7: a configuration that sets or uses it.
+                for c in &m.document().configurations {
+                    if c.values.contains_key(&name)
+                        || c.values
+                            .values()
+                            .any(|e| params::rename_in(e, &name, "rcad_probe_name") != *e)
+                    {
+                        users.push(format!("configuration '{}'", c.name));
+                    }
+                }
                 if !users.is_empty() {
                     return Err(DocError::Expression {
                         name,
@@ -3166,6 +3229,8 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            // Handled by `run_mesh` (run 7) before this match.
+            Command::RepairMesh(_) => {}
             // Handled by `run_sheet_surface` (run 7) before this match.
             Command::SheetBase(_)
             | Command::SheetFlange(_)
@@ -3409,6 +3474,7 @@ impl Session {
             | Command::Interference { .. }
             | Command::ExportAssembly { .. }
             | Command::SetJointValues { .. }
+            | Command::SetJointAxis { .. }
             | Command::InsertExternalComponent { .. }
             | Command::UpdateExternalComponent { .. }
             | Command::CheckExternalComponents
@@ -4070,6 +4136,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SurfaceStitch { .. } => ("surface_stitch", None),
                 FeatureKind::SurfaceFill { .. } => ("surface_fill", None),
                 FeatureKind::Thicken { .. } => ("thicken", None),
+                FeatureKind::MeshRepair { .. } => ("mesh_repair", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::AlignBody { .. } => ("align_body", None),

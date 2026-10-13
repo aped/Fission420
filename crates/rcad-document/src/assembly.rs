@@ -60,6 +60,8 @@ impl std::fmt::Display for JointId {
 pub const MAX_DEPTH: usize = 16;
 /// Maximum number of evaluated instances (guards exponential reuse).
 pub const MAX_INSTANCES: usize = 20_000;
+/// Maximum number of joints (bounds validation and the chain solve).
+pub const MAX_JOINTS: usize = 10_000;
 
 /// Stable instance path "O3/O7" (top-level occurrence first).
 pub fn path_string(path: &[OccurrenceId]) -> String {
@@ -231,8 +233,11 @@ pub enum JointKind {
     /// Run 7: translation in the plane with normal `axis` along `u` = `dir2`
     /// and `w` = axis × u, and rotation about the normal (3 DOF: mm, mm, deg).
     Planar,
-    /// Run 7: rotation about `origin`: about `axis`, then `u`, then `w`, all
-    /// fixed in the parent (3 DOF: degrees).
+    /// Run 7: rotation about `origin` (3 DOF: degrees):
+    /// `M = R_axis(v1) ∘ R_u(v2) ∘ R_w(v3)` with `axis`, `u`, `w` the parent's
+    /// fixed joint axes, i.e. applied to the child as first `w`, then `u`,
+    /// then `axis` about the fixed axes (equivalently intrinsic: `axis`, then
+    /// the moved `u`, then the moved `w`). Gimbal lock at v2 = ±90°.
     Ball,
 }
 
@@ -801,14 +806,13 @@ impl Assembly {
             }
         }
         let mut owner: BTreeMap<BodyId, ComponentId> = BTreeMap::new();
-        for (i, c) in self.components.iter().enumerate() {
+        let mut comp_ids: BTreeSet<ComponentId> = BTreeSet::new();
+        let mut comp_names: BTreeSet<&str> = BTreeSet::new();
+        for c in &self.components {
             if c.id.0 == 0 || c.id.0 >= self.next_component {
                 return v(format!("invalid component id {}", c.id));
             }
-            if self.components[..i]
-                .iter()
-                .any(|d| d.id == c.id || d.name == c.name)
-            {
+            if !comp_ids.insert(c.id) || !comp_names.insert(c.name.as_str()) {
                 return v(format!("duplicate component {} '{}'", c.id, c.name));
             }
             if c.name.trim().is_empty() {
@@ -837,14 +841,13 @@ impl Assembly {
         if let Some(a) = self.active {
             self.component(a)?;
         }
-        for (i, o) in self.occurrences.iter().enumerate() {
+        let mut occ_ids: BTreeSet<OccurrenceId> = BTreeSet::new();
+        let mut occ_names: BTreeSet<&str> = BTreeSet::new();
+        for o in &self.occurrences {
             if o.id.0 == 0 || o.id.0 >= self.next_occurrence {
                 return v(format!("invalid occurrence id {}", o.id));
             }
-            if self.occurrences[..i]
-                .iter()
-                .any(|p| p.id == o.id || p.name == o.name)
-            {
+            if !occ_ids.insert(o.id) || !occ_names.insert(o.name.as_str()) {
                 return v(format!("duplicate occurrence {} '{}'", o.id, o.name));
             }
             self.component(o.component)?;
@@ -853,31 +856,72 @@ impl Assembly {
             }
             o.placement.rigid()?;
         }
-        // Containment must be acyclic: no component contains itself.
+        // Containment must be acyclic: no component contains itself
+        // (iterative depth-first colouring of the component graph).
+        let mut kids: BTreeMap<ComponentId, Vec<ComponentId>> = BTreeMap::new();
+        for o in &self.occurrences {
+            if let Some(w) = o.owner {
+                kids.entry(w).or_default().push(o.component);
+            }
+        }
+        let mut colour: BTreeMap<ComponentId, u8> = BTreeMap::new();
         for c in &self.components {
-            for o in self.children_of(Some(c.id)) {
-                if self.contains(o.component, c.id) {
-                    return v(format!(
-                        "cyclic containment: '{}' contains {} ({}) whose component contains '{}'",
-                        c.name, o.id, o.name, c.name
-                    ));
+            if colour.contains_key(&c.id) {
+                continue;
+            }
+            let mut stack: Vec<(ComponentId, usize)> = vec![(c.id, 0)];
+            colour.insert(c.id, 1);
+            while let Some(&mut (n, ref mut k)) = stack.last_mut() {
+                let next = kids.get(&n).and_then(|v| v.get(*k)).copied();
+                *k += 1;
+                match next {
+                    None => {
+                        colour.insert(n, 2);
+                        stack.pop();
+                    }
+                    Some(m) => match colour.get(&m).copied().unwrap_or(0) {
+                        1 => {
+                            let name = |x: ComponentId| {
+                                self.component(x).map_or(x.to_string(), |c| c.name.clone())
+                            };
+                            return v(format!(
+                                "cyclic containment: '{}' contains '{}', which (transitively) \
+                                 contains '{}'",
+                                name(n),
+                                name(m),
+                                name(n)
+                            ));
+                        }
+                        0 => {
+                            colour.insert(m, 1);
+                            stack.push((m, 0));
+                        }
+                        _ => {}
+                    },
                 }
             }
         }
-        // Depth bound.
+        // Depth bound (memoized longest path over the acyclic containment
+        // graph): an instance path holds at most MAX_DEPTH occurrences.
+        let mut depth: BTreeMap<ComponentId, usize> = BTreeMap::new();
         for c in &self.components {
-            if self.depth_below(c.id, 0)? > MAX_DEPTH {
+            if self.depth_below(c.id, &mut depth) >= MAX_DEPTH {
                 return v(format!(
                     "component '{}' nests deeper than {MAX_DEPTH} levels",
                     c.name
                 ));
             }
         }
-        for (i, j) in self.joints.iter().enumerate() {
+        if self.joints.len() > MAX_JOINTS {
+            return v(format!("more than {MAX_JOINTS} joints"));
+        }
+        let mut children_seen: BTreeSet<OccurrenceId> = BTreeSet::new();
+        let mut joint_ids: BTreeSet<JointId> = BTreeSet::new();
+        for j in &self.joints {
             if j.id.0 == 0 || j.id.0 >= self.next_joint {
                 return v(format!("invalid joint id {}", j.id));
             }
-            if self.joints[..i].iter().any(|k| k.id == j.id) {
+            if !joint_ids.insert(j.id) {
                 return v(format!("duplicate joint {}", j.id));
             }
             if j.parent == j.child {
@@ -901,7 +945,7 @@ impl Assembly {
                     j.id, j.child
                 ));
             }
-            if self.joints[..i].iter().any(|k| k.child == j.child) {
+            if !children_seen.insert(j.child) {
                 return v(format!(
                     "{}: {} is already the child of another joint (overconstrained; only tree-structured assemblies are solved)",
                     j.id, j.child
@@ -922,24 +966,40 @@ impl Assembly {
             j.check_values(&j.values())?;
             j.current_motion()?;
         }
-        // Loops: following parents from any occurrence must terminate.
+        // Loops: following parents from any occurrence must terminate
+        // (each occurrence is walked once: 0 unvisited, 1 on the current
+        // walk, 2 known to reach a root).
+        let parent: BTreeMap<OccurrenceId, OccurrenceId> =
+            self.joints.iter().map(|j| (j.child, j.parent)).collect();
+        let mut state: BTreeMap<OccurrenceId, u8> = BTreeMap::new();
         for o in &self.occurrences {
-            let mut cur = o.id;
-            for _ in 0..=self.joints.len() {
-                match self.joint_of_child(cur) {
-                    Some(j) => cur = j.parent,
-                    None => break,
+            let mut walk = Vec::new();
+            let mut cur = Some(o.id);
+            while let Some(c) = cur {
+                match state.get(&c).copied().unwrap_or(0) {
+                    2 => break,
+                    1 => {
+                        let n = self.occurrence(c).map_or(String::new(), |x| x.name.clone());
+                        return v(format!(
+                            "joint loop through {c} ({n}): only tree-structured assemblies are solved"
+                        ));
+                    }
+                    _ => {}
                 }
-                if cur == o.id {
-                    return v(format!(
-                        "joint loop through {} ({}): only tree-structured assemblies are solved",
-                        o.id, o.name
-                    ));
-                }
+                state.insert(c, 1);
+                walk.push(c);
+                cur = parent.get(&c).copied();
+            }
+            for c in walk {
+                state.insert(c, 2);
             }
         }
         for (k, off) in &self.explode {
-            self.check_path(&parse_path(k)?)?;
+            let p = parse_path(k)?;
+            if path_string(&p) != *k {
+                return v(format!("exploded-view key '{k}' is not a canonical path"));
+            }
+            self.check_path(&p)?;
             if !off.iter().all(|x| x.is_finite()) {
                 return v(format!("exploded offset of {k} is not finite"));
             }
@@ -947,48 +1007,78 @@ impl Assembly {
         Ok(())
     }
 
-    /// Nesting levels below component `c` (0 when it has no children).
-    fn depth_below(&self, c: ComponentId, depth: usize) -> Result<usize> {
-        if depth > MAX_DEPTH {
-            return Ok(depth);
+    /// Nesting levels below component `c` (0 when it has no children),
+    /// memoized; containment must already be known to be acyclic. Values are
+    /// capped at MAX_DEPTH (recursion stays within MAX_DEPTH + 1 levels).
+    fn depth_below(&self, c: ComponentId, memo: &mut BTreeMap<ComponentId, usize>) -> usize {
+        fn go(
+            a: &Assembly,
+            c: ComponentId,
+            memo: &mut BTreeMap<ComponentId, usize>,
+            level: usize,
+        ) -> usize {
+            if let Some(d) = memo.get(&c) {
+                return *d;
+            }
+            if level > MAX_DEPTH {
+                return MAX_DEPTH;
+            }
+            let kids: Vec<ComponentId> = a.children_of(Some(c)).map(|o| o.component).collect();
+            let mut best = 0;
+            for k in kids {
+                best = best.max(1 + go(a, k, memo, level + 1)).min(MAX_DEPTH);
+            }
+            memo.insert(c, best);
+            best
         }
-        let mut best = 0;
-        for o in self.children_of(Some(c)) {
-            best = best.max(1 + self.depth_below(o.component, depth + 1)?);
-        }
-        Ok(best)
+        go(self, c, memo, 0)
     }
 
     /// Local transform of every occurrence relative to its owner (joint
     /// tree solve among siblings).
     pub fn local_transforms(&self) -> Result<BTreeMap<OccurrenceId, Rigid>> {
         let mut memo = BTreeMap::new();
+        let by_child: BTreeMap<OccurrenceId, &Joint> =
+            self.joints.iter().map(|j| (j.child, j)).collect();
         for o in &self.occurrences {
-            self.local(o.id, &mut memo, 0)?;
+            self.local(o.id, &mut memo, &by_child)?;
         }
         Ok(memo)
     }
 
+    /// Solve `id` (iteratively up its joint chain, then down).
     fn local(
         &self,
         id: OccurrenceId,
         memo: &mut BTreeMap<OccurrenceId, Rigid>,
-        depth: usize,
+        by_child: &BTreeMap<OccurrenceId, &Joint>,
     ) -> Result<Rigid> {
-        if let Some(t) = memo.get(&id) {
-            return Ok(*t);
-        }
-        if depth > self.joints.len() {
-            return Err(DocError::Validation(format!("joint loop through {id}")));
-        }
-        let t = match self.joint_of_child(id) {
-            Some(j) => {
-                let p = self.local(j.parent, memo, depth + 1)?;
-                p.after(&j.current_motion()?).after(&Rigid::from(j.rest))
+        let mut chain: Vec<&Joint> = Vec::new();
+        let mut cur = id;
+        let base = loop {
+            if let Some(t) = memo.get(&cur) {
+                break *t;
             }
-            None => self.occurrence(id)?.placement.rigid()?,
+            match by_child.get(&cur) {
+                Some(j) => {
+                    if chain.len() > self.joints.len() {
+                        return Err(DocError::Validation(format!("joint loop through {id}")));
+                    }
+                    chain.push(j);
+                    cur = j.parent;
+                }
+                None => {
+                    let t = self.occurrence(cur)?.placement.rigid()?;
+                    memo.insert(cur, t);
+                    break t;
+                }
+            }
         };
-        memo.insert(id, t);
+        let mut t = base;
+        for j in chain.into_iter().rev() {
+            t = t.after(&j.current_motion()?).after(&Rigid::from(j.rest));
+            memo.insert(j.child, t);
+        }
         Ok(t)
     }
 
@@ -1185,5 +1275,138 @@ mod tests {
         assert!(j.check_values(&[0.0, 5.0]).is_ok());
         assert!(j.check_values(&[0.0, 11.0]).is_err());
         assert!(j.check_values(&[f64::NAN, 1.0]).is_err());
+    }
+
+    fn occ(id: u32, component: u32, owner: Option<u32>) -> Occurrence {
+        Occurrence {
+            id: OccurrenceId(id),
+            component: ComponentId(component),
+            name: format!("o{id}"),
+            placement: Placement::default(),
+            grounded: false,
+            suppressed: false,
+            owner: owner.map(ComponentId),
+            hidden: false,
+        }
+    }
+
+    fn comp(id: u32) -> Component {
+        Component {
+            id: ComponentId(id),
+            name: format!("c{id}"),
+            bodies: vec![],
+            part_number: String::new(),
+            derived_from: None,
+            external: None,
+        }
+    }
+
+    /// Review run 7 #1: a DAG with reuse (16 levels, each component holding
+    /// 30 occurrences of the next) validates in bounded time and is refused
+    /// for depth / instance count instead of hanging.
+    #[test]
+    fn reused_deep_dag_is_bounded() {
+        for (levels, fan) in [(15u32, 30u32), (16, 30)] {
+            let mut a = Assembly::default();
+            let mut next_o = 1;
+            for c in 1..=levels {
+                a.components.push(comp(c));
+            }
+            a.occurrences.push(occ(next_o, 1, None));
+            next_o += 1;
+            for c in 1..levels {
+                for _ in 0..fan {
+                    a.occurrences.push(occ(next_o, c + 1, Some(c)));
+                    next_o += 1;
+                }
+            }
+            a.next_component = levels + 1;
+            a.next_occurrence = next_o;
+            let t = std::time::Instant::now();
+            let r = a.validate(&[]);
+            assert!(
+                t.elapsed().as_secs_f64() < 2.0,
+                "validate took {:?}",
+                t.elapsed()
+            );
+            if levels == 16 {
+                // 1 top + 15 nested levels = 16 occurrences per path: allowed
+                // depth, but 30^15 instances are refused by the evaluator.
+                assert!(r.is_ok(), "{r:?}");
+                let t = std::time::Instant::now();
+                assert!(a.evaluate_tree().is_err());
+                assert!(t.elapsed().as_secs_f64() < 5.0);
+            } else {
+                assert!(r.is_ok(), "{r:?}");
+            }
+        }
+        // 17 levels exceed MAX_DEPTH.
+        let mut a = Assembly::default();
+        for c in 1..=17 {
+            a.components.push(comp(c));
+        }
+        a.occurrences.push(occ(1, 1, None));
+        for c in 1..17 {
+            a.occurrences.push(occ(c + 1, c + 1, Some(c)));
+        }
+        a.next_component = 18;
+        a.next_occurrence = 18;
+        assert!(a.validate(&[]).is_err());
+    }
+
+    /// Review run 7 #19: a 5000-joint chain validates and solves without
+    /// deep recursion, in bounded time.
+    #[test]
+    fn long_joint_chain_is_iterative() {
+        let n = 5000u32;
+        let mut a = Assembly::default();
+        a.components.push(comp(1));
+        for i in 1..=n {
+            a.occurrences.push(occ(i, 1, None));
+        }
+        for i in 1..n {
+            a.joints.push(Joint {
+                id: JointId(i),
+                name: format!("j{i}"),
+                kind: JointKind::Slider,
+                parent: OccurrenceId(i),
+                child: OccurrenceId(i + 1),
+                origin: [0.0; 3],
+                axis: [1.0, 0.0, 0.0],
+                value: 1.0,
+                min: None,
+                max: None,
+                rest: Pose::from(Rigid::IDENTITY),
+                extra: vec![],
+                dir2: None,
+            });
+        }
+        a.next_component = 2;
+        a.next_occurrence = n + 1;
+        a.next_joint = n;
+        let t = std::time::Instant::now();
+        a.validate(&[]).unwrap();
+        let l = a.local_transforms().unwrap();
+        assert!(t.elapsed().as_secs_f64() < 5.0, "{:?}", t.elapsed());
+        // Each slider adds 1 mm along x.
+        assert_eq!(l[&OccurrenceId(n)].t, [f64::from(n - 1), 0.0, 0.0]);
+        // A loop is refused.
+        a.joints[0].parent = OccurrenceId(n);
+        assert!(a.validate(&[]).is_err());
+    }
+
+    /// Review run 7: exploded keys must be canonical paths.
+    #[test]
+    fn non_canonical_explode_keys_are_refused() {
+        let mut a = Assembly::default();
+        a.components.push(comp(1));
+        a.occurrences.push(occ(3, 1, None));
+        a.next_component = 2;
+        a.next_occurrence = 4;
+        a.explode.insert("O3".into(), [0.0, 0.0, 1.0]);
+        assert!(a.validate(&[]).is_ok());
+        a.explode.clear();
+        a.explode.insert("O03".into(), [0.0, 0.0, 1.0]);
+        assert!(a.validate(&[]).is_err());
     }
 }

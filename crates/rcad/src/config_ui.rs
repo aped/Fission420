@@ -42,6 +42,17 @@ impl Default for ConfigTableUi {
     }
 }
 
+impl ConfigTableUi {
+    /// Review run 7 #18: the draft is replaced only after a successful apply;
+    /// a refused table keeps the user's cells (and stays "unapplied").
+    pub(crate) fn on_reply(&mut self, response: &rcad_commands::Response) {
+        if response.command == "set_configuration_table" && response.ok {
+            self.dirty = false;
+            self.draft = None;
+        }
+    }
+}
+
 impl RcadApp {
     /// The table editor and variant export, under the Configurations section.
     pub(crate) fn configuration_table(&mut self, ui: &mut egui::Ui) {
@@ -291,10 +302,6 @@ impl RcadApp {
             });
         header.header_response.probe("Configuration table header");
         for c in send {
-            // A successful apply makes the next frame take a fresh draft.
-            if matches!(c, Command::SetConfigurationTable { .. }) {
-                self.config_table.dirty = false;
-            }
             self.request(c);
         }
     }

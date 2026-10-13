@@ -71,9 +71,13 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or_else(|| "--shot-dir requires a directory".to_string())?;
                 out.shot_dir = Some(PathBuf::from(p));
             }
+            Some("-V" | "--version") => {
+                println!("{}", rcad_commands::version_string());
+                std::process::exit(0);
+            }
             Some("-h" | "--help") => {
                 return Err(
-                    "usage: rcad [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
+                    "usage: rcad [--version] [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
                      [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)] \
                      [--scene multibody|extrude|step|sideface|import|export]"
                         .to_string(),
@@ -306,7 +310,11 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         .map(|j| format!("\"{}\":{}", j.id, j.value))
         .collect();
     let run7 = format!(
-        "\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
+        "\"interference\":{},\"highlight\":{},\"exploded\":{},\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
+        app.interference_count()
+            .map_or("null".to_string(), |n| n.to_string()),
+        app.assembly_highlight().len(),
+        s.assembly.exploded,
         s.assembly.occurrences.len(),
         s.assembly.total_dof,
         joints.join(","),

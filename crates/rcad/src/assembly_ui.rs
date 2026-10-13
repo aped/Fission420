@@ -114,6 +114,10 @@ pub struct AssemblyUi {
     pub align_from: Option<(FacePick, OccurrenceId, String)>,
     /// Joint value / limit buffers: values, (min, max) per value.
     pub joint_edit: Option<JointEdit>,
+    /// Axis buffers of the joint being edited: origin, axis.
+    pub joint_axis: [String; 6],
+    /// Part number buffer (rename panel).
+    pub part_number_edit: String,
     pub bom: Option<(u64, u64, Vec<BomRow>, Vec<StructuredBomRow>)>,
     /// Show the structured BOM (else flattened).
     pub structured: bool,
@@ -121,6 +125,9 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// Instance path of the last viewport face pick (a new pick selects its
+    /// tree row).
+    pub last_pick: Option<String>,
     /// External component insertion: path, linked.
     pub external_path: String,
     pub external_linked: bool,
@@ -131,6 +138,18 @@ pub struct AssemblyUi {
 impl AssemblyUi {
     /// Engine hook in `handle_reply`.
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
+        // Review run 7 #30: the joint dialog closes only when its joint was
+        // made; a refusal keeps every input.
+        if response.command == "add_joint"
+            && let Some(d) = &mut self.joint_dialog
+            && d.pending
+        {
+            if response.ok {
+                self.joint_dialog = None;
+            } else {
+                d.pending = false;
+            }
+        }
         let Some(a) = &response.assembly else {
             return;
         };
@@ -159,8 +178,11 @@ impl AssemblyUi {
             && (*d, *r) == (summary.doc_id, summary.revision)
             && let Some(x) = list.get(i)
         {
-            out.push(x.a_path.clone());
-            out.push(x.b_path.clone());
+            for p in [&x.a_path, &x.b_path] {
+                if !out.contains(p) {
+                    out.push(p.clone());
+                }
+            }
         }
         out
     }
@@ -221,6 +243,17 @@ impl RcadApp {
         self.assembly_ui.highlight_paths(&self.summary)
     }
 
+    /// Number of interference results of the current revision (None when
+    /// no check was run for it).
+    pub fn interference_count(&self) -> Option<usize> {
+        let (d, r) = (self.summary.doc_id, self.summary.revision);
+        self.assembly_ui
+            .interference
+            .as_ref()
+            .filter(|x| (x.0, x.1) == (d, r))
+            .map(|x| x.2.len())
+    }
+
     /// The viewport tint table for the current scene and highlight.
     pub fn display_tints(&self) -> Vec<(std::ops::Range<u32>, u8)> {
         tints(&self.scene, &self.assembly_highlight())
@@ -256,6 +289,14 @@ impl RcadApp {
     pub(crate) fn components_browser(&mut self, ui: &mut egui::Ui) {
         let asm = self.summary.assembly.clone();
         let mut send: Vec<Command> = Vec::new();
+        // A face picked on a placed copy selects that instance's tree row.
+        let pick = self.picked_face_instance().and_then(|(_, p)| p);
+        if pick != self.assembly_ui.last_pick {
+            self.assembly_ui.last_pick = pick.clone();
+            if pick.is_some() {
+                self.assembly_ui.selected = pick;
+            }
+        }
         let before_hl = self.assembly_ui.highlight_paths(&self.summary);
         ui.separator();
         ui.label(RichText::new(format!("Assembly ({} components)", asm.components.len())).strong())
@@ -479,7 +520,7 @@ impl RcadApp {
                     tags.push_str(" · hidden");
                 }
                 if asm.active == Some(i.component) {
-                    tags.push_str(" · ✎ active");
+                    tags.push_str(" · (active)");
                 }
                 ui.small(tags);
             });
@@ -574,8 +615,9 @@ impl RcadApp {
                     && o.driven_by.is_none()
                     && ui.small_button("Move…").named(&l).probe(&l).clicked()
                 {
-                    let z = o.axis[2] >= 0.0;
-                    let ang = if z { o.angle_deg } else { -o.angle_deg };
+                    // Review run 7: keep the stored rotation axis (an aligned or
+                    // joint-released occurrence may turn about any axis).
+                    let ang = o.angle_deg;
                     self.assembly_ui.edit = Some((
                         o.id,
                         [
@@ -589,6 +631,7 @@ impl RcadApp {
                 let l = format!("Rename {}", o.name);
                 if ui.small_button("Rename…").named(&l).probe(&l).clicked() {
                     self.assembly_ui.rename = Some((o.id, o.name.clone(), comp.name.clone()));
+                    self.assembly_ui.part_number_edit = comp.part_number.clone();
                 }
                 let l = format!("Make {} independent", o.name);
                 if comp.children.is_empty()
@@ -670,13 +713,19 @@ impl RcadApp {
                 && *id == o.id
             {
                 ui.horizontal(|ui| {
-                    for (i, l) in ["X (mm)", "Y (mm)", "Z (mm)", "Rotation Z (°)"]
+                    for (i, l) in ["X (mm)", "Y (mm)", "Z (mm)", "Rotation (°)"]
                         .iter()
                         .enumerate()
                     {
                         crate::panels::num_field(ui, l, &mut buf[i]);
                     }
                 });
+                ui.small(format!(
+                    "rotation about the axis ({}, {}, {}) through the owner's origin",
+                    fmt(o.axis[0]),
+                    fmt(o.axis[1]),
+                    fmt(o.axis[2])
+                ));
                 let vals: Vec<Option<f64>> = buf.iter().map(|t| parse(t)).collect();
                 ui.horizontal(|ui| {
                     if let [Some(x), Some(y), Some(z), Some(a)] = vals[..] {
@@ -688,7 +737,7 @@ impl RcadApp {
                             send.push(Command::SetOccurrenceTransform {
                                 occurrence: o.id,
                                 translate: [x, y, z],
-                                axis: Some([0.0, 0.0, 1.0]),
+                                axis: Some(o.axis),
                                 angle_deg: a,
                             });
                         }
@@ -720,7 +769,7 @@ impl RcadApp {
                                 send.push(Command::SetOccurrenceTransform {
                                     occurrence: o.id,
                                     translate: t,
-                                    axis: Some([0.0, 0.0, 1.0]),
+                                    axis: Some(o.axis),
                                     angle_deg: ang,
                                 });
                             }
@@ -770,6 +819,31 @@ impl RcadApp {
                         });
                     }
                 });
+                let pn = &mut self.assembly_ui.part_number_edit;
+                ui.horizontal(|ui| {
+                    crate::panels::short_text_field(ui, "Part number ", pn);
+                    if ui
+                        .small_button("Set part number")
+                        .probe("Set part number")
+                        .clicked()
+                    {
+                        send.push(Command::SetPartNumber {
+                            component: comp.id,
+                            part_number: pn.clone(),
+                        });
+                    }
+                });
+                let l = format!("Delete component {}", comp.name);
+                if ui
+                    .small_button("Delete component")
+                    .on_hover_text("Remove the component and all its occurrences (its bodies become loose bodies); refused while a joint or another component uses it")
+                    .named(&l)
+                    .probe(&l)
+                    .clicked()
+                {
+                    send.push(Command::DeleteComponent { component: comp.id });
+                    self.assembly_ui.selected = None;
+                }
             }
             // Exploded offset.
             if let Some((p, buf)) = &mut self.assembly_ui.explode
@@ -981,7 +1055,7 @@ impl RcadApp {
                 .join(", ");
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "{} {:?}: {} → {} {} · DOF {}",
+                    "{} {:?}: {} -> {} {} · DOF {}",
                     j.name,
                     j.kind,
                     occ(j.parent),
@@ -991,6 +1065,14 @@ impl RcadApp {
                 ));
                 let l = format!("Edit {}", j.name);
                 if j.kind.dof() > 0 && ui.small_button("Edit…").named(&l).probe(&l).clicked() {
+                    self.assembly_ui.joint_axis = [
+                        fmt(j.origin[0]),
+                        fmt(j.origin[1]),
+                        fmt(j.origin[2]),
+                        fmt(j.axis[0]),
+                        fmt(j.axis[1]),
+                        fmt(j.axis[2]),
+                    ];
                     self.assembly_ui.joint_edit = Some((
                         j.id,
                         vals.iter().map(|v| fmt(*v)).collect(),
@@ -1014,6 +1096,40 @@ impl RcadApp {
             if let Some((id, vals, lims)) = &mut self.assembly_ui.joint_edit
                 && *id == j.id
             {
+                // Axis (parent definition coordinates); the child keeps its pose.
+                let ax = &mut self.assembly_ui.joint_axis;
+                ui.horizontal(|ui| {
+                    for (k, l) in ["Joint origin X", "Joint origin Y", "Joint origin Z"]
+                        .iter()
+                        .enumerate()
+                    {
+                        crate::panels::num_field(ui, l, &mut ax[k]);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    for (k, l) in ["Joint axis X", "Joint axis Y", "Joint axis Z"]
+                        .iter()
+                        .enumerate()
+                    {
+                        crate::panels::num_field(ui, l, &mut ax[3 + k]);
+                    }
+                    let nums: Vec<Option<f64>> = ax.iter().map(|t| parse(t)).collect();
+                    if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..]
+                        && ui
+                            .small_button("Set axis")
+                            .on_hover_text("Redefine the joint axis; nothing moves now, later values move about the new axis")
+                            .probe("Set axis")
+                            .clicked()
+                    {
+                        send.push(Command::SetJointAxis {
+                            joint: j.id,
+                            origin: [a, b, c],
+                            axis: Some([d, e, f]),
+                            axis_from: None,
+                            dir2: j.dir2,
+                        });
+                    }
+                });
                 for i in 0..vals.len() {
                     let sfx = if i == 0 {
                         String::new()
@@ -1035,6 +1151,34 @@ impl RcadApp {
                             });
                         }
                     });
+                    // Drive within the stored limits (motion preview of the
+                    // solved joint; one command when the drag ends).
+                    let (smin, smax) = if i == 0 {
+                        (j.min, j.max)
+                    } else {
+                        j.extra.get(i - 1).map_or((None, None), |d| (d.min, d.max))
+                    };
+                    if let (Some(a), Some(b)) = (smin, smax)
+                        && a < b
+                    {
+                        let mut x = parse(&vals[i]).unwrap_or(a).clamp(a, b);
+                        let l = format!("Drive{sfx} {}", j.name);
+                        let r = ui
+                            .add(egui::Slider::new(&mut x, a..=b).text("drive"))
+                            .on_hover_text("Drag to move the joint within its limits; the value is committed when you release")
+                            .named(&l);
+                        if r.changed() {
+                            vals[i] = fmt(x);
+                        }
+                        // Commit at drag end, or at once for keyboard steps.
+                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                            send.push(Command::SetJointValue {
+                                joint: j.id,
+                                value: x,
+                                index: i,
+                            });
+                        }
+                    }
                     ui.horizontal(|ui| {
                         let (lo, hi) = &mut lims[i];
                         crate::panels::num_field(ui, &format!("Min{sfx}"), lo);
@@ -1098,6 +1242,7 @@ impl RcadApp {
             if ui
                 .checkbox(&mut ex, "Exploded view")
                 .on_hover_text("Display the per-occurrence exploded offsets (display only)")
+                .probe("Exploded view")
                 .changed()
             {
                 send.push(Command::SetExploded { exploded: ex });
@@ -1164,7 +1309,7 @@ impl RcadApp {
                         error_estimate,
                     } => (
                         format!(
-                            "{} ∩ {}: {} mm³{}",
+                            "{} × {}: {} mm³{}",
                             i.a_name,
                             i.b_name,
                             fmt(*volume),
@@ -1181,7 +1326,7 @@ impl RcadApp {
                         ),
                     ),
                     InterferenceStatus::OverlapVolumeUnknown { reason } => (
-                        format!("{} ∩ {}: overlap, volume unknown", i.a_name, i.b_name),
+                        format!("{} × {}: overlap, volume unknown", i.a_name, i.b_name),
                         format!("Sampled (10³ points in the common box): {reason}"),
                     ),
                     _ => continue,
@@ -1193,6 +1338,7 @@ impl RcadApp {
                         "{scope}. Touching contact (coincident faces) is not reported; no contact tolerance is applied."
                     ))
                     .named(&t)
+                    .probe(&format!("Interference {}", k + 1))
                     .clicked()
                 {
                     self.assembly_ui.interference_pick = (!sel).then_some(k);

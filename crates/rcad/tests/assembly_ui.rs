@@ -104,7 +104,7 @@ fn components_section_create_move_ground_bom_interference_joint() {
     click(&mut h, "Bill of materials");
     h.get_by_label("1. Block ×2 · P/N P-7");
     click(&mut h, "Check interference");
-    let l = h.get_by_label_contains("Block#1 ∩ Block#2");
+    let l = h.get_by_label_contains("Block#1 × Block#2");
     let _ = l;
     // A slider joint driven from the browser: inside the limits, then outside.
     h.state_mut().request(Command::AddJoint {
