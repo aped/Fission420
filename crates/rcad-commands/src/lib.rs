@@ -518,6 +518,14 @@ pub enum Command {
         feature: FeatureId,
         path: PathBuf,
     },
+    /// Shell from any planar face of a body prismatic along its normal (run
+    /// 6; see `FeatureKind::ShellFace`).
+    ShellFace {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        thickness: f64,
+    },
     /// Split `body` by `plane` (run 6; one undo step): the body keeps the
     /// part behind the plane, a new body (`body_name`) the part in front.
     SplitBody {
@@ -734,6 +742,7 @@ impl Command {
             Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
             Command::SplitBody { .. } => "split_body",
+            Command::ShellFace { .. } => "shell_face",
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::Project { .. } => "project",
@@ -2645,6 +2654,18 @@ impl Session {
                     part.bend_lines.len()
                 ));
             }
+            Command::ShellFace {
+                name,
+                face,
+                thickness,
+            } => {
+                let (name, face, thickness) = (name.clone(), *face, *thickness);
+                let id = self.model_mut()?.transact("Shell", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Shell"));
+                    Ok(d.push(n, FeatureKind::ShellFace { face, thickness }))
+                })?;
+                r.feature = Some(id);
+            }
             Command::SplitBody {
                 name,
                 body,
@@ -3373,6 +3394,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::SplitBody { plane, .. } => ("split_body", Some(*plane)),
                 FeatureKind::SheetMetal { .. } => ("sheet_metal", None),
+                FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
                 FeatureKind::Combine { .. } => ("combine", None),
                 FeatureKind::Countersink { .. } => ("countersink", None),

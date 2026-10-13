@@ -1077,6 +1077,14 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
+            FeatureKind::ShellFace { face, thickness } => {
+                let rf = resolve_face(id, face, &st)?;
+                r.frame = Some(rf.frame);
+                let t = brep_target(&st, id, rf.body)?;
+                let out = shell_from_face(id, &t, &rf.frame, *thickness)?;
+                replace_body(&mut st, id, rf.body, out);
+                r.body = Some(rf.body);
+            }
             FeatureKind::SplitBody {
                 body,
                 plane,
@@ -1937,6 +1945,135 @@ fn tapered_apply(
         })
 }
 
+/// Hollow `t` under the planar face in `frame` (outward normal z), leaving
+/// it open: its outer boundary offset inward by `th`, cut to one `th` above
+/// the opposite cap (see `FeatureKind::ShellFace`).
+fn shell_from_face(id: FeatureId, t: &Body, frame: &Frame, th: f64) -> Result<Body> {
+    let limit = |m: String| DocError::ProductLimit(format!("{id}: shell: {m}"));
+    if !(th.is_finite() && th > 0.0) {
+        return Err(DocError::Validation(format!(
+            "{id}.thickness: shell wall thickness must be > 0 mm, got {th}"
+        )));
+    }
+    let loops = k::face_boundary_curves(t, frame).map_err(|e| limit(e.to_string()))?;
+    if loops.len() != 1 {
+        return Err(limit(format!(
+            "the open face has {} boundary loops; a shell needs a face without holes",
+            loops.len()
+        )));
+    }
+    let outer = curves_to_profile(&loops[0]).map_err(limit)?;
+    let inner = rcad_sketch::offset_profile(&outer, -th)
+        .map_err(|x| limit(format!("thickness {th} mm does not fit the face ({x})")))?;
+    // The opposite cap: the lowest planar face parallel to the open face.
+    let floor = k::face_planes(t)
+        .iter()
+        .filter(|p| (dot(p.normal, frame.z).abs() - 1.0).abs() < 1e-9)
+        .map(|p| dot(sub(p.point, frame.origin), frame.z))
+        .fold(f64::INFINITY, f64::min);
+    if !floor.is_finite() || floor >= -th {
+        return Err(limit(format!(
+            "the body is {:.4} mm deep under the face; it must be deeper than the thickness",
+            -floor
+        )));
+    }
+    let kp = to_kernel(&inner);
+    if let Some(why) = k::prismatic::not_applicable(t, &kp, frame) {
+        return Err(limit(format!(
+            "the body is not prismatic along the face normal ({why}); walls would not be \
+             {th} mm thick"
+        )));
+    }
+    let depth = -floor - th;
+    let piece = ExtrudeOut {
+        start: *frame,
+        distance: depth,
+        dir: -1.0,
+        extent: Extent::Distance,
+        profile: inner,
+        entities: vec![],
+        holes: vec![],
+        span: (-depth, 0.0),
+        nominal: (-depth, 0.0),
+        side: Some(1.0),
+        removes: true,
+        joined: false,
+        intersect: false,
+        plain: true,
+        multi: false,
+        taper: 0.0,
+        body: BodyId(0),
+    };
+    Ok(apply_tool(t, &piece, frame, Some("shell"), id, None)?.0)
+}
+
+/// A closed loop of projected curves as a sketch profile.
+fn curves_to_profile(l: &[k::Curve2]) -> std::result::Result<SketchProfile, String> {
+    if let [k::Curve2::Circle { c, r }] = l {
+        return Ok(SketchProfile::Circle {
+            center: *c,
+            radius: *r,
+        });
+    }
+    let mut segs = Vec::new();
+    let mut any_arc = false;
+    for c in l {
+        match *c {
+            k::Curve2::Line { a, .. } => segs.push(rcad_sketch::LoopSegment::Line { start: a }),
+            k::Curve2::Arc { c, a, ccw, .. } => {
+                any_arc = true;
+                segs.push(rcad_sketch::LoopSegment::Arc {
+                    start: a,
+                    center: c,
+                    ccw,
+                })
+            }
+            k::Curve2::Circle { .. } => return Err("a circle inside a loop".into()),
+        }
+    }
+    let poly: Vec<[f64; 2]> = segs.iter().map(|s| s.start()).collect();
+    let area: f64 = (0..poly.len())
+        .map(|i| {
+            let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    if !any_arc {
+        let mut p = poly;
+        if area < 0.0 {
+            p.reverse();
+        }
+        return Ok(SketchProfile::Polygon(p));
+    }
+    // Arcs: orientation from a fine polyline.
+    let prof = SketchProfile::Loop(segs.clone());
+    let (pts, _) = k::profile_outline(&to_kernel(&prof));
+    let a2: f64 = (0..pts.len())
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    if a2 >= 0.0 {
+        return Ok(prof);
+    }
+    let n = segs.len();
+    let starts: Vec<[f64; 2]> = segs.iter().map(|s| s.start()).collect();
+    let mut out = Vec::with_capacity(n);
+    for i in (0..n).rev() {
+        let to = starts[(i + 1) % n];
+        out.push(match segs[i] {
+            rcad_sketch::LoopSegment::Line { .. } => rcad_sketch::LoopSegment::Line { start: to },
+            rcad_sketch::LoopSegment::Arc { center, ccw, .. } => rcad_sketch::LoopSegment::Arc {
+                start: to,
+                center,
+                ccw: !ccw,
+            },
+        });
+    }
+    Ok(SketchProfile::Loop(out))
+}
+
 /// Split `t` by the plane of `pf`: (the part behind the plane, the part in
 /// front of it), each an exact cut by a half-space box through
 /// [`apply_tool`] (result-checked; ADR 0005/0006).
@@ -2006,6 +2143,7 @@ fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
 /// Band of width `t` centred on the open chain `pts`: offset lines ±t/2,
 /// mitred at interior vertices (refused when a corner is sharper than a
 /// miter of 4·t), square ends; counter-clockwise polygon.
+#[allow(clippy::needless_range_loop)] // vertex i and its neighbours
 fn open_band(id: FeatureId, pts: &[[f64; 2]], t: f64) -> Result<SketchProfile> {
     let bad = |m: String| DocError::Validation(format!("{id}: thin open profile: {m}"));
     if !(t.is_finite() && t > 0.0) {

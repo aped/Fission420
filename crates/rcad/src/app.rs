@@ -416,6 +416,8 @@ pub struct RcadApp {
     /// Sheet-metal flange form: thickness, radius, K, width; flat-pattern path.
     pub(crate) sheet_form: [String; 4],
     pub(crate) flat_path: String,
+    /// Wall thickness typed for "Shell from this face" (run 6).
+    pub(crate) shell_thickness: String,
     /// Split-by-plane form: world plane (0 XY, 1 XZ, 2 YZ), offset text.
     pub(crate) split_form: (u8, String),
     /// Configuration name / part number being typed (run 6).
@@ -516,6 +518,7 @@ impl RcadApp {
             move_form: Default::default(),
             sheet_form: ["1".into(), "2".into(), "0.44".into(), "40".into()],
             flat_path: String::new(),
+            shell_thickness: "2".into(),
             split_form: (0, "0".into()),
             config_form: Default::default(),
             body_props: Default::default(),

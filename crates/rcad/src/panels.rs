@@ -853,6 +853,24 @@ impl RcadApp {
                             offset: "0".into(),
                         });
                     }
+                    // Run 6: shell the body under this face, leaving it open.
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.shell_thickness).desired_width(40.0),
+                    )
+                    .named("Shell thickness (mm)");
+                    if ui
+                        .button("Shell from this face")
+                        .probe("Shell from this face")
+                        .on_hover_text("Hollow the body under this face (left open) to walls and floor of the given thickness; bodies prismatic along the face normal")
+                        .clicked()
+                        && let Ok(t) = self.shell_thickness.trim().parse::<f64>()
+                    {
+                        self.request(Command::ShellFace {
+                            name: None,
+                            face: r,
+                            thickness: t,
+                        });
+                    }
                     if ui
                         .button("Chamfer edge…")
                         .probe("Chamfer edge…")

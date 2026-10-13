@@ -428,3 +428,30 @@ fn thread_rod_and_nut_from_the_dialog() {
     click(&mut h, "OK");
     assert_eq!(h.state().summary().bodies.len(), 2);
 }
+
+#[test]
+fn shell_from_a_picked_face() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(40.0, 30.0));
+    let ext = request(&mut h, Command::extrude(None, s1, 20.0));
+    let top = rcad_document::FaceRef {
+        feature: ext,
+        role: rcad_document::FaceRole::ExtrudeEndCap,
+    };
+    let g = h
+        .state()
+        .faces()
+        .iter()
+        .find(|f| f.reference == Some(top))
+        .map(|f| f.group);
+    h.state_mut().select_face(g);
+    let _ = h.try_run();
+    type_into(&mut h, "Shell thickness (mm)", "2");
+    click(&mut h, "Shell from this face");
+    assert!(
+        (h.state().volume().unwrap() - (24000.0 - 36.0 * 26.0 * 18.0)).abs() < 1e-6,
+        "{:?}",
+        h.state().volume()
+    );
+}

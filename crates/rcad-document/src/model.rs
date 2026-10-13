@@ -502,6 +502,13 @@ pub enum FeatureKind {
         plane: SketchPlane,
         new_body: BodyId,
     },
+    /// Shell from any planar face (run 6, format v6): hollow the body under
+    /// `face` (left open) to walls and floor `thickness` thick, for bodies
+    /// prismatic along the face normal (all walls perpendicular to the face):
+    /// the face's outer boundary offset inward by the thickness is cut down
+    /// to one thickness above the opposite cap (exact slab construction,
+    /// result-checked). Refused otherwise by name. Parameter "thickness".
+    ShellFace { face: FaceRef, thickness: f64 },
     /// Sheet-metal contour flange (run 6 pull-forward, `crate::sheet`,
     /// format v6): the open line chain of sketch `sketch` is one surface of a
     /// sheet `thickness` thick (material right of the chain, left with
@@ -802,6 +809,7 @@ impl Feature {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
             FeatureKind::SheetMetal { sketch, .. } => vec![*sketch],
+            FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::DirectEdit { face, .. } => vec![face.feature],
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             // Body creators (target and tools) come from `Document::dependencies_of`.
@@ -1001,6 +1009,7 @@ impl Feature {
                 ("plane_angle_deg".into(), angle.to_degrees()),
             ],
             FeatureKind::SplitBody { .. } => vec![],
+            FeatureKind::ShellFace { thickness, .. } => vec![("thickness".into(), *thickness)],
             FeatureKind::SheetMetal {
                 thickness,
                 radius,
@@ -1391,7 +1400,9 @@ impl Feature {
                 }
                 Ok(())
             }
-            FeatureKind::Shell { thickness, .. } if name == "thickness" => {
+            FeatureKind::Shell { thickness, .. } | FeatureKind::ShellFace { thickness, .. }
+                if name == "thickness" =>
+            {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.thickness: shell wall thickness must be > 0 mm, got {value}"
@@ -1831,6 +1842,7 @@ impl Document {
                 self.feature(*seed).ok().and_then(Feature::target_body)
             }
             FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => self.face_body(a),
+            FeatureKind::ShellFace { face, .. } => self.face_body(face),
             FeatureKind::Shell { extrude, .. } => self
                 .feature(*extrude)
                 .ok()
