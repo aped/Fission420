@@ -3,9 +3,11 @@ use crate::{Body, Frame, KernelError, Result, guarded, tol};
 use serde::{Deserialize, Serialize};
 use truck_modeling::*;
 
+mod faces;
 mod mass;
 mod revolution;
 
+pub use faces::{FacePairMeasure, PARALLEL_SIN, face_geometry, measure_face_pair};
 pub use mass::{VolumeProperties, mesh_volume_properties, volume_properties};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

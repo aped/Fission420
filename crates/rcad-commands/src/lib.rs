@@ -6,6 +6,7 @@
 
 pub mod acceptance;
 pub mod mass;
+pub mod measure_faces;
 pub mod print;
 pub mod printables;
 pub mod scenarios;
@@ -387,6 +388,14 @@ pub enum Command {
         #[serde(default)]
         keep_tools: bool,
     },
+    /// Exact geometry of face `a` (plane, or cylinder with radius/diameter)
+    /// and, with `b`, the distance or angle between the two faces
+    /// (`Response::face_measure`; read-only; world frame, mm, degrees).
+    MeasureFaces {
+        a: measure_faces::FacePick,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        b: Option<measure_faces::FacePick>,
+    },
     /// Volume, mass, centre of mass and inertia of `bodies` (default: every
     /// visible body) and their total (`Response::mass_properties`). Read-only.
     MassProperties {
@@ -734,6 +743,7 @@ impl Command {
             Command::SetBodyMaterial { .. } => "set_body_material",
             Command::MassProperties { .. } => "mass_properties",
             Command::Combine { .. } => "combine",
+            Command::MeasureFaces { .. } => "measure_faces",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -977,6 +987,9 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
+    /// `measure_faces`: exact face geometry and pair measurement (run 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face_measure: Option<measure_faces::FaceMeasureReport>,
     /// `mass_properties`: per-body and total mass properties (run 6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mass_properties: Option<mass::MassReport>,
@@ -2747,6 +2760,10 @@ impl Session {
                     ))
                 })?;
                 r.feature = Some(id);
+            }
+            Command::MeasureFaces { a, b } => {
+                let m = self.model_mut()?;
+                r.face_measure = Some(measure_faces::report(m, *a, *b)?);
             }
             Command::MassProperties { bodies } => {
                 let m = self.model_mut()?;

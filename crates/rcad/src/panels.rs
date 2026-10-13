@@ -806,6 +806,7 @@ impl RcadApp {
             ui.label(RichText::new("Selected face").strong());
             ui.label(&info.description);
             self.face_measure_ui(ui, &info);
+            self.exact_face_ui(ui, &info);
             match (info.reference, info.sketch_blocker()) {
                 (Some(r), _) => {
                     if ui
