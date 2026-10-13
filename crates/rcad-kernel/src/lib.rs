@@ -7,6 +7,7 @@
 
 mod build;
 mod chamfer;
+mod direct;
 mod exact;
 mod faceref;
 mod fillet;
@@ -24,6 +25,10 @@ mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
+pub use direct::{
+    CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, cylinder_feature,
+    offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,
+};
 pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
 pub use loft::loft;

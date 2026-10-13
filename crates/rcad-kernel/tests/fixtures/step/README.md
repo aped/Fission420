@@ -146,3 +146,15 @@ a `CIRCLE` (torus), and the same edge appears twice in the face's loop.
   referenced that unit, so it and the `GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT`
   partial are removed too. That leaves no dangling references and the file
   is valid Part 21. OCC accepts it and silently assumes mm.
+
+## Direct-edit fixture (run 6)
+
+`direct_edit_block_mm.step` is made by `tools/fixtures/step/direct_edit.py`
+(FreeCADCmd 1.1.4, OCC 7.8.1; run `tools/heavy.sh tools/fixtures/step/direct_edit.sh`),
+from Part primitives: `makeBox(60,40,20)` minus `makeCylinder(4,30,(15,20,-5))` (Ø8
+through hole), minus `makeCylinder(3,13,(30,12,12))` (Ø6 blind hole, z = 12..20, flat
+floor), fused with `makeCylinder(5,6,(45,25,19))` (Ø10 boss, top at z = 25),
+`removeSplitter()`. Expected: [0,60]x[0,40]x[0,25], V = 48000 - 267*pi =
+47161.19476149153, 11 STEP faces (8 planes, 3 cylinders; 14 faces after import, which
+splits each cylinder at its seam). FreeCAD's own re-import: 1 valid solid, volume
+47161.19476149152.

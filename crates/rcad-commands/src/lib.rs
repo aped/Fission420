@@ -180,6 +180,24 @@ pub enum Command {
         b: FaceRef,
         radius: f64,
     },
+    /// Direct edit (run 6, ADR 0010) of an imported STEP body at imported face
+    /// `face` (`FaceRole::Imported`, stable import index; see
+    /// [`Command::ImportedFaces`]): offset a planar face, resize or remove the
+    /// hole/boss of a cylindrical face. Exact; refused with the reason when the
+    /// preconditions do not hold. Parameters `distance` / `diameter`.
+    DirectEdit {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        op: rcad_document::DirectOp,
+    },
+    /// Query (run 6): the faces of imported body `body` that direct edits can
+    /// name, as JSON in `message`: `[{"face": FaceRef, "kind": DirectFace}]`
+    /// in current B-rep order. Fails when the body is not an imported body
+    /// changed only by direct edits.
+    ImportedFaces {
+        body: BodyId,
+    },
     /// Round hole (run 4) from a planar face of `target` (default: the body
     /// owning the face), centred at `center` (plane coordinates): `diameter`,
     /// `depth` mm (omit for through all), optional `counterbore`
@@ -497,6 +515,8 @@ impl Command {
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
+            Command::DirectEdit { .. } => "direct_edit",
+            Command::ImportedFaces { .. } => "imported_faces",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
             Command::Shell { .. } => "shell",
@@ -597,6 +617,18 @@ pub struct BodySummary {
     /// Why measuring this body failed (stable until its geometry changes).
     #[serde(default)]
     pub measure_error: Option<String>,
+    /// Run 6: imported bodies changed only by their import and direct edits:
+    /// per current B-rep face (display order), its semantic reference and
+    /// kind, for direct editing (ADR 0010). Empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imported_faces: Vec<ImportedFace>,
+}
+
+/// One face of [`BodySummary::imported_faces`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportedFace {
+    pub face: FaceRef,
+    pub kind: k::DirectFace,
 }
 
 /// Inspectable per-feature state.
@@ -1243,6 +1275,32 @@ impl Session {
                     Ok(d.push(n, FeatureKind::Fillet { a, b, radius }))
                 })?;
                 r.feature = Some(id);
+            }
+            Command::DirectEdit { name, face, op } => {
+                let (name, face, op) = (name.clone(), *face, *op);
+                if !matches!(face.role, FaceRole::Imported { .. }) {
+                    return Err(DocError::Validation(
+                        "a direct edit needs a face of an imported (STEP) body".into(),
+                    ));
+                }
+                let id = self.model_mut()?.transact("Direct edit", |d| {
+                    let n = name.unwrap_or_else(|| {
+                        d.default_name(match op {
+                            rcad_document::DirectOp::OffsetFace { .. } => "Offset face",
+                            rcad_document::DirectOp::ResizeCylinder { .. } => "Resize hole",
+                            rcad_document::DirectOp::RemoveCylinder => "Remove hole",
+                        })
+                    });
+                    Ok(d.push(n, FeatureKind::DirectEdit { face, op }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ImportedFaces { body } => {
+                let m = self
+                    .model
+                    .as_ref()
+                    .ok_or(DocError::Validation("no document is open".into()))?;
+                r.message = Some(imported_faces_json(m.evaluation(), *body)?);
             }
             Command::SetParameter {
                 feature,
@@ -2467,6 +2525,7 @@ impl Session {
                     mesh: b.geometry.mesh().map(|mb| mb.diagnostics.clone()),
                     planes: b.geometry.brep().map(k::face_planes).unwrap_or_default(),
                     measure_error: b.measure_error.clone(),
+                    imported_faces: imported_faces(m.evaluation(), b.id),
                     bounds: match &b.measurements {
                         Some(m) => Some(m.bounds),
                         None => b.geometry.brep().and_then(|g| k::bounds(g).ok()),
@@ -2504,6 +2563,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
+                FeatureKind::DirectEdit { .. } => ("direct_edit", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {
@@ -2566,6 +2626,52 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
             }
         })
         .collect()
+}
+
+/// [`BodySummary::imported_faces`] (empty when the body has no valid import
+/// identity or classification fails).
+fn imported_faces(ev: &rcad_document::Evaluation, body: BodyId) -> Vec<ImportedFace> {
+    let (Some(ids), Some(b)) = (
+        ev.imported_face_ids.get(&body),
+        ev.body_by_id(body).and_then(|b| b.geometry.brep()),
+    ) else {
+        return vec![];
+    };
+    match k::classify_faces(b) {
+        Ok(kinds) if kinds.len() == ids.ids.len() => kinds
+            .into_iter()
+            .enumerate()
+            .filter_map(|(pos, kind)| {
+                Some(ImportedFace {
+                    face: ids.reference(body, pos)?,
+                    kind,
+                })
+            })
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// [`Command::ImportedFaces`] payload.
+fn imported_faces_json(ev: &rcad_document::Evaluation, body: BodyId) -> Result<String, DocError> {
+    let ids = ev.imported_face_ids.get(&body).ok_or_else(|| {
+        DocError::Validation(format!(
+            "body {body} is not an imported body changed only by its import and direct edits"
+        ))
+    })?;
+    let b = ev
+        .body_by_id(body)
+        .and_then(|b| b.geometry.brep())
+        .ok_or_else(|| DocError::Validation(format!("body {body} has no B-rep")))?;
+    let mut out = Vec::new();
+    for pos in 0..ids.ids.len() {
+        let kind = k::classify_face(b, pos).map_err(|e| DocError::Kernel {
+            feature: ids.valid_at,
+            detail: e.to_string(),
+        })?;
+        out.push(serde_json::json!({ "face": ids.reference(body, pos), "kind": kind }));
+    }
+    serde_json::to_string(&out).map_err(|e| DocError::Validation(e.to_string()))
 }
 
 fn parameter_summaries(doc: &Document) -> Vec<ParameterSummary> {

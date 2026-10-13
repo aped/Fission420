@@ -234,3 +234,17 @@ Plane forms (run 5): `{"Offset": {"base": …, "distance": d, "angle": a}}` — 
 optional) tilts the base about its local X axis through its origin before the offset; parameter
 `plane_angle_deg` (bindable) on sketches, mirrors and holes. A non-zero angle makes the file v5.
 Pattern `count` 1 = the seed only.
+
+## Run 6 commands: direct editing of imported bodies (ADR 0010)
+
+| command | fields | notes |
+|---|---|---|
+| `imported_faces` | `body` | query: `message` is JSON `[{"face": FaceRef, "kind": DirectFace}]` for every current face of an imported body changed only by its import and direct edits (`kind`: `{"Plane": {origin, normal}}`, `{"Cylinder": {origin, axis, radius, hole}}` or `"Other"`). Refused for any other body |
+| `direct_edit` | `name?`, `face` (an `Imported` face reference: import feature + `{"Imported": {"body": b, "face": i}}`), `op` | `op`: `{"OffsetFace": {"distance": d}}` (planar face along its outward normal; neighbours must be walls along it), `{"ResizeCylinder": {"diameter": d}}` (hole or boss of a cylindrical face: through hole, flat-floored blind hole, flat-topped boss; growing is clearance-checked exactly on the pierced planes), `"RemoveCylinder"` (delete that hole/boss and close the openings). Exact (`rcad_kernel::{offset_face, resize_cylinder, remove_cylinder}`), result-checked; refusals are `ProductLimit` naming the reason. Parameters `distance` / `diameter` (bindable). A face removed by an earlier edit, or any direct edit after another feature changed the body, is a `BrokenReference`. UI: select a face of an imported body → **Offset face…**, **Resize hole…**, **Remove hole**. File format v6 |
+
+Example (CLI JSON):
+
+```json
+{"cmd": "direct_edit", "face": {"feature": 1, "role": {"Imported": {"body": 1, "face": 4}}},
+ "op": {"OffsetFace": {"distance": 3.0}}}
+```

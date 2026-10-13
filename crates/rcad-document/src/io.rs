@@ -176,6 +176,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         return Some("a rolled-back timeline marker");
     }
     for f in &doc.features {
+        if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
+            return Some("direct edits of imported bodies");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }

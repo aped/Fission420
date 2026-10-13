@@ -1,0 +1,336 @@
+//! Direct edits of the independent FreeCAD fixture `direct_edit_block_mm.step`
+//! (tools/fixtures/step/direct_edit.py): block [0,60]x[0,40]x[0,20], Ø8
+//! through hole at (15,20), Ø6 x 8 blind hole at (30,12), Ø10 x 5 boss at
+//! (45,25). Expected values are analytic.
+use super::*;
+use crate::{Body, StepImportOptions, VolumeResult, import_step, measure};
+use std::f64::consts::PI;
+
+const STEP: &str = include_str!("../../tests/fixtures/step/direct_edit_block_mm.step");
+const V0: f64 = 48000.0 - 267.0 * PI;
+/// Top face (z = 20): 60 x 40 minus the through hole, blind hole and boss base.
+const TOP_AREA: f64 = 2400.0 - 50.0 * PI;
+
+pub(crate) fn block() -> Body {
+    let imp = import_step(STEP, &StepImportOptions::default()).expect("import fixture");
+    assert_eq!(imp.solids.len(), 1);
+    imp.solids.into_iter().next().unwrap().body
+}
+
+fn volume(b: &Body) -> f64 {
+    match measure(b).unwrap().volume {
+        VolumeResult::Value { volume, .. } => volume,
+        other => panic!("no volume: {other:?}"),
+    }
+}
+
+fn assert_volume(b: &Body, want: f64) {
+    let v = volume(b);
+    assert!(
+        (v - want).abs() <= 1e-6 * want.abs().max(1.0),
+        "volume {v} vs {want} (diff {})",
+        v - want
+    );
+}
+
+/// Index of the planar face with outward normal `n` through a point at `level`
+/// along it whose plane contains `p`.
+fn plane_face(b: &Body, n: [f64; 3], p: [f64; 3]) -> usize {
+    let count = crate::face_count(b);
+    let hits: Vec<usize> = (0..count)
+        .filter(|i| match classify_face(b, *i).unwrap() {
+            DirectFace::Plane { origin, normal } => {
+                let d: f64 = (0..3).map(|k| (p[k] - origin[k]) * normal[k]).sum();
+                (0..3).all(|k| (normal[k] - n[k]).abs() < 1e-9) && d.abs() < 1e-9
+            }
+            _ => false,
+        })
+        .collect();
+    assert_eq!(hits.len(), 1, "plane faces {n:?} through {p:?}: {hits:?}");
+    hits[0]
+}
+
+/// A cylinder face with the given axis position (x, y) and radius.
+fn cyl_face(b: &Body, x: f64, y: f64, r: f64) -> usize {
+    let count = crate::face_count(b);
+    (0..count)
+        .find(|i| match classify_face(b, *i).unwrap() {
+            DirectFace::Cylinder {
+                origin,
+                axis,
+                radius,
+                ..
+            } => {
+                axis[2].abs() > 1.0 - 1e-9
+                    && (origin[0] - x).abs() < 1e-6
+                    && (origin[1] - y).abs() < 1e-6
+                    && (radius - r).abs() < 1e-6
+            }
+            _ => false,
+        })
+        .unwrap_or_else(|| panic!("no cylinder at ({x},{y}) r {r}"))
+}
+
+fn top(b: &Body) -> usize {
+    plane_face(b, [0.0, 0.0, 1.0], [0.0, 0.0, 20.0])
+}
+
+fn bounds(b: &Body) -> ([f64; 3], [f64; 3]) {
+    let m = measure(b).unwrap();
+    (m.bounds.min, m.bounds.max)
+}
+
+#[test]
+fn fixture_faces_classify() {
+    let b = block();
+    assert_volume(&b, V0);
+    let n = crate::face_count(&b);
+    let (mut planes, mut holes, mut bosses) = (0, 0, 0);
+    for i in 0..n {
+        match classify_face(&b, i).unwrap() {
+            DirectFace::Plane { .. } => planes += 1,
+            DirectFace::Cylinder { hole: true, .. } => holes += 1,
+            DirectFace::Cylinder { hole: false, .. } => bosses += 1,
+            DirectFace::Other => panic!("face {i} unclassified"),
+        }
+    }
+    // STEP cylinders are split in two at import (seam).
+    assert_eq!((planes, holes, bosses), (8, 4, 2));
+    let t = top(&b);
+    assert!((planar_face_area(&b, t).unwrap() - TOP_AREA).abs() < 1e-9);
+    let through = cylinder_feature(&b, cyl_face(&b, 15.0, 20.0, 4.0)).unwrap();
+    assert_eq!(through.describe(), "through hole");
+    assert_eq!(through.faces.len(), 2);
+    assert!((through.length - 20.0).abs() < 1e-9);
+    let blind = cylinder_feature(&b, cyl_face(&b, 30.0, 12.0, 3.0)).unwrap();
+    assert_eq!(blind.describe(), "blind hole");
+    assert!((blind.length - 8.0).abs() < 1e-9);
+    let boss = cylinder_feature(&b, cyl_face(&b, 45.0, 25.0, 5.0)).unwrap();
+    assert_eq!(boss.describe(), "boss");
+    assert!((boss.length - 5.0).abs() < 1e-9);
+}
+
+#[test]
+fn offset_top_face_out_and_in() {
+    let b = block();
+    let t = top(&b);
+    let up = offset_face(&b, t, 3.0).unwrap();
+    assert_volume(&up.body, V0 + 3.0 * TOP_AREA);
+    assert_eq!(crate::face_count(&up.body), crate::face_count(&b));
+    // The top face keeps its index and is now at z = 23; the boss top stays.
+    assert_eq!(top_at(&up.body, 23.0), t);
+    assert!((bounds(&up.body).1[2] - 25.0).abs() < 1e-9);
+    let down = offset_face(&b, t, -3.0).unwrap();
+    assert_volume(&down.body, V0 - 3.0 * TOP_AREA);
+    assert_eq!(top_at(&down.body, 17.0), t);
+    // The boss top is not adjacent to the top face: it stays at 25 (boss now 8 tall).
+    assert!((bounds(&down.body).1[2] - 25.0).abs() < 1e-9);
+}
+
+fn top_at(b: &Body, z: f64) -> usize {
+    plane_face(b, [0.0, 0.0, 1.0], [0.0, 0.0, z])
+}
+
+#[test]
+fn offset_side_face_and_floor() {
+    let b = block();
+    let side = plane_face(&b, [1.0, 0.0, 0.0], [60.0, 0.0, 0.0]);
+    let e = offset_face(&b, side, 2.0).unwrap();
+    assert_volume(&e.body, V0 + 2.0 * 40.0 * 20.0);
+    assert!((bounds(&e.body).1[0] - 62.0).abs() < 1e-9);
+    // Blind hole floor (outward normal +z at z = 12): 2 mm deeper.
+    let floor = plane_face(&b, [0.0, 0.0, 1.0], [0.0, 0.0, 12.0]);
+    let e = offset_face(&b, floor, -2.0).unwrap();
+    assert_volume(&e.body, V0 - 2.0 * 9.0 * PI);
+}
+
+#[test]
+fn offset_refusals() {
+    let b = block();
+    let t = top(&b);
+    // Up 5: the boss (5 tall) would vanish into the top face.
+    let e = offset_face(&b, t, 5.0).unwrap_err().to_string();
+    assert!(e.contains("collapse or invert"), "{e}");
+    // Down 8: the blind hole (8 deep) would lose its wall.
+    let e = offset_face(&b, t, -8.0).unwrap_err().to_string();
+    assert!(e.contains("collapse or invert"), "{e}");
+    // Down 25: past the bottom.
+    assert!(offset_face(&b, t, -25.0).is_err());
+    // Blind floor up 8: reaches the top face.
+    let floor = plane_face(&b, [0.0, 0.0, 1.0], [0.0, 0.0, 12.0]);
+    assert!(offset_face(&b, floor, 8.0).is_err());
+    // A cylinder is not planar.
+    let c = cyl_face(&b, 15.0, 20.0, 4.0);
+    assert!(
+        offset_face(&b, c, 1.0)
+            .unwrap_err()
+            .to_string()
+            .contains("not planar")
+    );
+    assert!(offset_face(&b, t, f64::NAN).is_err());
+    assert!(offset_face(&b, t, 0.0).is_err());
+    assert!(offset_face(&b, 999, 1.0).is_err());
+}
+
+#[test]
+fn resize_holes_and_boss() {
+    let b = block();
+    let c = cyl_face(&b, 15.0, 20.0, 4.0);
+    let e = resize_cylinder(&b, c, 12.0).unwrap();
+    assert_volume(&e.body, V0 - PI * (36.0 - 16.0) * 20.0);
+    assert_eq!(crate::face_count(&e.body), crate::face_count(&b));
+    assert!(matches!(
+        classify_face(&e.body, c).unwrap(),
+        DirectFace::Cylinder { radius, hole: true, .. } if (radius - 6.0).abs() < 1e-9
+    ));
+    let e = resize_cylinder(&b, c, 4.0).unwrap();
+    assert_volume(&e.body, V0 + PI * (16.0 - 4.0) * 20.0);
+    // Blind hole Ø6 -> Ø10 (8 deep).
+    let bl = cyl_face(&b, 30.0, 12.0, 3.0);
+    let e = resize_cylinder(&b, bl, 10.0).unwrap();
+    assert_volume(&e.body, V0 - PI * (25.0 - 9.0) * 8.0);
+    // Boss Ø10 -> Ø14 (5 tall), and smaller.
+    let bo = cyl_face(&b, 45.0, 25.0, 5.0);
+    let e = resize_cylinder(&b, bo, 14.0).unwrap();
+    assert_volume(&e.body, V0 + PI * (49.0 - 25.0) * 5.0);
+    let e = resize_cylinder(&b, bo, 6.0).unwrap();
+    assert_volume(&e.body, V0 - PI * (25.0 - 9.0) * 5.0);
+    // Through hole up to just below the blind hole's clearance:
+    // |(15,20)-(30,12)| = 17, minus r 3 -> radius < 14.
+    let e = resize_cylinder(&b, c, 27.0).unwrap();
+    assert_volume(&e.body, V0 - PI * (13.5 * 13.5 - 16.0) * 20.0);
+}
+
+#[test]
+fn resize_refusals() {
+    let b = block();
+    let c = cyl_face(&b, 15.0, 20.0, 4.0);
+    // Ø29: radius 14.5 reaches the blind hole (14 mm away).
+    let e = resize_cylinder(&b, c, 29.0).unwrap_err().to_string();
+    assert!(e.contains("would reach another edge"), "{e}");
+    // Ø31 (radius 15.5) would also break the x = 0 wall.
+    assert!(resize_cylinder(&b, c, 31.0).is_err());
+    assert!(resize_cylinder(&b, c, 8.0).is_err(), "same size");
+    assert!(resize_cylinder(&b, c, 0.0).is_err());
+    assert!(resize_cylinder(&b, c, f64::INFINITY).is_err());
+    let t = top(&b);
+    assert!(
+        resize_cylinder(&b, t, 5.0)
+            .unwrap_err()
+            .to_string()
+            .contains("not a circular cylinder")
+    );
+}
+
+#[test]
+fn remove_holes_and_boss() {
+    let b = block();
+    let n = crate::face_count(&b);
+    let c = cyl_face(&b, 15.0, 20.0, 4.0);
+    let e = remove_cylinder(&b, c).unwrap();
+    assert_volume(&e.body, V0 + PI * 16.0 * 20.0);
+    assert_eq!(e.removed_faces.len(), 2);
+    assert_eq!(crate::face_count(&e.body), n - 2);
+    let bl = cyl_face(&b, 30.0, 12.0, 3.0);
+    let e = remove_cylinder(&b, bl).unwrap();
+    assert_volume(&e.body, V0 + PI * 9.0 * 8.0);
+    assert_eq!(e.removed_faces.len(), 3, "two walls and the floor");
+    let bo = cyl_face(&b, 45.0, 25.0, 5.0);
+    let e = remove_cylinder(&b, bo).unwrap();
+    assert_volume(&e.body, V0 - PI * 25.0 * 5.0);
+    assert!((bounds(&e.body).1[2] - 20.0).abs() < 1e-9);
+    // Surviving faces keep their identity under `renumber`.
+    let t = top(&b);
+    assert_eq!(renumber(t, &e.removed_faces), Some(top(&e.body)));
+    // Remove everything in turn: a plain block.
+    let mut body = b.clone();
+    for (x, y, r) in [(15.0, 20.0, 4.0), (30.0, 12.0, 3.0), (45.0, 25.0, 5.0)] {
+        let f = cyl_face(&body, x, y, r);
+        body = remove_cylinder(&body, f).unwrap().body;
+    }
+    assert_volume(&body, 48000.0);
+    assert_eq!(crate::face_count(&body), 6);
+}
+
+#[test]
+fn edits_compose_and_export() {
+    let b = block();
+    let t = top(&b);
+    let e1 = offset_face(&b, t, 3.0).unwrap().body;
+    let c = cyl_face(&e1, 15.0, 20.0, 4.0);
+    let e2 = resize_cylinder(&e1, c, 10.0).unwrap().body;
+    let bl = cyl_face(&e2, 30.0, 12.0, 3.0);
+    let e3 = remove_cylinder(&e2, bl).unwrap().body;
+    // 3 mm on top; hole Ø10 over 23 mm; blind hole filled (now 11 deep).
+    let want = V0 + 3.0 * TOP_AREA - PI * (25.0 - 16.0) * 23.0 + PI * 9.0 * 11.0;
+    assert_volume(&e3, want);
+    // Exported exactly (re-read independently by tools/check_direct_edit.sh in
+    // FreeCAD; our own importer does not read the SURFACE_OF_REVOLUTION the
+    // writer uses for imported cylinders).
+    let step = crate::export_step(&e3, "R-CAD test").unwrap();
+    assert!(step.contains("MANIFOLD_SOLID_BREP"));
+    if let Ok(dir) = std::env::var("RCAD_EVIDENCE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, b: &Body| {
+            let s = crate::export_step(b, "R-CAD direct edit evidence").unwrap();
+            std::fs::write(std::path::Path::new(&dir).join(name), s).unwrap();
+        };
+        write("direct_composed.step", &e3);
+        write("direct_unedited.step", &b);
+        write(
+            "direct_offset_top_up3.step",
+            &offset_face(&b, t, 3.0).unwrap().body,
+        );
+        let c0 = cyl_face(&b, 15.0, 20.0, 4.0);
+        write(
+            "direct_resize_through_d12.step",
+            &resize_cylinder(&b, c0, 12.0).unwrap().body,
+        );
+        let bo = cyl_face(&b, 45.0, 25.0, 5.0);
+        write(
+            "direct_remove_boss.step",
+            &remove_cylinder(&b, bo).unwrap().body,
+        );
+    }
+}
+
+#[test]
+fn renumber_maps_indices() {
+    assert_eq!(renumber(0, &[1, 3]), Some(0));
+    assert_eq!(renumber(1, &[1, 3]), None);
+    assert_eq!(renumber(2, &[1, 3]), Some(1));
+    assert_eq!(renumber(5, &[1, 3]), Some(3));
+}
+
+#[test]
+fn oblique_neighbour_is_refused() {
+    // Loft frustum 20x20 (z = 0) to 10x10 (z = 10): the side faces are inclined.
+    let sq = |h: f64| Profile::Polygon(vec![[-h, -h], [h, -h], [h, h], [-h, h]]);
+    let b = crate::loft(&sq(10.0), &Frame::XY, &sq(5.0), &Frame::XY.offset(10.0)).unwrap();
+    let t = plane_face(&b, [0.0, 0.0, 1.0], [0.0, 0.0, 10.0]);
+    let e = offset_face(&b, t, 1.0).unwrap_err().to_string();
+    assert!(e.contains("not perpendicular"), "{e}");
+}
+
+#[test]
+fn result_check_rejects_a_wrong_expectation() {
+    // The independent check is not vacuous: the +3 offset is not a cut.
+    let b = block();
+    let t = top(&b);
+    let up = offset_face(&b, t, 3.0).unwrap();
+    let sh = shell_of(&b).unwrap();
+    let (fr, outer, holes, _) = face_region(&sh, t, geo_tol(&sh)).unwrap();
+    let prism = Prism {
+        profile: &outer,
+        holes: &holes,
+        start: &fr,
+        length: 3.0,
+    };
+    assert!(verify(&b, &up.body, PrismOp::Join, &prism).is_ok());
+    let shifted = fr.offset(-3.0);
+    let wrong = Prism {
+        start: &shifted,
+        ..prism
+    };
+    assert!(verify(&b, &up.body, PrismOp::Cut, &wrong).is_err());
+}

@@ -5,6 +5,7 @@
 //! ([`Evaluation`]) is a disposable cache produced by [`regenerate`].
 
 mod blob;
+pub mod direct;
 mod hole;
 pub mod import;
 mod io;
@@ -13,6 +14,7 @@ pub mod params;
 mod regen;
 mod session;
 
+pub use direct::ImportedFaceIds;
 pub use io::{
     FORMAT_NAME, FORMAT_VERSION, LEGACY_FORMAT_NAMES, MAX_FILE_BYTES, MIN_FORMAT_VERSION,
     NativeFile, load_file, migrate_to_v3, save_file, write_atomic,

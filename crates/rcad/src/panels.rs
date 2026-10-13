@@ -834,6 +834,7 @@ impl RcadApp {
                 }
                 _ => {}
             }
+            self.direct_edit_actions(ui, info.group);
             ui.separator();
         }
         if self.selected.is_none()
@@ -1802,6 +1803,7 @@ impl RcadApp {
                     } => {
                         self.shell_form_ui(ui, *extrude, open_end, thickness);
                     }
+                    Dialog::DirectEdit(f) => f.ui(ui),
                     Dialog::Chamfer {
                         a,
                         b,

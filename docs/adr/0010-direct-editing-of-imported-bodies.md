@@ -1,0 +1,97 @@
+# ADR 0010: Direct editing of imported (STEP) bodies
+
+Status: accepted (run 6, 2026-10-13). ADR 0005 (independent result check) applies to
+every result.
+
+## Context
+
+An imported STEP body has no feature history (ADR 0003: none is recovered or implied).
+Users still need to change it: move a face, open up or shrink a hole, delete a hole or
+a boss. These edits must be exact (no faceting, no mesh CSG), parametric (bindable to
+expressions, regenerated from the embedded STEP bytes) and must keep face references
+meaningful or break them explicitly.
+
+## Decision
+
+### Kernel (`rcad-kernel/src/direct.rs`)
+
+All edits work on the body's compressed topology (`Solid::compress` → edit →
+`Solid::extract`). Face indices are positions in `face_iter` order.
+
+* `offset_face(body, face, d)`: planar face moved by `d` along its outward normal `n`.
+  **Precondition:** every face touching it (along an edge or at a vertex) is a wall
+  along `n`: a plane containing `n`, or a curved face whose outward normal is
+  perpendicular to `n` everywhere sampled (boundary samples plus a 7 x 7 parameter grid,
+  to 1e-6). Every other edge ending on the face is a straight segment along `n`.
+  **Construction:** the plane, its edges and its vertices are translated (affine, exact);
+  the side edges are rebuilt as exact segments. Topology and face order unchanged.
+  **Refused:** oblique neighbour ("not perpendicular"), a side edge that would shrink below
+  `MIN_LENGTH` or flip (a face would degenerate or the topology change, e.g. a boss
+  swallowed by its base face, a blind hole losing its wall), non-planar face.
+* `resize_cylinder(body, face, diameter)`: the *feature* of a cylindrical face is the
+  set of coaxial cylinder faces of the same radius connected to it (a STEP cylinder is
+  split in two at import), plus *caps* (planar faces perpendicular to the axis bounded
+  only by those cylinders). Every other face it meets (*pierced*) must be a plane
+  perpendicular to the axis. Supported: through hole (no cap, two pierced planes), blind
+  hole with a flat floor, boss with a flat top. The feature's faces, edges and vertices
+  are mapped by the radial scaling about the axis (affine: circles stay exact circles;
+  a revolved surface gets its generatrix scaled in the revolution's own frame so its
+  placement stays rigid). **Clearance (growing):** the new circle must stay more than
+  `MIN_LENGTH` from every other boundary edge of every pierced face, by exact distance to
+  segments and circular arcs (free-form edges are refused).
+* `remove_cylinder(body, face)`: deletes the feature's faces and the inner loops it
+  leaves on the pierced planes; each such loop must consist only of the feature's edges
+  and must not be the face's only loop. Removed faces are reported by old index
+  (`DirectEdit::removed_faces`, `renumber`).
+* **Checks on every result:** every touched edge lies on the surfaces of both its faces
+  (catches a moved edge leaving a bounded patch), one closed shell with positive volume,
+  and `verify_prisms_boolean` against the nominal prism the edit adds or removes (offset:
+  the face region swept by `d`, Join for `d > 0`, Cut otherwise; resize: the disk or ring
+  between the radii over the axial span; removal: the disk). Interference with geometry
+  away from the edited face (e.g. a hole growing into an internal void) therefore fails
+  the probe check rather than producing a self-intersecting solid.
+* Not supported (named refusals): oblique neighbours (a general "replace face" that
+  recomputes neighbour intersections, task d of SESSION_6 §C, is not implemented),
+  cones / countersinks, holes ending on curved or tilted faces, partial-loop features
+  (a hole breaking through a side wall), bodies with several shells.
+
+### Document (`rcad-document/src/direct.rs`, `FeatureKind::DirectEdit`)
+
+* `FeatureKind::DirectEdit { face: FaceRef, op: DirectOp }`, `DirectOp ∈ {OffsetFace
+  { distance }, ResizeCylinder { diameter }, RemoveCylinder}`; parameters `distance`,
+  `diameter` (bindable, `SlotKind::Length`). Its target body is the face's body, so it is
+  ordered after the import and any earlier modifier of that body. It is *direct-edit
+  history*: the summary kind is `direct_edit`; nothing is presented as recovered feature
+  history.
+* Faces are named by `FaceRole::Imported { body, face }` with `face` = **import index**
+  (position right after import; deterministic for the same bytes). The role was
+  planar-only for sketches; its meaning is unchanged for them (sketch planes still
+  resolve only planar imported faces), and direct edits use it for cylinders too.
+  Serde-unchanged.
+* `ImportedFaceIds` maps current face positions to import indices while the body has
+  been changed only by its import and direct edits (`valid_at` = last such feature).
+  Offset/resize keep it; a removal retires the removed indices. A direct edit naming a
+  retired index is a `BrokenReference` ("no longer exists"); after any other feature has
+  changed the body, a direct edit is a `BrokenReference` ("can no longer be identified"):
+  indices are never re-guessed on changed topology.
+* The imported planar face table (sketch planes) follows the edits: an offset face's
+  frame moves with it (sketches on it move too, the frame's in-plane axes and origin
+  are kept); faces removed by an edit leave the table (references to them break).
+* `Evaluation::imported_face_ids` exposes the valid maps, for picking a face in the UI
+  and for the `imported_faces` command.
+* Native format **v6**, written only when a `DirectEdit` exists (`io::v6_feature`);
+  v5/v4 builds refuse such a file. Regeneration re-imports the embedded STEP blob and
+  replays the edits, so save/reopen and undo/redo need no source file.
+
+## Consequences
+
+* The FreeCAD fixture `direct_edit_block_mm.step` (tools/fixtures/step/direct_edit.py)
+  is edited exactly; volumes match the analytic values to 1e-6 relative in the kernel and
+  command tests, and FreeCAD re-reads every edited export as one valid solid with probes
+  on both sides of each edited face (`tools/check_direct_edit.sh`). FreeCAD's own volume
+  of these exports is ~1e-6 relative off even for the unedited re-export (it builds
+  approximate pcurves for the planar faces' circular edges), so that check uses 5e-6.
+* Our STEP writer emits imported cylinders as `SURFACE_OF_REVOLUTION`, which our own
+  importer does not read yet: an edited body cannot be re-imported into R-CAD (FreeCAD
+  reads it). Recorded as a gap.
+* Direct edits must come before modeled features on an imported body.

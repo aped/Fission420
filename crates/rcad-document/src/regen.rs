@@ -150,6 +150,10 @@ pub struct Evaluation {
     pub body: Option<Body>,
     /// Measurements of [`Evaluation::body`].
     pub measurements: Option<Measurements>,
+    /// Run 6: import identity of the faces of imported bodies changed by
+    /// nothing but their import and direct edits (for picking a face to edit
+    /// directly). Absent for any other body.
+    pub imported_face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
 }
 
 impl Evaluation {
@@ -219,6 +223,7 @@ impl Evaluation {
             faces: vec![],
             body: None,
             measurements: None,
+            imported_face_ids: BTreeMap::new(),
         }
     }
 }
@@ -350,6 +355,8 @@ struct Snapshot {
     /// Chamfer features: the chamfer face's frame (outward normal) and body.
     chamfers: HashMap<FeatureId, (Frame, BodyId)>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
+    /// Run 6: face identity of imported bodies (direct edits).
+    face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
     bodies: BTreeMap<BodyId, BodyState>,
     /// Body ids in creation order.
     created: Vec<BodyId>,
@@ -389,6 +396,7 @@ impl Snapshot {
             copies: HashMap::new(),
             chamfers: HashMap::new(),
             imported_faces: HashMap::new(),
+            face_ids: BTreeMap::new(),
             bodies: BTreeMap::new(),
             created: Vec::new(),
             results: Vec::new(),
@@ -798,6 +806,10 @@ fn regen_impl(
                 for (solid, body) in imp.solids.into_iter().zip(bodies) {
                     st.imported_faces
                         .insert((id, *body), Arc::new(solid.planar_faces));
+                    st.face_ids.insert(
+                        *body,
+                        crate::direct::ImportedFaceIds::at_import(id, k::face_count(&solid.body)),
+                    );
                     create_body(
                         &mut st,
                         id,
@@ -966,6 +978,23 @@ fn regen_impl(
                 replace_body(&mut st, id, body, out);
                 r.body = Some(body);
             }
+            FeatureKind::DirectEdit { face, op } => {
+                let bid = doc.face_body(face).ok_or_else(|| {
+                    DocError::Validation(format!("{id}: a direct edit needs an imported face"))
+                })?;
+                let target = brep_target(&st, id, bid)?;
+                let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
+                let out =
+                    crate::direct::apply(id, face, *op, &target, last, st.face_ids.get(&bid))?;
+                replace_body(&mut st, id, bid, out.body);
+                st.face_ids.insert(bid, out.ids);
+                if let (FaceRole::Imported { face: index, .. }, Some(t)) =
+                    (face.role, st.imported_faces.get_mut(&(face.feature, bid)))
+                {
+                    crate::direct::update_planar_table(Arc::make_mut(t), index, *op, &out.removed);
+                }
+                r.body = Some(bid);
+            }
             FeatureKind::Import3mf { blob, bodies } => {
                 let b = doc.blob(*blob)?;
                 let bytes = b.bytes()?;
@@ -1077,12 +1106,23 @@ fn regen_impl(
         });
     }
     let faces = face_candidates(&st, &order);
+    let imported_face_ids = st
+        .face_ids
+        .iter()
+        .filter(|(b, f)| {
+            st.bodies
+                .get(b)
+                .is_some_and(|s| s.last_feature == f.valid_at)
+        })
+        .map(|(b, f)| (*b, f.clone()))
+        .collect();
     let mut eval = Evaluation {
         features: st.results,
         bodies,
         faces,
         body: None,
         measurements: None,
+        imported_face_ids,
     };
     eval.refresh_legacy_view();
     Ok(Regen::Done(Box::new(eval)))

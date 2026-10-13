@@ -236,6 +236,9 @@ otherwise v5/v4 as before; a file labelled v5 or older that contains a v6 featur
 v5 documents (saved by run-6's build before the change, with run-5 features only) are in
 `crates/rcad-commands/tests/fixtures/native_v5/` (`native_formats.rs::v5_run5_documents`:
 open, analytic volume, re-save as an identical v5 document).
+**v6 (run 6)** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
+written only when present (`io::v6_feature`); otherwise the file stays v5/v4 as before.
+Imported bodies edited this way regenerate from the embedded STEP bytes plus the edit list.
 
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
