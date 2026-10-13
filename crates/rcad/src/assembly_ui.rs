@@ -115,6 +115,7 @@ impl RcadApp {
                             bodies: vec![b],
                             part_number: (!f.part_number.trim().is_empty())
                                 .then(|| f.part_number.clone()),
+                            occurrences: vec![],
                         });
                         f.component_name.clear();
                         f.part_number.clear();
@@ -141,6 +142,7 @@ impl RcadApp {
                     send.push(Command::AddOccurrence {
                         component: c.id,
                         name: None,
+                        owner: None,
                         translate: [0.0; 3],
                         axis: None,
                         angle_deg: 0.0,
@@ -234,11 +236,7 @@ impl RcadApp {
             );
         }
         for j in &asm.joints {
-            let unit = match j.kind {
-                rcad_document::assembly::JointKind::Revolute => "°",
-                rcad_document::assembly::JointKind::Slider => " mm",
-                rcad_document::assembly::JointKind::Rigid => "",
-            };
+            let unit = j.kind.units().first().copied().unwrap_or("");
             let occ = |id: OccurrenceId| {
                 asm.occurrences
                     .iter()
@@ -279,6 +277,7 @@ impl RcadApp {
                         send.push(Command::SetJointValue {
                             joint: j.id,
                             value: v,
+                            index: 0,
                         });
                     }
                 });
@@ -294,6 +293,7 @@ impl RcadApp {
                             joint: j.id,
                             min: a,
                             max: b,
+                            index: 0,
                         });
                     }
                 });

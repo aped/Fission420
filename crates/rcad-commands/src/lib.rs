@@ -396,11 +396,20 @@ pub enum Command {
     /// Components / occurrences / joints (run 6 pull-forward of Run-7 §1-2,
     /// docs/ASSEMBLIES.md; format v6). A component groups bodies of this
     /// document and gets a first occurrence at identity.
+    ///
+    /// Run 7: `occurrences` (siblings with the same owner) move into the new
+    /// component's definition, which becomes a sub-assembly; its first
+    /// occurrence takes their former owner at identity, so nothing moves.
+    /// With neither bodies nor occurrences an empty component is made (activate
+    /// it to model into it).
     CreateComponent {
         name: String,
+        #[serde(default)]
         bodies: Vec<BodyId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         part_number: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        occurrences: Vec<rcad_document::assembly::OccurrenceId>,
     },
     /// Remove a component and its occurrences (its bodies become loose bodies).
     DeleteComponent {
@@ -412,10 +421,16 @@ pub enum Command {
     },
     /// A further linked occurrence: rotate `angle_deg` about `axis` (default +Z)
     /// through the world origin, then translate.
+    ///
+    /// Run 7: with `owner`, the occurrence is a child in that component's
+    /// definition (a sub-assembly; placement relative to it). Cyclic
+    /// containment is refused.
     AddOccurrence {
         component: rcad_document::assembly::ComponentId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<rcad_document::assembly::ComponentId>,
         #[serde(default)]
         translate: [f64; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -462,10 +477,20 @@ pub enum Command {
         min: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<f64>,
+        /// Run 7: second/third values with limits (cylindrical, pin-slot,
+        /// planar, ball).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra: Vec<rcad_document::assembly::DofValue>,
+        /// Run 7: slot direction (pin-slot) / in-plane u (planar, ball).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir2: Option<[f64; 3]>,
     },
+    /// Set value `index` (default 0) of a joint; refused outside its limits.
     SetJointValue {
         joint: rcad_document::assembly::JointId,
         value: f64,
+        #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
+        index: usize,
     },
     SetJointLimits {
         joint: rcad_document::assembly::JointId,
@@ -473,6 +498,13 @@ pub enum Command {
         min: Option<f64>,
         #[serde(default)]
         max: Option<f64>,
+        #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
+        index: usize,
+    },
+    /// Run 7: set all values of a multi-DOF joint at once (atomic).
+    SetJointValues {
+        joint: rcad_document::assembly::JointId,
+        values: Vec<f64>,
     },
     DeleteJoint {
         joint: rcad_document::assembly::JointId,
@@ -490,6 +522,63 @@ pub enum Command {
     ExportAssembly {
         path: PathBuf,
         format: assembly::AssemblyFormat,
+    },
+    /// Run 7: rename a component (definition name; BOM row).
+    RenameComponent {
+        component: rcad_document::assembly::ComponentId,
+        name: String,
+    },
+    /// Run 7: rename an occurrence.
+    RenameOccurrence {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        name: String,
+    },
+    /// Run 7: make `component` the active component (bodies created while it
+    /// is active join its definition); `null` returns to the top level.
+    ActivateComponent {
+        #[serde(default)]
+        component: Option<rcad_document::assembly::ComponentId>,
+    },
+    /// Run 7: hide/show an occurrence (display only; still in BOM, mass,
+    /// interference and export).
+    SetOccurrenceHidden {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        hidden: bool,
+    },
+    /// Run 7: break the link of `occurrence`: a new component (independent
+    /// copy) with copies of the definition bodies, made from the current
+    /// geometry by body-copy features; the occurrence keeps its placement and
+    /// stops following later edits of the source definition.
+    MakeIndependent {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Run 7: rigid group: rigid joints from the first occurrence to each of
+    /// the others (siblings, free, not grounded); one undo step.
+    CreateRigidGroup {
+        occurrences: Vec<rcad_document::assembly::OccurrenceId>,
+    },
+    /// Run 7: exploded-view offset (world mm) of the instance `path` ("O3/O7");
+    /// display state only. A zero offset removes the entry.
+    SetExplodeOffset {
+        path: String,
+        offset: [f64; 3],
+    },
+    /// Run 7: show or hide the exploded view.
+    SetExploded {
+        exploded: bool,
+    },
+    /// Run 7: move a free occurrence so that planar face `from` (of its
+    /// definition) lies on planar face `to` of another occurrence, facing it
+    /// (normals opposite) with `offset` mm gap; translation + minimal rotation.
+    AlignOccurrence {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        from: measure_faces::FacePick,
+        target: rcad_document::assembly::OccurrenceId,
+        to: measure_faces::FacePick,
+        #[serde(default)]
+        offset: f64,
     },
     /// Exact geometry of face `a` (plane, or cylinder with radius/diameter)
     /// and, with `b`, the distance or angle between the two faces
@@ -1055,6 +1144,16 @@ impl Command {
             Command::Bom => "bom",
             Command::Interference { .. } => "interference",
             Command::ExportAssembly { .. } => "export_assembly",
+            Command::SetJointValues { .. } => "set_joint_values",
+            Command::RenameComponent { .. } => "rename_component",
+            Command::RenameOccurrence { .. } => "rename_occurrence",
+            Command::ActivateComponent { .. } => "activate_component",
+            Command::SetOccurrenceHidden { .. } => "set_occurrence_hidden",
+            Command::MakeIndependent { .. } => "make_independent",
+            Command::CreateRigidGroup { .. } => "create_rigid_group",
+            Command::SetExplodeOffset { .. } => "set_explode_offset",
+            Command::SetExploded { .. } => "set_exploded",
+            Command::AlignOccurrence { .. } => "align_occurrence",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -3232,7 +3331,17 @@ impl Session {
             | Command::DeleteJoint { .. }
             | Command::Bom
             | Command::Interference { .. }
-            | Command::ExportAssembly { .. } => {
+            | Command::ExportAssembly { .. }
+            | Command::SetJointValues { .. }
+            | Command::RenameComponent { .. }
+            | Command::RenameOccurrence { .. }
+            | Command::ActivateComponent { .. }
+            | Command::SetOccurrenceHidden { .. }
+            | Command::MakeIndependent { .. }
+            | Command::CreateRigidGroup { .. }
+            | Command::SetExplodeOffset { .. }
+            | Command::SetExploded { .. }
+            | Command::AlignOccurrence { .. } => {
                 let m = self.model_mut()?;
                 assembly::run(m, cmd, r)?;
             }

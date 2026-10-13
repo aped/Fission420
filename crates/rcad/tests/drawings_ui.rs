@@ -265,6 +265,7 @@ fn annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser() {
             name: "Block".into(),
             bodies: vec![body],
             part_number: Some("BL-1".into()),
+            occurrences: vec![],
         },
     );
     request(
@@ -275,6 +276,7 @@ fn annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser() {
             translate: [50.0, 0.0, 0.0],
             axis: None,
             angle_deg: 0.0,
+            owner: None,
         },
     );
     click(&mut h, "New assembly drawing");

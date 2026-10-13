@@ -168,7 +168,8 @@ fn ownership_and_edit_refusals() {
     for bad in [
         json!({"cmd": "create_component", "name": "Again", "bodies": [b]}),
         json!({"cmd": "create_component", "name": "Block", "bodies": [b]}),
-        json!({"cmd": "create_component", "name": "Empty", "bodies": []}),
+        // (Run 7: an empty component is allowed (active-component editing);
+        // tests/nested_assembly.rs covers it.)
         json!({"cmd": "create_component", "name": "Ghost", "bodies": [9]}),
         json!({"cmd": "add_occurrence", "component": 7}),
         json!({"cmd": "set_occurrence_transform", "occurrence": 9, "translate": [1.0, 0.0, 0.0]}),
