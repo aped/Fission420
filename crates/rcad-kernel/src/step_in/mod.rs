@@ -100,6 +100,23 @@ pub struct ImportedSolid {
     pub planar_faces: Vec<ImportedPlanarFace>,
 }
 
+/// Product structure of a STEP assembly (run 7).
+#[derive(Debug, Clone)]
+pub struct ImportedAssembly {
+    pub products: Vec<ImportedProduct>,
+    /// Top products (used by no other product and using at least one).
+    pub roots: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedProduct {
+    pub name: String,
+    /// Solids in the product's own coordinates.
+    pub solids: Vec<ImportedSolid>,
+    /// (child product, usage name, child placement in this product).
+    pub children: Vec<(usize, String, crate::Rigid)>,
+}
+
 /// The surfaces of a STEP file (run 7): every shell of every
 /// SHELL_BASED_SURFACE_MODEL, placed, gathered into one surface body (one
 /// shell per STEP shell). Open shells stay open: never reported as a solid.
@@ -117,6 +134,10 @@ pub struct ImportedSurfaces {
 #[derive(Debug, Clone)]
 pub struct StepImport {
     pub solids: Vec<ImportedSolid>,
+    /// Run 7: the product structure (assembly files): every product's solids
+    /// in its own coordinates and its usages with placements. `solids` stays
+    /// the flattened, placed view.
+    pub assembly: Option<ImportedAssembly>,
     /// Surface models (open shells), if the file has any (run 7).
     pub surfaces: Option<ImportedSurfaces>,
     pub length_unit: LengthUnit,
@@ -315,6 +336,73 @@ fn import_parsed(
         }
     }
     stats.solids = solids.len();
+    // Run 7: the product structure as definitions + usages.
+    let assembly = match placements.structure()? {
+        None => None,
+        Some(st) => {
+            let mut products: Vec<ImportedProduct> = st
+                .products
+                .iter()
+                .map(|p| ImportedProduct {
+                    name: p.name.clone(),
+                    solids: vec![],
+                    children: p
+                        .children
+                        .iter()
+                        .map(|(c, n, m)| {
+                            (
+                                *c,
+                                n.clone(),
+                                crate::Rigid {
+                                    r: std::array::from_fn(|i| std::array::from_fn(|j| m[j][i])),
+                                    t: [m[3][0], m[3][1], m[3][2]],
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+                .collect();
+            for &brep in &idx.all_simple("MANIFOLD_SOLID_BREP") {
+                let reps = placements.item_reps(brep);
+                let Some(pi) = st
+                    .products
+                    .iter()
+                    .position(|p| p.reps.iter().any(|r| reps.contains(r)))
+                else {
+                    continue;
+                };
+                let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
+                let label = p
+                    .opt_s(0)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"))
+                    .map(String::from);
+                let built = topo::build_shell(&geo, p.r(1)?, tol, false)
+                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+                let solid = Solid::extract(CompressedSolid {
+                    boundaries: vec![built.shell],
+                })
+                .map_err(|e| {
+                    fail(format!(
+                        "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
+                    ))
+                })?;
+                let body = orient_outward(Body { solid }, brep)?;
+                let planar_faces = planar_faces(&body)
+                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+                let fallback = products[pi].name.clone();
+                products[pi].solids.push(ImportedSolid {
+                    name: label.or(Some(fallback)),
+                    body,
+                    planar_faces,
+                });
+            }
+            Some(ImportedAssembly {
+                products,
+                roots: st.roots,
+            })
+        }
+    };
     // Run 7: the product structure is read only for placements and names; say
     // so rather than present the placed bodies as a preserved assembly.
     let usages = idx.all_with("NEXT_ASSEMBLY_USAGE_OCCURRENCE").len();
@@ -322,12 +410,14 @@ fn import_parsed(
         warnings.push(format!(
             "assembly structure flattened: {usages} component usage(s) \
              (NEXT_ASSEMBLY_USAGE_OCCURRENCE) became {} placed solid bodies named by product; \
-             the hierarchy and the reuse of definitions (linked occurrences) are not recreated",
+             import_step does not recreate the hierarchy or the reuse of definitions (linked \
+             occurrences); import_step_assembly does",
             solids.len()
         ));
     }
     Ok(StepImport {
         solids,
+        assembly,
         surfaces,
         length_unit,
         warnings,

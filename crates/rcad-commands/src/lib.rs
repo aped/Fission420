@@ -585,6 +585,16 @@ pub enum Command {
         #[serde(default)]
         linked: bool,
     },
+    /// Run 7: import a STEP assembly preserving its product structure: one
+    /// component per product (solids in its own coordinates, embedded as a
+    /// STEP copy), sub-assemblies, and one occurrence per usage with its
+    /// placement; reused products are written once (linked occurrences).
+    /// Refused for a file without assembly usages (use `import_step`).
+    ImportStepAssembly {
+        path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        units_to_mm: Option<f64>,
+    },
     /// Run 7: re-read a linked component's source file (explicit update):
     /// missing → refused with the embedded copy kept; unchanged → no-op;
     /// changed → the embedded copy is replaced (same solid count required).
@@ -1256,6 +1266,7 @@ impl Command {
             Command::SetJointAxis { .. } => "set_joint_axis",
             Command::JointSweep { .. } => "joint_sweep",
             Command::InsertExternalComponent { .. } => "insert_external_component",
+            Command::ImportStepAssembly { .. } => "import_step_assembly",
             Command::UpdateExternalComponent { .. } => "update_external_component",
             Command::CheckExternalComponents => "check_external_components",
             Command::RenameComponent { .. } => "rename_component",
@@ -3500,6 +3511,7 @@ impl Session {
             | Command::SetJointAxis { .. }
             | Command::JointSweep { .. }
             | Command::InsertExternalComponent { .. }
+            | Command::ImportStepAssembly { .. }
             | Command::UpdateExternalComponent { .. }
             | Command::CheckExternalComponents
             | Command::RenameComponent { .. }

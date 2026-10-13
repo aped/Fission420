@@ -64,8 +64,8 @@ pub use ops::{
 pub use project::{Curve2, face_boundary_curves};
 pub use step::{StepProduct, export_step, export_step_assembly, export_step_bodies};
 pub use step_in::{
-    ImportedPlanarFace, ImportedSolid, ImportedSurfaces, LengthUnit, StepImport, StepImportOptions,
-    StepStats, import_step,
+    ImportedAssembly, ImportedPlanarFace, ImportedProduct, ImportedSolid, ImportedSurfaces,
+    LengthUnit, StepImport, StepImportOptions, StepStats, import_step,
 };
 pub use stitch::{
     BoundaryLoop, FillReport, FreeEdge, Gap, MergeStats, ShellAnalysis, StitchReport, analyze,

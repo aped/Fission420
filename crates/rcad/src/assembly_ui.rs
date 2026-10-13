@@ -459,12 +459,28 @@ impl RcadApp {
                 .clicked()
             {
                 send.push(Command::InsertExternalComponent {
-                    path: p.into(),
+                    path: p.clone().into(),
                     name: None,
                     linked: self.assembly_ui.external_linked,
                 });
             }
         });
+        {
+            let p = self.assembly_ui.external_path.trim().to_string();
+            let tip = "Import a STEP file with its product structure: components, \
+                       sub-assemblies and linked occurrences with their placements";
+            if ui
+                .add_enabled(!p.is_empty(), egui::Button::new("Import STEP assembly"))
+                .on_hover_text(tip)
+                .named("Import STEP assembly")
+                .clicked()
+            {
+                send.push(Command::ImportStepAssembly {
+                    path: p.into(),
+                    units_to_mm: None,
+                });
+            }
+        }
         if asm.components.iter().any(|c| c.external.is_some()) {
             if ui
                 .small_button("Check external files")
