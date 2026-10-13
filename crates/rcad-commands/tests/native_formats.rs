@@ -260,3 +260,43 @@ fn v5_run5_documents() {
         assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     }
 }
+
+/// Frozen run-6 (format v6) documents, written by the run-6 build (73a6184)
+/// before the v7 schema changes: the rounded enclosure example and an
+/// assembly with materials, components, a grounded occurrence, a revolute
+/// joint at 30°, a configuration excluding an occurrence and a drawing
+/// (`fixtures/native_v6/assembly_v6_workflow.json`). They must open unchanged,
+/// regenerate, and re-save as v6 byte-compatible documents.
+#[test]
+fn v6_run6_documents() {
+    let d = repo().join("crates/rcad-commands/tests/fixtures/native_v6");
+    for name in ["rounded_enclosure", "assembly"] {
+        let path = d.join(format!("{name}.rcad.json"));
+        assert_eq!(version(&path), 6, "{name}");
+        let mut s = Session::new();
+        let r = s.execute(&Command::Open { path: path.clone() });
+        assert!(r.ok, "{name}: {:?}", r.error);
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("resaved.rcad.json");
+        assert!(s.execute(&Command::Save { path: out.clone() }).ok);
+        assert_eq!(version(&out), 6, "{name}");
+        let mut t = Session::new();
+        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
+    }
+    // Assembly content survives: 5 occurrences, joint value 30°, 3 components.
+    let mut s = Session::new();
+    assert!(
+        s.execute(&Command::Open {
+            path: d.join("assembly.rcad.json")
+        })
+        .ok
+    );
+    let a = &s.model().unwrap().document().assembly;
+    assert_eq!(a.components.len(), 3);
+    assert_eq!(a.occurrences.len(), 5);
+    assert_eq!(a.joints.len(), 1);
+    assert_eq!(a.joints[0].value, 30.0);
+    assert_eq!(s.model().unwrap().document().configurations.len(), 1);
+    assert_eq!(s.model().unwrap().document().drawings.len(), 1);
+}

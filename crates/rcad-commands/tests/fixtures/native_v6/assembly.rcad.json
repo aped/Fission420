@@ -1,0 +1,699 @@
+{
+  "format": "r-cad",
+  "version": 6,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Base",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -20.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Leaf A",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 4.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Moving",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Leaf B",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 4.0,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 5,
+        "name": "Screw",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -2.0,
+                "y": -2.0
+              },
+              {
+                "id": 2,
+                "x": 2.0,
+                "y": -2.0
+              },
+              {
+                "id": 3,
+                "x": 2.0,
+                "y": 2.0
+              },
+              {
+                "id": 4,
+                "x": -2.0,
+                "y": 2.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 20.0,
+                  "y": 30.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 4.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 4.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "Screw",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 5,
+          "distance": 6.0,
+          "operation": {
+            "NewBody": {
+              "body": 3
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      }
+    ],
+    "next_id": 7,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true,
+        "material": {
+          "name": "PLA",
+          "density": 1.24,
+          "catalog": "pla"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Body2",
+        "visible": true,
+        "material": {
+          "name": "Resin",
+          "density": 1.2
+        }
+      },
+      {
+        "id": 3,
+        "name": "Body3",
+        "visible": true
+      }
+    ],
+    "next_body_id": 4,
+    "blobs": [],
+    "next_blob_id": 1,
+    "configurations": [
+      {
+        "name": "Short",
+        "part_number": "V6-SHORT",
+        "excluded_occurrences": [
+          5
+        ]
+      }
+    ],
+    "assembly": {
+      "components": [
+        {
+          "id": 1,
+          "name": "LeafA",
+          "bodies": [
+            1
+          ],
+          "part_number": "V6-A"
+        },
+        {
+          "id": 2,
+          "name": "LeafB",
+          "bodies": [
+            2
+          ],
+          "part_number": "V6-B"
+        },
+        {
+          "id": 3,
+          "name": "Screw",
+          "bodies": [
+            3
+          ],
+          "part_number": "V6-S"
+        }
+      ],
+      "occurrences": [
+        {
+          "id": 1,
+          "component": 1,
+          "name": "LeafA#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          },
+          "grounded": true
+        },
+        {
+          "id": 2,
+          "component": 2,
+          "name": "LeafB#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 3,
+          "component": 3,
+          "name": "Screw#1",
+          "placement": {
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 4,
+          "component": 3,
+          "name": "Screw#2",
+          "placement": {
+            "translate": [
+              0.0,
+              10.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        },
+        {
+          "id": 5,
+          "component": 3,
+          "name": "Screw#3",
+          "placement": {
+            "translate": [
+              0.0,
+              20.0,
+              0.0
+            ],
+            "axis": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "angle": 0.0
+          }
+        }
+      ],
+      "joints": [
+        {
+          "id": 1,
+          "name": "Hinge",
+          "kind": "revolute",
+          "parent": 1,
+          "child": 2,
+          "origin": [
+            0.0,
+            0.0,
+            4.0
+          ],
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "value": 30.0,
+          "min": 0.0,
+          "max": 180.0,
+          "rest": {
+            "r": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "t": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "next_component": 4,
+      "next_occurrence": 6,
+      "next_joint": 2
+    },
+    "drawings": [
+      {
+        "id": 1,
+        "name": "Sheet 1",
+        "sheet": "a4_landscape",
+        "projection": "third_angle",
+        "title": {
+          "title": "Leaf A"
+        },
+        "views": [
+          {
+            "id": 1,
+            "kind": {
+              "base": {
+                "bodies": [
+                  1
+                ],
+                "orientation": "front",
+                "scale": 1.0,
+                "position": [
+                  83.16000000000001,
+                  75.6
+                ]
+              }
+            }
+          },
+          {
+            "id": 2,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "above"
+              }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "projected": {
+                "parent": 1,
+                "from": "right"
+              }
+            }
+          }
+        ],
+        "next_view": 4,
+        "auto_dimensions": true
+      }
+    ]
+  },
+  "cache": {
+    "volume": 96.0,
+    "bounds": {
+      "min": [
+        18.0,
+        28.0,
+        0.0
+      ],
+      "max": [
+        22.0,
+        32.0,
+        6.0
+      ]
+    },
+    "face_count": 6
+  }
+}

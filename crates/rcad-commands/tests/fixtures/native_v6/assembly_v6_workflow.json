@@ -1,0 +1,22 @@
+[
+  {"cmd": "new_document"},
+  {"cmd": "create_sketch", "name": "Base", "plane": "WorldXY", "template": "centered_rectangle", "width": 40, "height": 30, "center": [-20, 0]},
+  {"cmd": "extrude", "name": "Leaf A", "sketch": 1, "distance": 4},
+  {"cmd": "create_sketch", "name": "Moving", "plane": "WorldXY", "template": "centered_rectangle", "width": 40, "height": 30, "center": [20, 0]},
+  {"cmd": "extrude", "name": "Leaf B", "sketch": 3, "distance": 4},
+  {"cmd": "create_sketch", "name": "Screw", "plane": "WorldXY", "template": "centered_rectangle", "width": 4, "height": 4, "center": [20, 30]},
+  {"cmd": "extrude", "name": "Screw", "sketch": 5, "distance": 6},
+  {"cmd": "set_body_material", "body": 1, "material": "pla"},
+  {"cmd": "set_body_material", "body": 2, "density": 1.2, "name": "Resin"},
+  {"cmd": "create_component", "name": "LeafA", "bodies": [1], "part_number": "V6-A"},
+  {"cmd": "create_component", "name": "LeafB", "bodies": [2], "part_number": "V6-B"},
+  {"cmd": "create_component", "name": "Screw", "bodies": [3], "part_number": "V6-S"},
+  {"cmd": "add_occurrence", "component": 3, "translate": [0, 10, 0]},
+  {"cmd": "add_occurrence", "component": 3, "translate": [0, 20, 0]},
+  {"cmd": "set_grounded", "occurrence": 1, "grounded": true},
+  {"cmd": "add_joint", "name": "Hinge", "kind": "revolute", "parent": 1, "child": 2, "origin": [0, 0, 4], "axis": [0, 1, 0], "value": 0, "min": 0, "max": 180},
+  {"cmd": "set_joint_value", "joint": 1, "value": 30},
+  {"cmd": "set_configuration", "name": "Short", "part_number": "V6-SHORT", "excluded_occurrences": [5]},
+  {"cmd": "create_drawing", "name": "Sheet 1", "bodies": [1], "title": "Leaf A"},
+  {"cmd": "save", "path": "crates/rcad-commands/tests/fixtures/native_v6/assembly.rcad.json"}
+]

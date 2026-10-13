@@ -34,7 +34,10 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// the other run-6 additions listed in [`v6_feature`]. Written only when used
 /// (otherwise v5 or v4 as before), so a run-5 build refuses the file instead
 /// of silently ignoring a field it does not know.
-pub const FORMAT_VERSION: u32 = 6;
+/// v7 (run 7): the run-7 additions listed in [`v7_feature`] (nested
+/// assemblies, more joint types, drawing annotations, sheet-metal rules,
+/// surfaces, ...). Written only when used (otherwise v6 or older as before).
+pub const FORMAT_VERSION: u32 = 7;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -263,6 +266,31 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     sketch_v6_feature(doc)
 }
 
+/// What in `doc` needs format v7, if anything (see [`FORMAT_VERSION`]).
+/// Every run-7 addition that an older build would ignore or misread must be
+/// listed here. Each area keeps its checks in its own helper below so
+/// parallel work merges cleanly.
+pub fn v7_feature(doc: &Document) -> Option<&'static str> {
+    assembly_v7_feature(doc)
+        .or_else(|| drawing_v7_feature(doc))
+        .or_else(|| part_v7_feature(doc))
+}
+
+/// Run-7 assembly additions (nesting, joint types, ...).
+fn assembly_v7_feature(_doc: &Document) -> Option<&'static str> {
+    None
+}
+
+/// Run-7 drawing / configuration / property additions.
+fn drawing_v7_feature(_doc: &Document) -> Option<&'static str> {
+    None
+}
+
+/// Run-7 part-modeling additions (sheet metal, surfaces, ...).
+fn part_v7_feature(_doc: &Document) -> Option<&'static str> {
+    None
+}
+
 /// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and
 /// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
 /// a run-5 build would silently drop unknown fields or refuse with a misleading
@@ -290,10 +318,12 @@ pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
     None
 }
 
-/// The oldest format version that can hold `doc`: 6 / 5 when it uses a
-/// run-6 / run-5 feature, else 4.
+/// The oldest format version that can hold `doc`: 7 / 6 / 5 when it uses a
+/// run-7 / run-6 / run-5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if v6_feature(doc).is_some() {
+    if v7_feature(doc).is_some() {
+        7
+    } else if v6_feature(doc).is_some() {
         6
     } else if v5_feature(doc).is_some() {
         5
@@ -431,6 +461,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v6 feature)",
+            nf.version
+        )));
+    }
+    if nf.version < 7
+        && let Some(what) = v7_feature(&nf.document)
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain {what} (v7 feature)",
             nf.version
         )));
     }
