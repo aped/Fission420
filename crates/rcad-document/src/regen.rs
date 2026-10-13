@@ -1554,7 +1554,23 @@ fn extrude_feature(
         .get(&sketch)
         .ok_or(not_a_sketch(id, sketch))?
         .clone();
-    let region = s.region(id, sketch, pick)?;
+    // Thin extrusion of an open line chain (run 6: ribs/webs): the band of
+    // width `thin` centred on the chain, mitred at its corners, square ends.
+    let open_band = match (opts.thin, pick, &s.profile) {
+        (Some(t), None, Err(_)) => match crate::sheet::line_chain(&s.solved) {
+            Ok(chain) => Some(open_band(id, &chain, t)?),
+            Err(_) => None,
+        },
+        _ => None,
+    };
+    let region = match &open_band {
+        Some(band) => rcad_sketch::Region {
+            outer: band.clone(),
+            outer_entities: Vec::new(),
+            holes: Vec::new(),
+        },
+        None => s.region(id, sketch, pick)?,
+    };
     let (profile, entities) = (region.outer, region.outer_entities);
     let mut holes = region.holes;
     let mut extra = Vec::new();
@@ -1597,7 +1613,7 @@ fn extrude_feature(
         )));
     }
     // Thin: the band between the outer loop and its inward offset.
-    if let Some(t) = opts.thin {
+    if let Some(t) = opts.thin.filter(|_| open_band.is_none()) {
         if !t.is_finite() || t <= 0.0 {
             return Err(invalid(format!(
                 "thin: wall thickness must be > 0 mm, got {t}"
@@ -1985,6 +2001,62 @@ fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
     let behind = cut((0.0, hi[2] + m), "part behind the plane")?;
     let front = cut((lo[2] - m, 0.0), "part in front of the plane")?;
     Ok((behind, front))
+}
+
+/// Band of width `t` centred on the open chain `pts`: offset lines ±t/2,
+/// mitred at interior vertices (refused when a corner is sharper than a
+/// miter of 4·t), square ends; counter-clockwise polygon.
+fn open_band(id: FeatureId, pts: &[[f64; 2]], t: f64) -> Result<SketchProfile> {
+    let bad = |m: String| DocError::Validation(format!("{id}: thin open profile: {m}"));
+    if !(t.is_finite() && t > 0.0) {
+        return Err(bad(format!("wall thickness must be > 0 mm, got {t}")));
+    }
+    let n = pts.len();
+    let dir = |i: usize| {
+        let d = [pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]];
+        let l = d[0].hypot(d[1]);
+        [d[0] / l, d[1] / l]
+    };
+    let side = |sgn: f64| -> Result<Vec<[f64; 2]>> {
+        let h = sgn * t / 2.0;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let p = pts[i];
+            let off = |d: [f64; 2]| [p[0] - d[1] * h, p[1] + d[0] * h];
+            if i == 0 {
+                out.push(off(dir(0)));
+            } else if i == n - 1 {
+                out.push(off(dir(n - 2)));
+            } else {
+                let (a, b) = (dir(i - 1), dir(i));
+                let m = [-(a[1] + b[1]), a[0] + b[0]];
+                let ml = m[0].hypot(m[1]);
+                let cosh = (m[0] * -a[1] + m[1] * a[0]) / ml;
+                if ml < 1e-9 || cosh.abs() < 0.125 {
+                    return Err(bad(format!(
+                        "the corner at vertex {i} is too sharp to miter"
+                    )));
+                }
+                let k = h / cosh;
+                out.push([p[0] + m[0] / ml * k, p[1] + m[1] / ml * k]);
+            }
+        }
+        Ok(out)
+    };
+    let mut poly = side(1.0)?;
+    let mut right = side(-1.0)?;
+    right.reverse();
+    poly.extend(right);
+    let area: f64 = (0..poly.len())
+        .map(|i| {
+            let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    if area < 0.0 {
+        poly.reverse();
+    }
+    Ok(SketchProfile::Polygon(poly))
 }
 
 /// New-body tapered extrusion of `profile` over `(a, b)` along `frame.z`:
