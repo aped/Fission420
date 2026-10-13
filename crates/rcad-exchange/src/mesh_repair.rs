@@ -212,13 +212,12 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> (Vec<[f64; 3]>, Vec<u32>, usize, us
     let mut map = vec![0u32; n];
     let mut out = Vec::new();
     let mut new_of_root: HashMap<u32, u32> = HashMap::new();
-    for i in 0..n {
+    for (i, slot) in map.iter_mut().enumerate() {
         let r = find(&mut parent, i as u32);
-        let id = *new_of_root.entry(r).or_insert_with(|| {
+        *slot = *new_of_root.entry(r).or_insert_with(|| {
             out.push(positions[r as usize]);
             (out.len() - 1) as u32
         });
-        map[i] = id;
     }
     let merged = n - out.len();
     (out, map, merged, merged - exact_merged)
@@ -233,12 +232,15 @@ fn signed_volume(pos: &[[f64; 3]], tris: &[[u32; 3]]) -> f64 {
         .sum()
 }
 
+/// A repaired mesh: positions, triangles and the report.
+pub type Repaired = (Vec<[f64; 3]>, Vec<[u32; 3]>, RepairReport);
+
 /// Repair `triangles` over `positions` (see the module docs).
 pub fn repair(
     positions: &[[f64; 3]],
     triangles: &[[u32; 3]],
     opts: &RepairOptions,
-) -> Result<(Vec<[f64; 3]>, Vec<[u32; 3]>, RepairReport), String> {
+) -> Result<Repaired, String> {
     opts.validate()?;
     if triangles.len() > MAX_REPAIR_TRIANGLES {
         return Err(format!(
@@ -440,9 +442,10 @@ pub fn repair(
                 }
                 if !ok {
                     unfilled_holes += 1;
-                    notes.push(format!(
+                    notes.push(
                         "a boundary chain that does not close into a loop was left open"
-                    ));
+                            .to_string(),
+                    );
                     continue;
                 }
                 match fill_loop(&pos, &lp, opts.weld_tolerance) {
