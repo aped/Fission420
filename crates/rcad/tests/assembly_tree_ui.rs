@@ -403,6 +403,8 @@ fn part_number_delete_component_and_joint_axis() {
             max: None,
             extra: vec![],
             dir2: None,
+            child_axis_from: None,
+            flip: false,
         },
     );
     let world = |h: &Harness<'_, RcadApp>| {

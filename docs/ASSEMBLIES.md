@@ -72,8 +72,11 @@ document without them still saves as v6 (frozen fixtures in
 ## Joints (as-built tree solver)
 
 `L_child = L_parent ∘ M(values) ∘ rest` in the coordinates of the common owner; `rest` is
-captured when the joint is made, so nothing jumps (every joint is *as-built*; there is no
-snap-to-origin joint). `origin`/`axis` are in the parent's definition coordinates, given
+captured when the joint is made, so nothing jumps (*as-built*). Optionally the child is
+**snapped** first (`child_axis_from`: a cylinder face or two-face edge of the child, `flip`): its
+axis is rotated onto the joint axis (minimal rotation about the child axis point) and moved
+perpendicular onto the joint line, keeping its axial position; then the joint is made (one undo
+step). UI: joint dialog **Use selected face as child axis**, **Flip**. `origin`/`axis` are in the parent's definition coordinates, given
 explicitly or taken exactly from the parent's faces (`axis_from`: cylinder face axis, or the
 line where two planar faces meet; captured at creation, not re-derived after edits;
 `set_joint_axis` redefines it later without moving the child). The joint editor also has a

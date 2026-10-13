@@ -546,6 +546,8 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             max,
             extra,
             dir2,
+            child_axis_from,
+            flip,
         } => {
             let (kind, parent, child) = (*kind, *parent, *child);
             let (origin, axis) = match axis_from {
@@ -594,10 +596,18 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     kind.dof()
                 )));
             }
-            let rest = check_new_joint(m, &j)?;
+            // Optional snap of the child's own axis onto the joint axis.
+            let snapped = match child_axis_from {
+                Some(f) => Some(snap_child_axis(m, &j, f, *flip)?),
+                None => None,
+            };
+            let rest = check_new_joint_at(m, &j, snapped)?;
             j.rest = Pose::from(rest);
             let name = name.clone();
             let id = m.transact(&format!("Add {kind:?} joint"), |d| {
+                if let Some(t) = snapped {
+                    d.assembly.occurrence_mut(j.child)?.placement = placement_from_rigid(&t);
+                }
                 let id = d.assembly.new_joint_id();
                 j.id = id;
                 j.name = name.clone().unwrap_or_else(|| format!("Joint{}", id.0));
@@ -1210,6 +1220,68 @@ pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
 /// Validate a new joint against the current document; return its rest pose
 /// (the child keeps its current local pose: as-built).
 fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
+    check_new_joint_at(m, j, None)
+}
+
+/// The child's local transform after bringing its axis `f` onto the joint
+/// axis: minimal rotation of the child axis direction onto the joint axis
+/// (about the child axis point), then the translation perpendicular to the
+/// joint axis that puts the child axis line on it.
+fn snap_child_axis(m: &Model, j: &Joint, f: &AxisFrom, flip: bool) -> Result<Rigid, DocError> {
+    let a = &m.document().assembly;
+    if a.occurrence(j.child)?.grounded {
+        return Err(v("the child is grounded"));
+    }
+    let (c0, cd) = axis_from_faces(m, j.child, f)?;
+    let l = locals(m)?;
+    let lp = l.get(&j.parent).copied().unwrap_or(Rigid::IDENTITY);
+    let lc = l.get(&j.child).copied().unwrap_or(Rigid::IDENTITY);
+    let n = |x: [f64; 3]| {
+        let k = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        x.map(|y| y / k)
+    };
+    let p0 = lp.point(j.origin);
+    let pd = n(lp.vector(j.axis));
+    let q0 = lc.point(c0);
+    let mut qd = n(lc.vector(cd));
+    if flip {
+        qd = qd.map(|x| -x);
+    }
+    let dot = qd[0] * pd[0] + qd[1] * pd[1] + qd[2] * pd[2];
+    let ax = [
+        qd[1] * pd[2] - qd[2] * pd[1],
+        qd[2] * pd[0] - qd[0] * pd[2],
+        qd[0] * pd[1] - qd[1] * pd[0],
+    ];
+    let s = (ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]).sqrt();
+    let rot = if s < 1e-12 && dot > 0.0 {
+        Rigid::IDENTITY
+    } else if s < 1e-12 {
+        let seed = if qd[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let p = [
+            qd[1] * seed[2] - qd[2] * seed[1],
+            qd[2] * seed[0] - qd[0] * seed[2],
+            qd[0] * seed[1] - qd[1] * seed[0],
+        ];
+        Rigid::new([0.0; 3], q0, p, std::f64::consts::PI).map_err(|e| v(e.to_string()))?
+    } else {
+        Rigid::new([0.0; 3], q0, ax, s.atan2(dot)).map_err(|e| v(e.to_string()))?
+    };
+    // q0 is fixed by the rotation; move it perpendicular onto the joint line.
+    let w = [q0[0] - p0[0], q0[1] - p0[1], q0[2] - p0[2]];
+    let along = w[0] * pd[0] + w[1] * pd[1] + w[2] * pd[2];
+    let shift: [f64; 3] = std::array::from_fn(|i| p0[i] + along * pd[i] - q0[i]);
+    let t = Rigid::new(shift, [0.0; 3], [0.0, 0.0, 1.0], 0.0).map_err(|e| v(e.to_string()))?;
+    Ok(t.after(&rot).after(&lc))
+}
+
+/// [`check_new_joint`] with the child at `child_local` (a snap) instead of
+/// its current local transform.
+fn check_new_joint_at(m: &Model, j: &Joint, child_local: Option<Rigid>) -> Result<Rigid, DocError> {
     let a = &m.document().assembly;
     let pocc = a.occurrence(j.parent)?;
     let cocc = a.occurrence(j.child)?;
@@ -1260,7 +1332,11 @@ fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
             .copied()
             .ok_or_else(|| v(format!("occurrence {o} is not solved")))
     };
-    let (tp, tc) = (get(j.parent)?, get(j.child)?);
+    let tp = get(j.parent)?;
+    let tc = match child_local {
+        Some(t) => t,
+        None => get(j.child)?,
+    };
     Ok(inverse(&tp.after(&j.current_motion()?)).after(&tc))
 }
 
