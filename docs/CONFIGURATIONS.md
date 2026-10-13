@@ -35,7 +35,9 @@ configuration, and a file naming a missing feature is refused on load.
   occurrences exist), names must be unique; the active configuration is re-applied, or
   cleared when it was removed. Features and occurrences that no configuration controls after
   the edit are **restored** (unsuppressed / included) rather than left in whatever state the
-  last activation gave them.
+  last activation gave them. When the table removes (or renames) the active configuration, the
+  document keeps the parameter values and suppression it had (nothing is reset) and no
+  configuration is active until one is activated (review run 7 #17: documented, not changed).
 * `activate_configuration {name}`, `delete_configuration {name}`.
 * `export_configurations {dir, stem, configurations?, step, stl, 3mf, overwrite}`: for each
   configuration (all by default) activate, regenerate and write
