@@ -1069,3 +1069,106 @@ fn align_to_a_joint_descendant_is_refused() {
     );
     assert!(e.contains("would move with it"), "{e}");
 }
+
+/// Hole axes recovered from the B-rep faces (`measure_faces` classification of
+/// Truck's rational cylinder surfaces) agree with the sketch circle centres to
+/// ~1e-9 mm; the snap itself is exact algebra on those axes.
+const AXIS_TOL: f64 = 1e-8;
+
+/// Joint with a child-axis snap: the child's hole axis is brought onto the
+/// parent's hole axis (closed form), then the revolute turns about it.
+#[test]
+fn joint_snaps_the_child_axis_onto_the_parent_axis() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    // Parent: 20 × 20 × 4 plate at the origin with a Ø4 hole at (5, 0).
+    let (a, a_ext) = block(&mut s, 20.0, 20.0, 4.0, [0.0, 0.0]);
+    let f = s.summary().features.len() as u32 + 1;
+    ok(
+        &mut s,
+        json!({"cmd": "create_sketch",
+               "plane": {"Face": {"feature": a_ext, "role": "ExtrudeEndCap"}},
+               "template": "centered_circle", "diameter": 4.0, "center": [5.0, 0.0]}),
+    );
+    ok(&mut s, json!({"cmd": "cut_through_all", "sketch": f}));
+    // Child: 10 × 10 × 2 link at (50, 30) with a Ø4 hole at (52, 30).
+    let (b, b_ext) = block(&mut s, 10.0, 10.0, 2.0, [50.0, 30.0]);
+    let f = s.summary().features.len() as u32 + 1;
+    ok(
+        &mut s,
+        json!({"cmd": "create_sketch",
+               "plane": {"Face": {"feature": b_ext, "role": "ExtrudeEndCap"}},
+               "template": "centered_circle", "diameter": 4.0, "center": [52.0, 30.0]}),
+    );
+    ok(&mut s, json!({"cmd": "cut_through_all", "sketch": f}));
+    let oa = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "A", "bodies": [a]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let ob = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "B", "bodies": [b]}),
+    ))
+    .occurrence
+    .unwrap()
+    .0;
+    let cyl = |s: &mut Session, body: u32| {
+        let n = s
+            .summary()
+            .bodies
+            .iter()
+            .find(|x| x.id.0 == body)
+            .unwrap()
+            .measurements
+            .as_ref()
+            .unwrap()
+            .face_count as u32;
+        (0..n)
+            .find(|&i| {
+                tray::exec(
+                    s,
+                    &json!({"cmd": "measure_faces", "a": {"body": body, "face": i}}),
+                )
+                .face_measure
+                .is_some_and(|r| matches!(r.a, rcad_kernel::DirectFace::Cylinder { .. }))
+            })
+            .unwrap()
+    };
+    let (ha, hb) = (cyl(&mut s, a), cyl(&mut s, b));
+    let j = out(ok(
+        &mut s,
+        json!({"cmd": "add_joint", "kind": "revolute", "parent": oa, "child": ob,
+               "axis_from": {"cylinder": {"face": {"body": a, "face": ha}}},
+               "child_axis_from": {"cylinder": {"face": {"body": b, "face": hb}}}}),
+    ))
+    .joint
+    .unwrap()
+    .0;
+    // The child hole axis (52, 30, z) now lies on x = 5, y = 0; the axial
+    // (z) position is kept, the hole axes are parallel (no rotation needed,
+    // or a half turn when the face axes point opposite ways).
+    let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
+    assert!(
+        (p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL,
+        "{p:?}"
+    );
+    // Turning the joint keeps the child's hole on the axis.
+    ok(
+        &mut s,
+        json!({"cmd": "set_joint_value", "joint": j, "value": 37.0}),
+    );
+    let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
+    assert!(
+        (p[0] - 5.0).abs() < AXIS_TOL && p[1].abs() < AXIS_TOL,
+        "{p:?}"
+    );
+    // One undo step removes the joint and restores the child placement.
+    ok(&mut s, json!({"cmd": "undo"}));
+    ok(&mut s, json!({"cmd": "undo"}));
+    assert!(s.summary().assembly.joints.is_empty());
+    let p = instance_point(&s, &format!("O{ob}"), [52.0, 30.0, 1.0]);
+    assert!(near3(p, [52.0, 30.0, 1.0], 1e-12));
+}

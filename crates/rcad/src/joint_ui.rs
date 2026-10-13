@@ -40,6 +40,9 @@ pub struct JointDialog {
     pub name: String,
     /// The joint command was sent; the reply decides whether to close.
     pub pending: bool,
+    /// Snap the child's cylinder-face axis onto the joint axis first.
+    pub child_face: Option<FacePick>,
+    pub flip: bool,
 }
 
 impl JointDialog {
@@ -57,6 +60,8 @@ impl JointDialog {
             values: std::array::from_fn(|_| ["0".into(), String::new(), String::new()]),
             name: String::new(),
             pending: false,
+            child_face: None,
+            flip: false,
         }
     }
 
@@ -136,6 +141,8 @@ impl JointDialog {
             max: first.max,
             extra: vals.into_iter().skip(1).collect(),
             dir2,
+            child_axis_from: self.child_face.map(|face| AxisFrom::Cylinder { face }),
+            flip: self.flip,
         })
     }
 }
@@ -288,6 +295,28 @@ pub(crate) fn joint_dialog(
                 }
             });
         }
+        // Optional snap of the child's own axis (a hole or boss of the child).
+        ui.horizontal(|ui| {
+            let t = d
+                .child_face
+                .map_or("—".into(), |p| format!("{}/{}", p.body, p.face));
+            ui.small(format!("Child axis to snap: {t}"));
+            if let Some(p) = picked
+                && ui
+                    .small_button("Use selected face as child axis")
+                    .on_hover_text("A cylinder face of the child: it is moved so this axis lies on the joint axis before the joint is made")
+                    .probe("Use selected face as child axis")
+                    .clicked()
+            {
+                d.child_face = Some(p);
+            }
+            if d.child_face.is_some() {
+                ui.checkbox(&mut d.flip, "Flip").on_hover_text("Reverse the child axis direction");
+                if ui.small_button("No snap").probe("No snap").clicked() {
+                    d.child_face = None;
+                }
+            }
+        });
         let names = d.kind.value_names();
         for (i, n) in names.iter().enumerate() {
             let unit = d.kind.units()[i].trim();

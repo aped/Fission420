@@ -403,6 +403,8 @@ fn part_number_delete_component_and_joint_axis() {
             max: None,
             extra: vec![],
             dir2: None,
+            child_axis_from: None,
+            flip: false,
         },
     );
     let world = |h: &Harness<'_, RcadApp>| {
@@ -470,4 +472,50 @@ fn nudge_keeps_axis_and_dialog_survives_refusal() {
         h.query_by_label("Create joint").is_none(),
         "closed on success"
     );
+}
+
+/// The joint editor's sweep check reports the sampled values that interfere.
+#[test]
+fn joint_sweep_check_in_the_editor() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let a = block(&mut h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let b = block(&mut h, 4.0, 4.0, 4.0, [20.0, 0.0]);
+    component(&mut h, "A", a);
+    component(&mut h, "B", b);
+    // B slides along −x from x 18..22 towards A (x −5..5); lifted 1 mm so no
+    // faces are coplanar. Overlap for travel > 13.
+    send(
+        &mut h,
+        Command::SetOccurrenceTransform {
+            occurrence: OccurrenceId(2),
+            translate: [0.0, 0.0, 1.0],
+            axis: None,
+            angle_deg: 0.0,
+        },
+    );
+    send(
+        &mut h,
+        Command::AddJoint {
+            name: None,
+            kind: JointKind::Slider,
+            parent: OccurrenceId(1),
+            child: OccurrenceId(2),
+            origin: [0.0; 3],
+            axis: Some([-1.0, 0.0, 0.0]),
+            axis_from: None,
+            value: 0.0,
+            min: Some(0.0),
+            max: Some(20.0),
+            extra: vec![],
+            dir2: None,
+            child_axis_from: None,
+            flip: false,
+        },
+    );
+    click(&mut h, "Edit Joint1");
+    click(&mut h, "Sweep check Joint1");
+    // Samples 0, 1, …, 20: interference for values 14..20 (7 samples).
+    h.get_by_label_contains("interference at 7 of 21 samples");
+    assert_eq!(h.state().summary().assembly.joints[0].value, 0.0);
 }

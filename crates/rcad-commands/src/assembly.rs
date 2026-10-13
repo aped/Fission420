@@ -26,9 +26,19 @@ pub struct AssemblyOut {
     /// Run 7: indented BOM (quantity per parent; see [`structured_bom`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_bom: Option<Vec<StructuredBomRow>>,
+    /// Run 7: sampled motion check (`joint_sweep`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep: Option<Vec<SweepStep>>,
     /// Run 7: status of external components (`check_external_components`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<Vec<ExternalStatus>>,
+}
+
+/// One sample of a joint sweep (run 7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SweepStep {
+    pub value: f64,
+    pub interference: Vec<Interference>,
 }
 
 /// Source status of an external component (run 7).
@@ -546,6 +556,8 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             max,
             extra,
             dir2,
+            child_axis_from,
+            flip,
         } => {
             let (kind, parent, child) = (*kind, *parent, *child);
             let (origin, axis) = match axis_from {
@@ -594,10 +606,18 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     kind.dof()
                 )));
             }
-            let rest = check_new_joint(m, &j)?;
+            // Optional snap of the child's own axis onto the joint axis.
+            let snapped = match child_axis_from {
+                Some(f) => Some(snap_child_axis(m, &j, f, *flip)?),
+                None => None,
+            };
+            let rest = check_new_joint_at(m, &j, snapped)?;
             j.rest = Pose::from(rest);
             let name = name.clone();
             let id = m.transact(&format!("Add {kind:?} joint"), |d| {
+                if let Some(t) = snapped {
+                    d.assembly.occurrence_mut(j.child)?.placement = placement_from_rigid(&t);
+                }
                 let id = d.assembly.new_joint_id();
                 j.id = id;
                 j.name = name.clone().unwrap_or_else(|| format!("Joint{}", id.0));
@@ -877,6 +897,23 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
         Command::UpdateExternalComponent { component } => {
             r.message = Some(update_external(m, *component)?);
             out.component = Some(*component);
+        }
+        Command::JointSweep {
+            joint,
+            index,
+            from,
+            to,
+            steps,
+            occurrences,
+        } => {
+            out.sweep = Some(joint_sweep(
+                m,
+                *joint,
+                *index,
+                (*from, *to),
+                *steps,
+                occurrences.as_deref(),
+            )?);
         }
         Command::CheckExternalComponents => {
             out.external = Some(external_status(m));
@@ -1210,6 +1247,68 @@ pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
 /// Validate a new joint against the current document; return its rest pose
 /// (the child keeps its current local pose: as-built).
 fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
+    check_new_joint_at(m, j, None)
+}
+
+/// The child's local transform after bringing its axis `f` onto the joint
+/// axis: minimal rotation of the child axis direction onto the joint axis
+/// (about the child axis point), then the translation perpendicular to the
+/// joint axis that puts the child axis line on it.
+fn snap_child_axis(m: &Model, j: &Joint, f: &AxisFrom, flip: bool) -> Result<Rigid, DocError> {
+    let a = &m.document().assembly;
+    if a.occurrence(j.child)?.grounded {
+        return Err(v("the child is grounded"));
+    }
+    let (c0, cd) = axis_from_faces(m, j.child, f)?;
+    let l = locals(m)?;
+    let lp = l.get(&j.parent).copied().unwrap_or(Rigid::IDENTITY);
+    let lc = l.get(&j.child).copied().unwrap_or(Rigid::IDENTITY);
+    let n = |x: [f64; 3]| {
+        let k = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        x.map(|y| y / k)
+    };
+    let p0 = lp.point(j.origin);
+    let pd = n(lp.vector(j.axis));
+    let q0 = lc.point(c0);
+    let mut qd = n(lc.vector(cd));
+    if flip {
+        qd = qd.map(|x| -x);
+    }
+    let dot = qd[0] * pd[0] + qd[1] * pd[1] + qd[2] * pd[2];
+    let ax = [
+        qd[1] * pd[2] - qd[2] * pd[1],
+        qd[2] * pd[0] - qd[0] * pd[2],
+        qd[0] * pd[1] - qd[1] * pd[0],
+    ];
+    let s = (ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]).sqrt();
+    let rot = if s < 1e-12 && dot > 0.0 {
+        Rigid::IDENTITY
+    } else if s < 1e-12 {
+        let seed = if qd[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let p = [
+            qd[1] * seed[2] - qd[2] * seed[1],
+            qd[2] * seed[0] - qd[0] * seed[2],
+            qd[0] * seed[1] - qd[1] * seed[0],
+        ];
+        Rigid::new([0.0; 3], q0, p, std::f64::consts::PI).map_err(|e| v(e.to_string()))?
+    } else {
+        Rigid::new([0.0; 3], q0, ax, s.atan2(dot)).map_err(|e| v(e.to_string()))?
+    };
+    // q0 is fixed by the rotation; move it perpendicular onto the joint line.
+    let w = [q0[0] - p0[0], q0[1] - p0[1], q0[2] - p0[2]];
+    let along = w[0] * pd[0] + w[1] * pd[1] + w[2] * pd[2];
+    let shift: [f64; 3] = std::array::from_fn(|i| p0[i] + along * pd[i] - q0[i]);
+    let t = Rigid::new(shift, [0.0; 3], [0.0, 0.0, 1.0], 0.0).map_err(|e| v(e.to_string()))?;
+    Ok(t.after(&rot).after(&lc))
+}
+
+/// [`check_new_joint`] with the child at `child_local` (a snap) instead of
+/// its current local transform.
+fn check_new_joint_at(m: &Model, j: &Joint, child_local: Option<Rigid>) -> Result<Rigid, DocError> {
     let a = &m.document().assembly;
     let pocc = a.occurrence(j.parent)?;
     let cocc = a.occurrence(j.child)?;
@@ -1260,7 +1359,11 @@ fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
             .copied()
             .ok_or_else(|| v(format!("occurrence {o} is not solved")))
     };
-    let (tp, tc) = (get(j.parent)?, get(j.child)?);
+    let tp = get(j.parent)?;
+    let tc = match child_local {
+        Some(t) => t,
+        None => get(j.child)?,
+    };
     Ok(inverse(&tp.after(&j.current_motion()?)).after(&tc))
 }
 
@@ -1637,11 +1740,21 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
 /// Placed B-rep bodies of instance `i` of the evaluation (evaluated
 /// definition bodies; visibility is display only).
 fn placed(m: &Model, i: usize) -> Result<Vec<Body>, DocError> {
-    let ev = m.evaluation();
-    let eo = ev
+    let eo = m
+        .evaluation()
         .occurrences
         .get(i)
         .ok_or_else(|| v(format!("unknown instance {i}")))?;
+    placed_instance(m, eo)
+}
+
+/// Placed B-rep bodies of instance `eo` (its transform; bodies from the
+/// current evaluation).
+fn placed_instance(
+    m: &Model,
+    eo: &rcad_document::assembly::EvalOccurrence,
+) -> Result<Vec<Body>, DocError> {
+    let ev = m.evaluation();
     let mut out = Vec::new();
     for b in &eo.bodies {
         // Review run 6 #7: a definition body that is not evaluated (consumed
@@ -1763,20 +1876,67 @@ pub fn interference(
     m: &Model,
     list: Option<&[OccurrenceId]>,
 ) -> Result<Vec<Interference>, DocError> {
-    let ev = m.evaluation();
+    interference_with(m, &m.evaluation().occurrences, list)
+}
+
+/// Interference at `steps` samples of one joint value (document unchanged).
+fn joint_sweep(
+    m: &Model,
+    id: JointId,
+    index: usize,
+    (from, to): (f64, f64),
+    steps: usize,
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<SweepStep>, DocError> {
+    if !(2..=200).contains(&steps) {
+        return Err(v("a sweep takes 2 to 200 samples"));
+    }
+    let a = &m.document().assembly;
+    let j = a.joint(id)?;
+    let base = j.values();
+    if index >= base.len() {
+        return Err(v(format!("{} has no value {index}", j.name)));
+    }
+    let mut out = Vec::with_capacity(steps);
+    for k in 0..steps {
+        let t = k as f64 / (steps - 1) as f64;
+        let x = from + (to - from) * t;
+        let mut vals = base.clone();
+        vals[index] = x;
+        // Limits are enforced for every sample (no motion beyond them).
+        j.check_values(&vals)?;
+        let mut asm = a.clone();
+        let jm = asm.joint_mut(id)?;
+        jm.set_value(index, x);
+        let inst = asm.evaluate()?;
+        out.push(SweepStep {
+            value: x,
+            interference: interference_with(m, &inst, list)?,
+        });
+    }
+    Ok(out)
+}
+
+/// [`interference`] for the instances `inst` (current geometry, given
+/// placements; used by the joint sweep).
+fn interference_with(
+    m: &Model,
+    inst: &[rcad_document::assembly::EvalOccurrence],
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<Interference>, DocError> {
     if let Some(l) = list {
         for o in l {
             m.document().assembly.occurrence(*o)?;
         }
     }
-    let ids: Vec<usize> = (0..ev.occurrences.len())
-        .filter(|&i| list.is_none_or(|l| ev.occurrences[i].path.iter().any(|p| l.contains(p))))
+    let ids: Vec<usize> = (0..inst.len())
+        .filter(|&i| list.is_none_or(|l| inst[i].path.iter().any(|p| l.contains(p))))
         .collect();
     // Review run 7 #22: a listed occurrence without any evaluated instance
     // (suppressed, or no bodies anywhere below it) is an error, not "clear".
     if let Some(l) = list {
         for o in l {
-            if !ids.iter().any(|&i| ev.occurrences[i].path.contains(o)) {
+            if !ids.iter().any(|&i| inst[i].path.contains(o)) {
                 let n = m.document().assembly.occurrence(*o)?.name.clone();
                 return Err(v(format!(
                     "{n} has no evaluated instance with bodies (suppressed, or nothing to \
@@ -1787,7 +1947,7 @@ pub fn interference(
     }
     let mut cache: BTreeMap<usize, Vec<Body>> = BTreeMap::new();
     for i in &ids {
-        cache.insert(*i, placed(m, *i)?);
+        cache.insert(*i, placed_instance(m, &inst[*i])?);
     }
     let mut out = Vec::new();
     for (n, a) in ids.iter().enumerate() {
@@ -1823,7 +1983,7 @@ pub fn interference(
                 },
                 (None, None) => continue,
             };
-            let (ea, eb) = (&ev.occurrences[*a], &ev.occurrences[*b]);
+            let (ea, eb) = (&inst[*a], &inst[*b]);
             out.push(Interference {
                 a: ea.id,
                 b: eb.id,
