@@ -8,6 +8,7 @@
 mod build;
 mod chamfer;
 mod exact;
+mod faceref;
 mod measure;
 mod mesh;
 mod ops;
@@ -18,6 +19,7 @@ mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
+pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use measure::{
     Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count,
     face_planes, measure, planar_faces_on, z_face_inner_loops,

@@ -40,7 +40,10 @@ pub struct Uniforms {
     pub selection_color: [f32; 4],
     /// Linear RGB to fade the body toward, and the fade amount (0 = off).
     pub fade: [f32; 4],
-    /// x = hovered group, y = 1 if hover highlight active.
+    /// Section view: unit normal (xyz) and offset (w); see `highlight[2]`.
+    pub section: [f32; 4],
+    /// x = hovered group, y = 1 if hover highlight active, z = 1 if a section
+    /// plane hides material with `n·p > offset`.
     pub highlight: [u32; 4],
 }
 

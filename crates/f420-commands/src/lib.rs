@@ -552,6 +552,9 @@ pub struct FaceSummary {
     pub frame: Frame,
     #[serde(default)]
     pub body: BodyId,
+    /// When the plane holds several faces of the body: a point inside this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<[f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2082,6 +2085,7 @@ fn face_summary(c: &FaceCandidate) -> FaceSummary {
         reference: c.reference,
         frame: c.frame,
         body: c.body,
+        sample: c.sample,
     }
 }
 

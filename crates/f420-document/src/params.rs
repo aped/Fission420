@@ -626,6 +626,14 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::Sketch {
             plane: crate::SketchPlane::Offset { .. },
             ..
+        }
+        | FeatureKind::Mirror {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
+        }
+        | FeatureKind::Hole {
+            plane: crate::SketchPlane::Offset { .. },
+            ..
         } if name == "plane_offset" => Some(SlotKind::Length),
         FeatureKind::Sketch { sketch, .. } => {
             if name == "center_x" || name == "center_y" {

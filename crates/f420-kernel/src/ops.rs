@@ -194,7 +194,7 @@ pub fn coplanar_face_side(body: &Body, frame: &Frame) -> Result<Option<f64>> {
 
 /// Chord count per edge when polygonizing face boundaries / profiles for the
 /// containment test.
-const REGION_SAMPLES: usize = 64;
+pub(crate) const REGION_SAMPLES: usize = 64;
 
 /// Polygonized boundary loops of a planar face in `frame`'s 2D coordinates.
 pub(crate) fn face_loops_2d(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
@@ -264,7 +264,7 @@ pub(crate) fn dist_to_loops(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> f64 {
 }
 
 /// Polygonized profile boundary in its own 2D coordinates.
-fn profile_points(profile: &Profile) -> Vec<[f64; 2]> {
+pub(crate) fn profile_points(profile: &Profile) -> Vec<[f64; 2]> {
     match profile {
         Profile::Polygon(v) => {
             let n = v.len();

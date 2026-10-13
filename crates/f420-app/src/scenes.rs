@@ -343,6 +343,7 @@ impl F420App {
                                 counterbore: true,
                                 cb_diameter: "10".into(),
                                 cb_depth: "3".into(),
+                                offset: "0".into(),
                             });
                         }
                     }

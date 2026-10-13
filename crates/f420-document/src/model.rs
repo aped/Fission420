@@ -122,6 +122,40 @@ pub enum FaceRole {
     ExtrudeSide { entity: u32 },
     /// Planar face `face` (stable import index) of imported body `body`.
     Imported { body: BodyId, face: u32 },
+    /// Face of an occurrence made by a pattern or mirror feature (run 5): the
+    /// face that seed tool `tool` (0 for an extrusion; a Hole: 0 = counterbore
+    /// when present, then the hole) generates at occurrence `instance` (pattern:
+    /// 1..count-1, the seed is occurrence 0 and keeps its own references;
+    /// mirror: 1). The identity survives count changes; an occurrence that no
+    /// longer exists is a `BrokenReference`, never another occurrence.
+    Copy {
+        instance: u32,
+        #[serde(default)]
+        tool: u32,
+        of: CopiedRole,
+    },
+    /// The planar face made by a Chamfer feature (run 5).
+    Chamfer,
+}
+
+/// Role of a seed tool's face within a pattern/mirror occurrence
+/// ([`FaceRole::Copy`]); same meaning as the extrusion roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopiedRole {
+    EndCap,
+    StartCap,
+    Side { entity: u32 },
+}
+
+impl CopiedRole {
+    /// The equivalent extrusion role (on the occurrence's own tool).
+    pub fn extrude_role(self) -> FaceRole {
+        match self {
+            CopiedRole::EndCap => FaceRole::ExtrudeEndCap,
+            CopiedRole::StartCap => FaceRole::ExtrudeStartCap,
+            CopiedRole::Side { entity } => FaceRole::ExtrudeSide { entity },
+        }
+    }
 }
 
 /// Persistent face selection: originating feature + generated-face role.
@@ -305,7 +339,8 @@ pub enum FeatureKind {
         blob: BlobId,
         bodies: Vec<BodyId>,
     },
-    /// Repeat the tool of `seed` (an Extrude Cut) `count - 1` more times, each
+    /// Repeat the tool of `seed` (an Extrude Join/Cut or a Hole) `count - 1` more
+    /// times (count 1 = the seed only, no copies; run 5), each
     /// shifted by `spacing` mm along `direction` (seed sketch-plane coordinates,
     /// normalized), on the seed's target body. The seed is instance 0.
     LinearPattern {
@@ -502,6 +537,11 @@ impl Feature {
                 ..
             } => vec![],
             FeatureKind::Extrude { distance, .. } => vec![("distance".into(), *distance)],
+            // Run 5: an offset mirror plane's distance is a parameter.
+            FeatureKind::Mirror {
+                plane: SketchPlane::Offset { distance, .. },
+                ..
+            } => vec![("plane_offset".into(), *distance)],
             FeatureKind::Cut { .. }
             | FeatureKind::ImportStep { .. }
             | FeatureKind::Mirror { .. } => {
@@ -516,6 +556,7 @@ impl Feature {
                 diameter,
                 depth,
                 counterbore,
+                plane,
                 ..
             } => {
                 let mut v = vec![("diameter".into(), *diameter)];
@@ -528,6 +569,9 @@ impl Feature {
                 }
                 v.push(("center_x".into(), center[0]));
                 v.push(("center_y".into(), center[1]));
+                if let SketchPlane::Offset { distance, .. } = plane {
+                    v.push(("plane_offset".into(), *distance));
+                }
                 v
             }
             FeatureKind::LinearPattern { count, spacing, .. } => vec![
@@ -554,11 +598,17 @@ impl Feature {
             diameter,
             depth,
             counterbore,
+            plane,
             ..
         } = &mut trial.kind
         {
             for (n, v) in values {
                 match (n.as_str(), counterbore.as_mut(), depth.as_mut()) {
+                    ("plane_offset", ..) if matches!(plane, SketchPlane::Offset { .. }) => {
+                        if let SketchPlane::Offset { distance, .. } = plane {
+                            *distance = *v;
+                        }
+                    }
                     ("diameter", ..) => *diameter = *v,
                     ("depth", _, Some(d)) => *d = *v,
                     ("cbore_diameter", Some(c), _) => c.diameter = *v,
@@ -624,7 +674,20 @@ impl Feature {
             FeatureKind::Sketch {
                 plane: SketchPlane::Offset { distance, .. },
                 ..
+            }
+            | FeatureKind::Mirror {
+                plane: SketchPlane::Offset { distance, .. },
+                ..
+            }
+            | FeatureKind::Hole {
+                plane: SketchPlane::Offset { distance, .. },
+                ..
             } if name == "plane_offset" => {
+                if !value.is_finite() {
+                    return Err(DocError::Validation(format!(
+                        "{id}.plane_offset: the plane offset must be finite, got {value}"
+                    )));
+                }
                 *distance = value;
                 Ok(())
             }
@@ -669,10 +732,10 @@ impl Feature {
             | FeatureKind::CircularPattern { count, .. }
                 if name == "count" =>
             {
-                if value.fract() != 0.0 || !(2.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
+                if value.fract() != 0.0 || !(1.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
                     return Err(DocError::Validation(format!(
-                        "{id}.count: pattern count must be an integer in 2..={MAX_PATTERN_COUNT}, \
-                         got {value}"
+                        "{id}.count: pattern count must be an integer in 1..={MAX_PATTERN_COUNT} \
+                         (1 = the seed only), got {value}"
                     )));
                 }
                 *count = value as u32;
@@ -955,10 +1018,26 @@ impl Document {
 
     /// Body owning the face `r` names (from the definitions only).
     fn face_body(&self, r: &FaceRef) -> Option<BodyId> {
+        self.face_body_depth(r, 0)
+    }
+
+    fn face_body_depth(&self, r: &FaceRef, depth: usize) -> Option<BodyId> {
+        if depth > self.features.len() {
+            return None; // a (malformed) reference loop
+        }
         match r.role {
             FaceRole::Imported { body, .. } => Some(body),
             _ => {
                 let f = self.feature(r.feature).ok()?;
+                match &f.kind {
+                    FeatureKind::LinearPattern { seed, .. }
+                    | FeatureKind::CircularPattern { seed, .. }
+                    | FeatureKind::Mirror { seed, .. } => {
+                        return self.feature(*seed).ok()?.target_body();
+                    }
+                    FeatureKind::Chamfer { a, .. } => return self.face_body_depth(a, depth + 1),
+                    _ => {}
+                }
                 match f.created_bodies().first() {
                     Some(b) => Some(*b),
                     None => f.target_body(),

@@ -102,16 +102,63 @@ impl RenderMesh {
 
     /// Closest hit along `ray`: returns (distance, triangle index, group).
     pub fn pick(&self, ray: &Ray) -> Option<(f32, usize, u32)> {
+        self.pick_section(ray, None)
+    }
+
+    /// [`Self::pick`] ignoring hits on material hidden by a section plane:
+    /// what the user sees is what they pick.
+    pub fn pick_section(
+        &self,
+        ray: &Ray,
+        section: Option<SectionPlane>,
+    ) -> Option<(f32, usize, u32)> {
         let mut best: Option<(f32, usize, u32)> = None;
         for t in 0..self.triangle_count() {
             let Some(tri) = self.tri(t) else { continue };
             if let Some(d) = ray_triangle(ray, tri)
                 && best.is_none_or(|(bd, _, _)| d < bd)
+                && section.is_none_or(|s| {
+                    s.keeps(crate::math::add(ray.origin, crate::math::scale(ray.dir, d)))
+                })
             {
                 best = Some((d, t, self.tri_group.get(t).copied().unwrap_or(u32::MAX)));
             }
         }
         best
+    }
+}
+
+/// A display-only section plane: material with `normal · p > offset` is hidden
+/// (not drawn, not pickable). The cut is not capped; nothing in the model or
+/// in exports changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SectionPlane {
+    /// Unit normal pointing toward the hidden side.
+    pub normal: Vec3,
+    pub offset: f32,
+}
+
+impl SectionPlane {
+    /// Whether `p` is on the visible side (with a tiny display tolerance).
+    pub fn keeps(&self, p: Vec3) -> bool {
+        crate::math::dot(self.normal, p) <= self.offset + 1e-4 * (1.0 + self.offset.abs())
+    }
+
+    /// The part of segment `a`–`b` on the visible side, if any.
+    pub fn clip_segment(&self, a: Vec3, b: Vec3) -> Option<[Vec3; 2]> {
+        let (da, db) = (
+            crate::math::dot(self.normal, a) - self.offset,
+            crate::math::dot(self.normal, b) - self.offset,
+        );
+        match (da <= 0.0, db <= 0.0) {
+            (true, true) => Some([a, b]),
+            (false, false) => None,
+            _ => {
+                let t = da / (da - db);
+                let m = crate::math::add(a, crate::math::scale(crate::math::sub(b, a), t));
+                Some(if da <= 0.0 { [a, m] } else { [m, b] })
+            }
+        }
     }
 }
 

@@ -29,7 +29,7 @@ mod triad;
 pub use camera::{Camera, Ray, ViewPreset, pixels_per_mm};
 pub use edges::{edge_quantum, feature_edges};
 pub use grid::{GridPlane, GridPlaneError, MIN_CELL_PX, adaptive_grid_spacing};
-pub use mesh::{Aabb, MeshError, RenderMesh, box_mesh, ray_triangle};
+pub use mesh::{Aabb, MeshError, RenderMesh, SectionPlane, box_mesh, ray_triangle};
 pub use overlay::{
     Overlay, OverlayLabel, OverlayPolyline, overlay_shapes, paint_overlay, ray_plane,
 };
@@ -90,6 +90,8 @@ pub struct Viewport {
     last_size: [f32; 2],
     /// Whether an LMB drag orbits/pans (false while a placement tool is active).
     primary_navigates: bool,
+    /// Display-only section plane (None = off).
+    section: Option<SectionPlane>,
 }
 
 impl Viewport {
@@ -118,6 +120,7 @@ impl Viewport {
             last_aspect: DEFAULT_ASPECT,
             last_size: [0.0; 2],
             primary_navigates: true,
+            section: None,
         };
         vp.update_grid();
         vp
@@ -298,7 +301,9 @@ impl Viewport {
             let ray = self
                 .camera
                 .ray(local.x, local.y, rect.width(), rect.height())?;
-            self.mesh.pick(&ray).map(|(_, _, g)| g)
+            self.mesh
+                .pick_section(&ray, self.section)
+                .map(|(_, _, g)| g)
         });
 
         let ppp = ui.ctx().pixels_per_point();
@@ -377,7 +382,28 @@ impl Viewport {
         } else {
             EDGE_COLOR
         };
-        self.gpu.set_edges(&edge_vertices(&self.edges, color));
+        let edges: Vec<[Vec3; 2]> = match self.section {
+            Some(s) => self
+                .edges
+                .iter()
+                .filter_map(|[a, b]| s.clip_segment(*a, *b))
+                .collect(),
+            None => self.edges.clone(),
+        };
+        self.gpu.set_edges(&edge_vertices(&edges, color));
+    }
+
+    /// Display-only section view: hide material beyond `section` (drawing,
+    /// edges and picking). `None` turns it off. Never changes the model.
+    pub fn set_section(&mut self, section: Option<SectionPlane>) {
+        if section != self.section {
+            self.section = section;
+            self.upload_edges();
+        }
+    }
+
+    pub fn section(&self) -> Option<SectionPlane> {
+        self.section
     }
 
     /// Near/far: near is fitted to the body (depth precision where it
@@ -427,7 +453,15 @@ impl Viewport {
                 bg[2],
                 if self.dimmed { DIM_AMOUNT } else { 0.0 },
             ],
-            highlight: [hl.unwrap_or(0), u32::from(hl.is_some()), 0, 0],
+            section: self.section.map_or([0.0; 4], |s| {
+                [s.normal[0], s.normal[1], s.normal[2], s.offset]
+            }),
+            highlight: [
+                hl.unwrap_or(0),
+                u32::from(hl.is_some()),
+                u32::from(self.section.is_some()),
+                0,
+            ],
         }
     }
 }

@@ -105,8 +105,13 @@ pub(crate) enum Dialog {
         angle: String,
         center_x: String,
         center_y: String,
-        /// Mirror: world plane through the origin.
+        /// Mirror: world plane through the origin, or the face selected when
+        /// the dialog opened (`mirror_face`).
         mirror: SketchPlane,
+        mirror_face: Option<f420_document::FaceRef>,
+        /// Mirror: construction-plane offset along the plane's normal (mm; 0 =
+        /// the plane itself). Bindable afterwards as `plane_offset`.
+        mirror_offset: String,
     },
     /// Round hole (with optional counterbore) into the body of face `face`.
     Hole {
@@ -120,6 +125,9 @@ pub(crate) enum Dialog {
         counterbore: bool,
         cb_diameter: String,
         cb_depth: String,
+        /// Start-plane offset from the face along its normal (mm; 0 = the
+        /// face). The offset plane must hold a face of the target.
+        offset: String,
     },
     /// Chamfer the straight edge between face `a` and a chosen second face.
     Chamfer {
@@ -340,6 +348,8 @@ pub struct F420App {
     pub(crate) banner: Option<Diagnostic>,
     pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
+    /// Display-only section view (run 5); None = off.
+    pub section: Option<crate::section::SectionState>,
     pub(crate) mesh_triangles: usize,
     /// Last display scene: all visible bodies (face analysis, picking; display only).
     pub(crate) scene: DisplayScene,
@@ -432,6 +442,7 @@ impl F420App {
             banner: None,
             last_export: None,
             viewport: None,
+            section: None,
             mesh_triangles: 0,
             scene: DisplayScene::default(),
             selected_body: None,
@@ -1991,6 +2002,7 @@ impl F420App {
         self.recovery_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
+        self.section_window(&ctx);
         self.import_summary_ui(&ctx);
         self.reattach_ui(&ctx);
         if busy || self.summary.measuring {
@@ -2221,9 +2233,13 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             counterbore,
             cb_diameter,
             cb_depth,
+            offset,
         } => Command::Hole {
             name: None,
-            plane: SketchPlane::Face(*face),
+            plane: offset_plane(
+                SketchPlane::Face(*face),
+                parse_num("start plane offset", offset)?,
+            ),
             center: [parse_num("centre X", cx)?, parse_num("centre Y", cy)?],
             diameter: parse_num("hole diameter", diameter)?,
             depth: if *through {
@@ -2334,12 +2350,14 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             center_x,
             center_y,
             mirror,
+            mirror_offset,
+            ..
         } => {
             let count = || -> Result<u32, String> {
                 let n = parse_num("count", count)?;
-                if !(n.is_finite() && n >= 2.0 && n.fract() == 0.0 && n <= 100.0) {
+                if !(n.is_finite() && n >= 1.0 && n.fract() == 0.0 && n <= 100.0) {
                     return Err(format!(
-                        "count must be a whole number from 2 to 100, got {n}"
+                        "count must be a whole number from 1 to 100, got {n}"
                     ));
                 }
                 Ok(n as u32)
@@ -2368,11 +2386,29 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                 PatternKind::Mirror => Command::Mirror {
                     name: None,
                     feature: *feature,
-                    plane: *mirror,
+                    plane: offset_plane(*mirror, parse_num("mirror plane offset", mirror_offset)?),
                 },
             }
         }
     })
+}
+
+/// `plane` moved `distance` mm along its normal (a construction plane), or
+/// `plane` itself for a zero distance.
+pub(crate) fn offset_plane(plane: SketchPlane, distance: f64) -> SketchPlane {
+    use f420_document::PlaneBase;
+    let base = match plane {
+        SketchPlane::WorldXY => PlaneBase::WorldXY,
+        SketchPlane::WorldXZ => PlaneBase::WorldXZ,
+        SketchPlane::WorldYZ => PlaneBase::WorldYZ,
+        SketchPlane::Face(r) => PlaneBase::Face(r),
+        SketchPlane::Offset { .. } => return plane,
+    };
+    if distance == 0.0 {
+        plane
+    } else {
+        SketchPlane::Offset { base, distance }
+    }
 }
 
 pub(crate) fn nonempty_path(s: &str) -> Result<PathBuf, String> {

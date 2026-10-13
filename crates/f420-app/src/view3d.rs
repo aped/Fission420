@@ -97,6 +97,29 @@ fn norm(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
 }
 
+/// Whether `p` lies on one of the triangles `tris` (consecutive vertex
+/// triples), within `tol` of the triangle's plane and edges.
+fn on_triangles(p: [f64; 3], tris: &[[f64; 3]], tol: f64) -> bool {
+    tris.as_chunks::<3>().0.iter().any(|t| {
+        let (a, b, c) = (t[0], t[1], t[2]);
+        let n = cross(sub(b, a), sub(c, a));
+        let l = norm(n);
+        if l <= 0.0 {
+            return false;
+        }
+        let n = [n[0] / l, n[1] / l, n[2] / l];
+        if dot(sub(p, a), n).abs() > tol {
+            return false;
+        }
+        // Signed distances to the three edges (inside: all >= -tol).
+        [(a, b), (b, c), (c, a)].iter().all(|&(u, v)| {
+            let e = sub(v, u);
+            let el = norm(e);
+            el > 0.0 && dot(cross(e, sub(p, u)), n) / el >= -tol
+        })
+    })
+}
+
 /// Classify the faces of the display scene against the document's semantic faces.
 pub fn analyse_faces(
     scene: &DisplayScene,
@@ -171,17 +194,29 @@ pub fn analyse_faces(
             let planar = !mesh_body
                 && normals.iter().all(|n| dot(*n, n0) > 1.0 - 1e-4)
                 && pts.iter().all(|p| dot(sub(*p, p0), n0).abs() <= plane_tol);
-            // Same body, coplanar, same outward normal.
+            // Same body, coplanar, same outward normal. When several faces
+            // share the plane, the candidate's sample point (inside its own
+            // face) must lie on this group's triangles; never a guess.
             let reference = planar
                 .then(|| {
-                    features.iter().flat_map(|f| f.faces.iter()).find(|fs| {
-                        Some(fs.body) == body
-                            && dot(n0, fs.frame.z) > 1.0 - 1e-4
-                            && dot(sub(p0, fs.frame.origin), fs.frame.z).abs() <= plane_tol
-                    })
+                    let on_plane: Vec<_> = features
+                        .iter()
+                        .flat_map(|f| f.faces.iter())
+                        .filter(|fs| {
+                            Some(fs.body) == body
+                                && dot(n0, fs.frame.z) > 1.0 - 1e-4
+                                && dot(sub(p0, fs.frame.origin), fs.frame.z).abs() <= plane_tol
+                        })
+                        .collect();
+                    let mut hit = on_plane
+                        .iter()
+                        .filter(|fs| fs.sample.is_none_or(|s| on_triangles(s, &pts, plane_tol)));
+                    match (hit.next(), hit.next()) {
+                        (Some(fs), None) => Some(fs.reference),
+                        _ => None,
+                    }
                 })
-                .flatten()
-                .map(|fs| fs.reference);
+                .flatten();
             // Legacy blind pockets: the floor has no semantic reference.
             let floor = (planar && reference.is_none())
                 .then(|| {
@@ -336,7 +371,10 @@ impl F420App {
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
         let ray = self.ray_at(rect, p)?;
-        self.scene.mesh.pick(&ray).map(|(_, _, g)| g)
+        self.scene
+            .mesh
+            .pick_section(&ray, self.section_plane())
+            .map(|(_, _, g)| g)
     }
 
     pub(crate) fn view_ui(&mut self, ui: &mut egui::Ui) {
@@ -350,8 +388,10 @@ impl F420App {
                 y: f(s.frame.y),
             }
         });
+        let section = self.section_plane();
         let resp = match self.viewport.as_mut() {
             Some(vp) => {
+                vp.set_section(section);
                 vp.set_primary_drag_navigates(!tool_active);
                 vp.set_dimmed(sketching);
                 if vp.grid_plane() != grid {

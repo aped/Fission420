@@ -222,6 +222,20 @@ impl F420App {
                     self.fit_view();
                     ui.close();
                 }
+                let label = if self.section.is_some() {
+                    "Section view off"
+                } else {
+                    "Section view…"
+                };
+                if ui
+                    .button(label)
+                    .probe("Section view…")
+                    .on_hover_text("Display-only clipping plane (not capped); the model and exports are unchanged")
+                    .clicked()
+                {
+                    self.toggle_section();
+                    ui.close();
+                }
                 for (key, preset) in crate::view3d::VIEW_KEYS {
                     if ui
                         .button(format!("{} ({})", preset.label(), key.name()))
@@ -718,6 +732,7 @@ impl F420App {
                             counterbore: false,
                             cb_diameter: "10".into(),
                             cb_depth: "5".into(),
+                            offset: "0".into(),
                         });
                     }
                     if ui
@@ -873,6 +888,8 @@ impl F420App {
                         center_x: "0".into(),
                         center_y: "0".into(),
                         mirror: SketchPlane::WorldYZ,
+                        mirror_face: self.selected_face().and_then(|i| i.reference),
+                        mirror_offset: "0".into(),
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
@@ -1553,6 +1570,7 @@ impl F420App {
                         counterbore,
                         cb_diameter,
                         cb_depth,
+                        offset,
                     } => {
                         ui.label(format!(
                             "On {} {}",
@@ -1572,7 +1590,9 @@ impl F420App {
                             num_field(ui, "Counterbore diameter (mm)", cb_diameter);
                             num_field(ui, "Counterbore depth (mm)", cb_depth);
                         }
-                        ui.small("Built as exact cuts into the material, each checked against the nominal shape; countersinks are not supported. Sizes can be bound to parameters afterwards in the inspector.");
+                        num_field(ui, "Start plane offset (mm)", offset);
+                        ui.small("0 starts on the face. A non-zero offset starts on a construction plane moved along the face's outward normal; that plane must hold a face of the same body (e.g. a step's other level).");
+                        ui.small("Built as exact cuts into the material, each checked against the nominal shape; countersinks are not supported. Sizes and the offset (plane_offset) can be bound to parameters afterwards in the inspector.");
                     }
                     Dialog::OffsetPlane {
                         base,
@@ -1651,6 +1671,8 @@ impl F420App {
                         center_x,
                         center_y,
                         mirror,
+                        mirror_face,
+                        mirror_offset,
                     } => {
                         use crate::app::PatternKind;
                         ui.label(format!("Seed: {}", self.feature_name(*feature)));
@@ -1684,8 +1706,13 @@ impl F420App {
                                     ui.radio_value(mirror, SketchPlane::WorldYZ, "World YZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXZ, "World XZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXY, "World XY");
+                                    if let Some(r) = mirror_face {
+                                        ui.radio_value(mirror, SketchPlane::Face(*r), "Selected face")
+                                            .probe("Mirror on selected face");
+                                    }
                                 });
-                                ui.small("Adds the reflected copy of the seed's tool (the seed stays). A joined copy must land on a face of the target.");
+                                num_field(ui, "Mirror plane offset (mm)", mirror_offset);
+                                ui.small("Adds the reflected copy of the seed's tool (the seed stays). A joined copy must land on a face of the target. A non-zero offset mirrors across a construction plane parallel to the chosen one (parameter plane_offset, bindable in the inspector). Select a face before opening this dialog to mirror across it.");
                             }
                         }
                     }

@@ -7,9 +7,15 @@ struct Uniforms {
     selection_color: vec4<f32>,
     // rgb = linear colour to fade toward, a = fade amount (0 = off)
     fade: vec4<f32>,
-    // x = highlighted group id, y = 1 if highlight active
+    // Section view (display only): xyz = unit normal, w = offset; material
+    // with dot(p, n) > w is hidden. Active when highlight.z == 1.
+    section: vec4<f32>,
+    // x = highlighted group id, y = 1 if highlight active, z = 1 if section on
     highlight: vec4<u32>,
 };
+
+// Inside surfaces exposed by an (uncapped) section view.
+const SECTION_INSIDE: vec3<f32> = vec3<f32>(0.62, 0.30, 0.26);
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
@@ -62,10 +68,16 @@ fn to_gamma(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
+    let section = u.highlight.z == 1u;
+    if section && dot(i.world, u.section.xyz) > u.section.w {
+        discard;
+    }
     var n = normalize(i.normal);
     let v = normalize(u.eye.xyz - i.world);
-    // Two-sided lighting.
-    if dot(n, v) < 0.0 {
+    // Two-sided lighting. With a section, a face seen from behind is the
+    // inside of the material (the cut is not capped).
+    let inside = dot(n, v) < 0.0;
+    if inside {
         n = -n;
     }
     let l = u.light_dir.xyz;
@@ -80,6 +92,9 @@ fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
     }
     if (i.flags & FLAG_SELECTED) != 0u {
         base = u.selection_color.rgb;
+    }
+    if section && inside {
+        base = SECTION_INSIDE;
     }
     // Hover wins over selection.
     if u.highlight.y == 1u && i.group == u.highlight.x {

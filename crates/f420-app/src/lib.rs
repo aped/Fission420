@@ -16,6 +16,7 @@ pub mod probe;
 pub mod reattach;
 pub mod recovery;
 pub mod scenes;
+pub mod section;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod view3d;
@@ -33,5 +34,21 @@ pub(crate) fn face_role_label(role: &f420_document::FaceRole) -> String {
         FaceRole::ExtrudeStartCap => "start cap".into(),
         FaceRole::ExtrudeSide { entity } => format!("side face (sketch entity {entity})"),
         FaceRole::Imported { body, face } => format!("imported face {face} of {body}"),
+        FaceRole::Copy { instance, tool, of } => {
+            let of = match of {
+                f420_document::CopiedRole::EndCap => "end cap".to_string(),
+                f420_document::CopiedRole::StartCap => "start cap".to_string(),
+                f420_document::CopiedRole::Side { entity } => {
+                    format!("side face (sketch entity {entity})")
+                }
+            };
+            let tool = if *tool > 0 {
+                format!(", tool {}", tool + 1)
+            } else {
+                String::new()
+            };
+            format!("{of} of occurrence {}{tool}", instance + 1)
+        }
+        FaceRole::Chamfer => "chamfer face".into(),
     }
 }

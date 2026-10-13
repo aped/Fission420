@@ -3,8 +3,8 @@
 use crate::hole::{check_hole_inside, to_kernel};
 use crate::import::{self, ImportedPlanarFace};
 use crate::{
-    BodyId, DocError, Document, Extent, FaceRef, FaceRole, FeatureId, FeatureKind, Operation,
-    Result, SketchPlane,
+    BodyId, CopiedRole, DocError, Document, Extent, FaceRef, FaceRole, FeatureId, FeatureKind,
+    Operation, Result, SketchPlane,
 };
 use f420_kernel::{self as k, Body, Frame, Measurements};
 use f420_sketch::{EntityId, Profile as SketchProfile, SolveReport};
@@ -24,6 +24,11 @@ pub struct ResolvedFace {
     /// Body the face belongs to.
     #[serde(default)]
     pub body: BodyId,
+    /// When several faces of the body lie in the plane (run 5): a world point
+    /// inside the referenced face (from its generating tool's footprint), which
+    /// tells it apart from the others. None when the plane holds one face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<[f64; 3]>,
 }
 
 /// Per-feature evaluation result.
@@ -126,6 +131,9 @@ pub struct FaceCandidate {
     pub reference: FaceRef,
     pub frame: Frame,
     pub body: BodyId,
+    /// See [`ResolvedFace::sample`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<[f64; 3]>,
 }
 
 /// Disposable geometry cache for a document.
@@ -329,6 +337,11 @@ struct Snapshot {
     extrudes: HashMap<FeatureId, ExtrudeOut>,
     /// Hole features: their tools (counterbore, then hole), for patterns.
     holes: HashMap<FeatureId, Vec<ExtrudeOut>>,
+    /// Pattern/mirror occurrences: (instance, tool index, the tool as applied,
+    /// with its start frame moved to the occurrence), for [`FaceRole::Copy`].
+    copies: HashMap<FeatureId, Vec<(u32, u32, ExtrudeOut)>>,
+    /// Chamfer features: the chamfer face's frame (outward normal) and body.
+    chamfers: HashMap<FeatureId, (Frame, BodyId)>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     bodies: BTreeMap<BodyId, BodyState>,
     /// Body ids in creation order.
@@ -342,6 +355,8 @@ impl Snapshot {
             sketches: HashMap::new(),
             extrudes: HashMap::new(),
             holes: HashMap::new(),
+            copies: HashMap::new(),
+            chamfers: HashMap::new(),
             imported_faces: HashMap::new(),
             bodies: BTreeMap::new(),
             created: Vec::new(),
@@ -696,6 +711,9 @@ pub fn regenerate_cached_opts(
                 let out =
                     k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
                 replace_body(&mut st, id, fa.body, out);
+                if let Some(frame) = chamfer_face_frame(&fa.frame, &fb.frame, *distance) {
+                    st.chamfers.insert(id, (frame, fa.body));
+                }
                 r.body = Some(fa.body);
             }
             FeatureKind::Hole {
@@ -866,43 +884,72 @@ pub fn regenerate_cached_opts(
     Ok(eval)
 }
 
-/// Every semantic planar face (extrusion caps and line sides, imported planar
-/// faces) that resolves uniquely on the final geometry.
+/// Every semantic planar face (extrusion caps and line sides, pattern/mirror
+/// occurrence faces, chamfer faces, imported planar faces) that resolves
+/// uniquely on the final geometry, by the same rule as [`resolve_face`].
 fn face_candidates(st: &Snapshot, order: &[FeatureId]) -> Vec<FaceCandidate> {
     let mut out = Vec::new();
-    let mut push = |reference: FaceRef, frame: Frame, body: BodyId| {
-        if let Some(BodyState {
-            geometry: BodyGeometry::Brep(b),
-            ..
-        }) = st.bodies.get(&body)
-            && k::planar_faces_on(b, &frame) == 1
+    let mut push = |reference: FaceRef| {
+        if let Ok(r) = resolve_face(reference.feature, &reference, st)
+            && r.matching_brep_faces == 1
         {
             out.push(FaceCandidate {
                 reference,
-                frame,
-                body,
+                frame: r.frame,
+                body: r.body,
+                sample: r.sample,
             });
         }
+    };
+    let side_roles = |e: &ExtrudeOut| -> Vec<u32> {
+        e.entities
+            .iter()
+            .chain(e.holes.iter().flat_map(|(_, ents)| ents.iter()))
+            .map(|id| id.0)
+            .collect()
     };
     for fid in order {
         if let Some(e) = st.extrudes.get(fid) {
             let roles = [FaceRole::ExtrudeEndCap, FaceRole::ExtrudeStartCap]
                 .into_iter()
                 .chain(
-                    e.entities
-                        .iter()
-                        .chain(e.holes.iter().flat_map(|(_, ents)| ents.iter()))
-                        .map(|id| FaceRole::ExtrudeSide { entity: id.0 }),
+                    side_roles(e)
+                        .into_iter()
+                        .map(|entity| FaceRole::ExtrudeSide { entity }),
                 );
             for role in roles {
-                let fr = FaceRef {
+                push(FaceRef {
                     feature: *fid,
                     role,
-                };
-                if let Ok(frame) = extrude_face_frame(e, &fr, *fid) {
-                    push(fr, frame, e.body);
+                });
+            }
+        }
+        if let Some(copies) = st.copies.get(fid) {
+            for (instance, tool, e) in copies {
+                let roles = [CopiedRole::EndCap, CopiedRole::StartCap]
+                    .into_iter()
+                    .chain(
+                        side_roles(e)
+                            .into_iter()
+                            .map(|entity| CopiedRole::Side { entity }),
+                    );
+                for of in roles {
+                    push(FaceRef {
+                        feature: *fid,
+                        role: FaceRole::Copy {
+                            instance: *instance,
+                            tool: *tool,
+                            of,
+                        },
+                    });
                 }
             }
+        }
+        if st.chamfers.contains_key(fid) {
+            push(FaceRef {
+                feature: *fid,
+                role: FaceRole::Chamfer,
+            });
         }
         let mut imported: Vec<_> = st
             .imported_faces
@@ -912,17 +959,13 @@ fn face_candidates(st: &Snapshot, order: &[FeatureId]) -> Vec<FaceCandidate> {
         imported.sort_by_key(|((_, b), _)| *b);
         for ((_, body), faces) in imported {
             for f in faces.iter() {
-                push(
-                    FaceRef {
-                        feature: *fid,
-                        role: FaceRole::Imported {
-                            body: *body,
-                            face: f.index,
-                        },
+                push(FaceRef {
+                    feature: *fid,
+                    role: FaceRole::Imported {
+                        body: *body,
+                        face: f.index,
                     },
-                    f.frame,
-                    *body,
-                );
+                });
             }
         }
     }
@@ -1750,9 +1793,9 @@ fn linear_pattern(
 ) -> Result<BodyId> {
     let tools = copy_seed(st, id, seed)?;
     let e = tools[0].clone();
-    if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
+    if !(1..=crate::MAX_PATTERN_COUNT).contains(&count) {
         return Err(DocError::Validation(format!(
-            "{id}.count: must be in 2..={}, got {count}",
+            "{id}.count: must be in 1..={} (1 = the seed only), got {count}",
             crate::MAX_PATTERN_COUNT
         )));
     }
@@ -1777,6 +1820,7 @@ fn linear_pattern(
     let before = brep_target(st, id, e.body)?;
     let mut body = before.clone();
     let mut applied = Vec::new();
+    let mut copies = Vec::new();
     for i in 1..count {
         let t = spacing * f64::from(i);
         let frame = Frame {
@@ -1787,7 +1831,7 @@ fn linear_pattern(
             ],
             ..f
         };
-        for tool in &tools {
+        for (ti, tool) in tools.iter().enumerate() {
             body = apply_tool(
                 &body,
                 tool,
@@ -1797,11 +1841,23 @@ fn linear_pattern(
                 Some(&mut applied),
             )?
             .0;
+            copies.push((
+                i,
+                ti as u32,
+                ExtrudeOut {
+                    start: frame,
+                    ..tool.clone()
+                },
+            ));
         }
     }
-    // One independent check of the whole pattern (ADR 0005).
-    verify_applied(id, "pattern: ", &before, &body, &applied)?;
+    // One independent check of the whole pattern (ADR 0005). Count 1 applies
+    // nothing: the body is the seed's result, unchanged.
+    if !applied.is_empty() {
+        verify_applied(id, "pattern: ", &before, &body, &applied)?;
+    }
     replace_body(st, id, e.body, body);
+    st.copies.insert(id, copies);
     Ok(e.body)
 }
 
@@ -1817,9 +1873,9 @@ fn circular_pattern(
 ) -> Result<BodyId> {
     let tools = copy_seed(st, id, seed)?;
     let e = tools[0].clone();
-    if !(2..=crate::MAX_PATTERN_COUNT).contains(&count) {
+    if !(1..=crate::MAX_PATTERN_COUNT).contains(&count) {
         return Err(DocError::Validation(format!(
-            "{id}.count: must be in 2..={}, got {count}",
+            "{id}.count: must be in 1..={} (1 = the seed only), got {count}",
             crate::MAX_PATTERN_COUNT
         )));
     }
@@ -1856,6 +1912,7 @@ fn circular_pattern(
     let before = brep_target(st, id, e.body)?;
     let mut body = before.clone();
     let mut applied = Vec::new();
+    let mut copies = Vec::new();
     for i in 1..count {
         let t = angle * f64::from(i);
         let o = rot(sub(f.origin, c), t);
@@ -1865,7 +1922,7 @@ fn circular_pattern(
             y: rot(f.y, t),
             z: f.z,
         };
-        for tool in &tools {
+        for (ti, tool) in tools.iter().enumerate() {
             body = apply_tool(
                 &body,
                 tool,
@@ -1875,11 +1932,23 @@ fn circular_pattern(
                 Some(&mut applied),
             )?
             .0;
+            copies.push((
+                i,
+                ti as u32,
+                ExtrudeOut {
+                    start: frame,
+                    ..tool.clone()
+                },
+            ));
         }
     }
-    // One independent check of the whole pattern (ADR 0005).
-    verify_applied(id, "pattern: ", &before, &body, &applied)?;
+    // One independent check of the whole pattern (ADR 0005). Count 1 applies
+    // nothing: the body is the seed's result, unchanged.
+    if !applied.is_empty() {
+        verify_applied(id, "pattern: ", &before, &body, &applied)?;
+    }
     replace_body(st, id, e.body, body);
+    st.copies.insert(id, copies);
     Ok(e.body)
 }
 
@@ -1908,7 +1977,8 @@ fn mirror_feature(
     let before = brep_target(st, id, target)?;
     let mut body = before.clone();
     let mut applied = Vec::new();
-    for mut e in tools {
+    let mut copies = Vec::new();
+    for (ti, mut e) in tools.into_iter().enumerate() {
         let f = e.start;
         let (x, y) = (refl_v(f.x), refl_v(f.y));
         let frame = Frame {
@@ -1930,9 +2000,12 @@ fn mirror_feature(
             Some(&mut applied),
         )?
         .0;
+        e.start = frame;
+        copies.push((1, ti as u32, e));
     }
     verify_applied(id, "mirror: ", &before, &body, &applied)?;
     replace_body(st, id, target, body);
+    st.copies.insert(id, copies);
     Ok(target)
 }
 
@@ -2197,13 +2270,155 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
             "{} is an extrusion, not an import",
             fr.feature
         ))),
+        FaceRole::Copy { .. } | FaceRole::Chamfer => Err(broken(format!(
+            "{} is an extrusion, not a pattern, mirror or chamfer",
+            fr.feature
+        ))),
     }
+}
+
+/// Footprint of the face `role` of extrusion tool `e` (whose resolved plane is
+/// `frame`), as a closed world polygon in that plane, and whether it samples
+/// curves: the profile on a cap; the generating edge swept over the nominal
+/// span on a side face. Empty when unknown.
+fn footprint(e: &ExtrudeOut, role: FaceRole, frame: &Frame) -> (Vec<[f64; 3]>, bool) {
+    let f = e.start;
+    match role {
+        FaceRole::ExtrudeEndCap | FaceRole::ExtrudeStartCap => {
+            let shift = sub(frame.origin, f.to_world([0.0, 0.0]));
+            let (pts, curved) = k::profile_outline(&to_kernel(&e.profile));
+            let out = pts
+                .into_iter()
+                .map(|p| {
+                    let w = f.to_world(p);
+                    [w[0] + shift[0], w[1] + shift[1], w[2] + shift[2]]
+                })
+                .collect();
+            (out, curved)
+        }
+        FaceRole::ExtrudeSide { entity } => {
+            let edge = std::iter::once((&e.profile, &e.entities))
+                .chain(e.holes.iter().map(|(p, ents)| (p, ents)))
+                .find_map(|(p, ents)| {
+                    let i = ents.iter().position(|x| x.0 == entity)?;
+                    match p {
+                        SketchProfile::Polygon(v) => Some((v[i], v[(i + 1) % v.len()])),
+                        SketchProfile::Loop(segs) => match segs[i] {
+                            f420_sketch::LoopSegment::Line { start } => {
+                                Some((start, segs[(i + 1) % segs.len()].start()))
+                            }
+                            f420_sketch::LoopSegment::Arc { .. } => None,
+                        },
+                        SketchProfile::Circle { .. } => None,
+                    }
+                });
+            let Some((p, q)) = edge else {
+                return (Vec::new(), false);
+            };
+            // Through-all cuts span the whole body: their nominal span is the
+            // body's extent plus margins, which only enlarges the footprint
+            // past the material (no other face there).
+            let (lo, hi) = if e.removes || e.joined {
+                e.nominal
+            } else {
+                e.span
+            };
+            let (a, b) = (f.to_world(p), f.to_world(q));
+            let at =
+                |w: [f64; 3], t: f64| [w[0] + f.z[0] * t, w[1] + f.z[1] * t, w[2] + f.z[2] * t];
+            (vec![at(a, lo), at(b, lo), at(b, hi), at(a, hi)], false)
+        }
+        _ => (Vec::new(), false),
+    }
+}
+
+/// Occurrence `instance` (tool `tool`) of pattern/mirror `feature`, or a
+/// `BrokenReference` naming why it does not exist (never another occurrence).
+fn copy_occurrence(
+    st: &Snapshot,
+    from: FeatureId,
+    feature: FeatureId,
+    instance: u32,
+    tool: u32,
+) -> Result<&ExtrudeOut> {
+    let copies = st.copies.get(&feature).ok_or(DocError::BrokenReference {
+        from,
+        detail: format!("{feature} is not an evaluated pattern or mirror"),
+    })?;
+    copies
+        .iter()
+        .find(|(i, t, _)| *i == instance && *t == tool)
+        .map(|(_, _, e)| e)
+        .ok_or_else(|| {
+            let n = copies.iter().map(|(i, _, _)| *i).max().map_or(1, |m| m + 1);
+            DocError::BrokenReference {
+                from,
+                detail: format!(
+                    "occurrence {} (tool {tool}) of {feature} no longer exists ({feature} now \
+                     has {n} occurrence(s)); re-attach to an existing face",
+                    instance + 1
+                ),
+            }
+        })
+}
+
+/// Outward frame of the face an equal-distance chamfer of `d` mm makes on the
+/// convex edge between planar faces `a` and `b` (outward normals `na`, `nb`):
+/// it contains the edge direction `e` and the points `P + d ta`, `P + d tb`,
+/// where `ta`/`tb` are the in-face directions away from the edge (`ta ⟂ e,
+/// na`, pointing against `nb` on a convex edge). Matches `k::chamfer_edge`.
+fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
+    let (na, nb) = (a.z, b.z);
+    let e = cross(na, nb);
+    let len = dot(e, e).sqrt();
+    if len.is_nan() || len <= 1e-9 {
+        return None;
+    }
+    let e = scale(e, 1.0 / len);
+    let (ha, hb) = (dot(na, a.origin), dot(nb, b.origin));
+    let den = dot(cross(na, nb), e);
+    let p0 = scale(
+        [
+            cross(nb, e)[0] * ha + cross(e, na)[0] * hb,
+            cross(nb, e)[1] * ha + cross(e, na)[1] * hb,
+            cross(nb, e)[2] * ha + cross(e, na)[2] * hb,
+        ],
+        1.0 / den,
+    );
+    let away = |n: [f64; 3], other: [f64; 3]| {
+        let t = cross(n, e);
+        if dot(t, other) < 0.0 {
+            t
+        } else {
+            scale(t, -1.0)
+        }
+    };
+    let (ta, tb) = (away(na, nb), away(nb, na));
+    let pa = [p0[0] + d * ta[0], p0[1] + d * ta[1], p0[2] + d * ta[2]];
+    let mut z = cross(sub(ta, tb), e);
+    let zl = dot(z, z).sqrt();
+    if zl.is_nan() || zl <= 1e-12 {
+        return None;
+    }
+    z = scale(z, 1.0 / zl);
+    if dot(z, [na[0] + nb[0], na[1] + nb[1], na[2] + nb[2]]) < 0.0 {
+        z = scale(z, -1.0);
+    }
+    Some(Frame {
+        origin: pa,
+        x: e,
+        y: cross(z, e),
+        z,
+    })
 }
 
 /// Resolve a semantic face reference from the generating feature's definition, then
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
 fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<ResolvedFace> {
+    // The generating tool and its extrusion role, for telling coplanar faces
+    // apart by the tool's own footprint.
+    let mut tool_of: Option<(&ExtrudeOut, FaceRole)> = None;
     let (frame, owner) = match fr.role {
         FaceRole::Imported { body, face } => {
             let faces =
@@ -2224,6 +2439,23 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
                 })?;
             (f.frame, body)
         }
+        FaceRole::Copy { instance, tool, of } => {
+            let e = copy_occurrence(st, from, fr.feature, instance, tool)?;
+            let role = FaceRef {
+                feature: fr.feature,
+                role: of.extrude_role(),
+            };
+            let out = (extrude_face_frame(e, &role, from)?, e.body);
+            tool_of = Some((e, role.role));
+            out
+        }
+        FaceRole::Chamfer => *st
+            .chamfers
+            .get(&fr.feature)
+            .ok_or(DocError::BrokenReference {
+                from,
+                detail: format!("{} is not an evaluated chamfer", fr.feature),
+            })?,
         _ => {
             let e = st
                 .extrudes
@@ -2232,9 +2464,11 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
                     from,
                     detail: format!("{} is not an evaluated extrusion", fr.feature),
                 })?;
+            tool_of = Some((e, fr.role));
             (extrude_face_frame(e, fr, from)?, e.body)
         }
     };
+    let tool = tool_of;
     let state = st.bodies.get(&owner).ok_or(DocError::BrokenReference {
         from,
         detail: format!("body {owner} no longer exists"),
@@ -2245,10 +2479,28 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
             detail: format!("body {owner} is a mesh; mesh faces cannot host sketches"),
         });
     };
-    let n = k::planar_faces_on(body, &frame);
+    let mut n = k::planar_faces_on(body, &frame);
+    let mut sample = None;
+    if n > 1
+        && let Some((e, role)) = tool
+    {
+        // Several faces in the plane: the one holding this tool's footprint.
+        let (outline, curved) = footprint(e, role, &frame);
+        if !outline.is_empty() {
+            let (hits, inside) = k::planar_faces_overlapping(body, &frame, &outline, curved)
+                .map_err(kernel(from))?;
+            // No face under the footprint: still the plane's ambiguity (n > 1).
+            if hits > 0 {
+                (n, sample) = (hits, inside);
+            }
+        }
+    }
     let role = match fr.role {
         FaceRole::ExtrudeSide { entity } => format!("side face of entity {entity}"),
         FaceRole::Imported { face, .. } => format!("imported face {face}"),
+        FaceRole::Copy { instance, of, .. } => {
+            format!("{of:?} face of occurrence {}", instance + 1)
+        }
         r => format!("{r:?}"),
     };
     if n == 0 {
@@ -2276,5 +2528,6 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         frame,
         matching_brep_faces: n,
         body: owner,
+        sample,
     })
 }
