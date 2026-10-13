@@ -42,8 +42,9 @@ Every flange and the flat pattern regenerate from it.
 * **Length = straight leg beyond the bend**, from the bend's tangent line to the flange end,
   measured along the flange. This is the "between tangent points" convention of SESSION_7
   acceptance 6; it is not an outside (mold-line) dimension.
-* **Angle** θ in (0°, 180°): 90° makes the flange perpendicular to the plate. 180° (hems) is
-  refused.
+* **Angle** θ in (0°, 180°]: 90° makes the flange perpendicular to the plate; **180° is an open
+  hem**: the leg lies back over the plate with a gap of 2R (inside radius from the rule). Closed
+  (zero-gap) and rolled/teardrop hems are not implemented.
 * **Direction**: up = toward the base sketch normal (default), `down` = away from it. Up bends
   have the plate's top as their inside surface, down bends the bottom.
 * **Width**: the whole edge minus `start_offset` / `end_offset` (measured along the edge from its
@@ -58,6 +59,10 @@ w·t·(Σ straights) + Σ w·θ/2·((R+t)² − R²).
 
 ### Refusals (each with the feature and the reason)
 
+* a flat pattern that overlaps itself: the flat outline is checked for any intersection or
+  touching of non-neighbouring edges (collinear overlaps and end points on edges included) and its
+  area must equal the plate area plus the unfolded strips,
+* a relief that cuts into a hole of the plate,
 * flange footprints on the base plane overlapping (self-overlapping / colliding flanges; this
   check is conservative for flanges leaning over the plate at > 90°: it refuses any overlap of
   their projections even if their heights would separate them),
@@ -66,7 +71,7 @@ w·t·(Σ straights) + Σ w·θ/2·((R+t)² − R²).
 * two flanges (with their reliefs) overlapping on one edge,
 * **impossible reliefs**: an offset that leaves no room for the relief width, a relief that cuts
   through the plate (the outline would self-intersect),
-* bend angle ≤ 0° or ≥ 180° (hems), length ≤ 0, offsets that leave no flange, a line that is not
+* bend angle ≤ 0° or > 180°, length ≤ 0, offsets that leave no flange, a line that is not
   a straight edge of the base outline, an invalid rule (t, R, relief ≤ 0, K outside [0, 1]),
 * a flange after a non-sheet edit of the body.
 
@@ -81,7 +86,9 @@ from its edge into a strip of width BA + length. Orientation is the base sketch'
 * **Display state** — `sheet_flat_state {base, flat}`: the first call creates a `SheetFlat`
   feature whose body is the exact flat solid (the flat outline extruded by t from the plate's
   bottom); the call toggles visibility between the folded body and the flat body (one undo step
-  each). The flat body is a separate body: mass properties of both are reported if both are
+  each). The flat-pattern feature stays after every flange of its sheet: a new flange is
+  inserted before it, and a flange moved after it is refused (it would be out of date). The flat
+  body is a separate body: mass properties of both are reported if both are
   selected — hide/omit the flat body for physical totals.
 * **DXF** — `export_flat_pattern {feature, path}` with any sheet feature: R12 DXF, `$INSUNITS` 4
   (mm). Layers:
@@ -90,7 +97,9 @@ from its edge into a strip of width BA + length. Orientation is the base sketch'
     direction in the layer name.
   * `BEND_NOTES`: one TEXT per bend, e.g. `UP 90.0%%d R2 BA 3.770`.
 
-The response message gives the flat extent and the bends.
+The response message gives the flat extent and the bends. The export is refused when a non-sheet
+feature (hole, cut, ...) changed the body after its last sheet feature: unfolding arbitrary edits
+is not supported, and the pattern would silently miss them.
 
 ## Acceptance project 6 (U-channel)
 
@@ -101,11 +110,11 @@ Verified in `crates/rcad-commands/tests/sheet_flanges.rs` and `sheet_surface_acc
 (closed-form volume, bounding box, point membership, independent DXF parse; thickness/radius
 edit to t 2, R 3; refused self-overlapping flanges) and externally by FreeCAD
 (`tools/validate_sheet_surface.sh`: folded and flat STEP volume/bbox/validity, DXF closed CUT
-wire area = 40·L, bend lines, `$INSUNITS`).
+wire area = 40·L, bend lines, `$INSUNITS`; also an open-hem plate).
 
 ## Not implemented (tracked)
 
-Hems and 180° folds, flanges on flange edges or on arcs, flange position options (material
+Closed / rolled / teardrop hems, flanges on flange edges or on arcs, flange position options (material
 inside / bend inside), partial flanges with tapered sides, miters / corner closing, lofted or
 conical bends, forming tools, K-factor tables per material, bend deduction tables, unfolding of
 arbitrary solids, flat-pattern drawings with bend tables, face references to sheet faces for

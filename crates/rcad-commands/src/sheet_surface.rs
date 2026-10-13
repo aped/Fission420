@@ -140,7 +140,22 @@ pub struct ThickenArgs {
     pub hide_source: bool,
 }
 
-fn new_body(d: &mut Document, name: &Option<String>, default: &str) -> Result<BodyId, DocError> {
+/// Who owns a new body (review #16): a modelled body joins the active
+/// component; a display body (flat pattern) joins none; a derived body
+/// (stitch / fill / thicken) takes its source's place in its component.
+#[derive(Clone, Copy)]
+enum Owner {
+    Active,
+    Display,
+    Derived(BodyId),
+}
+
+fn new_body(
+    d: &mut Document,
+    name: &Option<String>,
+    default: &str,
+    owner: Owner,
+) -> Result<BodyId, DocError> {
     let n = match name {
         Some(n) => crate::valid_name(n, "body")?,
         None => crate::unique_body_name(d, default),
@@ -150,7 +165,11 @@ fn new_body(d: &mut Document, name: &Option<String>, default: &str) -> Result<Bo
             "another body is already named '{n}'"
         )));
     }
-    Ok(d.add_body(n))
+    Ok(match owner {
+        Owner::Active => d.add_body(n),
+        Owner::Display => d.add_body_unowned(n),
+        Owner::Derived(src) => d.add_derived_body(n, src),
+    })
 }
 
 /// The sheet base feature `base` and its body.
@@ -199,9 +218,26 @@ fn current_build(
     else {
         return Err(DocError::Validation(format!("{base} is not a sheet base")));
     };
-    if ev.body_by_id(body).is_none() {
+    let Some(eb) = ev.body_by_id(body) else {
         return Err(DocError::Validation(format!(
             "{base}: the sheet body is not evaluated (suppressed or failed)"
+        )));
+    };
+    // Review S3: the flat pattern comes from the sheet definition; a later
+    // non-sheet edit of the body (hole, cut, ...) would be silently missing.
+    let last_sheet = doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && !doc.is_rolled_back(f.id))
+        .filter(|f| {
+            f.id == base || matches!(f.kind, FeatureKind::SheetFlange { base: b, .. } if b == base)
+        })
+        .map(|f| f.id)
+        .next_back();
+    if Some(eb.last_feature) != last_sheet {
+        return Err(DocError::ProductLimit(format!(
+            "{base}: the sheet body was changed by {} after its last sheet feature; the flat pattern would not show that edit (unfolding arbitrary edits is not supported)",
+            eb.last_feature
         )));
     }
     let res = ev
@@ -256,7 +292,7 @@ impl Session {
                     relief_depth: a.relief_depth.unwrap_or(a.thickness),
                 };
                 let id = self.model_mut()?.transact("Sheet base face", |d| {
-                    let body = new_body(d, &a.body_name, "Sheet")?;
+                    let body = new_body(d, &a.body_name, "Sheet", Owner::Active)?;
                     let n = a.name.clone().unwrap_or_else(|| d.default_name("Sheet"));
                     Ok(d.push(
                         n,
@@ -272,16 +308,17 @@ impl Session {
             }
             Command::SheetFlange(a) => {
                 let a = a.clone();
-                if !(a.angle_deg > 0.0 && a.angle_deg < 180.0) {
+                if !(a.angle_deg > 0.0 && a.angle_deg <= 180.0) {
                     return Err(DocError::Validation(format!(
-                        "flange angle must be in (0, 180) degrees, got {}",
+                        "flange angle must be in (0, 180] degrees (180 = open hem), got {}",
                         a.angle_deg
                     )));
                 }
                 let id = self.model_mut()?.transact("Edge flange", |d| {
                     let body = sheet_base(d, a.base)?;
                     let n = a.name.clone().unwrap_or_else(|| d.default_name("Flange"));
-                    Ok(d.push(
+                    let flat = flat_of(d, a.base).map(|(f, _)| f);
+                    let id = d.push(
                         n,
                         FeatureKind::SheetFlange {
                             base: a.base,
@@ -293,7 +330,13 @@ impl Session {
                             start_offset: a.start_offset,
                             end_offset: a.end_offset,
                         },
-                    ))
+                    );
+                    // Review #5: the flat pattern must include every flange of
+                    // its body, so a new flange goes before an existing flat.
+                    if let Some(f) = flat {
+                        d.move_feature(id, Some(f))?;
+                    }
+                    Ok(id)
                 })?;
                 r.feature = Some(id);
             }
@@ -349,7 +392,7 @@ impl Session {
                                     "{} (flat)",
                                     d.body(folded).map(|b| b.name.clone()).unwrap_or_default()
                                 );
-                                let body = new_body(d, &None, &fname)?;
+                                let body = new_body(d, &None, &fname, Owner::Display)?;
                                 let n = d.default_name("Flat pattern");
                                 let fid = d.push(n, FeatureKind::SheetFlat { base: a.base, body });
                                 (fid, body)
@@ -398,7 +441,7 @@ impl Session {
                 let bytes = crate::read_import(&a.path)?;
                 let unit = a.units_to_mm;
                 // Parse once up front for an early, precise error.
-                let probe = rcad_document::import::step(&bytes, unit)?;
+                let probe = rcad_document::import::step_opts(&bytes, unit, true)?;
                 let Some(surf) = probe.surfaces else {
                     return Err(DocError::Validation(format!(
                         "{}: no surface model (SHELL_BASED_SURFACE_MODEL) in the file",
@@ -412,7 +455,7 @@ impl Session {
                     .model_mut()?
                     .transact(&format!("Import surfaces {file}"), |d| {
                         let blob = d.add_blob(&file, &bytes);
-                        let body = new_body(d, &None, &label)?;
+                        let body = new_body(d, &None, &label, Owner::Active)?;
                         let n = d.default_name("Surfaces");
                         Ok(d.push(
                             n,
@@ -450,7 +493,7 @@ impl Session {
                     rep.shells,
                     rep.faces,
                     rep.free_edges.len(),
-                    rep.gaps.len(),
+                    rep.gaps_total,
                     rep.search,
                     rep.gaps
                         .iter()
@@ -479,6 +522,7 @@ impl Session {
                             d,
                             &a.body_name,
                             &format!("{src} {}", if stitch { "stitched" } else { "filled" }),
+                            Owner::Derived(a.body),
                         )?;
                         if a.hide_source {
                             d.body_mut(a.body)?.visible = false;
@@ -507,7 +551,12 @@ impl Session {
                 let a = a.clone();
                 let id = self.model_mut()?.transact("Thicken", |d| {
                     let src = d.body(a.body)?.name.clone();
-                    let body = new_body(d, &a.body_name, &format!("{src} thickened"))?;
+                    let body = new_body(
+                        d,
+                        &a.body_name,
+                        &format!("{src} thickened"),
+                        Owner::Derived(a.body),
+                    )?;
                     if a.hide_source {
                         d.body_mut(a.body)?.visible = false;
                     }

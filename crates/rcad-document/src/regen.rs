@@ -1157,6 +1157,13 @@ fn regen_impl(
             }
             FeatureKind::SheetFlange { base, body, .. } => {
                 let mut model = sheet_of(&st, id, *base, *body)?;
+                // Review #5: a flange after the flat pattern would leave the
+                // displayed flat out of date (the DXF includes every flange).
+                if let Some(flat) = model.flat {
+                    return Err(DocError::Validation(format!(
+                        "{id}: this flange comes after the flat pattern {flat} of the same sheet, which would be out of date; keep flanges before the flat pattern"
+                    )));
+                }
                 model.flanges.extend(crate::sheet::flange_def(id, &f.kind));
                 let built = crate::sheet::build(&model)?;
                 r.notes = crate::sheet::notes(&built, &model.rule);
@@ -1175,10 +1182,12 @@ fn regen_impl(
                         from: id,
                         detail: format!("{base} is not a sheet base"),
                     })?;
-                let model = sheet_of(&st, id, *base, sheet_body)?;
+                let mut model = sheet_of(&st, id, *base, sheet_body)?;
                 let built = crate::sheet::build(&model)?;
                 let flat = crate::sheet::flat_body(&built, &model.rule, id)?;
                 r.notes = crate::sheet::notes(&built, &model.rule);
+                model.flat = Some(id);
+                st.sheets.insert(sheet_body, model);
                 create_body(
                     &mut st,
                     id,

@@ -29,6 +29,9 @@ surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside
 * **orientation conflicts**: face pairs using a shared edge in the same direction,
 * non-manifold edges (used by more than two faces), shell and face counts.
 
+`search` is limited to [0, 10] mm and at most 1000 gap records are returned (`gaps_total` counts
+all); candidate pairs come from a spatial grid, not all pairs.
+
 ## Stitch
 
 `stitch_surface {body, tolerance}`: vertices closer than the **healing tolerance** become one,
@@ -39,13 +42,16 @@ vertices merged is rebuilt as the exact line between them; faces keep their surf
 healing a face can be off its boundary by at most the tolerance (the healed solid's volume is
 within gap × face area of the ideal one; the gap-box test checks exactly that). A result with
 no free edges is a closed solid (oriented outward by its signed volume); otherwise it stays an
-open shell (possibly several pieces). A tolerance large enough to make an edge shared by three
+open shell (possibly several pieces; a result of several separate *closed* pieces is refused,
+because one body is one solid). A tolerance large enough to make an edge shared by three
 faces, or to collapse an edge, is refused. Tolerance range [0, 1] mm.
 
 ## Fill (patch)
 
 `fill_surface {body, tolerance}`: every closed boundary loop (lines, arcs, any edge curves) that
-is **planar** within the tolerance gets an exact planar face bounded by the loop's own edges.
+is **planar** within the tolerance (curved edges sampled at 16 points) gets an exact planar face
+bounded by the loop's own edges; coplanar nested loops of opposite orientation become one face
+with holes (e.g. the two end rings of an open tube); same-orientation or deeper nesting is refused.
 Non-planar loops are refused (not skipped); a body with several shells or orientation conflicts
 must be stitched first. If the result is closed it is a solid.
 

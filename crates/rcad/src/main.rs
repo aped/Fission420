@@ -329,6 +329,22 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         app.last_drawing_issues()
             .map_or("null".to_string(), |n| n.to_string()),
     );
+    // Run 7 sheet/surface: body visibility and closedness (open shells).
+    let body_state: Vec<String> = s
+        .bodies
+        .iter()
+        .map(|b| {
+            format!(
+                "\"{}\":{{\"visible\":{},\"closed\":{}}}",
+                b.id,
+                b.visible,
+                b.measurements
+                    .as_ref()
+                    .map_or("null".to_string(), |m| m.all_shells_closed.to_string())
+            )
+        })
+        .collect();
+    let run7 = format!("{run7},\"bodies\":{{{}}}", body_state.join(","));
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(

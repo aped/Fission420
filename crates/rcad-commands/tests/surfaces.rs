@@ -74,6 +74,7 @@ fn open_box_stays_open_then_fills_to_a_solid() {
     let r = tray::ok(&mut s, &json!({"cmd": "fill_surface", "body": 1}));
     assert!(r.message.unwrap().contains("closed solid"));
     assert!((volume(&s, 2).unwrap() - 24000.0).abs() < 1e-6);
+    assert_eq!(body(&s, 2).kind, "brep");
     assert!(!body(&s, 1).visible);
     assert_eq!(volume(&s, 1), None);
     // Undo / redo / save / reopen.
@@ -205,4 +206,88 @@ fn thicken_plate_and_half_tube_with_collapse_refusal() {
         (inn - 0.5 * PI * (100.0 - 36.0) * 30.0).abs() < 1e-6,
         "{inn}"
     );
+}
+
+/// Review #25: with one solid and one surface body, a cut without a target
+/// goes to the solid (surface bodies are not default targets).
+#[test]
+fn surface_bodies_are_not_default_targets() {
+    let mut s = Session::new();
+    import(&mut s, "plate_mm.step");
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::CenteredRectangle {
+            width: 10.0,
+            height: 10.0,
+            center: Some([100.0, 0.0]),
+        },
+    });
+    assert!(r.ok);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 2, "distance": 10.0}),
+    );
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::CenteredCircle {
+            diameter: 4.0,
+            center: Some([100.0, 0.0]),
+        },
+    });
+    assert!(r.ok);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 4, "op": "cut", "through_all": true}),
+    );
+    let v = volume(&s, 2).unwrap();
+    assert!((v - (1000.0 - PI * 4.0 * 10.0)).abs() < 1e-6, "{v}");
+}
+
+/// Review #16: with a component active, the flat-pattern display body joins
+/// no component and a stitch/fill output replaces its source only when the
+/// source is in a component (here: none, so they stay loose).
+#[test]
+fn derived_and_display_bodies_do_not_join_the_active_component() {
+    let mut s = Session::new();
+    import(&mut s, "open_box_mm.step");
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "create_component", "name": "Holder"}),
+    );
+    let comp = r.assembly.and_then(|a| a.component).expect("component id");
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "activate_component", "component": comp}),
+    );
+    tray::ok(&mut s, &json!({"cmd": "fill_surface", "body": 1}));
+    let c = s
+        .summary()
+        .assembly
+        .components
+        .into_iter()
+        .find(|c| c.id == comp)
+        .unwrap();
+    assert!(
+        !c.bodies.contains(&BodyId(2)),
+        "fill output joined the active component"
+    );
+    // A source inside a component is replaced by its derived body there.
+    let mut t = Session::new();
+    import(&mut t, "open_box_mm.step");
+    let r = tray::ok(
+        &mut t,
+        &json!({"cmd": "create_component", "name": "Box", "bodies": [1]}),
+    );
+    let comp = r.assembly.and_then(|a| a.component).expect("component id");
+    tray::ok(&mut t, &json!({"cmd": "fill_surface", "body": 1}));
+    let c = t
+        .summary()
+        .assembly
+        .components
+        .into_iter()
+        .find(|c| c.id == comp)
+        .unwrap();
+    assert_eq!(c.bodies, vec![BodyId(2)]);
 }

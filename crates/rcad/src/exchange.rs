@@ -503,13 +503,23 @@ impl RcadApp {
             return;
         };
         let mut close = false;
+        // Run 7: a surface import is not a solid import.
+        let surfaces = self
+            .summary
+            .features
+            .iter()
+            .any(|f| Some(f.id) == s.feature && f.kind == "import_surfaces");
         egui::Window::new("Import summary")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::RIGHT_BOTTOM, [-310.0, -40.0])
             .show(ctx, |ui| {
                 ui.label(RichText::new(&s.file).strong());
-                ui.label(format!("Format: {}", s.format.label()));
+                if surfaces {
+                    ui.label("Format: STEP surface models: one open-shell surface body (no volume)");
+                } else {
+                    ui.label(format!("Format: {}", s.format.label()));
+                }
                 if !s.bodies.is_empty() {
                     ui.label(format!("Bodies ({}): {}", s.bodies.len(), s.bodies.join(", ")));
                 }
@@ -529,6 +539,7 @@ impl RcadApp {
                 ui.separator();
                 ui.label(RichText::new("Supported edit actions").strong());
                 ui.small(match s.format {
+                    Format::Step if surfaces => "Exact surface body without feature history: analyse it, stitch it, fill planar holes or thicken a single face (each makes a new body). Solid operations and STEP export refuse it until it is a closed solid.",
                     Format::Step => "Exact B-rep without feature history: select/hide/rename, sketch on planar faces, Extrude Join/Cut with it as target, export STEP/STL. Its original features are not recovered.",
                     Format::Stl => "Triangle mesh: display, hide/show, rename, save, STL export. Exact operations (sketch on faces, join/cut, STEP export) are unavailable.",
                     Format::Dxf | Format::Svg => "Unconstrained sketch: edit and dimension it in the sketch editor, extrude it, export DXF/SVG. Constraints were not inferred.",

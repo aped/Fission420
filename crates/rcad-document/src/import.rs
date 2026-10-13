@@ -19,11 +19,22 @@ pub struct StepResult {
 
 /// Parse an embedded STEP file into exact solids (mm).
 pub fn step(bytes: &[u8], unit_override_to_mm: Option<f64>) -> Result<StepResult> {
+    step_opts(bytes, unit_override_to_mm, false)
+}
+
+/// [`step`] that also reads the file's surface models (run 7,
+/// `import_surfaces`); without `surfaces` they are ignored with a warning.
+pub fn step_opts(
+    bytes: &[u8],
+    unit_override_to_mm: Option<f64>,
+    surfaces: bool,
+) -> Result<StepResult> {
     let text = std::str::from_utf8(bytes)
         .map_err(|e| DocError::Validation(format!("STEP file is not valid text: {e}")))?;
     let opts = rcad_kernel::StepImportOptions {
         max_bytes: crate::io::MAX_FILE_BYTES as usize,
         unit_override_to_mm,
+        surfaces,
         ..Default::default()
     };
     let imp =

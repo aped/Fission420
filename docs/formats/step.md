@@ -50,9 +50,13 @@ All-or-nothing: the first unsupported or inconsistent entity aborts the import w
 | placement | `AXIS2_PLACEMENT_3D` (ref direction projected, defaults per ISO 10303-42) | |
 
 Surface models (run 7, docs/SURFACES.md): the shells (`OPEN_SHELL` / `CLOSED_SHELL`) of every
-`SHELL_BASED_SURFACE_MODEL` are read with the same geometry and topology code and returned as one
-open-shell surface body (`import_surfaces`); `import_step` refuses a file that has only surface
-models with a pointer to `import_surfaces` and notes them when the file also has solids.
+`SHELL_BASED_SURFACE_MODEL` are read only on request (`StepImportOptions::surfaces`, used by
+`import_surfaces`) with the same geometry and topology code and returned as one open-shell
+surface body; closed shells among them are oriented outward, and a surface model of several
+closed shells only is refused. Without the option (`import_step`, external components,
+regeneration of older documents) surface models are ignored with a warning, as before run 7, so a
+bad surface model never breaks a solid import; a file with only surface models is refused with a
+pointer to `import_surfaces`.
 `OPEN_SHELL` inside a `MANIFOLD_SOLID_BREP` stays an error. Surface bodies are not exported.
 
 Unsupported (explicit error): `BREP_WITH_VOIDS` (voids would be lost), `OPEN_SHELL` as a
