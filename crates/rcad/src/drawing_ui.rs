@@ -398,9 +398,12 @@ impl RcadApp {
                     .selected_text(st.dim_view.map(|v| v.to_string()).unwrap_or_default())
                     .show_ui(ui, |ui| {
                         for v in &views {
-                            ui.selectable_value(&mut st.dim_view, Some(*v), v.to_string());
+                            ui.selectable_value(&mut st.dim_view, Some(*v), v.to_string())
+                                .probe(&format!("Dimension view option {v}"));
                         }
-                    });
+                    })
+                    .response
+                    .probe("Dimension view");
                 let name = |r: &Option<DimRef>| {
                     r.and_then(|r| refs.iter().find(|(x, _)| *x == r))
                         .map(|(_, n)| n.clone())
@@ -410,9 +413,12 @@ impl RcadApp {
                     .selected_text(name(&st.dim_a))
                     .show_ui(ui, |ui| {
                         for (r, n) in &refs {
-                            ui.selectable_value(&mut st.dim_a, Some(*r), n);
+                            ui.selectable_value(&mut st.dim_a, Some(*r), n)
+                                .probe(&format!("Dimension from option {n}"));
                         }
-                    });
+                    })
+                    .response
+                    .probe("Dimension from");
                 let b_text = if st.dim_b.is_none() {
                     "(none: hole diameter)".to_string()
                 } else {
@@ -421,18 +427,25 @@ impl RcadApp {
                 egui::ComboBox::from_label("Dimension to")
                     .selected_text(b_text)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut st.dim_b, None, "(none: hole diameter)");
+                        ui.selectable_value(&mut st.dim_b, None, "(none: hole diameter)")
+                            .probe("Dimension to option none");
                         for (r, n) in &refs {
-                            ui.selectable_value(&mut st.dim_b, Some(*r), n);
+                            ui.selectable_value(&mut st.dim_b, Some(*r), n)
+                                .probe(&format!("Dimension to option {n}"));
                         }
-                    });
+                    })
+                    .response
+                    .probe("Dimension to");
                 egui::ComboBox::from_label("Dimension tolerance")
                     .selected_text(TOL_KINDS[st.tol_kind.min(3)])
                     .show_ui(ui, |ui| {
                         for (i, k) in TOL_KINDS.iter().enumerate() {
-                            ui.selectable_value(&mut st.tol_kind, i, *k);
+                            ui.selectable_value(&mut st.tol_kind, i, *k)
+                                .probe(&format!("Dimension tolerance option {k}"));
                         }
-                    });
+                    })
+                    .response
+                    .probe("Dimension tolerance");
                 if st.tol_kind > 0 {
                     ui.horizontal(|ui| {
                         ui.label(if st.tol_kind == 1 { "±" } else { "Upper" });
@@ -510,6 +523,16 @@ impl RcadApp {
                     });
                 }
             });
+    }
+
+    /// Issue count of the last drawing export if it belongs to the current
+    /// document revision (live-input probe).
+    pub fn last_drawing_issues(&self) -> Option<usize> {
+        self.drawing_ui
+            .report
+            .as_ref()
+            .filter(|(d, r, _)| *d == self.summary.doc_id && *r == self.summary.revision)
+            .map(|(_, _, r)| r.issues.len())
     }
 
     /// The last export report of drawing `id`, if it is for the current revision.
