@@ -188,8 +188,13 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::Countersink { .. }) {
             return Some("countersinks");
         }
-        if let crate::FeatureKind::Revolve { axis, reverse, .. } = &f.kind
-            && (!axis.is_default() || *reverse)
+        if let crate::FeatureKind::Revolve {
+            axis,
+            reverse,
+            merge,
+            ..
+        } = &f.kind
+            && (!axis.is_default() || *reverse || merge.is_some())
         {
             return Some("revolve axis/direction options");
         }

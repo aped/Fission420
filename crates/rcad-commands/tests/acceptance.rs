@@ -175,6 +175,8 @@ fn revolve_washer_edit_undo_and_limits() {
         angle_deg: 360.0,
         axis: Default::default(),
         reverse: false,
+        op: Default::default(),
+        target: None,
     });
     assert!(r.ok, "{:?}", r.error);
     assert!(

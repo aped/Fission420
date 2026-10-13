@@ -683,6 +683,7 @@ fn regen_impl(
                 body,
                 axis,
                 reverse,
+                merge,
             } => {
                 let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
                 let profile = s.single_loop(id, *sketch, "Revolve")?.clone();
@@ -701,14 +702,73 @@ fn regen_impl(
                         revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)?
                     }
                 };
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(b),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
+                match merge {
+                    None | Some(Operation::NewBody { .. }) => {
+                        create_body(
+                            &mut st,
+                            id,
+                            *body,
+                            BodyGeometry::Brep(b),
+                            BodySource::Modeled,
+                        )?;
+                        r.body = Some(*body);
+                    }
+                    Some(Operation::Join { target } | Operation::Cut { target })
+                    | Some(Operation::Intersect { target }) => {
+                        let op = match merge {
+                            Some(Operation::Join { .. }) => k::CombineOp::Join,
+                            Some(Operation::Cut { .. }) => k::CombineOp::Cut,
+                            _ => k::CombineOp::Intersect,
+                        };
+                        let t = brep_target(&st, id, *target)?;
+                        // A full turn is the same solid whatever its seam:
+                        // Truck often fails when the tool's seam lies on the
+                        // target's (coaxial revolutions), so retry with the
+                        // seam turned about the axis.
+                        let (ao, ad) = revolve_axis_world(id, &s.frame, &s.solved, *axis)?;
+                        let full = *angle >= 2.0 * std::f64::consts::PI - 1e-12;
+                        let turns: &[f64] = if full {
+                            &[0.0, 0.37, 1.13, 2.71]
+                        } else {
+                            &[0.0]
+                        };
+                        let mut last = None;
+                        let mut done = None;
+                        for &a in turns {
+                            let tool = if a == 0.0 {
+                                b.clone()
+                            } else {
+                                let rot = k::Rigid::new([0.0; 3], ao, ad, a).map_err(kernel(id))?;
+                                k::transform_body(&b, &rot).map_err(kernel(id))?
+                            };
+                            match k::combine(&t, std::slice::from_ref(&tool), op) {
+                                Ok(x) => {
+                                    done = Some(x);
+                                    break;
+                                }
+                                Err(e) => last = Some(e),
+                            }
+                        }
+                        let (out, rep) = done.ok_or_else(|| DocError::Kernel {
+                            feature: id,
+                            detail: format!(
+                                "revolve {op:?}: {}",
+                                last.map(|e| e.to_string()).unwrap_or_default()
+                            ),
+                        })?;
+                        if !rep.passed() {
+                            return Err(DocError::GeometryCheck {
+                                feature: id,
+                                detail: format!(
+                                    "revolve {op:?}: {}; refused (the model is unchanged)",
+                                    rep.failure().unwrap_or_default()
+                                ),
+                            });
+                        }
+                        replace_body(&mut st, id, *target, out);
+                        r.body = Some(*target);
+                    }
+                }
             }
             FeatureKind::Sweep {
                 profile,
@@ -3640,6 +3700,47 @@ fn revolve_about(
         return k::transform_body(&body, &t).map_err(kernel(id));
     }
     Ok(body)
+}
+
+/// The revolve axis in world coordinates (point, unit direction).
+fn revolve_axis_world(
+    id: FeatureId,
+    frame: &Frame,
+    sketch: &rcad_sketch::Sketch,
+    axis: crate::RevolveAxis,
+) -> Result<([f64; 3], [f64; 3])> {
+    let (p, q) = match axis {
+        crate::RevolveAxis::SketchY => ([0.0, 0.0], [0.0, 1.0]),
+        crate::RevolveAxis::SketchX => ([0.0, 0.0], [1.0, 0.0]),
+        crate::RevolveAxis::Line(e) => {
+            let Some(rcad_sketch::Entity::Line { a, b, .. }) =
+                sketch.entities.iter().find(|x| x.id() == e)
+            else {
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("revolve axis {e:?} is not a line of the sketch"),
+                });
+            };
+            let xy = |q: rcad_sketch::PointId| {
+                sketch
+                    .points
+                    .iter()
+                    .find(|x| x.id == q)
+                    .map(|x| [x.x, x.y])
+                    .unwrap_or([0.0, 0.0])
+            };
+            (xy(*a), xy(*b))
+        }
+    };
+    let (o, w) = (frame.to_world(p), frame.to_world(q));
+    let d = sub(w, o);
+    let l = dot(d, d).sqrt();
+    if l == 0.0 {
+        return Err(DocError::Validation(format!(
+            "{id}: revolve axis has no length"
+        )));
+    }
+    Ok((o, scale(d, 1.0 / l)))
 }
 
 /// `profile` with every point mapped by `f` (a proper rigid motion of the

@@ -2373,6 +2373,8 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             angle_deg: parse_num("angle", angle)?,
             axis: *axis,
             reverse: *reverse,
+            op: Default::default(),
+            target: None,
         },
         Dialog::Extrude(form) => form.command()?,
         Dialog::Hole {

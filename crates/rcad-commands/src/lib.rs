@@ -103,6 +103,11 @@ pub enum Command {
         axis: rcad_document::RevolveAxis,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reverse: bool,
+        /// Run 6: `join` / `cut` with `target` instead of a new body.
+        #[serde(default, skip_serializing_if = "ExtrudeOp::is_new_body")]
+        op: ExtrudeOp,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<BodyId>,
     },
     /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
     /// `a` and `b` (parallel planes) as a new body: equal-count polygons with
@@ -1264,16 +1269,33 @@ impl Session {
                 angle_deg,
                 axis,
                 reverse,
+                op,
+                target,
             } => {
                 let (name, sketch, a, axis, reverse) =
                     (name.clone(), *sketch, *angle_deg, *axis, *reverse);
+                let merge = match (op, target) {
+                    (ExtrudeOp::NewBody, _) => None,
+                    (_, None) => {
+                        return Err(DocError::Validation(
+                            "a revolve Join/Cut needs a target body".into(),
+                        ));
+                    }
+                    (ExtrudeOp::Join, Some(t)) => Some(Operation::Join { target: *t }),
+                    (ExtrudeOp::Cut, Some(t)) => Some(Operation::Cut { target: *t }),
+                    (ExtrudeOp::Intersect, Some(t)) => Some(Operation::Intersect { target: *t }),
+                };
                 if !a.is_finite() || a <= 0.0 || a > 360.0 {
                     return Err(DocError::Validation(format!(
                         "revolve angle must be in (0, 360] degrees, got {a}"
                     )));
                 }
                 let id = self.model_mut()?.transact("Revolve", |d| {
-                    let body = d.add_body(d.default_body_name());
+                    let body = if merge.is_some() {
+                        BodyId(0)
+                    } else {
+                        d.add_body(d.default_body_name())
+                    };
                     let n = name.unwrap_or_else(|| d.default_name("Revolve"));
                     Ok(d.push(
                         n,
@@ -1283,6 +1305,7 @@ impl Session {
                             body,
                             axis,
                             reverse,
+                            merge,
                         },
                     ))
                 })?;

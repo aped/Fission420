@@ -53,6 +53,8 @@ fn revolve(
         angle_deg: deg,
         axis,
         reverse,
+        op: Default::default(),
+        target: None,
     })
 }
 
@@ -162,4 +164,41 @@ fn axis_line_follows_edits_and_refusals() {
         false,
     );
     assert!(!r.ok);
+}
+
+fn revolve_op(s: &mut Session, sketch: Sketch, op: &str) -> rcad_commands::Response {
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXZ,
+        template: SketchTemplate::Custom { sketch },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    let c: Command = serde_json::from_value(json!({"cmd": "revolve", "sketch": r.feature.unwrap(),
+        "angle_deg": 360.0, "op": op, "target": 1}))
+    .unwrap();
+    s.execute(&c)
+}
+
+#[test]
+fn revolve_cut_is_exact_or_refused_unchanged() {
+    // Known limit (Truck 0.6): revolved Join/Cut tools fail in Truck for the
+    // cases tried in run 6 (a coaxial groove on a cylinder on four seam
+    // angles; a ring groove in a block: Truck panics). Whatever Truck does,
+    // the result is either exact (independent membership check) or refused
+    // with nothing changed.
+    let mut s = fresh();
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_circle",
+                "diameter": 20.0}),
+    );
+    tray::ok(&mut s, &json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}));
+    let r = revolve_op(&mut s, rect_sketch(9.0, 10.0, 11.0, 12.0, None), "cut");
+    if r.ok {
+        // Should Truck ever build it, the result must be exact.
+        assert!((tray::volume(&s) - (PI * 3000.0 - PI * 38.0)).abs() < 1e-3);
+    } else {
+        assert!(s.summary().bodies.len() == 1);
+        assert!((tray::volume(&s) - PI * 3000.0).abs() < 1e-6);
+    }
 }

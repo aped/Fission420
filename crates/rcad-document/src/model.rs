@@ -321,6 +321,11 @@ pub enum FeatureKind {
         axis: RevolveAxis,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reverse: bool,
+        /// Run 6: join to / cut from an existing body instead of a new body
+        /// (`body` is then unused). Built with the kernel boolean and checked
+        /// independently by point membership (`rcad_kernel::combine`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        merge: Option<Operation>,
     },
     /// Extrusion of a sketch profile along the sketch normal (or against it when
     /// `reverse`): a new body, or joined to / cut from an explicit target body.
@@ -778,7 +783,9 @@ impl Feature {
                 operation: Operation::NewBody { body },
                 ..
             }
-            | FeatureKind::Revolve { body, .. }
+            | FeatureKind::Revolve {
+                body, merge: None, ..
+            }
             | FeatureKind::Loft { body, .. }
             | FeatureKind::Sweep { body, .. }
             | FeatureKind::ImportMesh { body, .. }
@@ -809,7 +816,11 @@ impl Feature {
             | FeatureKind::Hole { target, .. }
             | FeatureKind::MoveBody { body: target, .. }
             | FeatureKind::SplitBody { body: target, .. }
-            | FeatureKind::Combine { target, .. } => Some(*target),
+            | FeatureKind::Combine { target, .. }
+            | FeatureKind::Revolve {
+                merge: Some(Operation::Join { target } | Operation::Cut { target }),
+                ..
+            } => Some(*target),
             FeatureKind::DirectEdit {
                 face:
                     FaceRef {
