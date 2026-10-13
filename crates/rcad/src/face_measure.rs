@@ -167,6 +167,12 @@ impl RcadApp {
             });
         if let Some((_, _, _, _, rep)) = current {
             ui.label(describe(&rep.a));
+            if let Some(a) = rep.area {
+                ui.label(format!("Area {} mm² (exact)", mm(a)))
+                    .on_hover_text(
+                        "Planar face area from the B-rep boundary (lines and arcs exact)",
+                    );
+            }
             if let Some(b) = &rep.b {
                 ui.label(describe(b));
             }

@@ -152,3 +152,29 @@ fn rotated_body_axis_distance_is_invariant() {
     let d = dist(&measure(&mut s, h1, Some(h2)).pair.unwrap());
     assert!((d - 30f64.hypot(20.0)).abs() < 1e-9, "{d}");
 }
+
+/// Run 7: exact planar face area (holes subtracted), following an edit.
+#[test]
+fn planar_face_area_is_exact_and_follows_edits() {
+    let mut s = Session::new();
+    plate(&mut s);
+    let fs = faces(&mut s);
+    let top = plane(&fs, [0.0, 0.0, 1.0], 20.0);
+    let front = plane(&fs, [0.0, -1.0, 0.0], 0.0);
+    let pi = std::f64::consts::PI;
+    let a = measure(&mut s, top, None).area.unwrap();
+    assert!((a - (2400.0 - pi * (25.0 + 9.0))).abs() < 1e-9, "{a}");
+    assert!((measure(&mut s, front, None).area.unwrap() - 1200.0).abs() < 1e-9);
+    // Cylinders report no area (planar faces only).
+    let hole = cyl(&fs, 5.0);
+    assert!(measure(&mut s, hole, None).area.is_none());
+    // Hole Ø10 -> Ø12.
+    ok(
+        &mut s,
+        json!({"cmd": "set_parameter", "feature": 3, "name": "diameter", "value": 12.0}),
+    );
+    let fs = faces(&mut s);
+    let top = plane(&fs, [0.0, 0.0, 1.0], 20.0);
+    let a = measure(&mut s, top, None).area.unwrap();
+    assert!((a - (2400.0 - pi * (36.0 + 9.0))).abs() < 1e-9, "{a}");
+}
