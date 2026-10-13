@@ -49,9 +49,15 @@ All-or-nothing: the first unsupported or inconsistent entity aborts the import w
 | curves | `LINE` (trimmed to the vertices); `CIRCLE`, `ELLIPSE` (rational quadratic B-spline, spans <= 90 deg, ellipse = affine image of a circle); `B_SPLINE_CURVE_WITH_KNOTS` and the rational complex form (trimmed by exact knot insertion); `SURFACE_CURVE` / `SEAM_CURVE` (their 3D curve) | Truck `Line`, `BSplineCurve`, `NurbsCurve` |
 | placement | `AXIS2_PLACEMENT_3D` (ref direction projected, defaults per ISO 10303-42) | |
 
-Unsupported (explicit error): `BREP_WITH_VOIDS` (voids would be lost), `OPEN_SHELL`,
-`FACETED_BREP`, `SHELL_BASED_SURFACE_MODEL` and other non-solid models (reported as "no
-MANIFOLD_SOLID_BREP ... unsupported content"), `HYPERBOLA`, `PARABOLA`, `POLYLINE`,
+Surface models (run 7, docs/SURFACES.md): the shells (`OPEN_SHELL` / `CLOSED_SHELL`) of every
+`SHELL_BASED_SURFACE_MODEL` are read with the same geometry and topology code and returned as one
+open-shell surface body (`import_surfaces`); `import_step` refuses a file that has only surface
+models with a pointer to `import_surfaces` and notes them when the file also has solids.
+`OPEN_SHELL` inside a `MANIFOLD_SOLID_BREP` stays an error. Surface bodies are not exported.
+
+Unsupported (explicit error): `BREP_WITH_VOIDS` (voids would be lost), `OPEN_SHELL` as a
+solid's shell, `FACETED_BREP` and other non-solid models (reported as "no MANIFOLD_SOLID_BREP
+... unsupported content"), `HYPERBOLA`, `PARABOLA`, `POLYLINE`,
 `TRIMMED_CURVE`, `PCURVE`-only edges, `BEZIER_*`/`UNIFORM_*`/`QUASI_UNIFORM_*` B-spline
 subtypes, `SURFACE_OF_LINEAR_EXTRUSION`, `SURFACE_OF_REVOLUTION`, offset surfaces,
 `MAPPED_ITEM`, non-rigid placements, self-intersecting tori, periodic B-spline edges whose

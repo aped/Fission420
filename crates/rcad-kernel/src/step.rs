@@ -71,6 +71,13 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
 /// Compressed copy of `body` with every `IntersectionCurve` edge replaced by its
 /// verified exact curve; refuses (InvalidInput) when an edge cannot be rebuilt.
 fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surface>> {
+    // Run 7: an open surface body is not a solid; writing it as a
+    // MANIFOLD_SOLID_BREP would be a malformed file.
+    if body.is_open_shell() {
+        return Err(KernelError::InvalidInput(
+            "the body is an open surface (no solid): STEP export of surface bodies is not supported; stitch, fill or thicken it first".into(),
+        ));
+    }
     let mut cs = body.solid.compress();
     for shell in &mut cs.boundaries {
         let verts = shell.vertices.clone();
