@@ -1169,7 +1169,9 @@ pub fn remove_cylinder(body: &Body, face: usize) -> Result<DirectEdit> {
 }
 
 mod countersink;
+mod replace;
 pub use countersink::countersink;
+pub use replace::{replace_face, tilt_offset_frame};
 
 #[cfg(test)]
 mod tests;

@@ -692,8 +692,12 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::MoveBody { .. } if matches!(name, "tx" | "ty" | "tz") => {
             Some(SlotKind::Length)
         }
+        FeatureKind::DirectEdit { .. } if name == "angle_deg" => {
+            kind_has(kind, name).then_some(SlotKind::Angle)
+        }
         FeatureKind::DirectEdit { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "diameter" => Some(SlotKind::Length),
+        FeatureKind::Thread { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::Countersink { .. } if name == "angle_deg" => Some(SlotKind::Angle),
         FeatureKind::Hole { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         _ => None,

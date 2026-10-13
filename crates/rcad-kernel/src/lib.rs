@@ -22,6 +22,7 @@ mod step;
 mod step_in;
 mod sweep;
 mod taper;
+mod thread;
 mod transform;
 mod validate;
 
@@ -33,7 +34,8 @@ pub use combine::{
 };
 pub use direct::{
     CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, countersink,
-    cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,
+    cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, replace_face,
+    resize_cylinder, tilt_offset_frame,
 };
 pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
@@ -60,6 +62,7 @@ pub use step_in::{
 };
 pub use sweep::{PathSegment, sweep};
 pub use taper::{taper_section, tapered_boolean, tapered_tool};
+pub use thread::{ThreadReport, ThreadSpec, threaded_nut, threaded_rod};
 pub use transform::{Rigid, transform_body};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,

@@ -204,6 +204,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::SplitBody { .. }) {
             return Some("split bodies");
         }
+        if matches!(f.kind, crate::FeatureKind::Thread { .. }) {
+            return Some("modeled threads");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }

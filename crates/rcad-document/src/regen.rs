@@ -1115,6 +1115,56 @@ fn regen_impl(
                 replace_body(&mut st, id, body, out);
                 r.body = Some(body);
             }
+            FeatureKind::Thread {
+                plane,
+                center,
+                diameter,
+                pitch,
+                length,
+                left_hand,
+                chord_tol,
+                nut,
+                body,
+            } => {
+                let (frame, rf) = plane_frame(id, plane, &st)?;
+                r.resolved_face = rf;
+                let frame = Frame {
+                    origin: frame.to_world(*center),
+                    ..frame
+                };
+                r.frame = Some(frame);
+                let spec = k::ThreadSpec {
+                    major_diameter: *diameter,
+                    pitch: *pitch,
+                    length: *length,
+                    left_hand: *left_hand,
+                    chord_tol: *chord_tol,
+                };
+                let built = match nut {
+                    None => k::threaded_rod(&frame, &spec),
+                    Some(n) => k::threaded_nut(&frame, &spec, n.width, n.clearance),
+                };
+                let (solid, report) = built.map_err(|e| match e {
+                    k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
+                    other => DocError::Kernel {
+                        feature: id,
+                        detail: other.to_string(),
+                    },
+                })?;
+                r.notes = vec![format!(
+                    "faceted thread: {} segments per turn, {} planar faces, largest facet \
+                     deviation {:.4} mm (tolerance {} mm); not an exact helicoid",
+                    report.segments_per_turn, report.faces, report.max_facet_deviation, chord_tol
+                )];
+                create_body(
+                    &mut st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid),
+                    BodySource::Modeled,
+                )?;
+                r.body = Some(*body);
+            }
             FeatureKind::Countersink {
                 hole,
                 diameter,
@@ -1194,8 +1244,23 @@ fn regen_impl(
                 })?;
                 let target = brep_target(&st, id, bid)?;
                 let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
-                let out =
-                    crate::direct::apply(id, face, *op, &target, last, st.face_ids.get(&bid))?;
+                let pivot = match face.role {
+                    FaceRole::Imported { face: index, .. } => st
+                        .imported_faces
+                        .get(&(face.feature, bid))
+                        .and_then(|t| t.iter().find(|f| f.index == index))
+                        .map(|f| f.frame),
+                    _ => None,
+                };
+                let out = crate::direct::apply(
+                    id,
+                    face,
+                    *op,
+                    &target,
+                    last,
+                    st.face_ids.get(&bid),
+                    pivot,
+                )?;
                 replace_body(&mut st, id, bid, out.body);
                 st.face_ids.insert(bid, out.ids);
                 if let (FaceRole::Imported { face: index, .. }, Some(t)) =

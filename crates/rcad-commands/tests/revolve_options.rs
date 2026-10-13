@@ -192,7 +192,10 @@ fn revolve_cut_is_exact_or_refused_unchanged() {
         &json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_circle",
                 "diameter": 20.0}),
     );
-    tray::ok(&mut s, &json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}));
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}),
+    );
     let r = revolve_op(&mut s, rect_sketch(9.0, 10.0, 11.0, 12.0, None), "cut");
     if r.ok {
         // Should Truck ever build it, the result must be exact.

@@ -554,6 +554,36 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_tools: bool,
     },
+    /// Modeled screw thread as a new body (run 6, ADR 0011): a threaded rod
+    /// (external thread), or with `nut` a square nut (internal thread with
+    /// radial clearance), axis along the normal of `plane` through `center`
+    /// (plane coordinates). Stated 60° symmetric V test profile, one-turn
+    /// lead-in/runout, `length` a whole number of pitches. **Faceted** with
+    /// chord tolerance `chord_tol` (planar facets through points of the ideal
+    /// helicoid; `rcad_kernel::threaded_rod` / `threaded_nut`). Parameters
+    /// "diameter", "pitch", "length", and for a nut "nut_width",
+    /// "clearance".
+    Thread {
+        plane: SketchPlane,
+        #[serde(default)]
+        center: [f64; 2],
+        diameter: f64,
+        pitch: f64,
+        length: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        left_hand: bool,
+        chord_tol: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nut: Option<NutSpec>,
+        body: BodyId,
+    },
+}
+
+/// Nut of a [`FeatureKind::Thread`]: square `width`, radial `clearance` (mm).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct NutSpec {
+    pub width: f64,
+    pub clearance: f64,
 }
 
 /// (Split body variant lives in FeatureKind; see `SplitBody`.)
@@ -678,6 +708,12 @@ pub enum DirectOp {
     /// Delete the hole or boss whose cylindrical wall is the face and close
     /// the openings it leaves.
     RemoveCylinder,
+    /// Replace the planar face by another plane: its imported frame tilted
+    /// by `angle` (radians; parameter `angle_deg`) about the frame's x axis
+    /// through its origin, then moved `distance` mm along the tilted normal
+    /// (parameter "distance"). Single convex loop, planar neighbours only
+    /// (`rcad_kernel::replace_face`).
+    ReplaceFace { distance: f64, angle: f64 },
 }
 
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
@@ -770,6 +806,9 @@ impl Feature {
             FeatureKind::Countersink { hole, .. } => vec![*hole],
             // Body creators (target and tools) come from `Document::dependencies_of`.
             FeatureKind::Combine { .. } => vec![],
+            FeatureKind::Thread { plane, .. } => {
+                plane.face().map(|r| r.feature).into_iter().collect()
+            }
             FeatureKind::ImportStep { .. }
             | FeatureKind::ImportMesh { .. }
             | FeatureKind::Import3mf { .. } => vec![],
@@ -788,6 +827,7 @@ impl Feature {
             }
             | FeatureKind::Loft { body, .. }
             | FeatureKind::Sweep { body, .. }
+            | FeatureKind::Thread { body, .. }
             | FeatureKind::ImportMesh { body, .. }
             | FeatureKind::MoveBody {
                 copy: Some(body), ..
@@ -921,6 +961,24 @@ impl Feature {
             }
             FeatureKind::ImportMesh { .. } | FeatureKind::Import3mf { .. } => vec![],
             FeatureKind::Loft { .. } | FeatureKind::Sweep { .. } => vec![],
+            FeatureKind::Thread {
+                diameter,
+                pitch,
+                length,
+                nut,
+                ..
+            } => {
+                let mut v = vec![
+                    ("diameter".into(), *diameter),
+                    ("pitch".into(), *pitch),
+                    ("length".into(), *length),
+                ];
+                if let Some(n) = nut {
+                    v.push(("nut_width".into(), n.width));
+                    v.push(("clearance".into(), n.clearance));
+                }
+                v
+            }
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
             FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
@@ -967,6 +1025,10 @@ impl Feature {
                 DirectOp::OffsetFace { distance } => vec![("distance".into(), *distance)],
                 DirectOp::ResizeCylinder { diameter } => vec![("diameter".into(), *diameter)],
                 DirectOp::RemoveCylinder => vec![],
+                DirectOp::ReplaceFace { distance, angle } => vec![
+                    ("distance".into(), *distance),
+                    ("angle_deg".into(), angle.to_degrees()),
+                ],
             },
             FeatureKind::Hole {
                 center,
@@ -1420,6 +1482,38 @@ impl Feature {
                 }
                 Ok(())
             }
+            FeatureKind::Thread {
+                diameter,
+                pitch,
+                length,
+                nut,
+                ..
+            } if matches!(
+                name,
+                "diameter" | "pitch" | "length" | "nut_width" | "clearance"
+            ) =>
+            {
+                let slot = match (name, nut.as_mut()) {
+                    ("diameter", _) => diameter,
+                    ("pitch", _) => pitch,
+                    ("length", _) => length,
+                    ("nut_width", Some(n)) => &mut n.width,
+                    ("clearance", Some(n)) => &mut n.clearance,
+                    _ => {
+                        return Err(DocError::UnknownParameter {
+                            feature: id,
+                            name: name.into(),
+                        });
+                    }
+                };
+                if value < 0.0 || (value == 0.0 && name != "clearance") {
+                    return Err(DocError::Validation(format!(
+                        "{id}.{name}: must be > 0 mm, got {value}"
+                    )));
+                }
+                *slot = value;
+                Ok(())
+            }
             FeatureKind::Countersink { diameter, .. } if name == "diameter" => {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
@@ -1449,6 +1543,25 @@ impl Feature {
                     )));
                 }
                 *distance = value;
+                Ok(())
+            }
+            FeatureKind::DirectEdit {
+                op: DirectOp::ReplaceFace { distance, .. },
+                ..
+            } if name == "distance" => {
+                *distance = value;
+                Ok(())
+            }
+            FeatureKind::DirectEdit {
+                op: DirectOp::ReplaceFace { angle, .. },
+                ..
+            } if name == "angle_deg" => {
+                if value.abs() >= 89.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.angle_deg: the tilt must be below 89 degrees, got {value}"
+                    )));
+                }
+                *angle = value.to_radians();
                 Ok(())
             }
             FeatureKind::DirectEdit {

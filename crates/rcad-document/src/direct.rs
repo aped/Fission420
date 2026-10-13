@@ -61,6 +61,7 @@ pub(crate) fn apply(
     body: &k::Body,
     last: FeatureId,
     ids: Option<&ImportedFaceIds>,
+    pivot: Option<rcad_kernel::Frame>,
 ) -> Result<Applied> {
     let FaceRole::Imported {
         body: bid,
@@ -92,11 +93,26 @@ pub(crate) fn apply(
         DirectOp::OffsetFace { .. } => "offset face",
         DirectOp::ResizeCylinder { .. } => "resize hole/boss",
         DirectOp::RemoveCylinder => "remove hole/boss",
+        DirectOp::ReplaceFace { .. } => "replace face",
     };
     let out = match op {
         DirectOp::OffsetFace { distance } => k::offset_face(body, pos, distance),
         DirectOp::ResizeCylinder { diameter } => k::resize_cylinder(body, pos, diameter),
         DirectOp::RemoveCylinder => k::remove_cylinder(body, pos),
+        DirectOp::ReplaceFace { distance, angle } => {
+            let Some(frame) = pivot else {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: imported face {index} is not planar; only planar faces can be replaced"
+                )));
+            };
+            if !(distance.is_finite() && angle.is_finite() && angle.abs() < 89f64.to_radians()) {
+                return Err(DocError::Validation(format!(
+                    "{id}: replace face: distance must be finite and the tilt below 89 degrees"
+                )));
+            }
+            let f = k::tilt_offset_frame(&frame, distance, angle);
+            k::replace_face(body, pos, f.origin, f.z)
+        }
     }
     .map_err(|e| match e {
         k::KernelError::InvalidInput(m) => {
@@ -135,10 +151,14 @@ pub(crate) fn update_planar_table(
     op: DirectOp,
     removed: &[u32],
 ) {
-    if let DirectOp::OffsetFace { distance } = op
-        && let Some(f) = table.iter_mut().find(|f| f.index == face)
-    {
-        f.frame = f.frame.offset(distance);
+    if let Some(f) = table.iter_mut().find(|f| f.index == face) {
+        match op {
+            DirectOp::OffsetFace { distance } => f.frame = f.frame.offset(distance),
+            DirectOp::ReplaceFace { distance, angle } => {
+                f.frame = rcad_kernel::tilt_offset_frame(&f.frame, distance, angle)
+            }
+            _ => {}
+        }
     }
     table.retain(|f| !removed.contains(&f.index));
 }
