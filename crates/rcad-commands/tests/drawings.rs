@@ -775,3 +775,155 @@ fn cylinder_silhouettes_are_exact() {
     assert!((top.circles[0].2 - 10.0 * scale).abs() < 1e-3);
     assert_eq!(dims(&g), vec!["20", "20", "30", "Ø20"]);
 }
+
+/// DXF group-code pairs → (entity type, layer, codes) list.
+fn read_dxf(text: &str) -> Vec<(String, String, BTreeMap<i32, Vec<String>>)> {
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines.len().is_multiple_of(2), "odd number of DXF lines");
+    let pairs: Vec<(i32, &str)> = lines
+        .chunks(2)
+        .map(|c| (c[0].trim().parse().unwrap(), c[1]))
+        .collect();
+    let start = pairs
+        .iter()
+        .position(|p| *p == (2, "ENTITIES"))
+        .expect("ENTITIES section");
+    let mut out: Vec<(String, String, BTreeMap<i32, Vec<String>>)> = Vec::new();
+    for &(code, v) in &pairs[start + 1..] {
+        if code == 0 {
+            if v == "ENDSEC" {
+                break;
+            }
+            out.push((v.to_string(), String::new(), BTreeMap::new()));
+        } else if let Some(e) = out.last_mut() {
+            if code == 8 {
+                e.1 = v.to_string();
+            }
+            e.2.entry(code).or_default().push(v.to_string());
+        }
+    }
+    out
+}
+
+#[test]
+fn dxf_export_has_layers_units_and_the_same_geometry() {
+    let mut s = Session::new();
+    block(&mut s, 8.0, 20.0, 15.0);
+    let d = drawing_of(&mut s);
+    let path = out_dir().join("block.dxf");
+    let r = ok(
+        &mut s,
+        Command::ExportDrawing {
+            drawing: d,
+            path: path.clone(),
+            format: None,
+        },
+    );
+    assert_eq!(r.drawing_report.unwrap().format, DrawingFormat::Dxf);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("$INSUNITS\n 70\n4\n"), "declared mm");
+    let ents = read_dxf(&text);
+    let count = |t: &str, l: &str| ents.iter().filter(|e| e.0 == t && e.1 == l).count();
+    // 3 rectangles + nothing else visible (the circle is a CIRCLE).
+    assert_eq!(count("LINE", "VISIBLE"), 12);
+    assert_eq!(count("LINE", "HIDDEN"), 4);
+    assert_eq!(count("CIRCLE", "VISIBLE"), 1);
+    let c = ents.iter().find(|e| e.0 == "CIRCLE").unwrap();
+    assert_eq!(c.2[&40][0].parse::<f64>().unwrap(), 4.0);
+    let hidden_len: f64 = ents
+        .iter()
+        .filter(|e| e.0 == "LINE" && e.1 == "HIDDEN")
+        .map(|e| {
+            let g = |k: i32| e.2[&k][0].parse::<f64>().unwrap();
+            (g(11) - g(10)).hypot(g(21) - g(20))
+        })
+        .sum();
+    assert!((hidden_len - 40.0).abs() < 1e-5, "{hidden_len}");
+    let texts: Vec<&str> = ents
+        .iter()
+        .filter(|e| e.0 == "TEXT")
+        .map(|e| e.2[&1][0].as_str())
+        .collect();
+    for t in ["40", "30", "10", "%%c8", "THIRD ANGLE PROJECTION"] {
+        assert!(texts.contains(&t), "{t} in {texts:?}");
+    }
+    // Deterministic.
+    ok(
+        &mut s,
+        Command::ExportDrawing {
+            drawing: d,
+            path: out_dir().join("block2.dxf"),
+            format: Some(DrawingFormat::Dxf),
+        },
+    );
+    assert_eq!(
+        std::fs::read_to_string(out_dir().join("block2.dxf")).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn title_block_fields_come_from_the_model_and_scale_applies() {
+    let mut s = Session::new();
+    block(&mut s, 8.0, 20.0, 15.0);
+    ok(
+        &mut s,
+        Command::SetBodyMaterial {
+            body: BodyId(1),
+            material: Some("pla".into()),
+            density: None,
+            density_unit: Default::default(),
+            name: None,
+        },
+    );
+    ok(
+        &mut s,
+        Command::SetConfiguration {
+            name: "Std".into(),
+            values: Default::default(),
+            suppressed: vec![],
+            part_number: "PN-STD-40".into(),
+        },
+    );
+    ok(
+        &mut s,
+        Command::ActivateConfiguration { name: "Std".into() },
+    );
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: Some(rcad_document::drawing::SheetSize::A3Landscape),
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: None,
+        },
+    )
+    .drawing
+    .unwrap();
+    ok(
+        &mut s,
+        Command::EditDrawingView {
+            drawing: d,
+            view: ViewId(1),
+            scale: Some(2.0),
+            position: None,
+            orientation: None,
+        },
+    );
+    let (r, svg) = export(&mut s, d, "a3_scale2.svg");
+    let rep = r.drawing_report.unwrap();
+    assert!(rep.issues.is_empty(), "{:?}", rep.issues);
+    let (w, h, g) = read_svg(std::str::from_utf8(&svg).unwrap());
+    assert_eq!((w, h), (420.0, 297.0));
+    let t = texts(&g, "title");
+    for want in ["PN-STD-40", "PLA", "2:1", "Drawing1", "A3 mm"] {
+        assert!(t.contains(&want.to_string()), "{want} in {t:?}");
+    }
+    // Scale 2: every view doubles; dimension values stay model values.
+    check_views(&g, 2.0, 8.0, 20.0, 15.0, true, "scale 2");
+    assert_eq!(dims(&g), vec!["10", "30", "40", "Ø8"]);
+}

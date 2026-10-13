@@ -36,6 +36,8 @@ pub enum ViewSpec {
 pub enum DrawingFormat {
     Svg,
     Pdf,
+    /// R12 ASCII DXF in mm, one layer per line style.
+    Dxf,
 }
 
 /// What an export reports (the sheet itself is in the file).
@@ -399,9 +401,10 @@ impl Session {
                     {
                         Some("svg") => DrawingFormat::Svg,
                         Some("pdf") => DrawingFormat::Pdf,
+                        Some("dxf") => DrawingFormat::Dxf,
                         _ => {
                             return Err(bad(format!(
-                                "give a format (svg or pdf) for {}",
+                                "give a format (svg, pdf or dxf) for {}",
                                 path.display()
                             )));
                         }
@@ -414,6 +417,9 @@ impl Session {
                         rcad_exchange::drawing::write_svg(&out.sheet).into_bytes()
                     }
                     DrawingFormat::Pdf => rcad_exchange::pdf::write_pdf(&out.sheet),
+                    DrawingFormat::Dxf => {
+                        rcad_exchange::drawing_dxf::write_dxf(&out.sheet).into_bytes()
+                    }
                 };
                 write_atomic(path, &bytes)?;
                 r.message = Some(format!(

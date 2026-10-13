@@ -750,7 +750,7 @@ pub enum Command {
         feature: FeatureId,
     },
     /// Render the drawing from the current geometry and write it (`format`
-    /// default from the extension: .svg / .pdf). `Response.drawing_report`.
+    /// default from the extension: .svg / .pdf / .dxf). `Response.drawing_report`.
     ExportDrawing {
         drawing: rcad_document::drawing::DrawingId,
         path: PathBuf,

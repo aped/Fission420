@@ -4,7 +4,7 @@ Status: run 6, foundation of SESSION_7 §4 (coverage DW01 base/projected views a
 DW02 driven dimensions: partial). Code: `crates/rcad-document/src/drawing.rs` (model,
 projection, hidden lines, dimensions), `crates/rcad-kernel/src/edges.rs` (exact B-rep edges),
 `crates/rcad-exchange/src/drawing.rs` (sheet primitives, SVG writer),
-`crates/rcad-exchange/src/pdf.rs` (PDF writer), `crates/rcad-commands/src/drawings.rs`
+`crates/rcad-exchange/src/pdf.rs` (PDF writer), `crates/rcad-exchange/src/drawing_dxf.rs` (DXF writer), `crates/rcad-commands/src/drawings.rs`
 (commands). Tests: `crates/rcad-commands/tests/drawings.rs`.
 
 ## What is stored and what is computed
@@ -99,9 +99,15 @@ exact edges); the view is flagged.
   (WinAnsiEncoding; `Ø` is code 0xD8), each group is a marked-content sequence
   `/RCADGroup <</Name (view-1)>> BDC … EMC`. Arcs and circles are cubic Béziers of at most 90°
   (radial error < 2.8e-4 × r); lines are exact.
+* **DXF** (`.dxf`): R12 ASCII (`crates/rcad-exchange/src/drawing_dxf.rs`), sheet mm,
+  `$INSUNITS` 4 (mm), layers `VISIBLE`, `HIDDEN` (linetype DASHED), `CENTER` (CENTER),
+  `THIN`, `FRAME`, `FLAG` (red). Exact `LINE`/`ARC`/`CIRCLE`; polylines as consecutive
+  `LINE`s, arrowheads as `SOLID`, text as `TEXT` with `Ø` written as `%%c`. View grouping is
+  not represented (R12 has no groups without blocks); layers carry the line style.
 
-Both are deterministic: identical documents give identical bytes (tested after save/reopen).
-Numbers are written with 3 (SVG) or 4 (PDF) decimals.
+All three are deterministic: identical documents give identical bytes (tested after
+save/reopen for SVG/PDF, twice for DXF). Numbers are written with 3 (SVG), 4 (PDF) or 6 (DXF)
+decimals.
 
 ## Verification
 
@@ -126,11 +132,18 @@ interpreter), independent of the writer's types:
 * External reader: poppler's `pdfinfo`/`pdftotext`/`pdftoppm` read the exported PDF (page size
   A4 841.89 × 595.276 pt, all texts extracted, rendered for visual inspection;
   `tools/validate_drawing_pdf.sh`).
+* DXF: the test reads the group codes back (12 visible / 4 hidden lines, hidden total 40 mm,
+  one Ø8 circle, texts `40`, `30`, `10`, `%%c8`); FreeCAD's DXF importer reads the same file
+  with the same counts and lengths per layer (`tools/validate_drawing_dxf.sh`, via
+  `tools/freecad_check_drawing_dxf.py`).
+* Title block from the model: material PLA on the body and an active configuration with part
+  number PN-STD-40 appear in the title block; an A3 sheet at 2:1 doubles every view while the
+  dimension values stay 40/30/10/Ø8.
 
 ## Not supported (yet)
 
 Section views and hatching, detail views, broken/auxiliary views, user-placed linear/angular
 dimensions, tolerances and fits, notes and leaders other than hole callouts, thread
 representation, BOM tables and balloons (no assembly model to count yet), multiple sheets per
-drawing, DXF export of drawings, a drawing editor canvas (views are placed numerically),
+drawing, view grouping in DXF, a drawing editor canvas (views are placed numerically),
 tangent edges drawn as thin lines, the ISO projection symbol, dangling-reference repair UI.
