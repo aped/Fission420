@@ -196,3 +196,76 @@ fn surface_body_analyse_fill_and_thicken_from_the_inspector() {
     let b = h.state().summary().bodies.last().unwrap().id.0;
     assert!((volume(&h, b).unwrap() - 3000.0).abs() < 1e-6);
 }
+
+/// Review S8: an obround base keeps its relief when only the thickness is
+/// edited through the rule editor; review S13: an invalid gap search shows
+/// why Analyse is unavailable.
+#[test]
+fn rule_editor_sends_only_changes() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 60.0,
+            height: 40.0,
+            center: Some([30.0, 20.0]),
+        },
+    });
+    settle(&mut h);
+    let sk = h.state().summary().features[0].id;
+    h.state_mut().request(Command::SheetBase(
+        rcad_commands::sheet_surface::SheetBaseArgs {
+            name: None,
+            sketch: sk,
+            thickness: 1.0,
+            radius: 1.0,
+            k_factor: 0.44,
+            relief: rcad_document::sheet::ReliefShape::Obround,
+            relief_width: Some(2.0),
+            relief_depth: Some(2.0),
+            flip: false,
+            body_name: None,
+        },
+    ));
+    settle(&mut h);
+    let base = feature_name(&h, "sheet_base");
+    click(&mut h, &base);
+    type_into(&mut h, "Thickness (mm)", "1.5");
+    click(&mut h, "Apply rule");
+    let f = h
+        .state()
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.kind == "sheet_base")
+        .unwrap()
+        .clone();
+    assert!(f.parameters.contains(&("thickness".to_string(), 1.5)));
+    assert!(
+        f.notes.iter().any(|n| n.contains("Obround relief")),
+        "{:?}",
+        f.notes
+    );
+    // Undo, then apply a K edit: the thickness is the reloaded 1, not 1.5.
+    h.state_mut().request(Command::Undo);
+    settle(&mut h);
+    click(&mut h, &base);
+    type_into(&mut h, "K-factor", "0.5");
+    click(&mut h, "Apply rule");
+    let f = h
+        .state()
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.kind == "sheet_base")
+        .unwrap()
+        .clone();
+    assert!(
+        f.parameters.contains(&("thickness".to_string(), 1.0)),
+        "{:?}",
+        f.parameters
+    );
+    assert!(f.parameters.contains(&("k_factor".to_string(), 0.5)));
+}

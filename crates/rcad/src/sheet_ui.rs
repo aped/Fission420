@@ -29,7 +29,14 @@ pub struct SheetSurfaceForm {
     pub rule: [String; 5],
     pub relief: ReliefShape,
     /// Rule editor: the base it was loaded from (reload on change).
-    pub rule_for: Option<FeatureId>,
+    /// (base, document revision) the editor was loaded at: reloaded after
+    /// any change (undo, parameter edit) so Apply never restores stale values.
+    pub rule_for: Option<(FeatureId, u64)>,
+    /// Rule editor: values as loaded (only changed fields are sent) and the
+    /// relief shape of the base (separate from the new-base form).
+    pub loaded: [Option<f64>; 5],
+    pub edit_relief: ReliefShape,
+    pub loaded_relief: ReliefShape,
     /// Flange: edge entity, angle (deg), length, start offset, end offset.
     pub edge: Option<u32>,
     pub flange: [String; 4],
@@ -49,6 +56,9 @@ impl Default for SheetSurfaceForm {
             rule: ["1", "2", "0.44", "1", "1"].map(String::from),
             relief: ReliefShape::Rectangular,
             rule_for: None,
+            loaded: [None; 5],
+            edit_relief: ReliefShape::Rectangular,
+            loaded_relief: ReliefShape::Rectangular,
             edge: None,
             flange: ["90", "20", "0", "0"].map(String::from),
             down: false,
@@ -205,9 +215,17 @@ impl RcadApp {
             ui.colored_label(Color32::from_rgb(255, 160, 120), "Sheet body not created");
         }
         // Rule editor (loaded from the base parameters).
+        let rev = self.summary.revision;
         let form = &mut self.sheet_surface;
-        if form.rule_for != Some(base) {
-            form.rule_for = Some(base);
+        if form.rule_for != Some((base, rev)) {
+            form.rule_for = Some((base, rev));
+            // Review S8: the relief shape of this base (from its rule note).
+            form.loaded_relief = if bf.notes.iter().any(|n| n.contains("Obround relief")) {
+                ReliefShape::Obround
+            } else {
+                ReliefShape::Rectangular
+            };
+            form.edit_relief = form.loaded_relief;
             for (i, n) in [
                 "thickness",
                 "radius",
@@ -218,8 +236,10 @@ impl RcadApp {
             .iter()
             .enumerate()
             {
-                if let Some((_, v)) = bf.parameters.iter().find(|(k, _)| k == n) {
-                    form.rule[i] = crate::params_ui::fmt_value(*v);
+                let v = bf.parameters.iter().find(|(k, _)| k == n).map(|p| p.1);
+                form.loaded[i] = v;
+                if let Some(v) = v {
+                    form.rule[i] = crate::params_ui::fmt_value(v);
                 }
             }
         }
@@ -239,7 +259,7 @@ impl RcadApp {
                 {
                     num_field(ui, l, &mut form.rule[i]);
                 }
-                relief_combo(ui, ("relief_edit", base.0), &mut form.relief);
+                relief_combo(ui, ("relief_edit", base.0), &mut form.edit_relief);
                 let v: Vec<Option<f64>> = form.rule.iter().map(|t| parse(t)).collect();
                 if ui
                     .add_enabled(
@@ -250,14 +270,23 @@ impl RcadApp {
                     .on_hover_text("One undo step; every flange and the flat pattern regenerate")
                     .clicked()
                 {
+                    // Only what the user changed (review S8).
+                    let ch = |i: usize| {
+                        v[i].filter(|x| {
+                            form.loaded[i].is_none_or(|l| {
+                                crate::params_ui::fmt_value(l) != crate::params_ui::fmt_value(*x)
+                            })
+                        })
+                    };
                     send.push(Command::EditSheetRule(SheetRuleArgs {
                         base,
-                        thickness: v[0],
-                        radius: v[1],
-                        k_factor: v[2],
-                        relief: Some(form.relief),
-                        relief_width: v[3],
-                        relief_depth: v[4],
+                        thickness: ch(0),
+                        radius: ch(1),
+                        k_factor: ch(2),
+                        relief: (form.edit_relief != form.loaded_relief)
+                            .then_some(form.edit_relief),
+                        relief_width: ch(3),
+                        relief_depth: ch(4),
                     }));
                 }
             });
@@ -400,16 +429,24 @@ impl RcadApp {
         let form = &mut self.sheet_surface;
         ui.horizontal(|ui| {
             num_field(ui, "Gap search (mm)", &mut form.search);
+            let search = parse(&form.search).filter(|v| (0.0..=10.0).contains(v));
             if ui
-                .button("Analyse")
+                .add_enabled(search.is_some(), egui::Button::new("Analyse"))
                 .probe("Analyse surface")
+                .on_disabled_hover_text("Gap search must be a number in [0, 10] mm")
                 .on_hover_text("Free edges, gaps between them, boundary loops and orientation conflicts, before any repair")
                 .clicked()
-                && let Some(search) = parse(&form.search)
+                && let Some(search) = search
             {
                 send.push(Command::AnalyzeSurface(AnalyzeSurfaceArgs { body, search }));
             }
         });
+        if parse(&form.search).is_none_or(|v| !(0.0..=10.0).contains(&v)) {
+            ui.colored_label(
+                Color32::from_rgb(255, 160, 120),
+                "Gap search must be a number in [0, 10] mm",
+            );
+        }
         if let Some((d, r, ab, a)) = &form.analysis
             && *d == doc
             && *r == rev
@@ -420,7 +457,7 @@ impl RcadApp {
                 a.shells,
                 a.faces,
                 a.free_edges.len(),
-                a.gaps.len(),
+                a.gaps_total,
                 a.search,
                 a.gaps
                     .last()

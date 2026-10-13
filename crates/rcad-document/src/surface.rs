@@ -25,7 +25,7 @@ pub fn import(
     bytes: &[u8],
     unit_override_to_mm: Option<f64>,
 ) -> Result<(Body, Option<String>, Vec<String>)> {
-    let imp = crate::import::step(bytes, unit_override_to_mm).map_err(|e| match e {
+    let imp = crate::import::step_opts(bytes, unit_override_to_mm, true).map_err(|e| match e {
         DocError::Validation(m) => DocError::Validation(format!("{id}: {m}")),
         other => other,
     })?;

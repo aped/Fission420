@@ -40,6 +40,12 @@ pub struct StepImportOptions {
     /// Millimetres per file length unit, used only when the file declares no length
     /// unit. Without it such files are refused ("units required").
     pub unit_override_to_mm: Option<f64>,
+    /// Run 7: also read the SHELL_BASED_SURFACE_MODELs into
+    /// [`StepImport::surfaces`] (failures then abort the import). Off: they
+    /// are ignored with a warning, exactly as before run 7, so a bad surface
+    /// model never breaks a solid import.
+    #[serde(default)]
+    pub surfaces: bool,
 }
 
 impl Default for StepImportOptions {
@@ -48,6 +54,7 @@ impl Default for StepImportOptions {
             max_bytes: 64 << 20,
             max_entities: 2_000_000,
             unit_override_to_mm: None,
+            surfaces: false,
         }
     }
 }
@@ -238,7 +245,13 @@ fn import_parsed(
     }
     let breps = idx.all_simple("MANIFOLD_SOLID_BREP");
     let surface_models = idx.all_simple("SHELL_BASED_SURFACE_MODEL");
-    if breps.is_empty() && surface_models.is_empty() {
+    if breps.is_empty() && (surface_models.is_empty() || !opts.surfaces) {
+        if !surface_models.is_empty() {
+            return Err(fail(format!(
+                "no MANIFOLD_SOLID_BREP in file ({} SHELL_BASED_SURFACE_MODEL(s): import them as a surface body with import_surfaces)",
+                surface_models.len()
+            )));
+        }
         let other: Vec<String> = ["FACETED_BREP", "GEOMETRIC_CURVE_SET"]
             .iter()
             .filter(|n| !idx.all_with(n).is_empty())
@@ -254,7 +267,17 @@ fn import_parsed(
         }));
     }
     let placements = assembly::Placements::new(&idx, &geo)?;
-    let surfaces = import_surfaces(&idx, &geo, &placements, &surface_models, &mut warnings)?;
+    let surfaces = if opts.surfaces {
+        import_surfaces(&idx, &geo, &placements, &surface_models, &mut warnings)?
+    } else {
+        if !surface_models.is_empty() {
+            warnings.push(format!(
+                "{} SHELL_BASED_SURFACE_MODEL(s) not read: surfaces are imported separately (import_surfaces)",
+                surface_models.len()
+            ));
+        }
+        None
+    };
     // Scale-aware consistency tolerance (docs/formats/step.md).
     let tol = consistency_tol(&geo)?;
     let mut solids = Vec::new();
@@ -389,6 +412,27 @@ fn import_surfaces(
     if shells.is_empty() {
         return Ok(None);
     }
+    // Review S6: closed shells of a surface model are oriented outward like
+    // solids; a surface model of several closed shells only is refused (one
+    // body is one solid; import solids as MANIFOLD_SOLID_BREPs).
+    if open == 0 && shells.len() > 1 {
+        return Err(fail(format!(
+            "the surface models are {} closed shells and no open one: several solids in one body are not supported",
+            shells.len()
+        )));
+    }
+    let mut oriented = Vec::with_capacity(shells.len());
+    for sh in shells {
+        if sh.shell_condition() == truck_topology::shell::ShellCondition::Closed {
+            let solid =
+                Solid::try_new(vec![sh]).map_err(|e| fail(format!("closed surface shell: {e}")))?;
+            let b = orient_outward(Body { solid }, 0)?;
+            oriented.extend(b.solid.into_boundaries());
+        } else {
+            oriented.push(sh);
+        }
+    }
+    let shells = oriented;
     warnings.push(format!(
         "{} surface shell(s) ({open} open, {faces} face(s)) in SHELL_BASED_SURFACE_MODEL: not solids (no volume); import them as a surface body (import_surfaces)",
         shells.len()

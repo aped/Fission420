@@ -7,10 +7,17 @@ use rcad_kernel::{
 };
 use std::f64::consts::PI;
 
+fn surfaces_opts() -> StepImportOptions {
+    StepImportOptions {
+        surfaces: true,
+        ..Default::default()
+    }
+}
+
 fn surf(name: &str) -> rcad_kernel::ImportedSurfaces {
     let path = format!("{}/tests/fixtures/step/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).unwrap();
-    let imp = import_step(&text, &StepImportOptions::default()).unwrap();
+    let imp = import_step(&text, &surfaces_opts()).unwrap();
     assert!(imp.solids.is_empty(), "{name}: no solids expected");
     imp.surfaces.expect("surfaces")
 }
@@ -73,6 +80,9 @@ fn loose_faces_report_gaps_then_stitch_and_fill() {
     assert_eq!(a.free_edges.len(), 20);
     // 8 coincident edge pairs: 4 floor edges, 4 vertical corners.
     assert_eq!(a.gaps.len(), 8);
+    assert_eq!(a.gaps_total, 8);
+    // Review S7: an unbounded search is refused (gaps are small by definition).
+    assert!(analyze(&s.body, 1e9).is_err());
     assert!(a.gaps.iter().all(|g| g.size < 1e-9));
     // Fill refuses before stitching (several shells / no loop).
     assert!(fill_planar(&s.body, 1e-6).is_err());
@@ -171,4 +181,41 @@ fn glue_two_boxes_along_their_shared_face() {
     let c = extrude(&sq(30.0), &Frame::XY, 5.0).unwrap();
     let d = extrude(&sq(0.0), &Frame::XY, 5.0).unwrap();
     assert!(glue(&[d, c], 1e-9).is_err());
+}
+
+/// Review #2: a file with good solids and a bad surface model still imports
+/// its solids (the surface model is ignored with a warning) unless surfaces
+/// are asked for; then the bad surface is reported.
+#[test]
+fn bad_surface_model_does_not_break_a_solid_import() {
+    let path = format!(
+        "{}/tests/fixtures/step/box_40x30x10_mm.step",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    // A surface model whose face "surface" is an axis placement (#53).
+    let bad = "#90001 = SHELL_BASED_SURFACE_MODEL('',(#90002));\n#90002 = OPEN_SHELL('',(#90003));\n#90003 = ADVANCED_FACE('',(#18),#53,.T.);\n";
+    let at = text.rfind("ENDSEC;").unwrap();
+    let text = format!("{}{bad}{}", &text[..at], &text[at..]);
+    let imp = import_step(&text, &StepImportOptions::default()).unwrap();
+    assert_eq!(imp.solids.len(), 1);
+    assert!(imp.surfaces.is_none());
+    assert!(
+        imp.warnings
+            .iter()
+            .any(|w| w.contains("SHELL_BASED_SURFACE_MODEL"))
+    );
+    assert!(import_step(&text, &surfaces_opts()).is_err());
+    // A surfaces-only file without the option points at import_surfaces.
+    let p2 = format!(
+        "{}/tests/fixtures/step/open_box_mm.step",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let e = import_step(
+        &std::fs::read_to_string(p2).unwrap(),
+        &StepImportOptions::default(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("import_surfaces"), "{e}");
 }

@@ -104,10 +104,9 @@ fn merge(shells: Vec<CShell>, tol: f64, stats: &mut MergeStats) -> Result<CShell
             out.faces.push(f);
         }
     }
-    // Vertices: sweep along x, union into the earliest index.
+    // Vertices: uniform grid (cell = tol), neighbours in the 27 cells; union
+    // into the earliest index (review S7: no quadratic sweep).
     let n = out.vertices.len();
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| out.vertices[a].x.total_cmp(&out.vertices[b].x));
     let mut rep: Vec<usize> = (0..n).collect();
     fn find(rep: &mut [usize], mut i: usize) -> usize {
         while rep[i] != i {
@@ -116,24 +115,44 @@ fn merge(shells: Vec<CShell>, tol: f64, stats: &mut MergeStats) -> Result<CShell
         }
         i
     }
-    for a in 0..n {
-        if tol < 0.0 {
-            break;
+    if tol >= 0.0 {
+        let cell = tol.max(1e-12);
+        let key = |p: Point3| {
+            [
+                (p.x / cell).floor() as i64,
+                (p.y / cell).floor() as i64,
+                (p.z / cell).floor() as i64,
+            ]
+        };
+        let mut grid: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+        for (i, p) in out.vertices.iter().enumerate() {
+            grid.entry(key(*p)).or_default().push(i);
         }
-        let pa = out.vertices[order[a]];
-        for &ob in &order[a + 1..] {
-            let pb = out.vertices[ob];
-            if pb.x - pa.x > tol {
-                break;
-            }
-            let d = dist(pa, pb);
-            if d <= tol {
-                let (ra, rb) = (find(&mut rep, order[a]), find(&mut rep, ob));
-                if ra != rb {
-                    let (lo, hi) = (ra.min(rb), ra.max(rb));
-                    rep[hi] = lo;
-                    stats.vertices_merged += 1;
-                    stats.max_vertex_gap = stats.max_vertex_gap.max(d);
+        for a in 0..n {
+            let pa = out.vertices[a];
+            let k = key(pa);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for dz in -1..=1 {
+                        let Some(list) = grid.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) else {
+                            continue;
+                        };
+                        for &b in list {
+                            if b <= a {
+                                continue;
+                            }
+                            let d = dist(pa, out.vertices[b]);
+                            if d <= tol {
+                                let (ra, rb) = (find(&mut rep, a), find(&mut rep, b));
+                                if ra != rb {
+                                    let (lo, hi) = (ra.min(rb), ra.max(rb));
+                                    rep[hi] = lo;
+                                    stats.vertices_merged += 1;
+                                    stats.max_vertex_gap = stats.max_vertex_gap.max(d);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -462,6 +481,12 @@ pub struct BoundaryLoop {
     pub normal: [f64; 3],
 }
 
+/// Largest gap search distance (mm): gaps are small by definition.
+pub const MAX_SEARCH: f64 = 10.0;
+/// Largest number of gap records returned ([`ShellAnalysis::gaps_total`]
+/// counts all).
+pub const MAX_GAPS: usize = 1000;
+
 /// Analysis of a body's shells before stitching or filling.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShellAnalysis {
@@ -470,8 +495,11 @@ pub struct ShellAnalysis {
     /// All shells closed: a solid.
     pub closed: bool,
     pub free_edges: Vec<FreeEdge>,
-    /// Free-edge pairs closer than the search distance, smallest first.
+    /// Free-edge pairs closer than the search distance, smallest first (at
+    /// most [`MAX_GAPS`]; `gaps_total` counts all).
     pub gaps: Vec<Gap>,
+    #[serde(default)]
+    pub gaps_total: usize,
     /// Closed loops of free edges that are not part of any gap.
     pub boundary_loops: Vec<BoundaryLoop>,
     /// Face pairs using a shared edge in the same direction (orientation
@@ -486,9 +514,9 @@ pub struct ShellAnalysis {
 /// Free edges, gaps (free edges within `search` mm of each other), boundary
 /// loops and orientation conflicts of `body`, without changing it.
 pub fn analyze(body: &Body, search: f64) -> Result<ShellAnalysis> {
-    if !(search.is_finite() && search >= 0.0) {
+    if !(search.is_finite() && (0.0..=MAX_SEARCH).contains(&search)) {
         return Err(KernelError::InvalidInput(format!(
-            "gap search distance must be finite and >= 0, got {search}"
+            "gap search distance must be in [0, {MAX_SEARCH}] mm, got {search}"
         )));
     }
     let shells = guarded("compress", || shells_of(body))?;
@@ -533,17 +561,49 @@ pub fn analyze(body: &Body, search: f64) -> Result<ShellAnalysis> {
         .map(|&e| curve_mid(&sh.edges[e].curve).unwrap_or(Point3::origin()))
         .collect();
     let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    // Candidate pairs from a grid over edge midpoints (cell = search): two
+    // edges of a gap have midpoints within `search` (review S7).
+    let cell = search.max(1e-9);
+    let key = |q: Point3| {
+        [
+            (q.x / cell).floor() as i64,
+            (q.y / cell).floor() as i64,
+            (q.z / cell).floor() as i64,
+        ]
+    };
+    let mut grid: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    for (i, m) in mids.iter().enumerate() {
+        grid.entry(key(*m)).or_default().push(i);
+    }
+    let mut gaps_total = 0usize;
     for i in 0..free.len() {
-        for j in i + 1..free.len() {
-            let (a0, a1) = (p(free[i].from), p(free[i].to));
-            let (b0, b1) = (p(free[j].from), p(free[j].to));
-            let ends = (dist(a0, b0).max(dist(a1, b1))).min(dist(a0, b1).max(dist(a1, b0)));
-            let size = ends.max(dist(mids[i], mids[j]));
-            if size <= search {
-                gaps.push(Gap {
-                    edges: [i, j],
-                    size,
-                });
+        let k = key(mids[i]);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let Some(list) = grid.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) else {
+                        continue;
+                    };
+                    for &j in list {
+                        if j <= i {
+                            continue;
+                        }
+                        let (a0, a1) = (p(free[i].from), p(free[i].to));
+                        let (b0, b1) = (p(free[j].from), p(free[j].to));
+                        let ends =
+                            (dist(a0, b0).max(dist(a1, b1))).min(dist(a0, b1).max(dist(a1, b0)));
+                        let size = ends.max(dist(mids[i], mids[j]));
+                        if size <= search {
+                            gaps_total += 1;
+                            if gaps.len() < MAX_GAPS {
+                                gaps.push(Gap {
+                                    edges: [i, j],
+                                    size,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -602,11 +662,40 @@ pub fn analyze(body: &Body, search: f64) -> Result<ShellAnalysis> {
         closed: !body.is_open_shell(),
         free_edges: free,
         gaps,
+        gaps_total,
         boundary_loops: loops,
         orientation_conflicts: conflicts,
         non_manifold_edges: non_manifold,
         search,
     })
+}
+
+/// Area of a closed planar point loop (Newell vector length / 2).
+fn newell_area(pts: &[Point3]) -> f64 {
+    let n = pts.len();
+    let mut v = Vector3::new(0.0, 0.0, 0.0);
+    for i in 0..n {
+        v += pts[i].to_vec().cross(pts[(i + 1) % n].to_vec());
+    }
+    v.magnitude() / 2.0
+}
+
+/// `q` inside the planar loop `pts` with normal `n` (even-odd, projected).
+fn inside_loop(pts: &[Point3], n: Vector3, q: Point3) -> bool {
+    let a = crate::step_in::least_aligned_axis(n);
+    let b = n.cross(a);
+    let p2 = |p: Point3| (p.to_vec().dot(a), p.to_vec().dot(b));
+    let (qx, qy) = p2(q);
+    let m = pts.len();
+    let mut c = false;
+    for i in 0..m {
+        let (ax, ay) = p2(pts[i]);
+        let (bx, by) = p2(pts[(i + 1) % m]);
+        if (ay > qy) != (by > qy) && qx < ax + (qy - ay) * (bx - ax) / (by - ay) {
+            c = !c;
+        }
+    }
+    c
 }
 
 /// Newell normal of a closed point loop and the largest distance of the
@@ -686,6 +775,16 @@ fn finish(
         // Still several pieces at this tolerance: an open multi-shell body.
         let parts = shell.connected_components();
         let pieces = parts.len();
+        // Review S6: separate closed pieces would make an unoriented
+        // multi-solid "body"; refuse instead (one solid per body).
+        if parts
+            .iter()
+            .all(|p| p.shell_condition() == ShellCondition::Closed)
+        {
+            return Err(KernelError::InvalidInput(format!(
+                "stitching gives {pieces} separate closed pieces; one body must be one solid (stitch each piece separately)"
+            )));
+        }
         return Ok((
             Body {
                 solid: Solid::new_unchecked(parts),
@@ -778,18 +877,29 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
     let wires = shell.extract_boundaries();
     let mut filled = 0;
     let mut max_planarity: f64 = 0.0;
+    // Each loop run the other way round (the fill face's orientation), with
+    // dense samples (review S10: curved edges sampled at 16 points) and its
+    // Newell plane.
+    struct L {
+        inv: Wire,
+        pts: Vec<Point3>,
+        n: Vector3,
+        area: f64,
+    }
+    let mut loops = Vec::new();
     for w in wires {
-        // The fill face runs the loop the other way round.
         let inv = w.inverse();
         let pts: Vec<Point3> = inv
             .edge_iter()
             .flat_map(|e| {
                 let c = e.oriented_curve();
                 let (t0, t1) = c.range_tuple();
-                [
-                    e.front().point(),
-                    eval(&c, 0.5 * (t0 + t1)).unwrap_or(e.front().point()),
-                ]
+                let k = if matches!(c, Curve::Line(_)) { 1 } else { 16 };
+                (0..k)
+                    .map(|j| {
+                        eval(&c, t0 + (t1 - t0) * j as f64 / k as f64).unwrap_or(e.front().point())
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
         let (n, dev) = best_plane(&pts);
@@ -799,9 +909,48 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
             )));
         }
         max_planarity = max_planarity.max(dev);
-        let o = pts[0];
+        let area = newell_area(&pts);
+        loops.push(L { inv, pts, n, area });
+    }
+    // Review S5: coplanar nested loops form one face with holes. A loop whose
+    // first point lies inside a larger coplanar loop of opposite orientation
+    // is a hole of it; nesting with the same orientation is refused.
+    loops.sort_by(|a, b| b.area.total_cmp(&a.area));
+    let mut parent: Vec<Option<usize>> = vec![None; loops.len()];
+    for j in 0..loops.len() {
+        for i in 0..j {
+            let (li, lj) = (&loops[i], &loops[j]);
+            let coplanar = li.n.dot(lj.n).abs() > 1.0 - 1e-9
+                && lj
+                    .pts
+                    .iter()
+                    .all(|q| (*q - li.pts[0]).dot(li.n).abs() <= tol.max(1e-9));
+            if !coplanar || !inside_loop(&li.pts, li.n, lj.pts[0]) {
+                continue;
+            }
+            if li.n.dot(lj.n) > 0.0 {
+                return Err(KernelError::InvalidInput(
+                    "nested boundary loops in one plane run the same way: not a face with a hole (unsupported)".into(),
+                ));
+            }
+            if parent[i].is_some() {
+                return Err(KernelError::InvalidInput(
+                    "boundary loops nested more than one level in one plane are not supported"
+                        .into(),
+                ));
+            }
+            parent[j] = Some(i);
+            break;
+        }
+    }
+    for i in 0..loops.len() {
+        if parent[i].is_some() {
+            continue;
+        }
+        let (o, n) = (loops[i].pts[0], loops[i].n);
         let x = {
-            let d = pts
+            let d = loops[i]
+                .pts
                 .iter()
                 .map(|q| *q - o)
                 .max_by(|a, b| a.magnitude().total_cmp(&b.magnitude()))
@@ -811,7 +960,13 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
         };
         let y = n.cross(x);
         let plane = Plane::new(o, o + x, o + y);
-        let face = Face::try_new(vec![inv], Surface::Plane(plane))
+        let mut wires = vec![loops[i].inv.clone()];
+        wires.extend(
+            (0..loops.len())
+                .filter(|&j| parent[j] == Some(i))
+                .map(|j| loops[j].inv.clone()),
+        );
+        let face = Face::try_new(wires, Surface::Plane(plane))
             .map_err(|e| KernelError::InvalidResult(format!("fill face: {e}")))?;
         shell.push(face);
         filled += 1;
@@ -881,5 +1036,84 @@ pub fn thicken(body: &Body, distance: f64, reverse: bool) -> Result<Body> {
             orient_outward(body)
         }
         _ => crate::thicken::thicken_curved(body, distance, reverse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Frame, Profile};
+
+    /// Review S5: an open tube (annulus extrusion without its end caps)
+    /// fills into a solid ring: each end gets one face with a hole, not two
+    /// overlapping disks.
+    #[test]
+    fn open_tube_fills_ends_as_faces_with_holes() {
+        let ring = crate::extrude_region(
+            &Profile::Circle {
+                center: [0.0, 0.0],
+                radius: 10.0,
+            },
+            &[Profile::Circle {
+                center: [0.0, 0.0],
+                radius: 6.0,
+            }],
+            &Frame::XY,
+            20.0,
+        )
+        .unwrap();
+        let mut cs = ring.solid.compress();
+        let mut sh = cs.boundaries.remove(0);
+        sh.faces.retain(|f| !matches!(f.surface, Surface::Plane(_)));
+        compact(&mut sh);
+        let tube = Body::from_shell_unchecked(Shell::extract(sh).unwrap());
+        assert!(tube.is_open_shell());
+        let (solid, rep) = fill_planar(&tube, 1e-6).unwrap();
+        assert!(rep.closed);
+        assert_eq!(rep.filled, 2, "one face per end");
+        let m = crate::measure(&solid).unwrap();
+        assert_eq!(m.face_count, ring.solid.face_iter().count());
+        match m.volume {
+            crate::VolumeResult::Value { volume, .. } => {
+                let want = std::f64::consts::PI * (100.0 - 36.0) * 20.0;
+                assert!((volume - want).abs() < 1e-6, "{volume} vs {want}");
+            }
+            v => panic!("{v:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod piece_tests {
+    use super::*;
+    use crate::{Frame, LoopSegment, Profile};
+
+    /// Review S6: two separate closed boxes stitched → refused, not an
+    /// unoriented two-solid body.
+    #[test]
+    fn separate_closed_pieces_are_refused() {
+        let sq = |x0: f64| {
+            Profile::Loop(vec![
+                LoopSegment::Line { start: [x0, 0.0] },
+                LoopSegment::Line {
+                    start: [x0 + 5.0, 0.0],
+                },
+                LoopSegment::Line {
+                    start: [x0 + 5.0, 5.0],
+                },
+                LoopSegment::Line { start: [x0, 5.0] },
+            ])
+        };
+        let a = crate::extrude(&sq(0.0), &Frame::XY, 5.0).unwrap();
+        let b = crate::extrude(&sq(20.0), &Frame::XY, 5.0).unwrap();
+        let mut shells = a.solid.into_boundaries();
+        shells.extend(b.solid.into_boundaries());
+        let two = Body {
+            solid: Solid::new_unchecked(shells),
+        };
+        // Not open: stitch refuses it as a closed solid input? It is closed,
+        // so check the kernel path directly through `stitch`.
+        let e = stitch(&two, 1e-6).unwrap_err().to_string();
+        assert!(e.contains("separate closed pieces"), "{e}");
     }
 }

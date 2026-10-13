@@ -3470,15 +3470,8 @@ impl Session {
                 let imp = rcad_document::import::step(&bytes, unit)?;
                 if imp.solids.is_empty() {
                     return Err(DocError::Validation(format!(
-                        "{}: no solids found{}",
-                        path.display(),
-                        imp.surfaces
-                            .as_ref()
-                            .map(|s| format!(
-                                " ({} surface shell(s): import them with import_surfaces)",
-                                s.shells
-                            ))
-                            .unwrap_or_default()
+                        "{}: no solids found",
+                        path.display()
                     )));
                 }
                 let names: Vec<Option<String>> =
@@ -4247,7 +4240,8 @@ fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
     let breps: Vec<_> = ev
         .bodies
         .iter()
-        .filter(|b| b.geometry.brep().is_some())
+        // Run 7 (review #25): open surface bodies are not join/cut targets.
+        .filter(|b| b.geometry.brep().is_some_and(|g| !g.is_open_shell()))
         .collect();
     match breps.as_slice() {
         [one] => Ok(one.id),

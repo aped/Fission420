@@ -582,3 +582,172 @@ fn open_hem_folds_back_over_the_plate() {
     );
     assert!(!r.ok, "colliding hems accepted");
 }
+
+/// Review #5: a flange added after the flat pattern was first shown is in the
+/// displayed flat body too (it matches the DXF).
+#[test]
+fn flat_pattern_follows_later_flanges() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    rect_sketch(&mut s, 60.0, 40.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 2.0, "k_factor": 0.4}),
+    );
+    let left = line_id(&s, 1, |p| p[0].abs() < 1e-9);
+    let right = line_id(&s, 1, |p| (p[0] - 60.0).abs() < 1e-9);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": left, "length": 20.0}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": true}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": false}),
+    );
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": right, "length": 20.0}),
+    );
+    let f2 = r.feature.unwrap();
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": true}),
+    );
+    let flat = 100.0 + 2.0 * (PI / 2.0) * 2.4;
+    assert!(
+        (body_volume(&s, 2) - flat * 40.0).abs() < 1e-6,
+        "{}",
+        body_volume(&s, 2)
+    );
+    // The flat feature stays last; moving a flange after it is refused.
+    let feats = s.summary().features;
+    assert_eq!(feats.last().unwrap().kind, "sheet_flat");
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "move_feature", "feature": f2, "before": null}),
+    );
+    assert!(!r.ok, "flange moved after the flat pattern");
+}
+
+/// Review S1: flat strips from the two walls of a 20 mm notch overlap only
+/// along collinear / touching edges of the outline polygon; refused.
+#[test]
+fn flat_strips_overlapping_in_a_notch_are_refused() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Polygon {
+            vertices: vec![
+                [0.0, 0.0],
+                [100.0, 0.0],
+                [100.0, 60.0],
+                [60.0, 60.0],
+                [60.0, 20.0],
+                [40.0, 20.0],
+                [40.0, 60.0],
+                [0.0, 60.0],
+            ],
+        },
+    });
+    assert!(r.ok);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 2.0, "k_factor": 0.44}),
+    );
+    let right_wall = line_id(&s, 1, |p| (p[0] - 60.0).abs() < 1e-9 && p[1] >= 20.0);
+    let left_wall = line_id(&s, 1, |p| (p[0] - 40.0).abs() < 1e-9 && p[1] >= 20.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": right_wall, "length": 5.0, "end_offset": 5.0}),
+    );
+    // Strips are BA + length wide, BA = (π/2)(2 + 0.44) = 3.83: 8.83 + 18.83 > 20.
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": left_wall, "length": 15.0, "start_offset": 5.0}),
+    );
+    assert!(!r.ok, "overlapping flat strips accepted");
+    let msg = format!("{:?}", r.error);
+    assert!(msg.contains("flat pattern overlaps itself"), "{msg}");
+    // 8.83 + 8.83 < 20: they fit side by side, accepted.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": left_wall, "length": 5.0, "start_offset": 5.0}),
+    );
+}
+
+/// Review S3: a cut into the sheet after its last flange is not in the flat
+/// pattern, so the DXF export is refused instead of silently omitting it.
+#[test]
+fn flat_export_refuses_later_non_sheet_edits() {
+    let mut s = channel();
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 6.0,
+            center: Some([30.0, 20.0]),
+        },
+    });
+    assert!(r.ok);
+    let sk = r.feature.unwrap();
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": sk, "op": "cut", "target": 1, "through_all": true}),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "export_flat_pattern", "feature": 2, "path": dir.path().join("x.dxf")}),
+    );
+    assert!(!r.ok, "stale flat export accepted");
+    assert!(format!("{:?}", r.error).contains("after its last sheet feature"));
+}
+
+/// Review S4: a relief notch crossing a plate hole is refused.
+#[test]
+fn relief_into_a_hole_is_refused() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [0.0, 40.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..4 {
+        sk.add_line(p[i], p[(i + 1) % 4]);
+    }
+    // Ø4 hole 0.5 mm from the bottom edge, across the relief x 9..10.
+    let c = sk.add_point(9.5, 2.5);
+    sk.add_circle(c, 2.0);
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 1.0,
+                "relief_depth": 3.0}),
+    );
+    let bottom = line_id(&s, 1, |p| p[1].abs() < 1e-9);
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "length": 5.0,
+                "start_offset": 10.0, "end_offset": 10.0}),
+    );
+    assert!(!r.ok, "relief through a hole accepted");
+    assert!(format!("{:?}", r.error).contains("hole"));
+    // Offsets that keep the reliefs clear of the hole: accepted.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "length": 5.0,
+                "start_offset": 20.0, "end_offset": 10.0}),
+    );
+}

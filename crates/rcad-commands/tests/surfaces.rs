@@ -207,3 +207,40 @@ fn thicken_plate_and_half_tube_with_collapse_refusal() {
         "{inn}"
     );
 }
+
+/// Review #25: with one solid and one surface body, a cut without a target
+/// goes to the solid (surface bodies are not default targets).
+#[test]
+fn surface_bodies_are_not_default_targets() {
+    let mut s = Session::new();
+    import(&mut s, "plate_mm.step");
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::CenteredRectangle {
+            width: 10.0,
+            height: 10.0,
+            center: Some([100.0, 0.0]),
+        },
+    });
+    assert!(r.ok);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 2, "distance": 10.0}),
+    );
+    let r = s.execute(&rcad_commands::Command::CreateSketch {
+        name: None,
+        plane: rcad_document::SketchPlane::WorldXY,
+        template: rcad_commands::SketchTemplate::CenteredCircle {
+            diameter: 4.0,
+            center: Some([100.0, 0.0]),
+        },
+    });
+    assert!(r.ok);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 4, "op": "cut", "through_all": true}),
+    );
+    let v = volume(&s, 2).unwrap();
+    assert!((v - (1000.0 - PI * 4.0 * 10.0)).abs() < 1e-6, "{v}");
+}

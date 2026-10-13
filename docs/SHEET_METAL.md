@@ -59,6 +59,10 @@ w·t·(Σ straights) + Σ w·θ/2·((R+t)² − R²).
 
 ### Refusals (each with the feature and the reason)
 
+* a flat pattern that overlaps itself: the flat outline is checked for any intersection or
+  touching of non-neighbouring edges (collinear overlaps and end points on edges included) and its
+  area must equal the plate area plus the unfolded strips,
+* a relief that cuts into a hole of the plate,
 * flange footprints on the base plane overlapping (self-overlapping / colliding flanges; this
   check is conservative for flanges leaning over the plate at > 90°: it refuses any overlap of
   their projections even if their heights would separate them),
@@ -82,7 +86,9 @@ from its edge into a strip of width BA + length. Orientation is the base sketch'
 * **Display state** — `sheet_flat_state {base, flat}`: the first call creates a `SheetFlat`
   feature whose body is the exact flat solid (the flat outline extruded by t from the plate's
   bottom); the call toggles visibility between the folded body and the flat body (one undo step
-  each). The flat body is a separate body: mass properties of both are reported if both are
+  each). The flat-pattern feature stays after every flange of its sheet: a new flange is
+  inserted before it, and a flange moved after it is refused (it would be out of date). The flat
+  body is a separate body: mass properties of both are reported if both are
   selected — hide/omit the flat body for physical totals.
 * **DXF** — `export_flat_pattern {feature, path}` with any sheet feature: R12 DXF, `$INSUNITS` 4
   (mm). Layers:
@@ -91,7 +97,9 @@ from its edge into a strip of width BA + length. Orientation is the base sketch'
     direction in the layer name.
   * `BEND_NOTES`: one TEXT per bend, e.g. `UP 90.0%%d R2 BA 3.770`.
 
-The response message gives the flat extent and the bends.
+The response message gives the flat extent and the bends. The export is refused when a non-sheet
+feature (hole, cut, ...) changed the body after its last sheet feature: unfolding arbitrary edits
+is not supported, and the pattern would silently miss them.
 
 ## Acceptance project 6 (U-channel)
 

@@ -199,9 +199,26 @@ fn current_build(
     else {
         return Err(DocError::Validation(format!("{base} is not a sheet base")));
     };
-    if ev.body_by_id(body).is_none() {
+    let Some(eb) = ev.body_by_id(body) else {
         return Err(DocError::Validation(format!(
             "{base}: the sheet body is not evaluated (suppressed or failed)"
+        )));
+    };
+    // Review S3: the flat pattern comes from the sheet definition; a later
+    // non-sheet edit of the body (hole, cut, ...) would be silently missing.
+    let last_sheet = doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && !doc.is_rolled_back(f.id))
+        .filter(|f| {
+            f.id == base || matches!(f.kind, FeatureKind::SheetFlange { base: b, .. } if b == base)
+        })
+        .map(|f| f.id)
+        .next_back();
+    if Some(eb.last_feature) != last_sheet {
+        return Err(DocError::ProductLimit(format!(
+            "{base}: the sheet body was changed by {} after its last sheet feature; the flat pattern would not show that edit (unfolding arbitrary edits is not supported)",
+            eb.last_feature
         )));
     }
     let res = ev
@@ -281,7 +298,8 @@ impl Session {
                 let id = self.model_mut()?.transact("Edge flange", |d| {
                     let body = sheet_base(d, a.base)?;
                     let n = a.name.clone().unwrap_or_else(|| d.default_name("Flange"));
-                    Ok(d.push(
+                    let flat = flat_of(d, a.base).map(|(f, _)| f);
+                    let id = d.push(
                         n,
                         FeatureKind::SheetFlange {
                             base: a.base,
@@ -293,7 +311,13 @@ impl Session {
                             start_offset: a.start_offset,
                             end_offset: a.end_offset,
                         },
-                    ))
+                    );
+                    // Review #5: the flat pattern must include every flange of
+                    // its body, so a new flange goes before an existing flat.
+                    if let Some(f) = flat {
+                        d.move_feature(id, Some(f))?;
+                    }
+                    Ok(id)
                 })?;
                 r.feature = Some(id);
             }
@@ -398,7 +422,7 @@ impl Session {
                 let bytes = crate::read_import(&a.path)?;
                 let unit = a.units_to_mm;
                 // Parse once up front for an early, precise error.
-                let probe = rcad_document::import::step(&bytes, unit)?;
+                let probe = rcad_document::import::step_opts(&bytes, unit, true)?;
                 let Some(surf) = probe.surfaces else {
                     return Err(DocError::Validation(format!(
                         "{}: no surface model (SHELL_BASED_SURFACE_MODEL) in the file",
@@ -450,7 +474,7 @@ impl Session {
                     rep.shells,
                     rep.faces,
                     rep.free_edges.len(),
-                    rep.gaps.len(),
+                    rep.gaps_total,
                     rep.search,
                     rep.gaps
                         .iter()
