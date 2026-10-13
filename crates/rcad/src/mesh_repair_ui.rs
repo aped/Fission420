@@ -60,7 +60,7 @@ impl RcadApp {
                     st.tolerance = "0".into();
                     st.max_edges = "0".into();
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Weld tolerance (mm)");
                     ui.add(egui::TextEdit::singleline(&mut st.tolerance).desired_width(60.0))
                         .named("Mesh weld tolerance")
@@ -69,27 +69,18 @@ impl RcadApp {
                              Changes geometry by up to this amount.",
                         );
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Fill holes up to (edges)");
                     ui.add(egui::TextEdit::singleline(&mut st.max_edges).desired_width(60.0))
                         .named("Mesh hole fill limit")
                         .on_hover_text("Planar boundary loops only; 0 = do not fill");
                 });
-                ui.checkbox(
-                    &mut st.options.remove_degenerate,
-                    "Remove degenerate triangles",
-                )
-                .named("Remove degenerate triangles");
-                ui.checkbox(
-                    &mut st.options.remove_duplicates,
-                    "Remove duplicate triangles",
-                )
-                .named("Remove duplicate triangles");
-                ui.checkbox(
-                    &mut st.options.orient,
-                    "Make orientation consistent (outward)",
-                )
-                .named("Orient triangles");
+                ui.checkbox(&mut st.options.remove_degenerate, "Remove degenerate")
+                    .named("Remove degenerate triangles");
+                ui.checkbox(&mut st.options.remove_duplicates, "Remove duplicates")
+                    .named("Remove duplicate triangles");
+                ui.checkbox(&mut st.options.orient, "Orient outward")
+                    .named("Orient triangles");
                 let tol = st.tolerance.trim().parse::<f64>();
                 let edges = st.max_edges.trim().parse::<u32>();
                 let opts = match (tol, edges) {
@@ -100,7 +91,7 @@ impl RcadApp {
                     }),
                     _ => None,
                 };
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     for (label, preview) in
                         [("Preview repair", true), ("Repair as new body", false)]
                     {
