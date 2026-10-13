@@ -1051,7 +1051,7 @@ fn update_external(m: &mut Model, c: ComponentId) -> Result<String, DocError> {
         Ok(())
     })?;
     Ok(format!(
-        "'{}' updated from {p} (fnv {} → {})",
+        "'{}' updated from {p} (fnv {} -> {})",
         comp.name, src.fnv64, new_src.fnv64
     ))
 }
@@ -1076,7 +1076,7 @@ pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
                             (
                                 "modified",
                                 format!(
-                                    "{p} changed (fnv {} → {f}); the model keeps the pinned copy until update_external_component",
+                                    "{p} changed (fnv {} -> {f}); the model keeps the pinned copy until update_external_component",
                                     src.fnv64
                                 ),
                             )
@@ -1130,7 +1130,7 @@ fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
     for _ in 0..=a.joints.len() {
         if cur == j.child {
             return Err(v(format!(
-                "joint {pn} → {}: closes a loop; loops are not solved",
+                "joint {pn} -> {}: closes a loop; loops are not solved",
                 cocc.name
             )));
         }

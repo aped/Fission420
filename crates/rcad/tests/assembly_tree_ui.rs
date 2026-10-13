@@ -6,7 +6,7 @@
 //! occurrences, the structured BOM and the exploded-view toggle.
 use std::time::{Duration, Instant};
 
-use eframe::egui::{Key, Modifiers};
+use eframe::egui::{self, Key, Modifiers, PointerButton, Pos2};
 use egui_kittest::{Harness, kittest::Queryable as _};
 use rcad::{ExecMode, RcadApp};
 use rcad_commands::{Command, SketchTemplate};
@@ -206,7 +206,7 @@ fn interference_highlight_structured_bom_and_explode() {
         },
     );
     click(&mut h, "Check interference");
-    h.get_by_label_contains("Block#1 ∩ Block#2").click();
+    h.get_by_label_contains("Block#1 × Block#2").click();
     settle(&mut h);
     let hl = h.state().assembly_highlight();
     assert_eq!(hl, vec!["O1".to_string(), "O2".to_string()]);
@@ -303,4 +303,52 @@ fn external_component_insert_check_and_update() {
     click(&mut h, "Occurrence cube#1");
     click(&mut h, "Update cube from file");
     assert!((vol(&h) - 3000.0).abs() < 1e-6);
+}
+
+fn pointer_click(h: &mut Harness<'_, RcadApp>, s: Pos2) {
+    h.event(egui::Event::PointerMoved(s));
+    let _ = h.try_run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: s,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        let _ = h.try_run();
+    }
+    let _ = h.try_run();
+}
+
+/// Clicking a placed copy in the 3D view selects that instance's tree row
+/// (and highlights it); the face pick is the definition face.
+#[test]
+fn viewport_pick_selects_the_occurrence() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let b = block(&mut h, 20.0, 20.0, 10.0, [0.0, 0.0]);
+    component(&mut h, "Block", b);
+    send(
+        &mut h,
+        Command::AddOccurrence {
+            component: ComponentId(1),
+            name: None,
+            owner: None,
+            translate: [40.0, 0.0, 0.0],
+            axis: None,
+            angle_deg: 0.0,
+        },
+    );
+    // Top face centre of the second copy: (40, 0, 10).
+    let p = h.state().world_to_screen([40.0, 0.0, 10.0]).unwrap();
+    pointer_click(&mut h, p);
+    settle(&mut h);
+    assert!(h.state().selected_face().is_some(), "a face is picked");
+    assert_eq!(h.state().assembly_highlight(), vec!["O2".to_string()]);
+    h.get_by_label("Selected: Block#2");
+    // The first copy.
+    let p = h.state().world_to_screen([0.0, 0.0, 10.0]).unwrap();
+    pointer_click(&mut h, p);
+    settle(&mut h);
+    assert_eq!(h.state().assembly_highlight(), vec!["O1".to_string()]);
 }

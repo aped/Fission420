@@ -121,6 +121,9 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// Instance path of the last viewport face pick (a new pick selects its
+    /// tree row).
+    pub last_pick: Option<String>,
     /// External component insertion: path, linked.
     pub external_path: String,
     pub external_linked: bool,
@@ -159,8 +162,11 @@ impl AssemblyUi {
             && (*d, *r) == (summary.doc_id, summary.revision)
             && let Some(x) = list.get(i)
         {
-            out.push(x.a_path.clone());
-            out.push(x.b_path.clone());
+            for p in [&x.a_path, &x.b_path] {
+                if !out.contains(p) {
+                    out.push(p.clone());
+                }
+            }
         }
         out
     }
@@ -221,6 +227,17 @@ impl RcadApp {
         self.assembly_ui.highlight_paths(&self.summary)
     }
 
+    /// Number of interference results of the current revision (None when
+    /// no check was run for it).
+    pub fn interference_count(&self) -> Option<usize> {
+        let (d, r) = (self.summary.doc_id, self.summary.revision);
+        self.assembly_ui
+            .interference
+            .as_ref()
+            .filter(|x| (x.0, x.1) == (d, r))
+            .map(|x| x.2.len())
+    }
+
     /// The viewport tint table for the current scene and highlight.
     pub fn display_tints(&self) -> Vec<(std::ops::Range<u32>, u8)> {
         tints(&self.scene, &self.assembly_highlight())
@@ -256,6 +273,14 @@ impl RcadApp {
     pub(crate) fn components_browser(&mut self, ui: &mut egui::Ui) {
         let asm = self.summary.assembly.clone();
         let mut send: Vec<Command> = Vec::new();
+        // A face picked on a placed copy selects that instance's tree row.
+        let pick = self.picked_face_instance().and_then(|(_, p)| p);
+        if pick != self.assembly_ui.last_pick {
+            self.assembly_ui.last_pick = pick.clone();
+            if pick.is_some() {
+                self.assembly_ui.selected = pick;
+            }
+        }
         let before_hl = self.assembly_ui.highlight_paths(&self.summary);
         ui.separator();
         ui.label(RichText::new(format!("Assembly ({} components)", asm.components.len())).strong())
@@ -479,7 +504,7 @@ impl RcadApp {
                     tags.push_str(" · hidden");
                 }
                 if asm.active == Some(i.component) {
-                    tags.push_str(" · ✎ active");
+                    tags.push_str(" · (active)");
                 }
                 ui.small(tags);
             });
@@ -981,7 +1006,7 @@ impl RcadApp {
                 .join(", ");
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "{} {:?}: {} → {} {} · DOF {}",
+                    "{} {:?}: {} -> {} {} · DOF {}",
                     j.name,
                     j.kind,
                     occ(j.parent),
@@ -1098,6 +1123,7 @@ impl RcadApp {
             if ui
                 .checkbox(&mut ex, "Exploded view")
                 .on_hover_text("Display the per-occurrence exploded offsets (display only)")
+                .probe("Exploded view")
                 .changed()
             {
                 send.push(Command::SetExploded { exploded: ex });
@@ -1164,7 +1190,7 @@ impl RcadApp {
                         error_estimate,
                     } => (
                         format!(
-                            "{} ∩ {}: {} mm³{}",
+                            "{} × {}: {} mm³{}",
                             i.a_name,
                             i.b_name,
                             fmt(*volume),
@@ -1181,7 +1207,7 @@ impl RcadApp {
                         ),
                     ),
                     InterferenceStatus::OverlapVolumeUnknown { reason } => (
-                        format!("{} ∩ {}: overlap, volume unknown", i.a_name, i.b_name),
+                        format!("{} × {}: overlap, volume unknown", i.a_name, i.b_name),
                         format!("Sampled (10³ points in the common box): {reason}"),
                     ),
                     _ => continue,
@@ -1193,6 +1219,7 @@ impl RcadApp {
                         "{scope}. Touching contact (coincident faces) is not reported; no contact tolerance is applied."
                     ))
                     .named(&t)
+                    .probe(&format!("Interference {}", k + 1))
                     .clicked()
                 {
                     self.assembly_ui.interference_pick = (!sel).then_some(k);
