@@ -399,6 +399,8 @@ pub struct RcadApp {
     /// Inline rename of a body row in the browser.
     pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) move_form: crate::bodies::MoveForm,
+    /// Body material form and last mass-properties report (run 6).
+    pub(crate) body_props: crate::bodies::BodyProps,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -487,6 +489,7 @@ impl RcadApp {
             rename: None,
             body_rename: None,
             move_form: Default::default(),
+            body_props: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -1059,6 +1062,7 @@ impl RcadApp {
         if matches!(command, Command::ExportStl { .. }) {
             self.last_export = response.mesh_check.clone();
         }
+        self.body_props.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;

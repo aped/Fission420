@@ -245,6 +245,11 @@ constraints (`PatternStep`, `PatternRotate`). Written only when a sketch uses on
 (`io.rs::sketch_v6_feature`, folded into `v6_feature`); a file labelled v5 or older that contains them is refused. Loading and regenerating never needs the font (the stored outlines are
 authoritative); only changing a text's string or font does.
 
+**v6 (run 6)** = v5 plus body materials (`bodies[].material`: `{name, density (g/cm³),
+catalog?}`, docs/MATERIALS.md); written only when a body has one (`io::v6_feature`, "body
+materials"), so a run-5 build refuses the file instead of dropping the material. An invalid
+density in a file is refused on load.
+
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
 the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
 `*.f420.json`. They load unchanged; no version changed with the name, and the extension is

@@ -1,5 +1,10 @@
 //! Bodies in the browser and the body inspector.
 //!
+//! Run 6: the inspector also sets a body's physical material (catalog or a
+//! user density, `SetBodyMaterial`) and shows its mass properties
+//! (`MassProperties`: volume, mass, centre of mass, inertia; world frame,
+//! mm / g / g·mm²; exact or a labelled estimate).
+//!
 //! The browser lists every body of the document above the feature history:
 //! select (highlights all of its faces in the view), inline rename
 //! (double-click or context menu; Enter commits, Esc cancels), show/hide.
@@ -12,14 +17,15 @@
 //! operations are unavailable.
 
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{BodySummary, Command};
-use rcad_document::{BodyId, BodySource};
+use rcad_commands::mass::MassReport;
+use rcad_commands::{BodySummary, Command, DocSummary};
+use rcad_document::material::{CATALOG, catalog_entry};
+use rcad_document::{BodyId, BodySource, DensityUnit};
 use rcad_kernel::VolumeResult;
 
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 
-/// Inline rename buffer of a body row.
 /// Edit buffers of the body Move / Copy form (run 6).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveForm {
@@ -38,6 +44,74 @@ impl Default for MoveForm {
             axis: 2,
             copy: false,
         }
+    }
+}
+
+/// Material form and the last mass-properties report (run 6).
+#[derive(Debug, Clone, Default)]
+pub struct BodyProps {
+    /// Body the form was filled for (reset when another body is shown).
+    pub body: Option<BodyId>,
+    /// Catalog key, `CUSTOM` or `NONE`.
+    pub choice: String,
+    pub density: String,
+    pub name: String,
+    pub unit: DensityUnit,
+    /// (doc_id, revision, report) of the last `MassProperties` reply.
+    pub report: Option<(u64, u64, MassReport)>,
+}
+
+const CUSTOM: &str = "custom";
+const NONE: &str = "none";
+
+impl BodyProps {
+    /// Keep the report of a `MassProperties` reply (engine hook in `handle_reply`).
+    pub(crate) fn on_reply(&mut self, response: &rcad_commands::Response, summary: &DocSummary) {
+        if let Some(r) = &response.mass_properties {
+            self.report = Some((summary.doc_id, summary.revision, r.clone()));
+        }
+    }
+
+    fn reset_for(&mut self, b: &BodySummary) {
+        self.body = Some(b.id);
+        self.unit = DensityUnit::GPerCm3;
+        match &b.material {
+            Some(m) if m.catalog.is_some() => {
+                self.choice = m.catalog.clone().unwrap_or_default();
+                self.density = m.density.to_string();
+                self.name.clear();
+            }
+            Some(m) => {
+                self.choice = CUSTOM.into();
+                self.density = m.density.to_string();
+                self.name = m.name.clone();
+            }
+            None => {
+                self.choice = NONE.into();
+                self.density.clear();
+                self.name.clear();
+            }
+        }
+    }
+}
+
+fn choice_text(choice: &str) -> String {
+    match choice {
+        NONE => "None".into(),
+        CUSTOM => "Custom density".into(),
+        k => catalog_entry(k).map_or_else(
+            || k.to_string(),
+            |e| format!("{} ({} g/cm³)", e.name, e.density),
+        ),
+    }
+}
+
+/// A readout with a precision suited to the magnitude.
+fn num(x: f64) -> String {
+    if x != 0.0 && (x.abs() >= 1e6 || x.abs() < 1e-3) {
+        format!("{x:.6e}")
+    } else {
+        format!("{x:.4}")
     }
 }
 
@@ -368,6 +442,158 @@ impl RcadApp {
             }
             (None, None) => {
                 ui.weak("No measurements available.");
+            }
+        }
+        ui.separator();
+        self.material_ui(ui, &b);
+    }
+
+    /// Material assignment and mass properties of body `b` (run 6).
+    fn material_ui(&mut self, ui: &mut egui::Ui, b: &BodySummary) {
+        if self.body_props.body != Some(b.id) {
+            self.body_props.reset_for(b);
+        }
+        let estimate = matches!(
+            b.measurements.as_ref().map(|m| &m.volume),
+            Some(VolumeResult::Value {
+                method: rcad_kernel::VolumeMethod::TessellationEstimate,
+                ..
+            })
+        );
+        match &b.material {
+            Some(m) => {
+                ui.label(format!("Material: {}", m.describe()))
+                    .on_hover_text("Physical material for mass properties (not the display colour). Catalog densities are typical nominal values of the solid material; a printed part with infill weighs less.");
+            }
+            None => {
+                ui.label("Material: none (no mass)");
+            }
+        }
+        if let Some(mass) = b.mass {
+            let t = if estimate {
+                format!("Mass ≈ {} g (volume is an estimate)", num(mass))
+            } else if b.kind == "mesh" {
+                format!("Mass {} g (of the triangle mesh)", num(mass))
+            } else {
+                format!("Mass {} g", num(mass))
+            };
+            ui.label(t);
+        }
+        let mut send = None;
+        ui.collapsing("Set material", |ui| {
+            let f = &mut self.body_props;
+            egui::ComboBox::from_label("Material")
+                .selected_text(choice_text(&f.choice))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.choice, NONE.to_string(), choice_text(NONE));
+                    ui.selectable_value(&mut f.choice, CUSTOM.to_string(), choice_text(CUSTOM));
+                    for e in CATALOG {
+                        ui.selectable_value(&mut f.choice, e.key.to_string(), choice_text(e.key));
+                    }
+                });
+            let custom = f.choice == CUSTOM;
+            if custom {
+                crate::panels::text_field(ui, "Material name", &mut f.name);
+                ui.horizontal(|ui| {
+                    crate::panels::num_field(ui, "Density", &mut f.density);
+                    ui.radio_value(&mut f.unit, DensityUnit::GPerCm3, "g/cm³");
+                    ui.radio_value(&mut f.unit, DensityUnit::KgPerM3, "kg/m³");
+                });
+            } else if let Some(e) = catalog_entry(&f.choice) {
+                ui.small(format!(
+                    "{} g/cm³, typical nominal (published values {}–{} g/cm³)",
+                    e.density, e.range.0, e.range.1
+                ));
+            }
+            let density = f
+                .density
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|d| d.is_finite());
+            let ready = !custom || density.is_some();
+            let r = ui
+                .add_enabled(ready, egui::Button::new("Apply material"))
+                .probe("Apply material");
+            if r.clicked() {
+                send = Some(Command::SetBodyMaterial {
+                    body: b.id,
+                    material: (!custom && f.choice != NONE).then(|| f.choice.clone()),
+                    density: if custom { density } else { None },
+                    density_unit: f.unit,
+                    name: (custom && !f.name.trim().is_empty()).then(|| f.name.clone()),
+                });
+            }
+        });
+        if let Some(c) = send {
+            // Refill the form from the reply's state on a later frame.
+            self.body_props.body = None;
+            self.request(c);
+        }
+        if ui
+            .button("Mass properties")
+            .on_hover_text("Volume, mass, centre of mass and inertia of this body (world frame)")
+            .probe("Mass properties")
+            .clicked()
+        {
+            self.request(Command::MassProperties {
+                bodies: Some(vec![b.id]),
+            });
+        }
+        let current = self
+            .body_props
+            .report
+            .as_ref()
+            .filter(|(d, r, _)| *d == self.summary.doc_id && *r == self.summary.revision);
+        let Some(bm) = current.and_then(|(_, _, rep)| rep.bodies.iter().find(|x| x.body == b.id))
+        else {
+            return;
+        };
+        let Some(p) = &bm.properties else {
+            ui.colored_label(
+                Color32::from_rgb(255, 170, 90),
+                format!(
+                    "Mass properties unavailable: {}",
+                    bm.error.as_deref().unwrap_or("unknown")
+                ),
+            );
+            return;
+        };
+        ui.label(RichText::new("Mass properties (world frame; mm, g, g·mm²)").strong());
+        if bm.exact {
+            ui.small(format!("Exact boundary integral ({:?})", p.method));
+        } else {
+            ui.colored_label(
+                Color32::from_rgb(255, 200, 120),
+                format!(
+                    "Estimate ({:?}): volume ±{} mm³, centre ±{} mm",
+                    p.method,
+                    num(p.volume_error),
+                    num(p.centroid_error)
+                ),
+            );
+        }
+        ui.label(format!("Volume {} mm³", num(p.volume)));
+        match bm.mass {
+            Some(m) => ui.label(format!("Mass {} g", num(m))),
+            None => ui.label("Mass: assign a material"),
+        };
+        let c = p.centroid;
+        ui.label(format!(
+            "Centre of mass ({}, {}, {}) mm",
+            num(c[0]),
+            num(c[1]),
+            num(c[2])
+        ));
+        if let Some(i) = bm.inertia {
+            ui.small("Inertia about the centre of mass, world axes (g·mm²):");
+            for row in i {
+                ui.small(format!(
+                    "[{}  {}  {}]",
+                    num(row[0]),
+                    num(row[1]),
+                    num(row[2])
+                ));
             }
         }
     }

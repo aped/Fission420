@@ -33,8 +33,9 @@ pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
 pub use loft::loft;
 pub use measure::{
-    Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeResult, face_count,
-    face_planes, measure, planar_faces_on, z_face_inner_loops,
+    Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeProperties, VolumeResult,
+    face_count, face_planes, measure, mesh_volume_properties, planar_faces_on, volume_properties,
+    z_face_inner_loops,
 };
 pub use mesh::{
     CANONICAL_GRID, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh,

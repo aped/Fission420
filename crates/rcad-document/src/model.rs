@@ -36,6 +36,10 @@ pub struct BodyInfo {
     pub name: String,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// Physical material for mass properties (run 6, format v6); None: not
+    /// assigned. Separate from appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<crate::Material>,
 }
 
 fn yes() -> bool {
@@ -1367,6 +1371,7 @@ impl Document {
             id,
             name: name.into(),
             visible: true,
+            material: None,
         });
         id
     }
@@ -1604,6 +1609,11 @@ impl Document {
                     "duplicate body entry {}",
                     info.id
                 )));
+            }
+            if let Some(m) = &info.material {
+                m.validate().map_err(|e| {
+                    DocError::Validation(format!("body {} ({}): {e}", info.id, info.name))
+                })?;
             }
             if !created.contains_key(&info.id) {
                 return Err(DocError::Validation(format!(
