@@ -154,6 +154,8 @@ pub struct Evaluation {
     /// nothing but their import and direct edits (for picking a face to edit
     /// directly). Absent for any other body.
     pub imported_face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
+    /// Run 6: solved placements of the component occurrences (docs/ASSEMBLIES.md).
+    pub occurrences: Vec<crate::assembly::EvalOccurrence>,
 }
 
 impl Evaluation {
@@ -224,6 +226,7 @@ impl Evaluation {
             body: None,
             measurements: None,
             imported_face_ids: BTreeMap::new(),
+            occurrences: vec![],
         }
     }
 }
@@ -1419,6 +1422,7 @@ fn regen_impl(
         body: None,
         measurements: None,
         imported_face_ids,
+        occurrences: doc.assembly.evaluate()?,
     };
     eval.refresh_legacy_view();
     Ok(Regen::Done(Box::new(eval)))

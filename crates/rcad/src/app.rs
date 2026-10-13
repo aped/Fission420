@@ -427,6 +427,8 @@ pub struct RcadApp {
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state (run 6).
     pub(crate) exact_measure: crate::face_measure::ExactMeasure,
+    /// Browser Components section state (run 6).
+    pub(crate) assembly_ui: crate::assembly_ui::AssemblyUi,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -482,6 +484,7 @@ impl RcadApp {
                 parameters: vec![],
                 configurations: vec![],
                 active_configuration: None,
+                assembly: Default::default(),
             },
             measurements: None,
             selected: None,
@@ -525,6 +528,7 @@ impl RcadApp {
             config_form: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
+            assembly_ui: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
@@ -1099,6 +1103,7 @@ impl RcadApp {
         }
         self.body_props.on_reply(&response, &summary);
         self.exact_measure.on_reply(&response, &summary);
+        self.assembly_ui.on_reply(&response, &summary);
         if doc_changed {
             self.fitted = false;
             self.selected = None;

@@ -1694,6 +1694,10 @@ pub struct Document {
     /// The configuration last activated (None: none / not configured).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_configuration: Option<String>,
+    /// Components, occurrences and joints (run 6 pull-forward of Run-7 §1-2,
+    /// format v6; docs/ASSEMBLIES.md).
+    #[serde(default, skip_serializing_if = "crate::assembly::Assembly::is_empty")]
+    pub assembly: crate::assembly::Assembly,
 }
 
 /// A named variant of a document (see [`Document::configurations`]).
@@ -1728,6 +1732,7 @@ impl Document {
             rollback: None,
             configurations: Vec::new(),
             active_configuration: None,
+            assembly: Default::default(),
         }
     }
 
@@ -2072,6 +2077,7 @@ impl Document {
                 })?;
             }
         }
+        self.assembly.validate(&self.bodies)?;
         let mut blob_ids = std::collections::HashSet::new();
         for b in &self.blobs {
             if !blob_ids.insert(b.id) || b.id.0 == 0 || b.id.0 >= self.next_blob_id {

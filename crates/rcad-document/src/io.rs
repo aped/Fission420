@@ -178,6 +178,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if !doc.configurations.is_empty() || doc.active_configuration.is_some() {
         return Some("configurations");
     }
+    if !doc.assembly.is_empty() {
+        return Some("components, occurrences and joints");
+    }
     if doc.bodies.iter().any(|b| b.material.is_some()) {
         return Some("body materials");
     }
