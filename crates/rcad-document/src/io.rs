@@ -175,6 +175,9 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if doc.rollback.is_some() {
         return Some("a rolled-back timeline marker");
     }
+    if !doc.configurations.is_empty() || doc.active_configuration.is_some() {
+        return Some("configurations");
+    }
     for f in &doc.features {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");

@@ -399,6 +399,8 @@ pub struct RcadApp {
     /// Inline rename of a body row in the browser.
     pub(crate) body_rename: Option<crate::bodies::BodyRename>,
     pub(crate) move_form: crate::bodies::MoveForm,
+    /// Configuration name / part number being typed (run 6).
+    pub(crate) config_form: (String, String),
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
     pub(crate) doc_dim_targets: Vec<(usize, egui::Rect)>,
@@ -452,6 +454,8 @@ impl RcadApp {
                 features: vec![],
                 bodies: vec![],
                 parameters: vec![],
+                configurations: vec![],
+                active_configuration: None,
             },
             measurements: None,
             selected: None,
@@ -487,6 +491,7 @@ impl RcadApp {
             rename: None,
             body_rename: None,
             move_form: Default::default(),
+            config_form: Default::default(),
             doc_dim_edit: None,
             doc_dim_targets: vec![],
             sketch_dim_opened: None,

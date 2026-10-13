@@ -367,6 +367,46 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
     },
+    /// Create or replace configuration `name` (run 6; one undo step):
+    /// user-parameter expressions, the features it suppresses (they become
+    /// configured features), part number. Re-applied when it is active.
+    SetConfiguration {
+        name: String,
+        #[serde(default)]
+        values: std::collections::BTreeMap<String, String>,
+        #[serde(default)]
+        suppressed: Vec<FeatureId>,
+        #[serde(default)]
+        part_number: String,
+    },
+    DeleteConfiguration {
+        name: String,
+    },
+    /// Apply configuration `name` (one undo step): its parameter values and
+    /// the suppression of every configured feature; refused unchanged when the
+    /// result does not regenerate.
+    ActivateConfiguration {
+        name: String,
+    },
+    /// Export every configuration (or `configurations`) as
+    /// `<dir>/<stem>-<configuration>[-<part number>].<ext>` for each requested
+    /// format; the document's state is restored afterwards (the activations
+    /// are undone). Names are sanitized; an existing file is overwritten only
+    /// with `overwrite`.
+    ExportConfigurations {
+        dir: PathBuf,
+        stem: String,
+        #[serde(default)]
+        configurations: Vec<String>,
+        #[serde(default)]
+        step: bool,
+        #[serde(default)]
+        stl: bool,
+        #[serde(default, rename = "3mf")]
+        threemf: bool,
+        #[serde(default)]
+        overwrite: bool,
+    },
     /// Timeline marker (run 6; one undo step): evaluate history up to and
     /// including `at`; later features are kept but not evaluated, and new
     /// features are inserted after the marker. `at: null` rolls to the end.
@@ -566,6 +606,10 @@ impl Command {
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
             Command::SetRollback { .. } => "set_rollback",
+            Command::SetConfiguration { .. } => "set_configuration",
+            Command::DeleteConfiguration { .. } => "delete_configuration",
+            Command::ActivateConfiguration { .. } => "activate_configuration",
+            Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
             Command::Project { .. } => "project",
             Command::UnlinkProjection { .. } => "unlink_projection",
@@ -777,6 +821,11 @@ pub struct DocSummary {
     /// Named user parameters in display order.
     #[serde(default)]
     pub parameters: Vec<ParameterSummary>,
+    /// Named configurations (run 6) and the active one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<rcad_document::Configuration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_configuration: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -2101,6 +2150,204 @@ impl Session {
                 )?;
                 r.feature = Some(id);
             }
+            Command::SetConfiguration {
+                name,
+                values,
+                suppressed,
+                part_number,
+            } => {
+                use rcad_document::params;
+                let name = name.trim().to_string();
+                if name.is_empty()
+                    || !name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
+                {
+                    return Err(DocError::Validation(format!(
+                        "configuration name '{name}': letters, digits, space, _ - . only"
+                    )));
+                }
+                for (p, e) in values {
+                    params::check_syntax(e).map_err(|x| DocError::Expression {
+                        name: p.clone(),
+                        detail: format!("'{e}': {x}"),
+                    })?;
+                }
+                let c = rcad_document::Configuration {
+                    name: name.clone(),
+                    values: values.clone(),
+                    suppressed: suppressed.iter().copied().collect(),
+                    part_number: part_number.trim().to_string(),
+                };
+                let m = self.model_mut()?;
+                for f in &c.suppressed {
+                    m.document().feature(*f)?;
+                }
+                for p in c.values.keys() {
+                    if !m.document().parameters.iter().any(|x| x.name == *p) {
+                        return Err(DocError::Expression {
+                            name: p.clone(),
+                            detail: "no such parameter".into(),
+                        });
+                    }
+                }
+                m.transact(&format!("Configuration {name}"), |d| {
+                    match d.configurations.iter_mut().find(|x| x.name == name) {
+                        Some(x) => *x = c,
+                        None => d.configurations.push(c),
+                    }
+                    if d.active_configuration.as_deref() == Some(&name) {
+                        d.apply_configuration(&name)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::DeleteConfiguration { name } => {
+                let name = name.clone();
+                let m = self.model_mut()?;
+                if !m.document().configurations.iter().any(|c| c.name == name) {
+                    return Err(DocError::Validation(format!(
+                        "no configuration named '{name}'"
+                    )));
+                }
+                m.transact(&format!("Delete configuration {name}"), |d| {
+                    d.configurations.retain(|c| c.name != name);
+                    if d.active_configuration.as_deref() == Some(&name) {
+                        d.active_configuration = None;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::ActivateConfiguration { name } => {
+                let name = name.clone();
+                self.model_mut()?
+                    .transact(&format!("Activate configuration {name}"), |d| {
+                        d.apply_configuration(&name)
+                    })?;
+                r.message = Some(format!("configuration {name} active"));
+            }
+            Command::ExportConfigurations {
+                dir,
+                stem,
+                configurations,
+                step,
+                stl,
+                threemf,
+                overwrite,
+            } => {
+                let (dir, stem, overwrite) = (dir.clone(), stem.clone(), *overwrite);
+                let formats: Vec<&str> = [(*step, "step"), (*stl, "stl"), (*threemf, "3mf")]
+                    .into_iter()
+                    .filter_map(|(on, e)| on.then_some(e))
+                    .collect();
+                if formats.is_empty() {
+                    return Err(DocError::Validation(
+                        "choose at least one format (step, stl, 3mf)".into(),
+                    ));
+                }
+                let all: Vec<rcad_document::Configuration> =
+                    self.model_mut()?.document().configurations.clone();
+                let chosen: Vec<rcad_document::Configuration> = if configurations.is_empty() {
+                    all
+                } else {
+                    configurations
+                        .iter()
+                        .map(|n| {
+                            all.iter().find(|c| c.name == *n).cloned().ok_or_else(|| {
+                                DocError::Validation(format!("no configuration named '{n}'"))
+                            })
+                        })
+                        .collect::<Result<_, _>>()?
+                };
+                if chosen.is_empty() {
+                    return Err(DocError::Validation(
+                        "the document has no configurations".into(),
+                    ));
+                }
+                let clean = |t: &str| -> String {
+                    t.chars()
+                        .map(|c| {
+                            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect()
+                };
+                // Plan every path first: refuse before changing anything.
+                let mut plan = Vec::new();
+                for c in &chosen {
+                    let mut base = format!("{}-{}", clean(&stem), clean(&c.name));
+                    if !c.part_number.is_empty() {
+                        base.push('-');
+                        base.push_str(&clean(&c.part_number));
+                    }
+                    for e in &formats {
+                        let p = dir.join(format!("{base}.{e}"));
+                        if p.exists() && !overwrite {
+                            return Err(DocError::File(format!(
+                                "{} exists; pass overwrite to replace it",
+                                p.display()
+                            )));
+                        }
+                        plan.push((c.name.clone(), *e, p));
+                    }
+                }
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| DocError::File(format!("{}: {e}", dir.display())))?;
+                let mut activations = 0;
+                let mut written = Vec::new();
+                let mut result = Ok(());
+                for c in &chosen {
+                    let a = self.run(
+                        &Command::ActivateConfiguration {
+                            name: c.name.clone(),
+                        },
+                        &mut Response::default(),
+                    );
+                    if let Err(e) = a {
+                        result = Err(e);
+                        break;
+                    }
+                    activations += 1;
+                    for (_, e, p) in plan.iter().filter(|(n, _, _)| *n == c.name) {
+                        let cmd = match *e {
+                            "step" => Command::ExportStep {
+                                path: p.clone(),
+                                bodies: None,
+                            },
+                            "stl" => Command::ExportStl {
+                                path: p.clone(),
+                                chord: None,
+                                bodies: None,
+                                print: Default::default(),
+                            },
+                            _ => Command::Export3mf {
+                                path: p.clone(),
+                                chord: None,
+                                bodies: None,
+                                unit: None,
+                                print: Default::default(),
+                            },
+                        };
+                        if let Err(x) = self.run(&cmd, &mut Response::default()) {
+                            result = Err(x);
+                            break;
+                        }
+                        written.push(p.display().to_string());
+                    }
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                // Restore the document as it was (undo the activations).
+                for _ in 0..activations {
+                    self.model_mut()?.undo()?;
+                }
+                result?;
+                r.message = Some(format!("wrote {}", written.join(", ")));
+            }
             Command::SetRollback { at } => {
                 let at = *at;
                 let m = self.model_mut()?;
@@ -2623,6 +2870,8 @@ impl Session {
                 features: vec![],
                 bodies: vec![],
                 parameters: vec![],
+                configurations: vec![],
+                active_configuration: None,
             };
         };
         DocSummary {
@@ -2663,6 +2912,8 @@ impl Session {
                 })
                 .collect(),
             parameters: parameter_summaries(m.document()),
+            configurations: m.document().configurations.clone(),
+            active_configuration: m.document().active_configuration.clone(),
         }
     }
 }

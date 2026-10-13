@@ -282,3 +282,48 @@ fn move_and_copy_a_body_from_the_inspector() {
     click(&mut h, "Undo");
     assert_eq!(h.state().summary().bodies.len(), 1);
 }
+
+#[test]
+fn save_and_activate_configurations_from_the_browser() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::SetUserParameter {
+        name: "length".into(),
+        expression: "100".into(),
+        unit: None,
+        comment: None,
+    });
+    settle(&mut h);
+    let s1 = sketch(&mut h, SketchPlane::WorldXY, rect(100.0, 30.0));
+    h.state_mut().request(Command::SetExpression {
+        feature: s1,
+        name: "width".into(),
+        expression: "length".into(),
+    });
+    settle(&mut h);
+    request(&mut h, Command::extrude(None, s1, 10.0));
+    click(&mut h, "Configurations (0)");
+    type_into(&mut h, "Configuration name", "Long");
+    type_into(&mut h, "Part number", "P-100");
+    click(&mut h, "Save current as configuration");
+    assert_eq!(h.state().summary().configurations.len(), 1);
+    h.state_mut().request(Command::SetUserParameter {
+        name: "length".into(),
+        expression: "60".into(),
+        unit: None,
+        comment: None,
+    });
+    settle(&mut h);
+    type_into(&mut h, "Configuration name", "Short");
+    type_into(&mut h, "Part number", "P-60");
+    click(&mut h, "Save current as configuration");
+    assert!((h.state().volume().unwrap() - 18000.0).abs() < 1e-6);
+    click(&mut h, "Activate Long");
+    assert!((h.state().volume().unwrap() - 30000.0).abs() < 1e-6);
+    assert_eq!(
+        h.state().summary().active_configuration.as_deref(),
+        Some("Long")
+    );
+    click(&mut h, "Activate Short");
+    assert!((h.state().volume().unwrap() - 18000.0).abs() < 1e-6);
+}

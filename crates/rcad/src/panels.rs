@@ -656,6 +656,7 @@ impl RcadApp {
             return;
         }
         self.parameters_panel(ui);
+        self.configurations_panel(ui);
         ui.separator();
         self.bodies_browser(ui);
         ui.add_space(4.0);
@@ -2375,5 +2376,115 @@ impl RcadApp {
         header
             .header_response
             .probe("Project geometry into this sketch");
+    }
+}
+
+impl RcadApp {
+    /// Run 6 (pull-forward of SESSION_7 §3): named configurations. "Save
+    /// current" stores every user parameter's expression and the features
+    /// suppressed now; Activate applies one (one Undo step each).
+    fn configurations_panel(&mut self, ui: &mut egui::Ui) {
+        let configs = self.summary.configurations.clone();
+        let active = self.summary.active_configuration.clone();
+        let header = egui::CollapsingHeader::new(format!("Configurations ({})", configs.len()))
+            .id_salt("configurations_panel")
+            .show(ui, |ui| {
+                for c in &configs {
+                    ui.horizontal(|ui| {
+                        let is_active = active.as_deref() == Some(c.name.as_str());
+                        let t = if is_active {
+                            RichText::new(format!("● {}", c.name)).strong()
+                        } else {
+                            RichText::new(&c.name)
+                        };
+                        ui.label(t);
+                        if !c.part_number.is_empty() {
+                            ui.label(RichText::new(&c.part_number).weak().small());
+                        }
+                        if ui
+                            .add_enabled(!is_active, egui::Button::new("Activate").small())
+                            .named(&format!("Activate {}", c.name))
+                            .clicked()
+                        {
+                            self.request(Command::ActivateConfiguration {
+                                name: c.name.clone(),
+                            });
+                        }
+                        if ui
+                            .small_button("Delete")
+                            .named(&format!("Delete configuration {}", c.name))
+                            .clicked()
+                        {
+                            self.request(Command::DeleteConfiguration {
+                                name: c.name.clone(),
+                            });
+                        }
+                    })
+                    .response
+                    .on_hover_text(format!(
+                        "{}; suppresses {}",
+                        c.values
+                            .iter()
+                            .map(|(k, v)| format!("{k} = {v}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        if c.suppressed.is_empty() {
+                            "nothing".to_string()
+                        } else {
+                            c.suppressed
+                                .iter()
+                                .map(|f| f.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ));
+                }
+                ui.horizontal(|ui| {
+                    let f = &mut self.config_form;
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.0)
+                            .hint_text("name")
+                            .desired_width(80.0),
+                    )
+                    .named("Configuration name");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.1)
+                            .hint_text("part number")
+                            .desired_width(80.0),
+                    )
+                    .named("Part number");
+                });
+                if ui
+                    .button("Save current as configuration")
+                    .probe("Save current as configuration")
+                    .on_hover_text(
+                        "Stores every user parameter's current expression and the features \
+                         suppressed now (they become configured features)",
+                    )
+                    .clicked()
+                {
+                    let (name, part) = self.config_form.clone();
+                    let values = self
+                        .summary
+                        .parameters
+                        .iter()
+                        .map(|p| (p.name.clone(), p.expression.clone()))
+                        .collect();
+                    let suppressed = self
+                        .summary
+                        .features
+                        .iter()
+                        .filter(|f| f.suppressed)
+                        .map(|f| f.id)
+                        .collect();
+                    self.request(Command::SetConfiguration {
+                        name,
+                        values,
+                        suppressed,
+                        part_number: part,
+                    });
+                }
+            });
+        header.header_response.probe("Configurations header");
     }
 }

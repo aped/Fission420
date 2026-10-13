@@ -1377,6 +1377,30 @@ pub struct Document {
     /// then moves to the new feature). None: at the end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback: Option<FeatureId>,
+    /// Named configurations (run 6 pull-forward of SESSION_7 §3, format v6):
+    /// per configuration, user-parameter expressions, the suppression state
+    /// of the configured features, and a part number. Activating one applies
+    /// it in one transaction (`Document::apply_configuration`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<Configuration>,
+    /// The configuration last activated (None: none / not configured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_configuration: Option<String>,
+}
+
+/// A named variant of a document (see [`Document::configurations`]).
+/// `values` override user-parameter expressions; every feature in
+/// `controls` is suppressed when it is in `suppressed`, evaluated otherwise
+/// (features no configuration controls keep their own state).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Configuration {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub values: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub suppressed: std::collections::BTreeSet<FeatureId>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub part_number: String,
 }
 
 fn one() -> u32 {
@@ -1394,7 +1418,47 @@ impl Document {
             next_blob_id: 1,
             parameters: Vec::new(),
             rollback: None,
+            configurations: Vec::new(),
+            active_configuration: None,
         }
+    }
+
+    /// Features any configuration controls (suppressed in at least one).
+    pub fn configured_features(&self) -> std::collections::BTreeSet<FeatureId> {
+        self.configurations
+            .iter()
+            .flat_map(|c| c.suppressed.iter().copied())
+            .collect()
+    }
+
+    /// Apply configuration `name` to this document: set its parameter
+    /// expressions (each parameter must exist), suppress the configured
+    /// features it lists and restore the other configured features, and mark
+    /// it active. Dependents of a suppressed feature must be suppressed by the
+    /// same configuration (`check_suppression` refuses otherwise).
+    pub fn apply_configuration(&mut self, name: &str) -> Result<()> {
+        let c = self
+            .configurations
+            .iter()
+            .find(|c| c.name == name)
+            .cloned()
+            .ok_or_else(|| DocError::Validation(format!("no configuration named '{name}'")))?;
+        for (p, e) in &c.values {
+            let x = self
+                .parameters
+                .iter_mut()
+                .find(|x| x.name == *p)
+                .ok_or_else(|| DocError::Expression {
+                    name: p.clone(),
+                    detail: format!("configuration '{name}' sets a parameter that does not exist"),
+                })?;
+            x.expression = e.clone();
+        }
+        for f in self.configured_features() {
+            self.feature_mut(f)?.suppressed = c.suppressed.contains(&f);
+        }
+        self.active_configuration = Some(name.to_string());
+        self.check_suppression()
     }
 
     /// Allocate a body id and register its metadata (`name` must be unique;
