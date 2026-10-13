@@ -10,6 +10,17 @@ pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
 pub mod mesh_repair;
+
+/// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
+/// revision comes from `RCAD_GIT_REV` at build time (tools/release.sh sets it).
+pub fn version_string() -> String {
+    format!(
+        "R-CAD {} ({}, native format v{})",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("RCAD_GIT_REV").unwrap_or("dev build"),
+        rcad_document::FORMAT_VERSION
+    )
+}
 pub mod print;
 pub mod printables;
 pub mod scenarios;

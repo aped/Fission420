@@ -23,7 +23,9 @@ fn yes() -> bool {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage:\n  rcad-cli acceptance [--out DIR]\n  rcad-cli run SCRIPT.json");
+    eprintln!(
+        "usage:\n  rcad-cli acceptance [--out DIR]\n  rcad-cli run SCRIPT.json\n  rcad-cli --version"
+    );
     ExitCode::from(64)
 }
 
@@ -40,6 +42,10 @@ fn main() -> ExitCode {
                 Some(_) => return usage(),
             };
             run_acceptance(out)
+        }
+        Some("-V" | "--version") => {
+            println!("{}", rcad_commands::version_string());
+            ExitCode::SUCCESS
         }
         Some("run") => match args.get(1) {
             Some(p) => run_script(PathBuf::from(p)),
