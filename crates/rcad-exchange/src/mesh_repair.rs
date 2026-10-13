@@ -295,7 +295,16 @@ pub fn repair(
     if positions.iter().flatten().any(|x| !x.is_finite()) {
         return Err("the mesh has non-finite coordinates".into());
     }
-    let before = diagnose(positions, triangles);
+    // The diagnosis "before" is of the exactly welded mesh (topology as
+    // stored; a display mesh with per-triangle corners is not 3n open edges).
+    let before = {
+        let (p0, m0, _, _) = weld(positions, 0.0)?;
+        let t0: Vec<[u32; 3]> = triangles
+            .iter()
+            .map(|t| t.map(|i| m0[i as usize]))
+            .collect();
+        diagnose(&p0, &t0)
+    };
     let mut notes = Vec::new();
     let (pos, map, welded, welded_tol) = weld(positions, opts.weld_tolerance)?;
     let mut tris: Vec<[u32; 3]> = triangles
