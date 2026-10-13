@@ -807,101 +807,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "f420-app"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui_kittest",
- "f420-commands",
- "f420-document",
- "f420-exchange",
- "f420-kernel",
- "f420-sketch",
- "f420-viewport",
- "image",
-]
-
-[[package]]
-name = "f420-cli"
-version = "0.1.0"
-dependencies = [
- "f420-commands",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "f420-commands"
-version = "0.1.0"
-dependencies = [
- "f420-document",
- "f420-exchange",
- "f420-kernel",
- "f420-sketch",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "f420-document"
-version = "0.1.0"
-dependencies = [
- "f420-exchange",
- "f420-kernel",
- "f420-sketch",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "f420-exchange"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "f420-sketch",
- "miniz_oxide 0.8.9",
- "quick-xml 0.41.0",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "f420-kernel"
-version = "0.1.0"
-dependencies = [
- "i_overlay",
- "serde",
- "thiserror 2.0.21",
- "truck-meshalgo",
- "truck-modeling",
- "truck-shapeops",
- "truck-stepio",
- "truck-topology",
-]
-
-[[package]]
-name = "f420-sketch"
-version = "0.1.0"
-dependencies = [
- "nalgebra",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "f420-viewport"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "eframe",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2557,6 +2462,102 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rcad"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui_kittest",
+ "image",
+ "rcad-commands",
+ "rcad-document",
+ "rcad-exchange",
+ "rcad-kernel",
+ "rcad-sketch",
+ "rcad-viewport",
+ "tempfile",
+]
+
+[[package]]
+name = "rcad-cli"
+version = "0.1.0"
+dependencies = [
+ "rcad-commands",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rcad-commands"
+version = "0.1.0"
+dependencies = [
+ "rcad-document",
+ "rcad-exchange",
+ "rcad-kernel",
+ "rcad-sketch",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rcad-document"
+version = "0.1.0"
+dependencies = [
+ "rcad-exchange",
+ "rcad-kernel",
+ "rcad-sketch",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rcad-exchange"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide 0.8.9",
+ "quick-xml 0.41.0",
+ "rcad-sketch",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rcad-kernel"
+version = "0.1.0"
+dependencies = [
+ "i_overlay",
+ "serde",
+ "thiserror 2.0.21",
+ "truck-meshalgo",
+ "truck-modeling",
+ "truck-shapeops",
+ "truck-stepio",
+ "truck-topology",
+]
+
+[[package]]
+name = "rcad-sketch"
+version = "0.1.0"
+dependencies = [
+ "nalgebra",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rcad-viewport"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eframe",
 ]
 
 [[package]]

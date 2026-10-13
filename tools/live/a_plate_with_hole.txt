@@ -60,7 +60,7 @@ clickw Redo
 wait_idle
 expect volume 59057.5222 0.01
 key ctrl+shift+s
-typew File path | @OUT@/plate.f420.json
+typew File path | @OUT@/plate.rcad.json
 key Return
 wait_idle
 expect dirty false
@@ -68,7 +68,7 @@ clickw Close
 wait_idle
 expect open false
 key ctrl+o
-typew File path | @OUT@/plate.f420.json
+typew File path | @OUT@/plate.rcad.json
 key Return
 wait_idle
 expect features 4

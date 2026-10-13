@@ -1,9 +1,9 @@
 # FreeCAD (FreeCADCmd) script: generate the STEP fixtures in
-# crates/f420-kernel/tests/fixtures/step/ and verify each by re-import.
+# crates/rcad-kernel/tests/fixtures/step/ and verify each by re-import.
 #
 # Run through tools/fixtures/step/generate.sh, which passes:
-#   F420_OUT      absolute output directory
-#   F420_RESULTS  absolute path of the JSON verification report to write
+#   RCAD_OUT      absolute output directory
+#   RCAD_RESULTS  absolute path of the JSON verification report to write
 #
 # Every fixture is built from Part primitives so its analytic values
 # (volume, bounding box) are known exactly; see the README next to the
@@ -17,8 +17,8 @@ import FreeCAD as App
 import Import
 import Part
 
-OUT = os.environ["F420_OUT"]
-RESULTS = os.environ.get("F420_RESULTS")
+OUT = os.environ["RCAD_OUT"]
+RESULTS = os.environ.get("RCAD_RESULTS")
 
 
 def path(name):
@@ -68,7 +68,7 @@ def verify(fname):
         return {"ok": False, "error": str(e)}
 
 
-MODE = os.environ.get("F420_MODE", "all")  # generate | verify | all
+MODE = os.environ.get("RCAD_MODE", "all")  # generate | verify | all
 results = {"freecad": App.Version()[:4], "occ": Part.OCC_VERSION, "files": {}}
 
 
@@ -137,4 +137,4 @@ if MODE in ("verify", "all"):
     if RESULTS:
         with open(RESULTS, "w") as f:
             json.dump(results, f, indent=1)
-    print("F420_RESULTS " + json.dumps(results))
+    print("RCAD_RESULTS " + json.dumps(results))

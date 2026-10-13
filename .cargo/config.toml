@@ -1,7 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
 
-# Windows gives the main thread a 1 MiB stack (8 MiB on Linux/macOS); f420-cli runs Truck
+# Windows gives the main thread a 1 MiB stack (8 MiB on Linux/macOS); rcad-cli runs Truck
 # booleans and the STEP parser on it. Match the Linux default. See docs/CI.md (L2).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/STACK:8388608"]

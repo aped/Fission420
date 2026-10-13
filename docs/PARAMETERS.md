@@ -1,8 +1,8 @@
 # Named parameters and expressions
 
-Run 4 (SESSION_4 §3). Code: `crates/f420-document/src/params.rs` (language, evaluation,
-binding), commands in `crates/f420-commands/src/lib.rs`, UI in
-`crates/f420-app/src/params_ui.rs` and the inspector (`panels.rs`).
+Run 4 (SESSION_4 §3). Code: `crates/rcad-document/src/params.rs` (language, evaluation,
+binding), commands in `crates/rcad-commands/src/lib.rs`, UI in
+`crates/rcad/src/params_ui.rs` and the inspector (`panels.rs`).
 
 ## Model
 
@@ -92,7 +92,7 @@ dependents correct by rewriting them in the same transaction.
 
 v4 adds `document.parameters` and `features[].expressions` (both omitted when empty). A v3
 document is a v4 document without them, so v3 files load unchanged
-(`crates/f420-commands/tests/fixtures/native_v3/`, frozen copies of the run-3 documents,
+(`crates/rcad-commands/tests/fixtures/native_v3/`, frozen copies of the run-3 documents,
 checked by `native_formats.rs::v3_run3_examples`). Saves always write v4, so an older build
 refuses the file ("newer than supported") instead of silently dropping expressions. A file
 that claims an older version but contains parameters or expressions is refused.
@@ -108,13 +108,13 @@ that claims an older version but contains parameters or expressions is refused.
   expression; a bound value shows its expression with `= value` beside the label.
   **Apply** sends `set_parameter` for unbound numbers (keeps the engine's coalescing of
   rapid edits) and `set_expression` otherwise.
-* Tests: `crates/f420-app/tests/parameters_ui.rs` (real widgets: add, bind, edit, undo,
+* Tests: `crates/rcad/tests/parameters_ui.rs` (real widgets: add, bind, edit, undo,
   refused edit, rename, delete disabled, unbind; the enclosure's fit clearance; two-face
   measurement).
 
 ## Examples
 
 `examples/enclosure_workflow.json`, `clearance_coupon_workflow.json`,
-`mounting_bracket_workflow.json` (generated from `crates/f420-commands/src/printables.rs`)
+`mounting_bracket_workflow.json` (generated from `crates/rcad-commands/src/printables.rs`)
 build their documents entirely from parameters and bindings; the saved
-`examples/*.f420.json` are edited by changing parameters only.
+`examples/*.rcad.json` are edited by changing parameters only.

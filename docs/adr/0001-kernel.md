@@ -4,7 +4,7 @@ Status: accepted (run 1, 2026-10-10)
 
 ## Decision
 Use the Truck crates from crates.io (Apache-2.0): truck-modeling 0.6.0, truck-shapeops 0.4.0,
-truck-meshalgo 0.4.0 (plus their truck-* deps). All Truck types stay behind `crates/f420-kernel`.
+truck-meshalgo 0.4.0 (plus their truck-* deps). All Truck types stay behind `crates/rcad-kernel`.
 
 ## Evidence (spike: `spikes/truck_spike`, `cargo run --release` there)
 Box built by `tsweep` of a vertex/edge/face; cutter = `rsweep` circle -> `try_attach_plane` -> `tsweep`;
@@ -41,7 +41,7 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
   IntersectionCurve`: `self.surface1().fmt(surface0_idx, f)`), giving duplicate ids. Observed: the
   cut plate exported as-is imports in FreeCAD with volume 39194.58 (expected 39214.60) and z bounds
   [-1, 11] (`spikes/truck_spike/src/bin/step.rs`, artifacts/step_probe_cut.step).
-  Mitigation in `f420-kernel/src/step.rs`: before writing, every plane ∩ Z-extruded-NURBS intersection
+  Mitigation in `rcad-kernel/src/step.rs`: before writing, every plane ∩ Z-extruded-NURBS intersection
   edge is rebuilt as the exact rational B-spline generating curve at the plane's z, trimmed between
   the edge vertices, and verified to lie on both surfaces (1e-7 mm) and on the same branch as Truck's
   edge; any other intersection type is refused. Output is checked for unique entity ids.
@@ -54,7 +54,7 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
 - No persistent topological naming in Truck; the document layer resolves semantic references
   from feature parameters and validates them against the B-rep (see docs/behavior/plate-workflow.md).
 
-## Adapter API (crates/f420-kernel)
+## Adapter API (crates/rcad-kernel)
 `extrude(profile, frame, distance)`, `cut_through_all(body, profile, frame)`, `measure(body)`,
 `planar_faces_on(body, frame)`, `tessellate(body, chord)` (welded), `tessellate_display`,
 `check_mesh`, `write_stl_binary`. All return `Result<_, KernelError>`.

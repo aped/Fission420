@@ -1,7 +1,7 @@
 # DXF fixtures: provenance
 
-Committed under `crates/f420-exchange/tests/fixtures/dxf/`, used by
-`crates/f420-exchange/tests/dxf_fixtures.rs`. Regenerate with `tools/fixtures/dxf/gen_freecad.sh`
+Committed under `crates/rcad-exchange/tests/fixtures/dxf/`, used by
+`crates/rcad-exchange/tests/dxf_fixtures.rs`. Regenerate with `tools/fixtures/dxf/gen_freecad.sh`
 (FreeCAD 1.1.4 flatpak, C++ writer `Import.writeDXFShape`) which also runs
 `gen_handwritten.py` (Python stdlib, written from the public DXF reference group codes).
 Expected values are derived analytically in the generator comments and the tests.

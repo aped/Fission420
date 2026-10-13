@@ -1,4 +1,4 @@
-# SVG planar paths (`f420_exchange::svg`)
+# SVG planar paths (`rcad_exchange::svg`)
 
 Status: run 3. Commands `import_svg` (new unconstrained sketch on a plane) and `export_svg`
 (a sketch). Clean-room from the SVG 1.1 specification (path grammar, transform list, arc
@@ -38,7 +38,7 @@ y negated. Stroke only, no fill. Losses: constraints, dimensions, construction g
 sketch placement (plane) — the same contract as DXF export.
 
 ## Evidence
-* `crates/f420-exchange/tests/svg_fixtures.rs` (15 tests): hand-written fixture
+* `crates/rcad-exchange/tests/svg_fixtures.rs` (15 tests): hand-written fixture
   `plate_mm.svg` (arc, circle, translated group; exact region area), FreeCAD-generated
   `freecad_plate.svg` (`tools/fixtures/svg/generate_freecad_svg.py`; reflected group
   transform, arcs; analytic region area 2400 − 36π − (80 + 16π)), units/override, transforms,
@@ -46,7 +46,7 @@ sketch placement (plane) — the same contract as DXF export.
   review fixes: data after `Z` (formerly an infinite loop), exponent lengths, Inkscape
   namespaces, relative lengths skipped per element, root size > 0, root transform refused,
   near-equal radii / near-similarity scales, aspect-ratio alignments, width-only roots.
-* Acceptance 3S (`f420-cli acceptance`): FreeCAD SVG → sketch with two holes → 5 mm solid
+* Acceptance 3S (`rcad-cli acceptance`): FreeCAD SVG → sketch with two holes → 5 mm solid
   (exact volume, bounds), own SVG export re-imported to the same solid, STEP export.
 * `tools/check_run3_steps.sh`: the 3S STEP validated by FreeCAD (volume, bounds, probes), and
   the exported SVG read by FreeCAD's own `importSVG` (total edge length 220 + 20π, 60 × 40).

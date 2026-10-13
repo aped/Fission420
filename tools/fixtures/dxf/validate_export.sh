@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Independent validation of the DXF writer (and of the hand-written fixtures) with FreeCAD's
-# C++ DXF importer. Expected values are analytic (below), not read from Fission420 output.
+# C++ DXF importer. Expected values are analytic (below), not read from R-CAD output.
 #
 # usage: tools/fixtures/dxf/validate_export.sh [OUT_DIR]   (default artifacts/exchange/exports)
 # Needs the org.freecad.FreeCAD flatpak. Exit status 1 on any mismatch.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT=$(realpath -m "${1:-$REPO/artifacts/exchange/exports}")
-FIX="$REPO/crates/f420-exchange/tests/fixtures/dxf"
+FIX="$REPO/crates/rcad-exchange/tests/fixtures/dxf"
 mkdir -p "$OUT"
-(cd "$REPO" && cargo run -q --release -p f420-exchange --example export_samples -- "$OUT")
+(cd "$REPO" && cargo run -q --release -p rcad-exchange --example export_samples -- "$OUT")
 
 files=(
   "$OUT/export_slot.dxf" "$OUT/export_bulge.dxf" "$OUT/export_notch.dxf"
@@ -18,7 +18,7 @@ files=(
   "$FIX/rect_inch.dxf" "$FIX/slot_freecad_r14.dxf"
 )
 list=$(IFS=:; echo "${files[*]}")
-timeout 300 flatpak run --env="F420_DXF=$list" --filesystem="$REPO" --filesystem="$OUT" \
+timeout 300 flatpak run --env="RCAD_DXF=$list" --filesystem="$REPO" --filesystem="$OUT" \
   --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/fixtures/dxf/freecad_read_dxf.py" 2>&1 \
   | grep -o 'FREECAD_RESULT .*' | tee "$OUT/freecad_read_dxf.txt"
 

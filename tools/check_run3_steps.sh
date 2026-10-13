@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Independent FreeCAD 1.1 (OpenCascade) validation of the run-3 scenario STEP exports
-# written by `f420-cli acceptance --out DIR` (steps 3A, 3B, 3N, 3P).
+# written by `rcad-cli acceptance --out DIR` (steps 3A, 3B, 3N, 3P).
 # usage: tools/check_run3_steps.sh [DIR]   (default artifacts/run3/acceptance)
-# Expected values are analytic (derived here, not read from Fission420 output); probe
+# Expected values are analytic (derived here, not read from R-CAD output); probe
 # points check feature placement (inside material / inside a removed region).
 set -u -o pipefail
 DIR=$(realpath "${1:-artifacts/run3/acceptance}")
@@ -13,7 +13,7 @@ fi
 status=0
 check() { # file, expected sorted volumes (python list expr), bounds (python list), probes JSON, expected inside (python list)
   local f=$1 vols=$2 bounds=$3 probes=$4 inside=$5 out
-  out=$(timeout 180 flatpak run --env="F420_STEP=$DIR/$f" --env="F420_PROBES=$probes" \
+  out=$(timeout 180 flatpak run --env="RCAD_STEP=$DIR/$f" --env="RCAD_PROBES=$probes" \
     --filesystem="$DIR" --filesystem="$REPO" --command=FreeCADCmd org.freecad.FreeCAD \
     "$REPO/tools/freecad_check_probes.py" 2>&1 | grep FREECAD_RESULT) || { echo "$f: FreeCAD failed"; status=1; return; }
   echo "$out" > "$DIR/${f%.step}_freecad.txt"
@@ -68,7 +68,7 @@ check bolt_circle.step "[math.pi*2500*10 - 6*math.pi*16*10]" "[-50,-50,0,50,50,1
   "[[35,0,5],[17.5,30.31088913,5],[-17.5,30.31088913,5],[-35,0,5],[-17.5,-30.31088913,5],[17.5,-30.31088913,5],[0,35,5],[35,10,5]]" \
   "[False, False, False, False, False, False, True, True]"
 # 3S: our SVG export read by FreeCAD's own importer: edge lengths 200 + 12pi + 20 + 8pi, extents 60 x 40.
-out=$(timeout 180 flatpak run --env="F420_SVG=$DIR/svg_plate.svg" --filesystem="$DIR" --filesystem="$REPO" \
+out=$(timeout 180 flatpak run --env="RCAD_SVG=$DIR/svg_plate.svg" --filesystem="$DIR" --filesystem="$REPO" \
   --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/freecad_check_svg.py" 2>&1 | grep FREECAD_RESULT) || status=1
 echo "$out" > "$DIR/svg_plate_svg_freecad.txt"
 python3 - "$out" <<'PY' || status=1

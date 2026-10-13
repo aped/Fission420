@@ -28,6 +28,6 @@ rustup -q toolchain install "$TOOLCHAIN" --profile minimal -c rustfmt,clippy
 rustup default "$TOOLCHAIN" >/dev/null
 grep PRETTY_NAME /etc/os-release; rustc -V
 cargo fetch --locked
-cargo build --release --locked -p f420-app -p f420-cli
+cargo build --release --locked -p rcad -p rcad-cli
 cargo xtask check
 '

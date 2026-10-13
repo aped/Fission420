@@ -1,8 +1,8 @@
 #!/bin/bash
-# Run every tools/live/*.txt script against a fresh f420-app in its own private
+# Run every tools/live/*.txt script against a fresh rcad in its own private
 # headless compositor (tools/headless_session.sh), with real pointer/keyboard
 # input injected through mutter's RemoteDesktop API (tools/live_input.py).
-# Each script asserts document state via the app's F420_PROBE output.
+# Each script asserts document state via the app's RCAD_PROBE output.
 # Scripts may use @OUT@ (the per-script output dir) and @ROOT@ (the repository root).
 # Exit status is non-zero if any script or expectation fails.
 #
@@ -11,8 +11,8 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/artifacts/live_walkthrough}
 FILTER=${2:-}
-APP=$ROOT/target/release/f420-app
-[ -x "$APP" ] || { echo "build first: cargo build --release -p f420-app"; exit 2; }
+APP=$ROOT/target/release/rcad
+[ -x "$APP" ] || { echo "build first: cargo build --release -p rcad"; exit 2; }
 rc=0
 for script in "$ROOT"/tools/live/*.txt; do
   name=$(basename "$script" .txt)
@@ -22,7 +22,7 @@ for script in "$ROOT"/tools/live/*.txt; do
   case "$dir" in "$OUT"/?*) ;; *) echo "refusing to clear $dir"; exit 2 ;; esac
   if [ -d "${dir:?}" ]; then rm -rf -- "${dir:?}"; fi
   mkdir -p "$dir/shots"
-  F420_TRACE_INPUT=1 F420_PROBE="$dir/probe.json" F420_RECOVERY_DIR="$dir/recovery" \
+  RCAD_TRACE_INPUT=1 RCAD_PROBE="$dir/probe.json" RCAD_RECOVERY_DIR="$dir/recovery" \
     "$ROOT/tools/headless_session.sh" "$dir" 1280x800 "$APP" --maximized --shot-dir "$dir/shots" \
     > "$dir/session.log" 2>&1 &
   session=$!

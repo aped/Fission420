@@ -16,7 +16,7 @@ implemented; listing them here is not a claim of support. Ordered roughly by val
   naming that survives face splits/merges (today: deterministic refusal + explicit re-attach).
 - Sketches on curved faces; construction planes (offset, angled, through edges).
 - Fillet: not feasible through Truck 0.6 booleans — a tool whose arc is tangent to both faces
-  returns no result at every tolerance (spike: `f420-kernel` `ops::tests::spike_fillet_tangent_arc_tool`,
+  returns no result at every tolerance (spike: `rcad-kernel` `ops::tests::spike_fillet_tangent_arc_tool`,
   ignored, run with `--ignored`). Needs direct B-rep face construction (replace the edge by a
   cylindrical face and trim the neighbours) or a kernel with fillets. Chamfers of straight convex
   edges exist (docs/COMMANDS.md `chamfer`); vertex blends and chamfer chains do not.

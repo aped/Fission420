@@ -1,10 +1,10 @@
 # Observed timings (run 2)
 
-Measured 2026-10-10 with the timing harness in `crates/f420-app/src/engine.rs`
+Measured 2026-10-10 with the timing harness in `crates/rcad/src/engine.rs`
 (`#[ignore]`d test, so it never gates CI):
 
 ```bash
-cargo test --release -p f420-app --lib engine::tests::timings -- --ignored --nocapture
+cargo test --release -p rcad --lib engine::tests::timings -- --ignored --nocapture
 ```
 
 Machine: AMD Ryzen 7 9800X3D (8 cores / 16 threads, boost to 4.7 GHz), 32 GB RAM, Linux
@@ -44,7 +44,7 @@ Observations (labelled by confidence):
 ## Deferred measurement (run 2, coordinator)
 
 Profiling one plate-with-hole regeneration stage by stage
-(`cargo run --release -p f420-app --example regen_profile`, same machine):
+(`cargo run --release -p rcad --example regen_profile`, same machine):
 
 | stage | time |
 |---|---|
@@ -54,7 +54,7 @@ Profiling one plate-with-hole regeneration stage by stage
 | `tessellate_display` (0.05 mm chord) | ~377 ms |
 
 So the earlier inference that the boolean dominates was wrong: exact measurement is ~75 %.
-The threaded engine now defers it (see the module docs of `crates/f420-app/src/engine.rs`):
+The threaded engine now defers it (see the module docs of `crates/rcad/src/engine.rs`):
 the reply carries the new geometry and `summary.measuring`, a measurement thread (latest job
 wins) computes the volume, and a follow-up reply tagged with document id + revision delivers
 it; the UI shows "Measuring volume… (geometry is current)" meanwhile and ignores a follow-up
@@ -104,7 +104,7 @@ Temporary instrumentation (not committed) counted and timed every edge evaluatio
 After every successful boolean, each `Plane` ∩ (NURBS surface extruded along the plane normal)
 edge is replaced by its exact rational B-spline (projection of the generating curve onto the
 plane; affine, hence exact), verified against the original curve and vertices, and kept as the
-original on any mismatch (`crates/f420-kernel/src/exact.rs`, ADR 0002, tolerances in
+original on any mismatch (`crates/rcad-kernel/src/exact.rs`, ADR 0002, tolerances in
 docs/TOLERANCES.md). Measurement code and its mathematics are unchanged.
 
 ### Before / after (release, 9800X3D)
@@ -116,10 +116,10 @@ docs/TOLERANCES.md). Measurement code and its mathematics are unchanged.
 | same: `tessellate_display(0.05)` | 380 ms | 1.6 ms |
 | same: volume error vs 40000 − 250π | −1.2e-5 mm³ | +4e-11 mm³ |
 | plate 100×50×10 Ø10: cut / measure / tessellate | 156 / 1809 / 377 ms | 167 / 1.0 / 1.7 ms |
-| `f420-cli run examples/bracket_workflow.json` (wall, 3 runs) | 68.4–69.7 s | 2.66–2.69 s |
+| `rcad-cli run examples/bracket_workflow.json` (wall, 3 runs) | 68.4–69.7 s | 2.66–2.69 s |
 | bracket final volume error vs 43200 − 853.5π | −1.1e-5 mm³ | +1.6e-10 mm³ |
-| `f420-cli run examples/scenario_r_workflow.json` (wall, 3 runs) | 6.27–6.94 s | 0.48 s |
-| `f420-cli acceptance` (440 checks, 0 failed both) | 76.5 s | 2.4 s |
+| `rcad-cli run examples/scenario_r_workflow.json` (wall, 3 runs) | 6.27–6.94 s | 0.48 s |
+| `rcad-cli acceptance` (440 checks, 0 failed both) | 76.5 s | 2.4 s |
 | engine harness: plate `set_parameter width` geometry reply (median of 7) | 575 ms | 211 ms |
 | engine harness: same, until measurements arrive | 2394 ms | 213 ms |
 | engine harness: plate undo (cached prefix) | 517 ms | 2.1 ms |
@@ -127,11 +127,11 @@ docs/TOLERANCES.md). Measurement code and its mathematics are unchanged.
 Commands:
 
 ```bash
-cargo run --release -p f420-app --example regen_profile
-target/release/f420-cli run examples/bracket_workflow.json     # needs ./artifacts/
-target/release/f420-cli run examples/scenario_r_workflow.json
-target/release/f420-cli acceptance --out artifacts/acceptance
-cargo test --release -p f420-app --lib engine::tests::timings -- --ignored --nocapture
+cargo run --release -p rcad --example regen_profile
+target/release/rcad-cli run examples/bracket_workflow.json     # needs ./artifacts/
+target/release/rcad-cli run examples/scenario_r_workflow.json
+target/release/rcad-cli acceptance --out artifacts/acceptance
+cargo test --release -p rcad --lib engine::tests::timings -- --ignored --nocapture
 ```
 
 The remaining regeneration cost of a holed part is the Truck boolean itself

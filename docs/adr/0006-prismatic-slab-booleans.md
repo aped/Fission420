@@ -24,7 +24,7 @@ For a **prismatic** case, build the result directly instead of calling Truck:
 * the profile has straight edges only (no arcs or circles).
 
 Then the body is a stack of slabs whose cross-section is constant between consecutive cap
-levels, and a Join/Cut is a 2-D region boolean per slab (`f420-kernel/src/prismatic.rs`):
+levels, and a Join/Cut is a 2-D region boolean per slab (`rcad-kernel/src/prismatic.rs`):
 
 1. `S_k = (S_{k-1} \ Up_k) ∪ Down_k` from the cap faces (up-/down-facing at level `k`); the
    region above the top level must come out empty (consistency check);
@@ -46,7 +46,7 @@ maps a grid value to the same integer. (`i_overlay`'s own fixed-scale adapter ce
 input bounds, so two calls could round the same noisy value one step apart and leave
 1e-9 mm slivers; `grid_snapping_is_consistent_across_calls` tests this.)
 
-**Where it is used** (`f420-document/src/regen.rs::apply_tool`): Truck stays first. If
+**Where it is used** (`rcad-document/src/regen.rs::apply_tool`): Truck stays first. If
 Truck fails, or its result fails the ADR 0005 check, and the case is prismatic, the slab
 result is built and goes through **the same independent result check**. If that check
 fails, the error says it is the slab construction's. A Join sketched on a face whose

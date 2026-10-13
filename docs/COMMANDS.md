@@ -1,21 +1,21 @@
 # Headless command API
 
-One API (`crates/f420-commands`, `Session::execute(&Command) -> Response`) is used by the
+One API (`crates/rcad-commands`, `Session::execute(&Command) -> Response`) is used by the
 native app, the CLI, and the tests. Commands are JSON objects tagged by `cmd`.
 
 ## CLI
 
 ```bash
-cargo build --release -p f420-cli
-target/release/f420-cli run examples/plate_workflow.json       # JSON lines, one per command
-target/release/f420-cli run examples/bracket_workflow.json     # 120x60 bracket, 5 holes, STL+STEP
-target/release/f420-cli run examples/scenario_a_workflow.json  # SESSION_2 A: editor sketches, plate + hole
-target/release/f420-cli run examples/scenario_b_workflow.json  # SESSION_2 B: chamfered line loop
-target/release/f420-cli run examples/scenario_r_workflow.json  # stretch: rounded rectangle + slot (3-point arcs)
-target/release/f420-cli run examples/enclosure_workflow.json       # run 4: parametric enclosure base + lid (docs/PARAMETERS.md)
-target/release/f420-cli run examples/clearance_coupon_workflow.json # run 4: peg/hole fit test, 0.15-0.45 mm per side
-target/release/f420-cli run examples/mounting_bracket_workflow.json # run 4: L bracket, patterned holes, chamfer
-target/release/f420-cli acceptance --out artifacts/acceptance  # GOAL.md workflow + scenarios A/B, analytic checks
+cargo build --release -p rcad-cli
+target/release/rcad-cli run examples/plate_workflow.json       # JSON lines, one per command
+target/release/rcad-cli run examples/bracket_workflow.json     # 120x60 bracket, 5 holes, STL+STEP
+target/release/rcad-cli run examples/scenario_a_workflow.json  # SESSION_2 A: editor sketches, plate + hole
+target/release/rcad-cli run examples/scenario_b_workflow.json  # SESSION_2 B: chamfered line loop
+target/release/rcad-cli run examples/scenario_r_workflow.json  # stretch: rounded rectangle + slot (3-point arcs)
+target/release/rcad-cli run examples/enclosure_workflow.json       # run 4: parametric enclosure base + lid (docs/PARAMETERS.md)
+target/release/rcad-cli run examples/clearance_coupon_workflow.json # run 4: peg/hole fit test, 0.15-0.45 mm per side
+target/release/rcad-cli run examples/mounting_bracket_workflow.json # run 4: L bracket, patterned holes, chamfer
+target/release/rcad-cli acceptance --out artifacts/acceptance  # GOAL.md workflow + scenarios A/B, analytic checks
 tools/external_validation.sh artifacts/acceptance               # python STL + FreeCAD STL/STEP checks
 ```
 
@@ -26,9 +26,9 @@ repository root (paths are relative to the working directory).
 stretch steps are prefixed `P.`, the three-point-arc stretch steps `R.`; steps of the
 SESSION_2 scenarios are prefixed `A.` / `B.`.
 
-The scenario workflows are generated from `f420_commands::scenarios` (the sketches are built
+The scenario workflows are generated from `rcad_commands::scenarios` (the sketches are built
 with the sketch editing API, like the interactive editor). After changing that module:
-`F420_WRITE_EXAMPLES=1 cargo test -p f420-commands --test scenario_examples`; without the
+`RCAD_WRITE_EXAMPLES=1 cargo test -p rcad-commands --test scenario_examples`; without the
 variable the same test fails when the committed JSON is stale, and it replays the workflows.
 
 ## Commands
@@ -141,7 +141,7 @@ Arcs: an `Arc` runs counter-clockwise from `start` to `end` about `center` (swee
 constraint). The editor API builds one with `Sketch::add_arc_3pt(start, end, via)` (centre at
 the circumcentre; endpoints stored swapped when `via` is on the clockwise side; refused for
 coincident or collinear points or a radius above 1e4 × the span, `SketchError::DegenerateArc`).
-Helpers in `f420_commands::sketches`: `rounded_rectangle(w, h, r)` (dimensions `width`,
+Helpers in `rcad_commands::sketches`: `rounded_rectangle(w, h, r)` (dimensions `width`,
 `height`, `radius`; 8 tangents, the other corners `EqualRadius`), `slot(length, radius)`
 (dimensions `length`, `radius`), `offset_circle(d, x, y)`. All fully constrained.
 
@@ -166,7 +166,7 @@ A failed command never changes the document (transaction rollback).
 Optional fields set only by a queueing front end (the app engine), never by `Session`, and
 omitted from JSON when unset: `superseded: true` (the command was skipped because a newer
 edit of the same parameter was queued right behind it; `ok` is true and nothing changed) and
-`elapsed_ms` (worker time including display tessellation). See `crates/f420-app/src/engine.rs`.
+`elapsed_ms` (worker time including display tessellation). See `crates/rcad/src/engine.rs`.
 
 `summary` (`DocSummary`): `doc_id` (changes on New/Open/Close), `open`, `path`, `dirty`,
 `revision` (bumped by every commit, undo and redo), undo/redo labels, and per-feature
@@ -182,10 +182,11 @@ geometry changes). `DocSummary.parameters` (run 4) lists user parameters with va
 ## Native format
 
 Current: **version 4** (run 4) = v3 (ADR 0003: bodies, blobs, operations) + `parameters` and
-`features[].expressions` (docs/PARAMETERS.md). v1–v3 load; saves write v4. History of
-earlier versions:
+`features[].expressions` (docs/PARAMETERS.md). v1–v3 load; saves write v4. The format name
+is `"r-cad"`; files from before the rename (`"fission420"`, `*.f420.json`) load unchanged
+(docs/RENAME.md). History of earlier versions:
 
-`{"format": "fission420", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
+`{"format": "r-cad", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
 optional sketch `origin`, the `Distance` constraint and the `Pocket` feature; later run-2
 additions (the `Arc` entity, `Radius` / `Tangent` / `EqualRadius` / `Parallel` / `Perpendicular` /
 `EqualLength` / `PointOnLine` constraints, the sketch `construction` set) are serde-additive
@@ -194,5 +195,5 @@ and keep version 2, so a v2 file that uses them cannot be read by a run-1 or ear
 strict subset and load unchanged (identity migration); saving writes version 2. Files claiming
 a newer version than the build supports are refused with a `File` error. Stored coordinates
 are written with shortest round-trip float formatting and reload bit-exactly.
-`crates/f420-document/tests/fixtures/plate_v1.f420.json` is a frozen v1 file used by the
-migration test (the `examples/*.f420.json` files are re-saved as v2 by their workflows).
+`crates/rcad-document/tests/fixtures/plate_v1.rcad.json` is a frozen v1 file used by the
+migration test (the `examples/*.rcad.json` files are re-saved as v2 by their workflows).

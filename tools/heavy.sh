@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run one heavy job (cargo build/test/clippy, FreeCAD or slicer validation) at a time
 # across the coordinator and workers (the run specification's resource budget).
-# Usage: tools/heavy.sh cargo test -p f420-document --release
+# Usage: tools/heavy.sh cargo test -p rcad-document --release
 # Waits for the lock; builds use 4 jobs and the shared disk-backed target dir.
 set -euo pipefail
 # Main checkout (the parent of the shared .git), so every worktree uses the same lock and

@@ -35,7 +35,7 @@ Undo/redo swap whole-document snapshots (parameters, features, references) and r
 A new edit clears redo. Rejected edits do not create history entries or bump `revision`.
 
 ## Persistence
-`*.f420.json`: `{format: "fission420", version: 1, document, cache}`. `document` is authoritative;
+`*.rcad.json`: `{format: "r-cad", version: 1, document, cache}`. `document` is authoritative;
 `cache` (volume/bounds/face count at save time) is only compared after regeneration. Unknown
 format/newer version/structural errors/dangling references are rejected with `File` errors.
 

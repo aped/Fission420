@@ -1,6 +1,6 @@
 # Sketch editing behaviour (run 2)
 
-This is the behaviour implemented in `crates/f420-app/src/sketch_edit.rs` (logic),
+This is the behaviour implemented in `crates/rcad/src/sketch_edit.rs` (logic),
 `sketch_view.rs` (drawing) and `view3d.rs` / `panels.rs` (input routing and panels). It is an
 original specification for this product, not a description of any other CAD system.
 
@@ -87,7 +87,7 @@ A drag never bypasses constraints:
    ("Cannot move: held by width = 80 mm …; delete a constraint or dimension to free it").
 
 The solve runs on the UI thread (typical step 2–5 µs, blocked-with-diagnosis ~0.12 ms; see
-`cargo run --release -p f420-app --example drag_latency`). Escape during a drag restores the
+`cargo run --release -p rcad --example drag_latency`). Escape during a drag restores the
 start state; a completed drag is **one local undo step**.
 
 ## Status and profile
@@ -131,8 +131,8 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   sketch plane and the preview prism shows its holes. A sketch whose whole profile is refused
   only because of extra loops can still be extruded (pick a region).
 * API: `Sketch::regions()` (each with `RegionRef`, depth, area), `Sketch::region_by_ref`,
-  `Sketch::region_at(point)`; tests `crates/f420-sketch/src/tests_regions_pick.rs`,
-  `crates/f420-commands/tests/regions.rs`, `crates/f420-app/tests/region_pick_ui.rs`.
+  `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
+  `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
 
 ## Offset (Offset tool, `O`) — run 4
 
@@ -167,11 +167,11 @@ Enter. One undo step.
   could not drive them) and produces redundant equations at tangent joints.
 * With the copy the sketch has two loops: the default profile is the ring between them (outer
   minus inner); pick the inner region to extrude or cut the opening (see Regions).
-* Tests: `crates/f420-sketch/src/tests_offset.rs` (analytic areas: rectangle ± d, L shape
+* Tests: `crates/rcad-sketch/src/tests_offset.rs` (analytic areas: rectangle ± d, L shape
   concave/convex, slot, rounded rectangle, circle; edits; refusals), the finite-difference check
-  `solver.rs::offset_rows_match_finite_differences`, `crates/f420-commands/tests/offset_lip.rs`
+  `solver.rs::offset_rows_match_finite_differences`, `crates/rcad-commands/tests/offset_lip.rs`
   (enclosure lip opening = lip outline offset by −`lip_wall`; lid volume = `lid_volume()` for the
-  baseline and the variant), `crates/f420-app/tests/sketch_offset_ui.rs`.
+  baseline and the variant), `crates/rcad/tests/sketch_offset_ui.rs`.
 
 ## Sketch corner fillet (Fillet tool) — run 4
 
@@ -192,10 +192,10 @@ of the arc, or the refusal reason), Enter. One undo step.
   circles, free points, three curves), collinear lines, radius ≤ 0, and a radius that does not fit
   (t must be shorter than both lines, measured to their other ends — two fillets on one side
   share its length).
-* Tests: `crates/f420-sketch/src/tests_fillet.rs` (areas: right corners r²(1 − π/4) each, an
+* Tests: `crates/rcad-sketch/src/tests_fillet.rs` (areas: right corners r²(1 − π/4) each, an
   oblique corner t·r − (π − θ)r²/2; full constraint kept; width and radius edits; refusals),
-  `crates/f420-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
-  regenerated after width/radius edits), `crates/f420-app/tests/sketch_fillet_ui.rs`.
+  `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
+  regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
 
 ## Offset construction planes — run 4
 
@@ -207,8 +207,8 @@ for the world planes; negative values go the other way). The distance is the ske
 `floor + 3` above a cavity floor). The plane follows the base face when the model changes; if the
 face no longer resolves, regeneration reports `BrokenReference` (never another face), and the
 face's feature cannot be deleted while the sketch uses it. Mirror and Hole accept the same plane
-form through the command API. Tests: `crates/f420-commands/tests/offset_plane.rs`,
-`crates/f420-app/tests/offset_plane_ui.rs`.
+form through the command API. Tests: `crates/rcad-commands/tests/offset_plane.rs`,
+`crates/rcad/tests/offset_plane_ui.rs`.
 
 ## Undo model
 
@@ -219,7 +219,7 @@ form through the command API. Tests: `crates/f420-commands/tests/offset_plane.rs
 
 ## Template sketches and old files
 
-Run-1 template sketches (dimensioned rectangle / circle, and old `.f420.json` files) open in the
+Run-1 template sketches (dimensioned rectangle / circle, and old `.rcad.json` files) open in the
 same editor. They keep their fixed anchor point, so after an edit they still expose `center_x` /
 `center_y` next to their dimensions; feature ids and downstream references are unchanged.
 Editor-made sketches have an explicit fixed origin point instead (no `center_*` parameters).

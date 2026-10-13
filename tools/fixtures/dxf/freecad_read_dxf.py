@@ -1,5 +1,5 @@
 # Read DXF files with FreeCAD's C++ DXF importer (Import.readDXF) and report what it found.
-# Run inside FreeCADCmd; F420_DXF is a ':'-separated list of absolute paths.
+# Run inside FreeCADCmd; RCAD_DXF is a ':'-separated list of absolute paths.
 # One line per file: FREECAD_RESULT {"file", "edges": {type: n}, "layers", "bounds", "area",
 # "closed", "arcs": [[cx, cy, r, sweep_deg]]}
 import json
@@ -10,7 +10,7 @@ import FreeCAD
 import Import
 import Part
 
-for path in os.environ["F420_DXF"].split(":"):
+for path in os.environ["RCAD_DXF"].split(":"):
     doc = FreeCAD.newDocument()
     res = {"file": os.path.basename(path)}
     try:

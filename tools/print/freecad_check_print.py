@@ -1,6 +1,6 @@
 # FreeCAD cross-check for print exports (STL / 3MF), independent of check_print_mesh.py.
-# Run with (from the repo root; F420_PRINT = absolute path of the .stl or .3mf):
-#   tools/heavy.sh timeout 180 flatpak run --env=F420_PRINT=/abs/file.stl \
+# Run with (from the repo root; RCAD_PRINT = absolute path of the .stl or .3mf):
+#   tools/heavy.sh timeout 180 flatpak run --env=RCAD_PRINT=/abs/file.stl \
 #     --filesystem=/abs/repo --command=FreeCADCmd org.freecad.FreeCAD tools/print/freecad_check_print.py
 # Prints one line "FREECAD_RESULT {json}" with per-object mesh facts as FreeCAD's Mesh
 # module sees them. 3MF goes through Mesh.insert (FreeCAD's own 3MF reader, if present);
@@ -11,10 +11,10 @@
 # non-millimeter 3MF results must therefore come from check_print_mesh.py, not FreeCAD.
 import os, json, FreeCAD, Mesh
 
-path = os.environ["F420_PRINT"]
+path = os.environ["RCAD_PRINT"]
 out = {"file": path, "freecad": ".".join(FreeCAD.Version()[:3])}
 try:
-    doc = FreeCAD.newDocument("f420print")
+    doc = FreeCAD.newDocument("rcadprint")
     Mesh.insert(path, doc.Name)
     objs = []
     for o in doc.Objects:

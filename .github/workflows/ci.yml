@@ -85,7 +85,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: fission420-*
+          pattern: r-cad-*
           path: dist
           merge-multiple: true
       - name: Create draft GitHub release (unsigned)
@@ -94,4 +94,4 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" --draft --generate-notes \
-            --title "Fission420 ${GITHUB_REF_NAME} (unsigned prototype build)"
+            --title "R-CAD ${GITHUB_REF_NAME} (unsigned prototype build)"

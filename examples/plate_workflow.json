@@ -11,9 +11,9 @@
   {"cmd": "set_parameter", "feature": 3, "name": "diameter", "value": 60, "expect_ok": false},
   {"cmd": "undo"},
   {"cmd": "redo"},
-  {"cmd": "save", "path": "examples/plate.f420.json"},
+  {"cmd": "save", "path": "examples/plate.rcad.json"},
   {"cmd": "close"},
-  {"cmd": "open", "path": "examples/plate.f420.json"},
+  {"cmd": "open", "path": "examples/plate.rcad.json"},
   {"cmd": "export_stl", "path": "artifacts/plate.stl", "chord": 0.01},
   {"cmd": "inspect"}
 ]

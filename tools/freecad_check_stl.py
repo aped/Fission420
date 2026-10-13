@@ -1,6 +1,6 @@
-# Run with: flatpak run --command=FreeCADCmd org.freecad.FreeCAD tools/freecad_check_stl.py  (STL path via F420_STL env)
+# Run with: flatpak run --command=FreeCADCmd org.freecad.FreeCAD tools/freecad_check_stl.py  (STL path via RCAD_STL env)
 import os, json, Mesh
-m = Mesh.Mesh(os.environ["F420_STL"])
+m = Mesh.Mesh(os.environ["RCAD_STL"])
 bb = m.BoundBox
 print("FREECAD_RESULT " + json.dumps({
     "points": m.CountPoints, "facets": m.CountFacets, "isSolid": m.isSolid(),

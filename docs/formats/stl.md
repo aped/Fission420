@@ -1,10 +1,10 @@
-# STL support (`f420_exchange::stl`, `f420_exchange::mesh`)
+# STL support (`rcad_exchange::stl`, `rcad_exchange::mesh`)
 
 ## Supported subset
 * **Read**: ASCII and binary STL. ASCII keywords are case-insensitive; several `solid … endsolid`
   blocks in one file are concatenated (the name is the first one's). Facets must have exactly
   3 vertices.
-* **Write**: `write_binary` (80-byte header `binary STL from Fission420: <name>`, never starting
+* **Write**: `write_binary` (80-byte header `binary STL from R-CAD: <name>`, never starting
   with `solid`; `f32` coordinates; attribute 0) and `write_ascii` (`f64`, shortest round-trip
   exponent form). A missing or zero stored normal is replaced by the right-hand-rule unit normal.
 
@@ -45,11 +45,11 @@ an open mesh never gets a volume.
 * Mixed or non-UTF-8 ASCII STL is rejected rather than guessed.
 
 ## Fixture evidence
-`crates/f420-exchange/tests/stl_fixtures.rs` with fixtures from FreeCAD 1.1.4 and Python
+`crates/rcad-exchange/tests/stl_fixtures.rs` with fixtures from FreeCAD 1.1.4 and Python
 (`tools/fixtures/stl/README.md`): ASCII = binary geometry, box closed with volume 1000 / area 700,
 open box 4 boundary edges and no volume, `solid`-header binary detected, truncated / malformed /
 NaN / unterminated / over-limit inputs rejected with the right error. Writer output validated by
 FreeCAD (`tools/fixtures/stl/validate_writer.sh`: solid, volume 1000, PASS).
 
 ## Command-level evidence
-Acceptance scenario D (`crates/f420-commands/src/acceptance/formats.rs`, steps "D.1"-"D.6"): ASCII/binary at mm and inch, open mesh, malformed files, exact operations refused on mesh bodies, mesh STL export (validated by `tools/check_formats.sh`), reload without the sources. Summary matrix: `docs/FORMAT_SUPPORT.md`.
+Acceptance scenario D (`crates/rcad-commands/src/acceptance/formats.rs`, steps "D.1"-"D.6"): ASCII/binary at mm and inch, open mesh, malformed files, exact operations refused on mesh bodies, mesh STL export (validated by `tools/check_formats.sh`), reload without the sources. Summary matrix: `docs/FORMAT_SUPPORT.md`.

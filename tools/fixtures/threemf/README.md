@@ -1,12 +1,12 @@
 # 3MF fixtures: provenance
 
-Committed under `crates/f420-exchange/tests/fixtures/threemf/`, used by
-`crates/f420-exchange/tests/threemf_fixtures.rs`. Expected values are analytic (stated in
+Committed under `crates/rcad-exchange/tests/fixtures/threemf/`, used by
+`crates/rcad-exchange/tests/threemf_fixtures.rs`. Expected values are analytic (stated in
 the generators and asserted in the tests).
 
 | file | writer | content | expected |
 |---|---|---|---|
-| `freecad_two_boxes.3mf` | FreeCAD 1.1.4 Mesh 3MF writer (`freecad_3mf.py`, `F420_MODE=generate`), deflated | `makeBox(10,10,10)` and `makeBox(20,10,5)` at (50,0,0), two objects, two items | mm; 12 triangles each, closed, V 1000 each; bounds [0,10]^3 and [50,70]x[0,10]x[0,5] |
+| `freecad_two_boxes.3mf` | FreeCAD 1.1.4 Mesh 3MF writer (`freecad_3mf.py`, `RCAD_MODE=generate`), deflated | `makeBox(10,10,10)` and `makeBox(20,10,5)` at (50,0,0), two objects, two items | mm; 12 triangles each, closed, V 1000 each; bounds [0,10]^3 and [50,70]x[0,10]x[0,5] |
 | `box_inch_rotated.3mf` | `gen_handwritten.py` (Python stdlib) | box 1 x 0.5 x 0.25 in, item transform `0 1 0 -1 0 0 0 0 1 2 0 0` (+90 deg about Z, +2 in X) | x [38.1, 50.8], y [0, 25.4], z [0, 6.35] mm; V 0.125 in^3 |
 | `components_mirror_stored.3mf` | hand-written, **stored** entries | tetrahedron (legs 10) used twice through `<components>`, once mirrored in X and moved +30 | one item "Pair": 2 components, 8 triangles, closed, V 2000/6, bounds [0,30]x[0,10]^2 |
 | `colors.3mf` | hand-written | `<basematerials>` #FF000080 / #00FF00 for objects 1/2; a per-triangle `p1` on object 2; object 3 uses a materials-extension `m:colorgroup` (required extension `m`) | colours [255,0,0,128], [0,255,0,255], none; warnings for the triangle override and group 6 |
@@ -18,12 +18,12 @@ the generators and asserted in the tests).
 | `lying_size.3mf` | hand-written, then the model's declared uncompressed size patched to 1000 bytes in both headers | | refused; never inflated past the declared size |
 | `no_rels.3mf` | hand-written without `_rels/.rels` | 1 mm cube | read with a warning (default part name) |
 
-Regenerate: `python3 -I tools/fixtures/threemf/gen_handwritten.py crates/f420-exchange/tests/fixtures/threemf`
-and `flatpak run --env=F420_MODE=generate --env=F420_OUT=<that dir> --filesystem=<repo>
+Regenerate: `python3 -I tools/fixtures/threemf/gen_handwritten.py crates/rcad-exchange/tests/fixtures/threemf`
+and `flatpak run --env=RCAD_MODE=generate --env=RCAD_OUT=<that dir> --filesystem=<repo>
 --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/threemf/freecad_3mf.py`
 (zip timestamps differ between runs; the XML is deterministic).
 
-## FreeCAD 1.1.4's reading of the fixtures (observed 2026-10-11, `F420_MODE=read`)
+## FreeCAD 1.1.4's reading of the fixtures (observed 2026-10-11, `RCAD_MODE=read`)
 
 | file | FreeCAD result | note |
 |---|---|---|
@@ -39,8 +39,8 @@ deflate/stored packaging, but not of units or components; `check_3mf.py` (stdlib
 
 ## Writer validation
 
-`tools/fixtures/threemf/validate_writer.sh` writes `f420_two_mm.3mf` / `f420_two_inch.3mf`
-(`crates/f420-exchange/examples/threemf_samples.rs`: 10 mm cube coloured #FF8000 + tetrahedron
+`tools/fixtures/threemf/validate_writer.sh` writes `rcad_two_mm.3mf` / `rcad_two_inch.3mf`
+(`crates/rcad-exchange/examples/threemf_samples.rs`: 10 mm cube coloured #FF8000 + tetrahedron
 legs 12) and checks them with `check_3mf.py` (unit, 2 objects/items, closed, V 1000 and 288
 mm^3 scaled by 25.4^-3 for inch, colour) and FreeCAD (12 points, 16 facets, solid, V 1288 in
 file units). Result 2026-10-11: all PASS (`artifacts/threemf_validate_writer.log`).

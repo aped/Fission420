@@ -1,4 +1,4 @@
-# DXF support (`f420_exchange::dxf`)
+# DXF support (`rcad_exchange::dxf`)
 
 Clean-room implementation from the public AutoCAD DXF Reference (group-code format, HEADER
 variables, entity group codes, the arbitrary-axis algorithm). ASCII DXF only (R12/AC1009 …
@@ -60,7 +60,7 @@ R2018/AC1032 group-code files); binary DXF is rejected with a clear error.
   rounding; a larger shift is a warning); `solve.status` is `UnderConstrained`. Open endpoints
   are reported as a warning (a profile needs a closed loop).
 * **Limits**: `max_bytes` (64 MiB), `max_entities` (200 000), pair count ≤ bytes/4, sketch size
-  ≤ `f420_sketch::MAX_UNKNOWNS` (2048 unknowns, ≈ 1000 points; larger drawings return
+  ≤ `rcad_sketch::MAX_UNKNOWNS` (2048 unknowns, ≈ 1000 points; larger drawings return
   `LimitExceeded`). Single linear pass, no recursion. Non-finite numbers → `NonFinite { line }`,
   syntax errors → `Malformed { line }`, missing ENDSEC/values → `Truncated`.
 
@@ -81,7 +81,7 @@ Numbers use the shortest exact `f64` decimal form.
 * The sketch solver's size limit bounds the importable drawing size.
 
 ## Fixture evidence
-`crates/f420-exchange/tests/dxf_fixtures.rs` with FreeCAD-written and hand-written fixtures
+`crates/rcad-exchange/tests/dxf_fixtures.rs` with FreeCAD-written and hand-written fixtures
 (`tools/fixtures/dxf/README.md`): arc centres/radii/sweeps, bounds, `Sketch::profile()` closure
 and analytic area (600 + 50π, 800 − 12.5π, 500, 1290.32), unit scaling (in, override), mirrored
 OCS arc, unsupported diagnostics (all-or-nothing, partial, layer filter), join tolerance,
@@ -90,4 +90,4 @@ malformed/limit inputs and a garbage-input no-panic sweep; export → reimport r
 (`tools/fixtures/dxf/validate_export.sh`, `ezdxf_check.py`): all PASS.
 
 ## Command-level evidence
-Acceptance scenario D (`crates/f420-commands/src/acceptance/formats.rs`, steps "D.7"-"D.11"): FreeCAD contour -> sketch -> edit -> extrude -> STEP (FreeCAD-validated), DXF export read back by our importer and by FreeCAD (`tools/check_formats.sh`), declared inch and unitless files, reload without the sources; DXF onto an imported STEP face: `crates/f420-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.
+Acceptance scenario D (`crates/rcad-commands/src/acceptance/formats.rs`, steps "D.7"-"D.11"): FreeCAD contour -> sketch -> edit -> extrude -> STEP (FreeCAD-validated), DXF export read back by our importer and by FreeCAD (`tools/check_formats.sh`), declared inch and unitless files, reload without the sources; DXF onto an imported STEP face: `crates/rcad-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.

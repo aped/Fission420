@@ -5,10 +5,10 @@ checks, independent validators, Bambu Studio slicing and the desktop Export STL 
 dialogs (see "Desktop dialogs") are implemented and tested. Nothing here has been
 physically printed: "sliced" means Bambu Studio produced G-code whose toolpaths were checked.
 
-Code: `crates/f420-commands/src/print.rs` (selection, tessellation, checks, placement, bed fit,
-report, atomic writes), `crates/f420-kernel/src/mesh.rs` (`check_mesh`, `MeshCheck`,
+Code: `crates/rcad-commands/src/print.rs` (selection, tessellation, checks, placement, bed fit,
+report, atomic writes), `crates/rcad-kernel/src/mesh.rs` (`check_mesh`, `MeshCheck`,
 `weld_exact`, `max_facet_angle_deg`, `RigidTransform`). Tests:
-`crates/f420-commands/tests/print_export.rs`, `crates/f420-kernel/tests/mesh_checks.rs`.
+`crates/rcad-commands/tests/print_export.rs`, `crates/rcad-kernel/tests/mesh_checks.rs`.
 
 ## Units
 
@@ -140,8 +140,8 @@ files newly created by this export are removed. A refused export writes nothing.
 
 The same document exported (or saved) twice gives the same bytes, also across processes,
 although Truck orders topology by pointer-derived ids and carries ~1e-15 mm of noise that
-differs between regenerations. `crates/f420-commands/tests/export_determinism.rs` builds the
-three printables twice and compares STL, 3MF, STEP and `.f420.json` byte for byte.
+differs between regenerations. `crates/rcad-commands/tests/export_determinism.rs` builds the
+three printables twice and compares STL, 3MF, STEP and `.rcad.json` byte for byte.
 * Tessellation: faces visited in a canonical geometric order, loops started at a canonical
   edge, planar faces re-triangulated to their constrained 3-D Delaunay triangulation by edge
   flips, with exact ties (a rectangle's two diagonals) broken by vertex key
@@ -180,7 +180,7 @@ policy, placement and units.
 * `tools/print/analyze_gcode.py`: layer count, objects, extrusion probes per layer
   (`extrusion_near`, `no_extrusion_in_rect`, `filled_rect`), slicer-log and mesh_stat repair
   counters.
-* `tools/print/validate_print_exports.sh <f420-cli>`: runs
+* `tools/print/validate_print_exports.sh <rcad-cli>`: runs
   `tools/print/enclosure_print_workflow.json` (an export fixture built with plain commands,
   baseline and SESSION_4 B variant sizes entered as numbers, not the named-parameter example),
   then all of the above with `tools/print/enclosure_spec.json` and
@@ -189,7 +189,7 @@ policy, placement and units.
 ### Results (2026-10-11, commit of this doc; `artifacts/run4/print/validate.log`)
 
 Exports from `enclosure_print_workflow.json` (built from the worktree with `--release`,
-binary copied to `artifacts/run4/print/bin/f420-cli`):
+binary copied to `artifacts/run4/print/bin/rcad-cli`):
 
 * Python checker: 91 PASS, 0 FAIL (`validation/mesh_check.txt`): unit `millimeter`, 2 named
   objects per 3MF, all objects closed/manifold/outward, volumes 19592 / 9404 (baseline) and
@@ -209,7 +209,7 @@ binary copied to `artifacts/run4/print/bin/f420-cli`):
 
 ### Real printable examples (`tools/print/validate_examples.sh`, 2026-10-11)
 
-`crates/f420-commands/tests/print_examples.rs` (ignored test, run by the driver) replays
+`crates/rcad-commands/tests/print_examples.rs` (ignored test, run by the driver) replays
 `printables::{enclosure,coupon,bracket}_workflow` (baseline, then `ENCLOSURE_VARIANT`
 parameters), exports placed STLs, multi-object 3MFs (lid face down on its plate top, lip up;
 base on its floor; X layout, gap 10, P1S bed) and per-body STEP, and writes the expected
@@ -241,7 +241,7 @@ values from the analytic formulas (never from the export report). Results
 This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
 says nothing about fit, strength or print quality.
 
-## Desktop dialogs (`crates/f420-app/src/exchange.rs`, `PrintForm`)
+## Desktop dialogs (`crates/rcad/src/exchange.rs`, `PrintForm`)
 
 Export STL… / Export 3MF… show: path; units (STL: "coordinates in mm; the slicer must interpret
 mm"; 3MF: the declared unit, geometry only); chord (default 0.01 mm) and optional max facet
@@ -251,7 +251,7 @@ a per-body table (solid / mesh closed|OPEN, modeled size, orientation "As modele
 own body); "Place on bed (export only)", "Lay out side by side along X" + gap; bed None / Bambu
 Lab P1S / Manual; "One STL file per body"; "Allow open reference meshes". The dialog stays open
 after OK and shows the export's per-body report (triangles, size, mesh checks, fit, files,
-warnings) or the refusal. Test: `crates/f420-app/tests/print_export_ui.rs` (builds
+warnings) or the refusal. Test: `crates/rcad/tests/print_export_ui.rs` (builds
 `printables::enclosure_workflow`, selects the lid plate's top face, exports a placed 3MF of
 both bodies on the P1S bed and re-reads it: lid min z 0, lip up with the lip's outer size,
 base on its floor, 10 mm gap, analytic volumes, document unchanged).

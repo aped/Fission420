@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Independent 3MF reader (Python stdlib zipfile + xml.etree; shares no code with
-Fission420). Prints one JSON line per file:
+R-CAD). Prints one JSON line per file:
   {"file", "unit", "objects": [{"id", "name", "vertices", "triangles", "closed",
    "volume", "color"}], "items": [objectid...]}
 Volumes are in file units (divergence theorem over each object's triangles); "closed"

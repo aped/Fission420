@@ -14,7 +14,7 @@ docs/behavior/timings.md, "Kernel hardening: intersection-curve cost").
 ## Decision
 After each successful boolean (`cut_through_all`, `cut_blind`; `build.rs::with_exact_edges`),
 rebuild the solid with every *supported* intersection edge replaced by an explicit exact curve
-(`crates/f420-kernel/src/exact.rs`). Topology, vertices and surfaces are unchanged (compress →
+(`crates/rcad-kernel/src/exact.rs`). Topology, vertices and surfaces are unchanged (compress →
 replace curve → extract), and the result must again be one closed shell, else the original body
 is kept.
 

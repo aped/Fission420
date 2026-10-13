@@ -1,0 +1,882 @@
+{
+  "format": "r-cad",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Base outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -40.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 40.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 40.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -40.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": 25.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "outer_length / 2",
+          "center_y": "outer_width / 2",
+          "height": "outer_width",
+          "width": "outer_length"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Base",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 25.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "outer_height"
+        }
+      },
+      {
+        "id": 3,
+        "name": "Cavity outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -38.0,
+                "y": -23.0
+              },
+              {
+                "id": 2,
+                "x": 38.0,
+                "y": -23.0
+              },
+              {
+                "id": 3,
+                "x": 38.0,
+                "y": 23.0
+              },
+              {
+                "id": 4,
+                "x": -38.0,
+                "y": 23.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": 25.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 76.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 46.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "outer_length / 2",
+          "center_y": "outer_width / 2",
+          "height": "cavity_width",
+          "width": "cavity_length"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Cavity",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 23.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "cavity_depth"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Lid outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -40.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 40.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 40.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -40.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": -35.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "outer_length / 2",
+          "center_y": "-(outer_width / 2 + lid_gap)",
+          "height": "outer_width",
+          "width": "outer_length"
+        }
+      },
+      {
+        "id": 6,
+        "name": "Lid plate",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 5,
+          "distance": 2.0,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "lid_thickness"
+        }
+      },
+      {
+        "id": 7,
+        "name": "Lip outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 6,
+              "role": "ExtrudeStartCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -37.75,
+                "y": -22.75
+              },
+              {
+                "id": 2,
+                "x": 37.75,
+                "y": -22.75
+              },
+              {
+                "id": 3,
+                "x": 37.75,
+                "y": 22.75
+              },
+              {
+                "id": 4,
+                "x": -37.75,
+                "y": 22.75
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 75.5
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 45.5
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "outer_length / 2",
+          "center_y": "outer_width / 2 + lid_gap",
+          "height": "lip_width",
+          "width": "lip_length"
+        }
+      },
+      {
+        "id": 8,
+        "name": "Lip",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 7,
+          "distance": 3.0,
+          "operation": {
+            "Join": {
+              "target": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "lip_depth"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Lip opening outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 8,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -35.75,
+                "y": -20.75
+              },
+              {
+                "id": 2,
+                "x": 35.75,
+                "y": -20.75
+              },
+              {
+                "id": 3,
+                "x": 35.75,
+                "y": 20.75
+              },
+              {
+                "id": 4,
+                "x": -35.75,
+                "y": 20.75
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 40.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 71.5
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 41.5
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "outer_length / 2",
+          "center_y": "outer_width / 2 + lid_gap",
+          "height": "lip_width - 2 * lip_wall",
+          "width": "lip_length - 2 * lip_wall"
+        }
+      },
+      {
+        "id": 10,
+        "name": "Lip opening",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 9,
+          "distance": 3.0,
+          "operation": {
+            "Cut": {
+              "target": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "lip_depth"
+        }
+      }
+    ],
+    "next_id": 11,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Enclosure base",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Enclosure lid",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "outer_length",
+        "expression": "80",
+        "unit": "mm",
+        "comment": "base outside, X"
+      },
+      {
+        "name": "outer_width",
+        "expression": "50",
+        "unit": "mm",
+        "comment": "base outside, Y"
+      },
+      {
+        "name": "outer_height",
+        "expression": "25",
+        "unit": "mm",
+        "comment": "base outside, Z (floor + cavity depth)"
+      },
+      {
+        "name": "wall",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "side wall thickness (base walls and lid lip wall)"
+      },
+      {
+        "name": "floor",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "base floor thickness"
+      },
+      {
+        "name": "lid_thickness",
+        "expression": "2",
+        "unit": "mm",
+        "comment": "lid plate thickness"
+      },
+      {
+        "name": "lip_depth",
+        "expression": "3",
+        "unit": "mm",
+        "comment": "locating lip height below the lid plate"
+      },
+      {
+        "name": "fit_clearance",
+        "expression": "0.25",
+        "unit": "mm",
+        "comment": "PER SIDE gap between lip and cavity wall (diametral = 2x); calibrate with the clearance coupon"
+      },
+      {
+        "name": "lid_gap",
+        "expression": "10",
+        "unit": "mm",
+        "comment": "modeling layout only: lid distance from the base"
+      },
+      {
+        "name": "cavity_length",
+        "expression": "outer_length - 2 * wall",
+        "unit": "mm"
+      },
+      {
+        "name": "cavity_width",
+        "expression": "outer_width - 2 * wall",
+        "unit": "mm"
+      },
+      {
+        "name": "cavity_depth",
+        "expression": "outer_height - floor",
+        "unit": "mm"
+      },
+      {
+        "name": "lip_wall",
+        "expression": "wall",
+        "unit": "mm",
+        "comment": "lip wall tracks the base wall"
+      },
+      {
+        "name": "lip_length",
+        "expression": "cavity_length - 2 * fit_clearance",
+        "unit": "mm"
+      },
+      {
+        "name": "lip_width",
+        "expression": "cavity_width - 2 * fit_clearance",
+        "unit": "mm"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 9404.0,
+    "bounds": {
+      "min": [
+        0.0,
+        -60.0,
+        -3.0
+      ],
+      "max": [
+        80.0,
+        -10.0,
+        2.0
+      ]
+    },
+    "face_count": 16
+  }
+}

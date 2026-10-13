@@ -1,13 +1,13 @@
-# 3MF support (`f420_exchange::threemf`)
+# 3MF support (`rcad_exchange::threemf`)
 
 Status: run 3. Wired into commands (`import_3mf`, `export_3mf`; document base feature
 `Import3mf`, mesh bodies) by the coordinator; desktop UI: Import… and Export 3MF…
-(`crates/f420-app/src/exchange.rs`, test `exchange_ui.rs::threemf_import_export_and_svg_sketch`). The section "Command
+(`crates/rcad/src/exchange.rs`, test `exchange_ui.rs::threemf_import_export_and_svg_sketch`). The section "Command
 integration" below records the original proposal, implemented as written (no colours: the
 document has no body colour yet).
 
 Clean-room implementation from the public 3MF Core Specification 1.3 (3MF Consortium) and
-ECMA-376 Part 2 (Open Packaging Conventions). Container: `crates/f420-exchange/src/zip.rs`
+ECMA-376 Part 2 (Open Packaging Conventions). Container: `crates/rcad-exchange/src/zip.rs`
 (own ZIP reader/writer; deflate by `miniz_oxide`, CRC-32 by `crc32fast`); XML tokenizing by
 `quick-xml` (all three were already in `Cargo.lock`, see docs/DEPENDENCIES.md).
 
@@ -64,7 +64,7 @@ colours are written; no components/instancing is written (each body is a full me
 exact B-rep geometry is tessellated by the caller (3MF is a mesh format).
 
 ## Evidence
-* `crates/f420-exchange/tests/threemf_fixtures.rs` (9 tests) on FreeCAD-written and
+* `crates/rcad-exchange/tests/threemf_fixtures.rs` (9 tests) on FreeCAD-written and
   hand-written fixtures (`tools/fixtures/threemf/README.md`): FreeCAD two-object file,
   inch + rotated item, components + mirror, colours/warnings, production refused,
   bad index, no build, DOCTYPE, decompression bound, lying size header, missing `.rels`,
@@ -88,6 +88,6 @@ Command::Export3mf { path: PathBuf, #[serde(default)] chord: Option<f64>,
                      #[serde(default)] bodies: Option<Vec<BodyId>>,
                      #[serde(default)] unit: Option<ThreeMfUnit> }
 ```
-Needed in `f420-document`: a `FeatureKind::ImportMesh` variant (or a format tag on the
+Needed in `rcad-document`: a `FeatureKind::ImportMesh` variant (or a format tag on the
 existing one) that regenerates N mesh bodies from a 3MF blob via `threemf::read`, keeping
 per-body colour if the body model gains one.

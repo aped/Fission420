@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # End-to-end print-export validation (docs/PRINT_EXPORT.md):
-#   1. f420-cli runs tools/print/enclosure_print_workflow.json (baseline + variant enclosure/lid,
+#   1. rcad-cli runs tools/print/enclosure_print_workflow.json (baseline + variant enclosure/lid,
 #      placed STL per body + multi-object 3MF, cylinder at chord 0.02 / 0.005);
 #   2. independent Python mesh checks against analytic values (tools/print/enclosure_spec.json);
 #   3. FreeCAD Mesh cross-check per file (incl. FreeCAD's self-intersection test);
 #   4. Bambu Studio headless slice (P1S 0.4 / 0.20mm Standard / Generic PLA) of the baseline and
 #      variant 3MF and STL sets, G-code probes for walls/cavity/floor/lip/clearance.
-# Usage: tools/print/validate_print_exports.sh <f420-cli binary> [outdir]
+# Usage: tools/print/validate_print_exports.sh <rcad-cli binary> [outdir]
 # (default outdir artifacts/run4/print/validation). Run from the repository root. Every FreeCAD
 # and slicer run goes through tools/heavy.sh. Exit 1 if any step fails; each step still runs.
 set -uo pipefail
-CLI=${1:?usage: validate_print_exports.sh <f420-cli> [outdir]}
+CLI=${1:?usage: validate_print_exports.sh <rcad-cli> [outdir]}
 CLI=$(readlink -f "$CLI")
 OUT=${2:-artifacts/run4/print/validation}
 ROOT=$(pwd)
@@ -34,7 +34,7 @@ grep -E '\bFAIL\b' "$OUT/mesh_check.txt" | head -20; mark $rc
 step "3. FreeCAD cross-check"
 : > "$OUT/freecad.txt"
 for f in "$EXP"/*.stl "$EXP"/*.3mf; do
-  tools/heavy.sh timeout 300 flatpak run --env=F420_PRINT="$f" --filesystem="$ROOT" \
+  tools/heavy.sh timeout 300 flatpak run --env=RCAD_PRINT="$f" --filesystem="$ROOT" \
     --command=FreeCADCmd org.freecad.FreeCAD "$ROOT/tools/print/freecad_check_print.py" 2>&1 \
     | grep FREECAD_RESULT >> "$OUT/freecad.txt"
 done

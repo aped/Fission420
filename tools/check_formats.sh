@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Independent validation of the SESSION_3 scenario C/D exports (written by
-# `f420-cli acceptance`, crates/f420-commands/src/acceptance/formats.rs) with FreeCAD 1.1
-# (OpenCascade) and a pure-Python STL reader -- no Fission420 reader is involved.
+# `rcad-cli acceptance`, crates/rcad-commands/src/acceptance/formats.rs) with FreeCAD 1.1
+# (OpenCascade) and a pure-Python STL reader -- no R-CAD reader is involved.
 # usage: tools/check_formats.sh [DIR]   (default artifacts/acceptance)
 # Exit 0 = all PASS, 1 = a check failed, 2 = FreeCAD not installed (FreeCAD checks NOT RUN).
 #
-# Expected values are analytic (computed here, not read from Fission420 output):
+# Expected values are analytic (computed here, not read from R-CAD output):
 #   scenario_c.step     FreeCAD box 40x30x10 imported, centred Ø6 through hole cut from its
 #                       imported top face: 1 valid solid, V = 12000 - 90*pi,
 #                       bbox [0,40]x[0,30]x[0,10], hole axis x=20,y=15 parallel to Z
@@ -48,7 +48,7 @@ check_step() { # stem, python expected-dict expression
   local stem=$1 expect=$2 probes=${3:-[]} out
   echo "== $stem.step: FreeCAD (OpenCascade) solid check"
   if [ ! -f "$DIR/$stem.step" ]; then echo "MISSING $DIR/$stem.step"; status=1; return; fi
-  out=$(fc "F420_STEP=$DIR/$stem.step" "F420_PROBES=$probes" "$REPO/tools/freecad_check_step_detail.py") \
+  out=$(fc "RCAD_STEP=$DIR/$stem.step" "RCAD_PROBES=$probes" "$REPO/tools/freecad_check_step_detail.py") \
     || { echo "FreeCAD run failed"; status=1; return; }
   echo "$out" | tee "$DIR/${stem}_step_check_freecad.txt"
   python3 - "$out" "$expect" <<'PY' || status=1
@@ -100,7 +100,7 @@ check_step scenario_d_slot \
 
 echo "== scenario_d_mesh.stl: FreeCAD Mesh check"
 if [ -f "$DIR/scenario_d_mesh.stl" ]; then
-  out=$(fc "F420_STL=$DIR/scenario_d_mesh.stl" "$REPO/tools/freecad_check_stl.py") || status=1
+  out=$(fc "RCAD_STL=$DIR/scenario_d_mesh.stl" "$REPO/tools/freecad_check_stl.py") || status=1
   echo "$out" | tee "$DIR/scenario_d_mesh_stl_check_freecad.txt"
   python3 - "$out" <<'PY' || status=1
 import json, sys
@@ -115,7 +115,7 @@ fi
 
 echo "== scenario_d_slot.dxf: FreeCAD DXF importer"
 if [ -f "$DIR/scenario_d_slot.dxf" ]; then
-  out=$(fc "F420_DXF=$DIR/scenario_d_slot.dxf" "$REPO/tools/fixtures/dxf/freecad_read_dxf.py") || status=1
+  out=$(fc "RCAD_DXF=$DIR/scenario_d_slot.dxf" "$REPO/tools/fixtures/dxf/freecad_read_dxf.py") || status=1
   echo "$out" | tee "$DIR/scenario_d_slot_dxf_check_freecad.txt"
   python3 - "$out" <<'PY' || status=1
 import json, math, sys

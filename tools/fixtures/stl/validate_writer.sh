@@ -6,10 +6,10 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT=$(realpath -m "${1:-$REPO/artifacts/exchange/stl}")
 mkdir -p "$OUT"
-(cd "$REPO" && cargo run -q --release -p f420-exchange --example stl_samples -- "$OUT")
+(cd "$REPO" && cargo run -q --release -p rcad-exchange --example stl_samples -- "$OUT")
 status=0
 for f in cube10_binary.stl cube10_ascii.stl; do
-  r=$(timeout 180 flatpak run --env="F420_STL=$OUT/$f" --filesystem="$REPO" --filesystem="$OUT" \
+  r=$(timeout 180 flatpak run --env="RCAD_STL=$OUT/$f" --filesystem="$REPO" --filesystem="$OUT" \
     --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/freecad_check_stl.py" 2>&1 | grep -o 'FREECAD_RESULT .*')
   echo "$f: $r"
   python3 - "$r" <<'PY' || status=1

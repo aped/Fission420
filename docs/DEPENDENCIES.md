@@ -4,9 +4,9 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 
 | crate | version | license | source | used by |
 |---|---|---|---|---|
-| truck-modeling | 0.6.0 | Apache-2.0 | https://github.com/ricosjp/truck | f420-kernel |
-| truck-shapeops | 0.4.0 | Apache-2.0 | same | f420-kernel |
-| truck-meshalgo | 0.4.0 | Apache-2.0 | same | f420-kernel |
+| truck-modeling | 0.6.0 | Apache-2.0 | https://github.com/ricosjp/truck | rcad-kernel |
+| truck-shapeops | 0.4.0 | Apache-2.0 | same | rcad-kernel |
+| truck-meshalgo | 0.4.0 | Apache-2.0 | same | rcad-kernel |
 | serde | 1.x | MIT OR Apache-2.0 | crates.io | all |
 | thiserror | 2.x | MIT OR Apache-2.0 | crates.io | all |
 
@@ -16,13 +16,13 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 
 | crate | version | license | used by |
 |---|---|---|---|
-| nalgebra | 0.35.0 (default-features off, `std`) | Apache-2.0 | f420-sketch (SVD rank) |
+| nalgebra | 0.35.0 (default-features off, `std`) | Apache-2.0 | rcad-sketch (SVD rank) |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | document, commands, cli |
 | tempfile | 3.27 (dev) | MIT OR Apache-2.0 | tests |
-| eframe / egui / egui-wgpu | 0.36.2 (`default_fonts`, `wayland`, `x11`, `wgpu`) | MIT OR Apache-2.0 | f420-viewport, f420-app |
-| wgpu | 30.0.1 | MIT OR Apache-2.0 | f420-viewport |
-| bytemuck | 1.25 | Zlib OR Apache-2.0 OR MIT | f420-viewport |
-| image | 0.25.10 (`png`) | MIT OR Apache-2.0 | f420-app (screenshots) |
+| eframe / egui / egui-wgpu | 0.36.2 (`default_fonts`, `wayland`, `x11`, `wgpu`) | MIT OR Apache-2.0 | rcad-viewport, rcad |
+| wgpu | 30.0.1 | MIT OR Apache-2.0 | rcad-viewport |
+| bytemuck | 1.25 | Zlib OR Apache-2.0 OR MIT | rcad-viewport |
+| image | 0.25.10 (`png`) | MIT OR Apache-2.0 | rcad (screenshots) |
 
 External tools used only for validation (not linked, not shipped): FreeCAD 1.1.4 flatpak (LGPL-2.1).
 Full transitive license audit: see `artifacts/licenses.txt` (generated) / section below.
@@ -39,12 +39,12 @@ No package lacks a permissive option (`artifacts/licenses.txt`).
 Binary distributions (CI artifacts) carry `THIRD_PARTY_LICENSES.txt`, generated per target by
 `tools/ci/third_party_licenses.py` (crate list, shipped licence and font texts, canonical texts
 for crates without licence files); see docs/CI.md.
-| egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | f420-app UI interaction tests |
-| kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | f420-app UI interaction tests |
+| egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | rcad UI interaction tests |
+| kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | rcad UI interaction tests |
 
-## f420-exchange (run 3, STL/DXF adapters)
+## rcad-exchange (run 3, STL/DXF adapters)
 
-No new third-party crates: `f420-exchange` depends only on `f420-sketch`, `serde` 1.0.229 and
+No new third-party crates: `rcad-exchange` depends only on `rcad-sketch`, `serde` 1.0.229 and
 `thiserror` 2.0.21 (both already listed), plus `serde_json` 1.0.151 as a dev-dependency.
 External tools used only to generate/validate fixtures (not linked, not shipped, not a project
 dependency): FreeCAD 1.1.4 flatpak (LGPL-2.1, `Mesh`, `Import.writeDXFShape`/`readDXF`) and
@@ -52,22 +52,22 @@ ezdxf 1.4.2 (MIT, https://github.com/mozman/ezdxf) in a throwaway venv under `ar
 
 ## STEP import / multi-body export (run 3)
 
-No new crates. STEP import (`f420-kernel/src/step_in/`) uses the ruststep parser through
+No new crates. STEP import (`rcad-kernel/src/step_in/`) uses the ruststep parser through
 truck-stepio's re-export (`truck_stepio::r#in::ruststep`), so there is no direct dependency.
 
 | crate | version (Cargo.lock) | license | source | used by |
 |---|---|---|---|---|
-| truck-stepio | 0.3.0 (default features: `in`, `out`) | Apache-2.0 | https://crates.io/crates/truck-stepio | f420-kernel (STEP writer; parser re-export) |
-| ruststep | 0.4.0 (transitive via truck-stepio) | Apache-2.0 | https://crates.io/crates/ruststep | f420-kernel import: Part 21 parser only (AST); entity conversion is our own code |
+| truck-stepio | 0.3.0 (default features: `in`, `out`) | Apache-2.0 | https://crates.io/crates/truck-stepio | rcad-kernel (STEP writer; parser re-export) |
+| ruststep | 0.4.0 (transitive via truck-stepio) | Apache-2.0 | https://crates.io/crates/ruststep | rcad-kernel import: Part 21 parser only (AST); entity conversion is our own code |
 | ruststep-derive | 0.4.0 (transitive) | Apache-2.0 | https://crates.io/crates/ruststep-derive | (proc macros of ruststep) |
 
-Test fixtures under `crates/f420-kernel/tests/fixtures/step/` were generated with FreeCAD 1.1.4
+Test fixtures under `crates/rcad-kernel/tests/fixtures/step/` were generated with FreeCAD 1.1.4
 (LGPL-2.1, external tool, not linked) from primitives in our own script
 (`tools/fixtures/step/generate.py`); they contain no third-party design data.
 
-## 3MF adapter (run 3, `f420-exchange::threemf`)
+## 3MF adapter (run 3, `rcad-exchange::threemf`)
 
-New *direct* dependencies of `f420-exchange`; all three were already in `Cargo.lock`
+New *direct* dependencies of `rcad-exchange`; all three were already in `Cargo.lock`
 (transitively via `image`/`png` and `wayland-scanner`), so no new crate enters the build.
 
 | crate | version (Cargo.lock) | license | source | used for |
@@ -76,14 +76,14 @@ New *direct* dependencies of `f420-exchange`; all three were already in `Cargo.l
 | crc32fast | 1.5.2 | MIT OR Apache-2.0 | https://crates.io/crates/crc32fast | ZIP entry CRC-32 |
 | quick-xml | 0.41.0 (`default-features = false`) | MIT | https://crates.io/crates/quick-xml | streaming XML tokenizer + namespace resolution for the 3MF model and OPC relationships |
 
-The ZIP container code (`f420-exchange/src/zip.rs`) and the 3MF model handling are our own.
+The ZIP container code (`rcad-exchange/src/zip.rs`) and the 3MF model handling are our own.
 Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tools/fixtures/threemf/`.
 
 ## Added 2026-10-12 (after run 4)
 
 | crate | version | license | used by |
 |---|---|---|---|
-| i_overlay | 8.1.2 (default features: no rayon) | MIT OR Apache-2.0 | f420-kernel `prismatic.rs`: exact 2-D region booleans on an integer grid (ADR 0006) |
+| i_overlay | 8.1.2 (default features: no rayon) | MIT OR Apache-2.0 | rcad-kernel `prismatic.rs`: exact 2-D region booleans on an integer grid (ADR 0006) |
 | i_float / i_shape / i_tree / i_key_sort | 4.1.0 / 4.0.0 / 0.19.0 / 0.11.0 (transitive) | MIT | i_overlay |
 
 Pure Rust, no C code. `i_overlay` is the boolean engine `geo` uses.

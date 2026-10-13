@@ -10,7 +10,7 @@ Requires the system python (jeepney). Usage:
     /usr/bin/python3 tools/live_input.py <state-dir> <script-file|->
 
 Script lines. Coordinates are app-window content coordinates (egui points, as
-seen in F12 screenshots); F420_OFFSET="dx,dy" (default "4,28", measured for
+seen in F12 screenshots); RCAD_OFFSET="dx,dy" (default "4,28", measured for
 eframe's client-side decorations on a maximized window in mutter 50) is added
 to get monitor pixels.
     move X Y                      click X Y [left|right|middle]
@@ -29,8 +29,8 @@ to get monitor pixels.
     wait_idle [MS]                until the probe reports no work in flight / measuring
     expect PATH VALUE [TOL]       assert probe "doc" field (dotted path), e.g.
                                   expect volume 39214.6018 0.01 / expect editing.status FullyConstrained
-      (s*/w* commands need the app started with F420_PROBE=<state>/probe.json;
-       they project with the app's own camera, see crates/f420-app/src/main.rs)
+      (s*/w* commands need the app started with RCAD_PROBE=<state>/probe.json;
+       they project with the app's own camera, see crates/rcad/src/main.rs)
     # comment
 """
 import json
@@ -42,7 +42,7 @@ import time
 from jeepney import DBusAddress, Properties, new_method_call
 from jeepney.io.blocking import open_dbus_connection
 
-OFFSET = tuple(float(v) for v in os.environ.get("F420_OFFSET", "4,28").split(","))
+OFFSET = tuple(float(v) for v in os.environ.get("RCAD_OFFSET", "4,28").split(","))
 BUTTONS = {"left": 0x110, "right": 0x111, "middle": 0x112}
 KEYSYMS = {
     "escape": 0xFF1B, "return": 0xFF0D, "enter": 0xFF0D, "tab": 0xFF09,
@@ -82,7 +82,7 @@ class Driver:
         scs = DBusAddress(scpath, bus_name="org.gnome.Mutter.ScreenCast",
                           interface="org.gnome.Mutter.ScreenCast.Session")
         self.stream = self.call(new_method_call(
-            scs, "RecordMonitor", "sa{sv}", (os.environ.get("F420_MONITOR", "Meta-0"), {})))[0]
+            scs, "RecordMonitor", "sa{sv}", (os.environ.get("RCAD_MONITOR", "Meta-0"), {})))[0]
         self.last = (1.0, 1.0)
         self.last_input = time.time()
         self.call(new_method_call(self.session, "Start"))
@@ -137,7 +137,7 @@ class Driver:
 
 
 class Probe:
-    """Mirror of f420_viewport::Camera::project (Z-up orbit camera)."""
+    """Mirror of rcad_viewport::Camera::project (Z-up orbit camera)."""
 
     def __init__(self, path):
         self.path = path

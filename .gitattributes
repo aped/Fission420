@@ -1,6 +1,6 @@
 # Check out text as LF on every platform (Windows runners default to core.autocrlf=true).
 # Fixtures are compared byte-for-byte or hashed into native documents (e.g. the STEP blob
-# in examples/imported_step_hole.f420.json), so CRLF conversion breaks tests. docs/CI.md.
+# in examples/imported_step_hole.rcad.json), so CRLF conversion breaks tests. docs/CI.md.
 * text=auto eol=lf
 # Mesh and archive formats: never convert (ASCII STL included, to keep fixtures byte-exact).
 *.stl binary

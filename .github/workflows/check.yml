@@ -64,7 +64,7 @@ jobs:
 
       - name: Build release binaries
         id: build
-        run: cargo build --release --locked -p f420-app -p f420-cli
+        run: cargo build --release --locked -p rcad -p rcad-cli
 
       - name: cargo xtask check
         id: check
@@ -87,11 +87,11 @@ jobs:
           && steps.build.outcome == 'success'
           && (steps.check.outcome == 'success' || !inputs.gate)
         run: |
-          name="fission420-${{ inputs.artifact }}"
+          name="r-cad-${{ inputs.artifact }}"
           mkdir -p "dist/$name"
           exe=""
           if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
-          cp "target/release/f420-app$exe" "target/release/f420-cli$exe" "dist/$name/"
+          cp "target/release/rcad$exe" "target/release/rcad-cli$exe" "dist/$name/"
           cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           py=python3; command -v python3 >/dev/null || py=python
           "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
@@ -120,7 +120,7 @@ jobs:
         # non-gating leg whose check failed, so its archive would never upload.
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
-          name: fission420-${{ inputs.artifact }}
+          name: r-cad-${{ inputs.artifact }}
           path: |
             dist/*.tar.gz
             dist/*.zip

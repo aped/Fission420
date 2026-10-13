@@ -275,7 +275,7 @@
   },
   {
     "cmd": "save",
-    "path": "examples/clearance_coupon.f420.json"
+    "path": "examples/clearance_coupon.rcad.json"
   },
   {
     "cmd": "inspect"

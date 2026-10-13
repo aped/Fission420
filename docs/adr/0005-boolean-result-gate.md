@@ -29,7 +29,7 @@ and validating with the same boolean is not independent.
    pattern/mirror copy. The workarounds are re-derived for each placement from the material
    around it, and every result goes through the check below. The legacy Cut Through All and
    Pocket paths are checked too.
-3. **Independent result check** (`f420-kernel/src/validate.rs`, `verify_prism_boolean`):
+3. **Independent result check** (`rcad-kernel/src/validate.rs`, `verify_prism_boolean`):
    * the result's tessellation must be closed (edge incidence / orientation);
    * for every result face near the tool actually used (largest triangles first, up to 3
      decided probes per face), a point just inside and just outside the face is classified:
@@ -68,7 +68,7 @@ and validating with the same boolean is not independent.
   tried and fails in Truck on the second half. The supported route is to edit the existing
   hole's dimension (control test). Kernel limitation, not fixed.
 * Thin skin / flange joins and their linear, circular and mirror copies are now **exact**
-  (`crates/f420-commands/tests/geometry_gate.rs`, each with an adjacent control).
+  (`crates/rcad-commands/tests/geometry_gate.rs`, each with an adjacent control).
 * Verification is to the validation tessellation's tolerance: a defect thinner than the probe
   offset on a curved face, or confined to a face region that no probe reaches, could pass.
   The check is a strong guard against wrong whole faces (the observed failure mode), not a

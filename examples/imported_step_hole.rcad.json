@@ -1,0 +1,137 @@
+{
+  "format": "r-cad",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Import1",
+        "kind": {
+          "type": "ImportStep",
+          "blob": 1,
+          "unit_override_to_mm": null,
+          "bodies": [
+            1
+          ]
+        }
+      },
+      {
+        "id": 2,
+        "name": "Hole sketch",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 1,
+              "role": {
+                "Imported": {
+                  "body": 1,
+                  "face": 5
+                }
+              }
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.0
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.0
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "name": "Hole",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 2,
+          "distance": 0.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "ThroughAll",
+          "reverse": false
+        }
+      }
+    ],
+    "next_id": 4,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "box_40x30x10_mm",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [
+      {
+        "id": 1,
+        "file_name": "box_40x30x10_mm.step",
+        "len": 6868,
+        "fnv64": "da2e5b274169ccf9",
+        "encoding": "Text",
+        "data": "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('FreeCAD Model'),'2;1');\nFILE_NAME('Open CASCADE Shape Model','2026-10-10T21:36:02',('FreeCAD'),(\n    'FreeCAD'),'Open CASCADE STEP processor 7.8','FreeCAD','Unknown');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n#1 = APPLICATION_PROTOCOL_DEFINITION('international standard',\n  'automotive_design',2000,#2);\n#2 = APPLICATION_CONTEXT(\n  'core data for automotive mechanical design processes');\n#3 = SHAPE_DEFINITION_REPRESENTATION(#4,#10);\n#4 = PRODUCT_DEFINITION_SHAPE('','',#5);\n#5 = PRODUCT_DEFINITION('design','',#6,#9);\n#6 = PRODUCT_DEFINITION_FORMATION('','',#7);\n#7 = PRODUCT('Open CASCADE STEP translator 7.8 1',\n  'Open CASCADE STEP translator 7.8 1','',(#8));\n#8 = PRODUCT_CONTEXT('',#2,'mechanical');\n#9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');\n#10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#165);\n#11 = AXIS2_PLACEMENT_3D('',#12,#13,#14);\n#12 = CARTESIAN_POINT('',(0.,0.,0.));\n#13 = DIRECTION('',(0.,0.,1.));\n#14 = DIRECTION('',(1.,0.,-0.));\n#15 = MANIFOLD_SOLID_BREP('',#16);\n#16 = CLOSED_SHELL('',(#17,#57,#97,#119,#141,#153));\n#17 = ADVANCED_FACE('',(#18),#52,.F.);\n#18 = FACE_BOUND('',#19,.F.);\n#19 = EDGE_LOOP('',(#20,#30,#38,#46));\n#20 = ORIENTED_EDGE('',*,*,#21,.F.);\n#21 = EDGE_CURVE('',#22,#24,#26,.T.);\n#22 = VERTEX_POINT('',#23);\n#23 = CARTESIAN_POINT('',(0.,0.,0.));\n#24 = VERTEX_POINT('',#25);\n#25 = CARTESIAN_POINT('',(0.,0.,10.));\n#26 = LINE('',#27,#28);\n#27 = CARTESIAN_POINT('',(0.,0.,0.));\n#28 = VECTOR('',#29,1.);\n#29 = DIRECTION('',(0.,0.,1.));\n#30 = ORIENTED_EDGE('',*,*,#31,.T.);\n#31 = EDGE_CURVE('',#22,#32,#34,.T.);\n#32 = VERTEX_POINT('',#33);\n#33 = CARTESIAN_POINT('',(0.,30.,0.));\n#34 = LINE('',#35,#36);\n#35 = CARTESIAN_POINT('',(0.,0.,0.));\n#36 = VECTOR('',#37,1.);\n#37 = DIRECTION('',(-0.,1.,0.));\n#38 = ORIENTED_EDGE('',*,*,#39,.T.);\n#39 = EDGE_CURVE('',#32,#40,#42,.T.);\n#40 = VERTEX_POINT('',#41);\n#41 = CARTESIAN_POINT('',(0.,30.,10.));\n#42 = LINE('',#43,#44);\n#43 = CARTESIAN_POINT('',(0.,30.,0.));\n#44 = VECTOR('',#45,1.);\n#45 = DIRECTION('',(0.,0.,1.));\n#46 = ORIENTED_EDGE('',*,*,#47,.F.);\n#47 = EDGE_CURVE('',#24,#40,#48,.T.);\n#48 = LINE('',#49,#50);\n#49 = CARTESIAN_POINT('',(0.,0.,10.));\n#50 = VECTOR('',#51,1.);\n#51 = DIRECTION('',(-0.,1.,0.));\n#52 = PLANE('',#53);\n#53 = AXIS2_PLACEMENT_3D('',#54,#55,#56);\n#54 = CARTESIAN_POINT('',(0.,0.,0.));\n#55 = DIRECTION('',(1.,0.,-0.));\n#56 = DIRECTION('',(0.,0.,1.));\n#57 = ADVANCED_FACE('',(#58),#92,.T.);\n#58 = FACE_BOUND('',#59,.T.);\n#59 = EDGE_LOOP('',(#60,#70,#78,#86));\n#60 = ORIENTED_EDGE('',*,*,#61,.F.);\n#61 = EDGE_CURVE('',#62,#64,#66,.T.);\n#62 = VERTEX_POINT('',#63);\n#63 = CARTESIAN_POINT('',(40.,0.,0.));\n#64 = VERTEX_POINT('',#65);\n#65 = CARTESIAN_POINT('',(40.,0.,10.));\n#66 = LINE('',#67,#68);\n#67 = CARTESIAN_POINT('',(40.,0.,0.));\n#68 = VECTOR('',#69,1.);\n#69 = DIRECTION('',(0.,0.,1.));\n#70 = ORIENTED_EDGE('',*,*,#71,.T.);\n#71 = EDGE_CURVE('',#62,#72,#74,.T.);\n#72 = VERTEX_POINT('',#73);\n#73 = CARTESIAN_POINT('',(40.,30.,0.));\n#74 = LINE('',#75,#76);\n#75 = CARTESIAN_POINT('',(40.,0.,0.));\n#76 = VECTOR('',#77,1.);\n#77 = DIRECTION('',(-0.,1.,0.));\n#78 = ORIENTED_EDGE('',*,*,#79,.T.);\n#79 = EDGE_CURVE('',#72,#80,#82,.T.);\n#80 = VERTEX_POINT('',#81);\n#81 = CARTESIAN_POINT('',(40.,30.,10.));\n#82 = LINE('',#83,#84);\n#83 = CARTESIAN_POINT('',(40.,30.,0.));\n#84 = VECTOR('',#85,1.);\n#85 = DIRECTION('',(0.,0.,1.));\n#86 = ORIENTED_EDGE('',*,*,#87,.F.);\n#87 = EDGE_CURVE('',#64,#80,#88,.T.);\n#88 = LINE('',#89,#90);\n#89 = CARTESIAN_POINT('',(40.,0.,10.));\n#90 = VECTOR('',#91,1.);\n#91 = DIRECTION('',(-0.,1.,0.));\n#92 = PLANE('',#93);\n#93 = AXIS2_PLACEMENT_3D('',#94,#95,#96);\n#94 = CARTESIAN_POINT('',(40.,0.,0.));\n#95 = DIRECTION('',(1.,0.,-0.));\n#96 = DIRECTION('',(0.,0.,1.));\n#97 = ADVANCED_FACE('',(#98),#114,.F.);\n#98 = FACE_BOUND('',#99,.F.);\n#99 = EDGE_LOOP('',(#100,#106,#107,#113));\n#100 = ORIENTED_EDGE('',*,*,#101,.F.);\n#101 = EDGE_CURVE('',#22,#62,#102,.T.);\n#102 = LINE('',#103,#104);\n#103 = CARTESIAN_POINT('',(0.,0.,0.));\n#104 = VECTOR('',#105,1.);\n#105 = DIRECTION('',(1.,0.,-0.));\n#106 = ORIENTED_EDGE('',*,*,#21,.T.);\n#107 = ORIENTED_EDGE('',*,*,#108,.T.);\n#108 = EDGE_CURVE('',#24,#64,#109,.T.);\n#109 = LINE('',#110,#111);\n#110 = CARTESIAN_POINT('',(0.,0.,10.));\n#111 = VECTOR('',#112,1.);\n#112 = DIRECTION('',(1.,0.,-0.));\n#113 = ORIENTED_EDGE('',*,*,#61,.F.);\n#114 = PLANE('',#115);\n#115 = AXIS2_PLACEMENT_3D('',#116,#117,#118);\n#116 = CARTESIAN_POINT('',(0.,0.,0.));\n#117 = DIRECTION('',(-0.,1.,0.));\n#118 = DIRECTION('',(0.,0.,1.));\n#119 = ADVANCED_FACE('',(#120),#136,.T.);\n#120 = FACE_BOUND('',#121,.T.);\n#121 = EDGE_LOOP('',(#122,#128,#129,#135));\n#122 = ORIENTED_EDGE('',*,*,#123,.F.);\n#123 = EDGE_CURVE('',#32,#72,#124,.T.);\n#124 = LINE('',#125,#126);\n#125 = CARTESIAN_POINT('',(0.,30.,0.));\n#126 = VECTOR('',#127,1.);\n#127 = DIRECTION('',(1.,0.,-0.));\n#128 = ORIENTED_EDGE('',*,*,#39,.T.);\n#129 = ORIENTED_EDGE('',*,*,#130,.T.);\n#130 = EDGE_CURVE('',#40,#80,#131,.T.);\n#131 = LINE('',#132,#133);\n#132 = CARTESIAN_POINT('',(0.,30.,10.));\n#133 = VECTOR('',#134,1.);\n#134 = DIRECTION('',(1.,0.,-0.));\n#135 = ORIENTED_EDGE('',*,*,#79,.F.);\n#136 = PLANE('',#137);\n#137 = AXIS2_PLACEMENT_3D('',#138,#139,#140);\n#138 = CARTESIAN_POINT('',(0.,30.,0.));\n#139 = DIRECTION('',(-0.,1.,0.));\n#140 = DIRECTION('',(0.,0.,1.));\n#141 = ADVANCED_FACE('',(#142),#148,.F.);\n#142 = FACE_BOUND('',#143,.F.);\n#143 = EDGE_LOOP('',(#144,#145,#146,#147));\n#144 = ORIENTED_EDGE('',*,*,#31,.F.);\n#145 = ORIENTED_EDGE('',*,*,#101,.T.);\n#146 = ORIENTED_EDGE('',*,*,#71,.T.);\n#147 = ORIENTED_EDGE('',*,*,#123,.F.);\n#148 = PLANE('',#149);\n#149 = AXIS2_PLACEMENT_3D('',#150,#151,#152);\n#150 = CARTESIAN_POINT('',(0.,0.,0.));\n#151 = DIRECTION('',(0.,0.,1.));\n#152 = DIRECTION('',(1.,0.,-0.));\n#153 = ADVANCED_FACE('',(#154),#160,.T.);\n#154 = FACE_BOUND('',#155,.T.);\n#155 = EDGE_LOOP('',(#156,#157,#158,#159));\n#156 = ORIENTED_EDGE('',*,*,#47,.F.);\n#157 = ORIENTED_EDGE('',*,*,#108,.T.);\n#158 = ORIENTED_EDGE('',*,*,#87,.T.);\n#159 = ORIENTED_EDGE('',*,*,#130,.F.);\n#160 = PLANE('',#161);\n#161 = AXIS2_PLACEMENT_3D('',#162,#163,#164);\n#162 = CARTESIAN_POINT('',(0.,0.,10.));\n#163 = DIRECTION('',(0.,0.,1.));\n#164 = DIRECTION('',(1.,0.,-0.));\n#165 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) \nGLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#169)) GLOBAL_UNIT_ASSIGNED_CONTEXT\n((#166,#167,#168)) REPRESENTATION_CONTEXT('Context #1',\n  '3D Context with UNIT and UNCERTAINTY') );\n#166 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );\n#167 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );\n#168 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );\n#169 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#166,\n  'distance_accuracy_value','confusion accuracy');\n#170 = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#7));\nENDSEC;\nEND-ISO-10303-21;\n"
+      }
+    ],
+    "next_blob_id": 2
+  },
+  "cache": {
+    "volume": 11717.256661177,
+    "bounds": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        40.0,
+        30.0,
+        10.0
+      ]
+    },
+    "face_count": 9
+  }
+}

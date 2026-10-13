@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Find (and with --kill, stop) processes left behind by the private headless GNOME
 # sessions of tools/headless_session.sh:
-#   * transient systemd user scopes f420-headless-* (current harness; stopping one kills
+#   * transient systemd user scopes rcad-headless-* (current harness; stopping one kills
 #     everything in its cgroup);
 #   * legacy orphans from harness versions before 2026-10-12, which ran without a scope:
-#     - `mutter --headless ... --wayland-display f420-live-*`;
+#     - `mutter --headless ... --wayland-display rcad-live-*`;
 #     - the private session bus `dbus-daemon --nofork --print-address N --session` started
 #       by dbus-run-session, once orphaned (parent = this user's systemd --user);
 #     - `gvfsd` (and its children) activated on such a private bus (its
@@ -21,13 +21,13 @@ targets=()
 note() { printf '%-8s %7s  %s\n' "$1" "$2" "$3"; }
 
 # 1. Scopes of the current harness.
-for unit in $(systemctl --user list-units --type=scope --all --plain --no-legend 'f420-headless-*' 2>/dev/null | awk '{print $1}'); do
+for unit in $(systemctl --user list-units --type=scope --all --plain --no-legend 'rcad-headless-*' 2>/dev/null | awk '{print $1}'); do
   note scope - "$unit"
   [ $KILL = 1 ] && systemctl --user stop "$unit"
 done
 
 # 2. Legacy headless mutters.
-for p in $(pgrep -u "$UID_N" -f -- '^mutter --headless .*--wayland-display f420-live-'); do
+for p in $(pgrep -u "$UID_N" -f -- '^mutter --headless .*--wayland-display rcad-live-'); do
   note mutter "$p" "$(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-100)"
   targets+=("$p")
 done

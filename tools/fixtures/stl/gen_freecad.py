@@ -3,7 +3,7 @@
 # usage (from the repository root):
 #   tools/fixtures/stl/gen_freecad.sh
 # which runs:
-#   flatpak run --env=OUT=<repo>/crates/f420-exchange/tests/fixtures/stl --filesystem=<repo> \
+#   flatpak run --env=OUT=<repo>/crates/rcad-exchange/tests/fixtures/stl --filesystem=<repo> \
 #     --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/stl/gen_freecad.py
 #
 # Outputs (all of a 20 x 10 x 5 mm box with one corner at the origin):

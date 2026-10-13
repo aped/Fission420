@@ -136,7 +136,7 @@
  },
  {
   "cmd": "save",
-  "path": "examples/bracket.f420.json"
+  "path": "examples/bracket.rcad.json"
  },
  {
   "cmd": "export_stl",

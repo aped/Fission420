@@ -493,14 +493,14 @@
   },
   {
     "cmd": "save",
-    "path": "examples/scenario_b.f420.json"
+    "path": "examples/scenario_b.rcad.json"
   },
   {
     "cmd": "close"
   },
   {
     "cmd": "open",
-    "path": "examples/scenario_b.f420.json"
+    "path": "examples/scenario_b.rcad.json"
   },
   {
     "chord": 0.01,

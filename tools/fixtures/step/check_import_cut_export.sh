@@ -7,7 +7,7 @@
 # volume 12000 - 90*pi (analytic, computed here) within max(0.001, V*1e-7).
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
-cargo test --release -q -p f420-kernel --test step_import imported_box_can_be_cut_measured_and_exported || exit 1
+cargo test --release -q -p rcad-kernel --test step_import imported_box_can_be_cut_measured_and_exported || exit 1
 FILE="$REPO/target/tmp/imported_box_hole.step"
 mkdir -p "$REPO/artifacts/step_import"
 cp "$FILE" "$REPO/artifacts/step_import/imported_box_hole.step"
@@ -15,8 +15,8 @@ if ! flatpak info org.freecad.FreeCAD >/dev/null 2>&1; then
   echo "FreeCAD flatpak not installed: external validation NOT RUN"
   exit 2
 fi
-out=$(timeout 180 flatpak run --env="F420_STEP=$REPO/artifacts/step_import/imported_box_hole.step" \
-  --env=F420_EXPECT_SOLIDS=1 --filesystem="$REPO/artifacts/step_import" \
+out=$(timeout 180 flatpak run --env="RCAD_STEP=$REPO/artifacts/step_import/imported_box_hole.step" \
+  --env=RCAD_EXPECT_SOLIDS=1 --filesystem="$REPO/artifacts/step_import" \
   --command=FreeCADCmd org.freecad.FreeCAD "$REPO/tools/freecad_check_step.py" 2>&1 | grep FREECAD_RESULT) || exit 1
 echo "$out" | tee "$REPO/artifacts/step_import/imported_box_hole_freecad.txt"
 python3 - "$out" <<'PY'

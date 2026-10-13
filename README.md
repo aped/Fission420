@@ -1,13 +1,16 @@
 <div align="center">
 
-# Fission420
+# R-CAD
 
 **A local-first parametric CAD modeler for small mechanical parts, written in Rust.**
+
+*The **R** is for **Rust**, and it is said like "our": R-CAD is **our CAD**. It runs on
+your machine, keeps your files in an open format, and is small enough to read and change.*
 
 Constraint-based sketches · feature history · exact B-rep solids · named parameters ·
 STEP / STL / 3MF / DXF / SVG · a headless command API
 
-[![CI](https://github.com/aped/Fission420/actions/workflows/ci.yml/badge.svg)](https://github.com/aped/Fission420/actions/workflows/ci.yml)
+[![CI](https://github.com/aped/R-CAD/actions/workflows/ci.yml/badge.svg)](https://github.com/aped/R-CAD/actions/workflows/ci.yml)
 ![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 ![Kernel](https://img.shields.io/badge/kernel-Truck%20B--rep-6f42c1)
@@ -26,7 +29,7 @@ such as <code>cavity_length - 2 * fit_clearance</code>.</sub>
 ## Why
 
 Most hobby-grade parametric CAD is cloud-bound, closed, or built on a large C++ kernel.
-Fission420 is a small, inspectable modeler that does a few things properly:
+R-CAD is a small, inspectable modeler that does a few things properly:
 
 - **Exact geometry.** Solids are analytic B-rep, built through
   [Truck](https://github.com/ricosjp/truck); tessellation is a derived cache. Volumes and
@@ -51,7 +54,7 @@ Fission420 is a small, inspectable modeler that does a few things properly:
 | **Inspection** | Face-to-face measurement, per-body volume, bounds and topology, section view |
 | **Print export** | STL / 3MF with chord control, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.f420.json` (v4) with automatic migration from v1–v3 and atomic saves that never destroy the previous file |
+| **Native format** | Versioned `.rcad.json` (v4) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
 
 ## Screenshots
 
@@ -69,7 +72,8 @@ Fission420 is a small, inspectable modeler that does a few things properly:
 </tr>
 </table>
 
-More in [`docs/screenshots/`](docs/screenshots).
+More in [`docs/screenshots/`](docs/screenshots). The screenshots predate the rename, so the
+title bar in them still reads *Fission420*.
 
 ## Getting it
 
@@ -77,7 +81,7 @@ More in [`docs/screenshots/`](docs/screenshots).
 
 CI publishes unsigned builds for **Linux x86_64**, **Windows x64** and **macOS ARM64** from
 `main` and from manual runs (Actions → CI → a run → *Artifacts*; kept 7 days). Tagged
-versions (`v*`) produce a draft release with the same archives. Each archive holds `f420-app`, `f420-cli`, the example
+versions (`v*`) produce a draft release with the same archives. Each archive holds `rcad`, `rcad-cli`, the example
 documents and a `BUILD_INFO.txt` that says whether that platform's tests passed.
 
 > Windows and macOS builds are produced on every run but are not yet test-gated; see
@@ -88,10 +92,10 @@ documents and a `BUILD_INFO.txt` that says whether that platform's tests passed.
 Requires Rust **1.95+** (CI uses 1.99.0) and a C compiler (one dependency builds liblzma).
 
 ```bash
-git clone https://github.com/aped/Fission420.git
-cd Fission420
-cargo build --release -p f420-app -p f420-cli
-target/release/f420-app            # F1 = help
+git clone https://github.com/aped/R-CAD.git
+cd R-CAD
+cargo build --release -p rcad -p rcad-cli
+target/release/rcad            # F1 = help
 ```
 
 On Linux the app runs on Wayland or X11 with Vulkan or GL; nothing beyond the usual desktop
@@ -118,8 +122,8 @@ Every modeling action is a JSON command. Workflows in [`examples/`](examples) ar
 scripts:
 
 ```bash
-target/release/f420-cli run examples/enclosure_workflow.json      # build, edit, save, export
-target/release/f420-cli acceptance --out artifacts/acceptance     # analytic acceptance checks
+target/release/rcad-cli run examples/enclosure_workflow.json      # build, edit, save, export
+target/release/rcad-cli acceptance --out artifacts/acceptance     # analytic acceptance checks
 ```
 
 ```json
@@ -138,16 +142,16 @@ mesh checks). The command reference is [`docs/COMMANDS.md`](docs/COMMANDS.md).
 
 ```mermaid
 flowchart LR
-    app["f420-app<br/><sub>egui/eframe shell</sub>"] --> viewport["f420-viewport<br/><sub>wgpu display, picking</sub>"]
+    app["rcad<br/><sub>egui/eframe shell</sub>"] --> viewport["rcad-viewport<br/><sub>wgpu display, picking</sub>"]
     app --> commands
-    cli["f420-cli<br/><sub>JSON scripts</sub>"] --> commands
-    commands["f420-commands<br/><sub>typed request/response API</sub>"] --> document
+    cli["rcad-cli<br/><sub>JSON scripts</sub>"] --> commands
+    commands["rcad-commands<br/><sub>typed request/response API</sub>"] --> document
     commands --> exchange
-    document["f420-document<br/><sub>history, parameters, regen,<br/>undo, native format</sub>"] --> kernel
+    document["rcad-document<br/><sub>history, parameters, regen,<br/>undo, native format</sub>"] --> kernel
     document --> sketch
-    exchange["f420-exchange<br/><sub>STL, 3MF, DXF, SVG</sub>"] --> sketch
-    kernel["f420-kernel<br/><sub>B-rep ops, validation,<br/>tessellation, STEP</sub>"] --> truck[("Truck")]
-    sketch["f420-sketch<br/><sub>entities, constraints, solver</sub>"]
+    exchange["rcad-exchange<br/><sub>STL, 3MF, DXF, SVG</sub>"] --> sketch
+    kernel["rcad-kernel<br/><sub>B-rep ops, validation,<br/>tessellation, STEP</sub>"] --> truck[("Truck")]
+    sketch["rcad-sketch<br/><sub>entities, constraints, solver</sub>"]
 ```
 
 Geometry and document crates build and run without a window or GPU. Decisions are recorded
@@ -174,7 +178,7 @@ cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptan
 
 ## Status and limits
 
-Fission420 is a **prototype**. It is useful for simple prismatic parts and printable
+R-CAD is a **prototype**. It is useful for simple prismatic parts and printable
 enclosures. It does not have solid fillets, countersinks, assemblies or drawings. Some
 coplanar or coincident boolean cases are refused (a Truck 0.6 limitation). Every Join/Cut
 result is independently checked before it commits (ADR 0005), so an unsupported case
@@ -205,4 +209,9 @@ The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
-Fission420 is an independent project and is not affiliated with any commercial CAD vendor.
+R-CAD is an independent project and is not affiliated with any commercial CAD vendor.
+
+<sub>Until October 2026 the project was called Fission420. Documents (`*.f420.json`,
+`"format": "fission420"`), autosave copies and the `F420_RECOVERY_DIR` /
+`F420_AUTOSAVE_SECS` variables from that name keep working; see
+[`docs/RENAME.md`](docs/RENAME.md).</sub>

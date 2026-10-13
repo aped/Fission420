@@ -367,7 +367,7 @@
   },
   {
     "cmd": "save",
-    "path": "examples/enclosure.f420.json"
+    "path": "examples/enclosure.rcad.json"
   },
   {
     "cmd": "inspect"

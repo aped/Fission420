@@ -420,14 +420,14 @@
   },
   {
     "cmd": "save",
-    "path": "examples/scenario_r.f420.json"
+    "path": "examples/scenario_r.rcad.json"
   },
   {
     "cmd": "close"
   },
   {
     "cmd": "open",
-    "path": "examples/scenario_r.f420.json"
+    "path": "examples/scenario_r.rcad.json"
   },
   {
     "chord": 0.01,

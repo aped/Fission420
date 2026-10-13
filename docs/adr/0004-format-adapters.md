@@ -4,12 +4,12 @@ Status: accepted (run 3, 2026-10-10)
 
 ## Decision
 * Adapters are pure functions from bytes to typed results, with no document access:
-  * `f420_kernel::import_step(text, &StepImportOptions) -> Result<StepImport>`: exact B-rep
+  * `rcad_kernel::import_step(text, &StepImportOptions) -> Result<StepImport>`: exact B-rep
     solids (Truck), units, names, warnings, per-solid planar face table. Lives in the kernel
     because it builds Truck types (only the kernel touches Truck).
-  * `f420_exchange::stl::read(bytes) -> Result<StlMesh>` and `f420_exchange::mesh` diagnostics.
-  * `f420_exchange::dxf::import(bytes, &DxfImportOptions) -> Result<DxfImport>` (to an
-    unconstrained `f420_sketch::Sketch`) and `dxf::export(&Sketch, ...) -> String`.
+  * `rcad_exchange::stl::read(bytes) -> Result<StlMesh>` and `rcad_exchange::mesh` diagnostics.
+  * `rcad_exchange::dxf::import(bytes, &DxfImportOptions) -> Result<DxfImport>` (to an
+    unconstrained `rcad_sketch::Sketch`) and `dxf::export(&Sketch, ...) -> String`.
 * The document/command layer turns adapter results into one transaction (all-or-nothing).
   UI, CLI and tests use the same `Command::Import*` path. Work runs off the UI thread in the
   app engine, tagged with document id + revision like every other job.

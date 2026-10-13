@@ -6,7 +6,7 @@ through the real widgets:
 
 | Area | Behaviour | Code | UI test |
 |---|---|---|---|
-| Multi-body view | Every visible body is tessellated into one display scene. Each body gets its own group range and tint, and mesh bodies get their own colour. Hidden bodies are not drawn, picked or fitted. | `engine.rs` (`display_scene`), `f420-viewport` `set_group_tints` | `multibody.rs` |
+| Multi-body view | Every visible body is tessellated into one display scene. Each body gets its own group range and tint, and mesh bodies get their own colour. Hidden bodies are not drawn, picked or fitted. | `engine.rs` (`display_scene`), `rcad-viewport` `set_group_tints` | `multibody.rs` |
 | Face picking | A planar face matches a document face candidate on the same body that is coplanar and has the same outward normal (caps, line side faces, cut floors, imported planar faces), and it can host a sketch. Curved faces, mesh bodies and planar faces with no unique reference show the reason. | `view3d.rs` (`analyse_faces`) | `sketch_workflow.rs` `selection_sync…`, `reattach.rs` |
 | Bodies browser | You can select a body (this highlights all its faces), rename it inline, and hide or show it (each is an undoable command). The inspector shows the body's kind, where it came from, and either its measurements or mesh diagnostics. | `bodies.rs` | `multibody.rs` |
 | Extrude | Operations are New Body, Join and Cut, with a target body. Through All is available for Cut only and goes through both sides of the sketch plane. Reverse and units are also available. A translucent preview is computed in the UI, and the target is highlighted. A Cut from a face of the target goes into the material. | `extrude.rs` | `multibody.rs`, `reattach.rs` |
@@ -21,7 +21,7 @@ through the real widgets:
 | Frame pacing | Each worker reply calls the repaint callback. An idle UI requests no repaint. While work is pending the UI polls every 50 ms. | `engine.rs`, `app.rs` | `frame_pacing.rs` |
 
 Screenshots: `tools/run3_screenshots.sh` renders the `--scene` states
-(`crates/f420-app/src/scenes.rs`) in a private headless mutter at 1280×800 and 1920×1080.
+(`crates/rcad/src/scenes.rs`) in a private headless mutter at 1280×800 and 1920×1080.
 Curated copies are in `docs/screenshots/12-17`. The full set is written to
 `artifacts/run3/screenshots/` (not tracked).
 
@@ -49,11 +49,13 @@ be interrupted and still completes, and Undo removes it in one step.
   *Mounting bracket* start a new document with editable parameters.
 * **Export STL… / Export 3MF…**: body table, tessellation, export-only placement (selected
   face down), layout, bed fit, per-body report (docs/PRINT_EXPORT.md).
-* **Autosave / recovery** (`crates/f420-app/src/recovery.rs`): while a document has
-  unsaved changes, a copy is written every 60 s (`F420_AUTOSAVE_SECS`) to
-  `~/.local/state/fission420/recovery` (`F420_RECOVERY_DIR`); Save or deliberately leaving
+* **Autosave / recovery** (`crates/rcad/src/recovery.rs`): while a document has
+  unsaved changes, a copy is written every 60 s (`RCAD_AUTOSAVE_SECS`) to
+  `~/.local/state/r-cad/recovery` (`RCAD_RECOVERY_DIR`); Save or deliberately leaving
   the document removes it; after a crash the next start offers *Open copy* (opens as an
   unsaved, untitled document) or *Discard*. Scripted scenes, demos and tests never write
-  recovery files.
+  recovery files. Copies left by a pre-rename build (`…/fission420/recovery`,
+  `*.autosave.f420.json`) are still offered, and `F420_RECOVERY_DIR` /
+  `F420_AUTOSAVE_SECS` still apply when the `RCAD_*` variables are unset.
 * Dialogs holding feature/body ids close on Undo/Redo (ids may be reused afterwards) and
   when their ids disappear; import replies resolve only the form that submitted them.

@@ -4,11 +4,11 @@
   },
   {
     "cmd": "import_step",
-    "path": "crates/f420-kernel/tests/fixtures/step/box_40x30x10_mm.step"
+    "path": "crates/rcad-kernel/tests/fixtures/step/box_40x30x10_mm.step"
   },
   {
     "cmd": "import_step",
-    "path": "crates/f420-kernel/tests/fixtures/step/truncated.step",
+    "path": "crates/rcad-kernel/tests/fixtures/step/truncated.step",
     "expect_ok": false
   },
   {
@@ -45,7 +45,7 @@
   },
   {
     "cmd": "save",
-    "path": "examples/imported_step_hole.f420.json"
+    "path": "examples/imported_step_hole.rcad.json"
   },
   {
     "cmd": "export_step",

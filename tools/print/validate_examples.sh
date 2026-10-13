@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Print-export validation of the REAL printable examples (f420_commands::printables):
+# Print-export validation of the REAL printable examples (rcad_commands::printables):
 # enclosure baseline + variant (base + lid), clearance coupon (plate + peg), mounting bracket.
-#   1. crates/f420-commands/tests/print_examples.rs (ignored test) replays the example workflows
+#   1. crates/rcad-commands/tests/print_examples.rs (ignored test) replays the example workflows
 #      and writes placed per-body STLs, multi-object 3MFs, one STEP per body, and analytic
 #      expectations (spec.json for the mesh checker, step_expected.json for FreeCAD);
 #   2. tools/print/check_print_mesh.py (independent, stdlib Python) against spec.json;
@@ -31,7 +31,7 @@ res() { if [ "$2" -ne 0 ]; then FAIL=1; note "  $1: FAIL (exit $2)"; else note "
 note "# validate_examples.sh $(date -Is)  commit $(git rev-parse --short HEAD 2>/dev/null)"
 note "## 1. exports (cargo test --test print_examples -- --ignored)"
 rm -rf "$EXP"; mkdir -p "$EXP"
-F420_PRINT_EXAMPLES_OUT=$EXP tools/heavy.sh cargo test -p f420-commands --release \
+RCAD_PRINT_EXAMPLES_OUT=$EXP tools/heavy.sh cargo test -p rcad-commands --release \
   --test print_examples -- --ignored > "$OUT/export.log" 2>&1
 res "export test" $?
 ls "$EXP" | sed 's/^/    /' >> "$SUM"
@@ -55,12 +55,12 @@ res "mesh checks" $rc
 note "## 3. FreeCAD (STEP exact volume/validity, STL solidity/self-intersection)"
 : > "$OUT/freecad.log"
 for f in "$EXP"/*.step; do
-  tools/heavy.sh timeout 300 flatpak run --env=F420_STEP="$f" --env=F420_EXPECT_SOLIDS=1 \
+  tools/heavy.sh timeout 300 flatpak run --env=RCAD_STEP="$f" --env=RCAD_EXPECT_SOLIDS=1 \
     --filesystem="$ROOT" --command=FreeCADCmd org.freecad.FreeCAD "$ROOT/tools/freecad_check_step.py" 2>&1 \
     | grep FREECAD_RESULT | sed "s|^|STEP $(basename "$f") |" >> "$OUT/freecad.log"
 done
 for f in "$EXP"/*.stl; do
-  tools/heavy.sh timeout 300 flatpak run --env=F420_PRINT="$f" --filesystem="$ROOT" \
+  tools/heavy.sh timeout 300 flatpak run --env=RCAD_PRINT="$f" --filesystem="$ROOT" \
     --command=FreeCADCmd org.freecad.FreeCAD "$ROOT/tools/print/freecad_check_print.py" 2>&1 \
     | grep FREECAD_RESULT | sed "s|^|STL $(basename "$f") |" >> "$OUT/freecad.log"
 done

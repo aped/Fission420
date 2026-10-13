@@ -1,9 +1,9 @@
-# Generates crates/f420-exchange/tests/fixtures/svg/freecad_plate.svg with FreeCAD 1.1.4 (Draft importSVG.export):
-# flatpak run --env=F420_OUT=<abs path> --filesystem=<dir> --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/svg/generate_freecad_svg.py
+# Generates crates/rcad-exchange/tests/fixtures/svg/freecad_plate.svg with FreeCAD 1.1.4 (Draft importSVG.export):
+# flatpak run --env=RCAD_OUT=<abs path> --filesystem=<dir> --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/svg/generate_freecad_svg.py
 # The printed 'area' is NOT a reference: Part.Face here gets inner wires with the outer wire's
 # orientation, so FreeCAD adds them (2643.36). The test uses the analytic area 2400 - 36pi - (80 + 16pi).
 import FreeCAD, Part, os, json
-out = os.environ["F420_OUT"]
+out = os.environ["RCAD_OUT"]
 doc = FreeCAD.newDocument("svg")
 # 60 x 40 plate outline with a Ø12 hole at (20, 20) and a slot made of two lines + two arcs.
 outer = Part.makePolygon([FreeCAD.Vector(0,0,0), FreeCAD.Vector(60,0,0), FreeCAD.Vector(60,40,0), FreeCAD.Vector(0,40,0), FreeCAD.Vector(0,0,0)])

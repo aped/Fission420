@@ -4,9 +4,9 @@
 #   - FreeCAD 1.1 flatpak (OpenCascade) for STL mesh + STEP solid import, if installed.
 # usage: tools/external_validation.sh [DIR]
 # DIR (default artifacts/acceptance) must contain plate.stl/plate.step; scenario_a.*,
-# scenario_b.*, pocket.* and scenario_r*.* (from `f420-cli acceptance`) are checked too
+# scenario_b.*, pocket.* and scenario_r*.* (from `rcad-cli acceptance`) are checked too
 # when present.
-# Expected volumes are analytic (computed here, not read from Fission420 output):
+# Expected volumes are analytic (computed here, not read from R-CAD output):
 #   plate      100 x 50 x 10, centred Ø10 through hole: 50000 - 250*pi
 #   scenario_a 100 x 50 x 12, centred Ø10 through hole: 60000 - 300*pi
 #   scenario_b_initial 5 mm prism over (0,0)(60,0)(60,30)(50,40)(0,40): 5*2350
@@ -24,10 +24,10 @@ check_stem() { # stem, python expression for the expected volume
   python3 "$REPO/tools/check_stl.py" "$DIR/$stem.stl" "$exp" | tee "$DIR/${stem}_stl_check_python.json" || status=1
   if [ "$HAVE_FC" = 1 ]; then
     echo "== $stem: FreeCAD STL"
-    run_fc "F420_STL=$DIR/$stem.stl" "$REPO/tools/freecad_check_stl.py" | tee "$DIR/${stem}_stl_check_freecad.txt" || status=1
+    run_fc "RCAD_STL=$DIR/$stem.stl" "$REPO/tools/freecad_check_stl.py" | tee "$DIR/${stem}_stl_check_freecad.txt" || status=1
     echo "== $stem: FreeCAD STEP"
     local out
-    out=$(run_fc "F420_STEP=$DIR/$stem.step" "$REPO/tools/freecad_check_step.py") || status=1
+    out=$(run_fc "RCAD_STEP=$DIR/$stem.step" "$REPO/tools/freecad_check_step.py") || status=1
     echo "$out" | tee "$DIR/${stem}_step_check_freecad.txt"
     python3 - "$out" "$exp" <<'PY' || status=1
 import json, sys
@@ -54,9 +54,9 @@ echo "== plate: python STL check"
 python3 "$REPO/tools/check_stl.py" "$DIR/plate.stl" "$exp_plate" | tee "$DIR/stl_check_python.json" || status=1
 if [ "$HAVE_FC" = 1 ]; then
   echo "== plate: FreeCAD STL"
-  run_fc "F420_STL=$DIR/plate.stl" "$REPO/tools/freecad_check_stl.py" | tee "$DIR/stl_check_freecad.txt" || status=1
+  run_fc "RCAD_STL=$DIR/plate.stl" "$REPO/tools/freecad_check_stl.py" | tee "$DIR/stl_check_freecad.txt" || status=1
   echo "== plate: FreeCAD STEP"
-  out=$(run_fc "F420_STEP=$DIR/plate.step" "$REPO/tools/freecad_check_step.py") || status=1
+  out=$(run_fc "RCAD_STEP=$DIR/plate.step" "$REPO/tools/freecad_check_step.py") || status=1
   echo "$out" | tee "$DIR/step_check_freecad.txt"
   python3 - "$out" "$exp_plate" <<'PY' || status=1
 import json, sys

@@ -331,7 +331,7 @@
   },
   {
     "cmd": "save",
-    "path": "examples/mounting_bracket.f420.json"
+    "path": "examples/mounting_bracket.rcad.json"
   },
   {
     "cmd": "inspect"

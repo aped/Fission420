@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Hand-written 3MF fixtures (Python stdlib only), written from the public 3MF Core
-Specification 1.3 and ECMA-376 Part 2 (OPC), independent of Fission420's writer.
+Specification 1.3 and ECMA-376 Part 2 (OPC), independent of R-CAD's writer.
 
 usage: gen_handwritten.py OUT_DIR
 
 Every expected value is stated next to the fixture (and asserted in
-crates/f420-exchange/tests/threemf_fixtures.rs).
+crates/rcad-exchange/tests/threemf_fixtures.rs).
 """
 import os
 import struct

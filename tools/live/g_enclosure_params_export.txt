@@ -3,7 +3,7 @@
 # export a placed multi-object 3MF (lid face down so the lip points up, side by
 # side, P1S bed) -- all through real pointer/keyboard input.
 key ctrl+o
-typew File path | @ROOT@/examples/enclosure.f420.json
+typew File path | @ROOT@/examples/enclosure.rcad.json
 clickw OK
 wait_idle
 expect features 10

@@ -1,11 +1,11 @@
-# Independent read of an SVG by FreeCAD's Draft importer (not Fission420's reader).
-# flatpak run --env=F420_SVG=<abs path> --filesystem=<dir> --command=FreeCADCmd org.freecad.FreeCAD tools/freecad_check_svg.py
+# Independent read of an SVG by FreeCAD's Draft importer (not R-CAD's reader).
+# flatpak run --env=RCAD_SVG=<abs path> --filesystem=<dir> --command=FreeCADCmd org.freecad.FreeCAD tools/freecad_check_svg.py
 # Prints FREECAD_RESULT {ok, edges, length (sum of edge lengths, mm), size [dx, dy] of all edges}
 import os, json, FreeCAD
 try:
     import importSVG
     doc = FreeCAD.newDocument("svgcheck")
-    importSVG.insert(os.environ["F420_SVG"], doc.Name)
+    importSVG.insert(os.environ["RCAD_SVG"], doc.Name)
     doc.recompute()
     edges = [e for o in doc.Objects if hasattr(o, "Shape") for e in o.Shape.Edges]
     bb = None

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent mesh validator for Fission420 print exports (STL, 3MF).
+"""Independent mesh validator for R-CAD print exports (STL, 3MF).
 
 Python 3 stdlib only; shares no code with the Rust exporters. Run isolated:
 
