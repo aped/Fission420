@@ -134,7 +134,7 @@ expected; **C** = cosmetic.
 | L4 | R | Windows, macOS | `crates/f420-app/src/recovery.rs:42-51` | The autosave directory is `F420_RECOVERY_DIR`, then `XDG_STATE_HOME`, then `HOME/.local/state`. Windows usually has no `HOME`, so autosave is silently off there. On macOS it lands in a Linux-style path. | Fall back to `%LOCALAPPDATA%` on Windows and `~/Library/Application Support` on macOS, with no new dependency. |
 | L5 | R | Windows | `crates/f420-document/src/io.rs:111-116` | Saving copies the target's permissions onto the temp file before the rename. On Windows a read-only target, or a target another process holds open, makes the rename fail. The previous file survives, so it is safe, but the save fails. | Do not copy the read-only bit on Windows; retry the rename briefly on `PermissionDenied`. Add a test for saving over a read-only file. |
 | L6 | T? | slow runners | `crates/f420-app/tests/exchange_ui.rs:375` (20 s); `tests/measure_imports.rs:28` (30 s); `tests/frame_pacing.rs:94-104` | Wall-clock limits tuned on a 9800X3D. A shared CI runner may be several times slower. | Raise them to about 120 s. They guard against hangs, not performance. |
-| L7 | R | macOS, Windows | `crates/f420-commands/tests/export_determinism.rs`; `f420-kernel/src/step.rs` canonical ordering | Byte-identical export within one process depends on canonical ordering hiding Truck's address-dependent order. A different allocator could expose a gap. | Watch the first runs. |
+| L7 | **T (confirmed, intermittent)** | macOS | `crates/f420-commands/tests/export_determinism.rs:114` (`bracket_exports_and_saves_are_byte_identical`); `crates/f420-document/src/io.rs:48-52` (cache rounding) | Seen in run 38346875644 after two green macOS runs. The two saves of the mounting bracket differ at byte 13523 of 13701, inside `"cache": {"volume": 20245.180555535}`. The bracket's volume is a `TessellationEstimate`. The likely cause, inferred and not yet reproduced locally, is that its floating-point sum follows Truck's pointer-derived face order. Rounding the cache to 1e-9 does not absorb a summation-order difference of that size, and macOS's randomised allocation changes the order between sessions where glibc's allocator happened not to. This is a real save-determinism defect, not a test bug. | Sum per-face contributions in a canonical face order (the same canonical ordering `step.rs` uses), or round estimate-method volumes in the cache to their error bound. Then run the test in a loop on macOS. Do not loosen the byte-identity assertion. |
 | C1 | C | Windows | `crates/f420-app/src/main.rs:1` | The GUI binary opens a console window. | `#![cfg_attr(windows, windows_subsystem = "windows")]`, once a log location exists. |
 | C2 | C | non-Linux | `crates/f420-app/Cargo.toml`, `crates/f420-viewport/Cargo.toml` | eframe's `wayland`/`x11` features do nothing there. They build fine. | None. |
 | C3 | C | all | `tools/heavy.sh:7` (hard-coded `ROOT`); `tools/*freecad*`, `tools/print/slice_bambu.sh` (flatpak) | Local-only tooling. Neither tests nor CI use it. | None for CI. |
@@ -174,8 +174,8 @@ commit `8946b8d`, the original four-legs-on-every-push layout). Conclusion **suc
 - **L3 seen from the user's side:** an extracted archive without an `artifacts/` directory
   made the CLI exit 1 on that example. Archives now ship an empty `artifacts/`.
 
-The next step is F1 alone. After it, Windows can be promoted to gating once one run is green,
-and macOS can be promoted now.
+Next: F1 for Windows, and L7 for macOS. macOS is **not** ready to gate: L7 fails
+intermittently there (see the verification run below).
 
 Local evidence from base `f0bcf6c` plus this change (logs in `artifacts/ci/`, untracked):
 
