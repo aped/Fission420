@@ -2626,6 +2626,8 @@ impl RcadApp {
                         values,
                         suppressed,
                         part_number: part,
+                        // Occurrence exclusion: through the command API.
+                        excluded_occurrences: Vec::new(),
                     });
                 }
             });

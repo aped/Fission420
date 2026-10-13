@@ -138,6 +138,10 @@ pub struct Occurrence {
     pub placement: Placement,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub grounded: bool,
+    /// Run 6: excluded from the evaluated assembly (display, BOM, mass,
+    /// interference, export); a configuration can control it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,6 +371,7 @@ impl Assembly {
             name,
             placement,
             grounded: false,
+            suppressed: false,
         });
         id
     }
@@ -528,7 +533,7 @@ impl Assembly {
     pub fn evaluate(&self) -> Result<Vec<EvalOccurrence>> {
         let mut memo: BTreeMap<OccurrenceId, Rigid> = BTreeMap::new();
         let mut out = Vec::with_capacity(self.occurrences.len());
-        for o in &self.occurrences {
+        for o in self.occurrences.iter().filter(|o| !o.suppressed) {
             let t = self.world(o.id, &mut memo, 0)?;
             let j = self.joint_of_child(o.id);
             out.push(EvalOccurrence {

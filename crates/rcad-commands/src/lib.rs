@@ -569,6 +569,16 @@ pub enum Command {
         suppressed: Vec<FeatureId>,
         #[serde(default)]
         part_number: String,
+        /// Component occurrences this configuration excludes.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        excluded_occurrences: Vec<rcad_document::assembly::OccurrenceId>,
+    },
+    /// Exclude (or include) a component occurrence (run 6; one undo step):
+    /// a suppressed occurrence leaves display, BOM, mass, interference and
+    /// assembly export.
+    SetOccurrenceSuppressed {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        suppressed: bool,
     },
     DeleteConfiguration {
         name: String,
@@ -862,6 +872,7 @@ impl Command {
             Command::SetRollback { .. } => "set_rollback",
             Command::SetConfiguration { .. } => "set_configuration",
             Command::DeleteConfiguration { .. } => "delete_configuration",
+            Command::SetOccurrenceSuppressed { .. } => "set_occurrence_suppressed",
             Command::ActivateConfiguration { .. } => "activate_configuration",
             Command::ExportConfigurations { .. } => "export_configurations",
             Command::MoveBody { .. } => "move_body",
@@ -2525,6 +2536,7 @@ impl Session {
                 values,
                 suppressed,
                 part_number,
+                excluded_occurrences,
             } => {
                 use rcad_document::params;
                 let name = name.trim().to_string();
@@ -2548,10 +2560,16 @@ impl Session {
                     values: values.clone(),
                     suppressed: suppressed.iter().copied().collect(),
                     part_number: part_number.trim().to_string(),
+                    excluded_occurrences: excluded_occurrences.iter().copied().collect(),
                 };
                 let m = self.model_mut()?;
                 for f in &c.suppressed {
                     m.document().feature(*f)?;
+                }
+                for o in &c.excluded_occurrences {
+                    if !m.document().assembly.occurrences.iter().any(|x| x.id == *o) {
+                        return Err(DocError::Validation(format!("unknown occurrence {o:?}")));
+                    }
                 }
                 for p in c.values.keys() {
                     if !m.document().parameters.iter().any(|x| x.name == *p) {
@@ -2571,6 +2589,27 @@ impl Session {
                     }
                     Ok(())
                 })?;
+            }
+            Command::SetOccurrenceSuppressed {
+                occurrence,
+                suppressed,
+            } => {
+                let (o, sup) = (*occurrence, *suppressed);
+                self.model_mut()?.transact(
+                    &format!("{} occurrence", if sup { "Suppress" } else { "Restore" }),
+                    |d| {
+                        let x = d
+                            .assembly
+                            .occurrences
+                            .iter_mut()
+                            .find(|x| x.id == o)
+                            .ok_or_else(|| {
+                                DocError::Validation(format!("unknown occurrence {o:?}"))
+                            })?;
+                        x.suppressed = sup;
+                        Ok(())
+                    },
+                )?;
             }
             Command::DeleteConfiguration { name } => {
                 let name = name.clone();

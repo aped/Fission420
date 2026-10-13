@@ -598,3 +598,62 @@ fn joint_axis_from_an_edge_and_from_a_hole() {
         "{p:?}"
     );
 }
+
+/// Run-7 §3 pull-forward: a configuration excludes a component occurrence;
+/// BOM quantity and assembly mass follow the active configuration.
+#[test]
+fn configurations_include_or_exclude_occurrences() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    let b = block(&mut s, 20.0, 30.0, 40.0, [10.0, 15.0]);
+    ok(
+        &mut s,
+        json!({"cmd": "set_body_material", "body": b, "density": 1.2}),
+    );
+    let o = out(ok(
+        &mut s,
+        json!({"cmd": "create_component", "name": "Block", "bodies": [b]}),
+    ));
+    let c = o.component.unwrap();
+    let o2 = out(ok(
+        &mut s,
+        json!({"cmd": "add_occurrence", "component": c, "translate": [100.0, 0.0, 0.0]}),
+    ))
+    .occurrence
+    .unwrap();
+    ok(
+        &mut s,
+        json!({"cmd": "set_configuration", "name": "Pair", "part_number": "P-2"}),
+    );
+    ok(
+        &mut s,
+        json!({"cmd": "set_configuration", "name": "Single", "part_number": "P-1",
+                      "excluded_occurrences": [o2]}),
+    );
+    let qty = |s: &mut Session| out(ok(s, json!({"cmd": "bom"}))).bom.unwrap()[0].quantity;
+    ok(
+        &mut s,
+        json!({"cmd": "activate_configuration", "name": "Single"}),
+    );
+    assert_eq!(qty(&mut s), 1);
+    ok(
+        &mut s,
+        json!({"cmd": "activate_configuration", "name": "Pair"}),
+    );
+    assert_eq!(qty(&mut s), 2);
+    // Direct suppression, one undo step.
+    ok(
+        &mut s,
+        json!({"cmd": "set_occurrence_suppressed", "occurrence": o2, "suppressed": true}),
+    );
+    assert_eq!(qty(&mut s), 1);
+    ok(&mut s, json!({"cmd": "undo"}));
+    assert_eq!(qty(&mut s), 2);
+    // Unknown occurrence in a configuration: refused.
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "set_configuration", "name": "Bad",
+                                       "excluded_occurrences": [999]}),
+    );
+    assert!(!r.ok);
+}

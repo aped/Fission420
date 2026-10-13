@@ -1767,6 +1767,10 @@ pub struct Configuration {
     pub suppressed: std::collections::BTreeSet<FeatureId>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part_number: String,
+    /// Component occurrences this configuration excludes (run 6); every
+    /// occurrence any configuration lists is controlled like `suppressed`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub excluded_occurrences: std::collections::BTreeSet<crate::assembly::OccurrenceId>,
 }
 
 fn one() -> u32 {
@@ -1823,6 +1827,16 @@ impl Document {
         }
         for f in self.configured_features() {
             self.feature_mut(f)?.suppressed = c.suppressed.contains(&f);
+        }
+        let controlled: std::collections::BTreeSet<_> = self
+            .configurations
+            .iter()
+            .flat_map(|x| x.excluded_occurrences.iter().copied())
+            .collect();
+        for o in self.assembly.occurrences.iter_mut() {
+            if controlled.contains(&o.id) {
+                o.suppressed = c.excluded_occurrences.contains(&o.id);
+            }
         }
         self.active_configuration = Some(name.to_string());
         self.check_suppression()

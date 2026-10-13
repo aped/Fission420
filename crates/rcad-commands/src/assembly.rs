@@ -575,7 +575,7 @@ pub fn bom(m: &Model) -> Vec<BomRow> {
             .assembly
             .occurrences
             .iter()
-            .filter(|o| o.component == c.id)
+            .filter(|o| o.component == c.id && !o.suppressed)
             .map(|o| o.name.clone())
             .collect();
         if occ.is_empty() {
@@ -947,7 +947,11 @@ pub fn summary(m: &Model) -> AssemblySummary {
                 name: c.name.clone(),
                 part_number: c.part_number.clone(),
                 bodies: c.bodies.clone(),
-                occurrences: a.occurrences.iter().filter(|o| o.component == c.id).count(),
+                occurrences: a
+                    .occurrences
+                    .iter()
+                    .filter(|o| o.component == c.id && !o.suppressed)
+                    .count(),
             })
             .collect(),
         total_dof: occurrences.iter().map(|o| u32::from(o.dof)).sum(),
