@@ -27,6 +27,24 @@ pub(super) struct Placements<'a> {
     same: HashMap<u64, Vec<u64>>,
     /// child representation -> (parent representation, child-to-parent transform)
     up: HashMap<u64, Vec<(u64, Matrix4)>>,
+    /// Run 7: relationship entity -> child-to-parent transform.
+    rel: HashMap<u64, Matrix4>,
+}
+
+/// Run 7: the product structure of a STEP file (products = product
+/// definitions, usages = NEXT_ASSEMBLY_USAGE_OCCURRENCE with their
+/// CONTEXT_DEPENDENT_SHAPE_REPRESENTATION placement).
+pub(super) struct Structure {
+    pub products: Vec<SProduct>,
+    pub roots: Vec<usize>,
+}
+
+pub(super) struct SProduct {
+    pub name: String,
+    /// Representations of the product (identity-linked group).
+    pub reps: HashSet<u64>,
+    /// (child product, usage name, child-to-parent transform).
+    pub children: Vec<(usize, String, Matrix4)>,
 }
 
 fn is_representation(name: &str) -> bool {
@@ -53,6 +71,7 @@ impl<'a> Placements<'a> {
         let mut rep_items = HashMap::new();
         let mut same: HashMap<u64, Vec<u64>> = HashMap::new();
         let mut up: HashMap<u64, Vec<(u64, Matrix4)>> = HashMap::new();
+        let mut rel: HashMap<u64, Matrix4> = HashMap::new();
         for &id in &idx.order {
             let e = &idx.map[&id];
             for (name, params) in &e.parts {
@@ -96,6 +115,7 @@ impl<'a> Placements<'a> {
                         ))
                     })?;
                     up.entry(r1).or_default().push((r2, m2 * inv));
+                    rel.insert(id, m2 * inv);
                 } else if e.parts.len() == 1 || e.has("SHAPE_REPRESENTATION_RELATIONSHIP") {
                     same.entry(r1).or_default().push(r2);
                     same.entry(r2).or_default().push(r1);
@@ -127,6 +147,7 @@ impl<'a> Placements<'a> {
             rep_items,
             same,
             up,
+            rel,
         })
     }
 
@@ -208,6 +229,153 @@ impl<'a> Placements<'a> {
             path.remove(r);
         }
         Ok(())
+    }
+
+    /// Representations (identity groups) containing `item`.
+    pub fn item_reps(&self, item: u64) -> HashSet<u64> {
+        self.reps_containing(item)
+            .into_iter()
+            .flat_map(|r| self.closure(r))
+            .collect()
+    }
+
+    /// Run 7: the product structure, when the file has assembly usages
+    /// (`None` without NEXT_ASSEMBLY_USAGE_OCCURRENCE). Refused (error) when a
+    /// usage's placement cannot be resolved or usage is cyclic.
+    pub fn structure(&self) -> Result<Option<Structure>, StepError> {
+        let idx = self.idx;
+        let nauos = idx.all_simple("NEXT_ASSEMBLY_USAGE_OCCURRENCE");
+        if nauos.is_empty() {
+            return Ok(None);
+        }
+        let pds = idx.all_simple("PRODUCT_DEFINITION");
+        let index: HashMap<u64, usize> = pds.iter().enumerate().map(|(i, p)| (*p, i)).collect();
+        let mut products: Vec<SProduct> = Vec::with_capacity(pds.len());
+        for &pd in &pds {
+            let (_, p) = idx.simple(pd, &["PRODUCT_DEFINITION"])?;
+            let name = idx
+                .simple(
+                    p.r(2)?,
+                    &[
+                        "PRODUCT_DEFINITION_FORMATION",
+                        "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE",
+                    ],
+                )
+                .ok()
+                .and_then(|(_, f)| f.r(2).ok())
+                .and_then(|prod| idx.simple(prod, &["PRODUCT"]).ok())
+                .and_then(|(_, prod)| {
+                    prod.opt_s(1)
+                        .or(prod.opt_s(0))
+                        .map(|s| s.trim().to_string())
+                })
+                .unwrap_or_default();
+            products.push(SProduct {
+                name,
+                reps: HashSet::new(),
+                children: vec![],
+            });
+        }
+        // Shape of each product: SHAPE_DEFINITION_REPRESENTATION(PDS(pd), rep).
+        let mut pds_def: HashMap<u64, u64> = HashMap::new();
+        for pds_id in idx.all_simple("PRODUCT_DEFINITION_SHAPE") {
+            if let Ok((_, p)) = idx.simple(pds_id, &["PRODUCT_DEFINITION_SHAPE"])
+                && let Ok(d) = p.r(2)
+            {
+                pds_def.insert(pds_id, d);
+            }
+        }
+        for sdr in idx.all_simple("SHAPE_DEFINITION_REPRESENTATION") {
+            let (_, p) = idx.simple(sdr, &["SHAPE_DEFINITION_REPRESENTATION"])?;
+            let (Ok(pds_id), Ok(rep)) = (p.r(0), p.r(1)) else {
+                continue;
+            };
+            if let Some(pd) = pds_def.get(&pds_id)
+                && let Some(&i) = index.get(pd)
+            {
+                products[i].reps.extend(self.closure(rep));
+            }
+        }
+        // Usages and their placements (CDSR(rel, PDS(nauo))).
+        let mut cdsr_of: HashMap<u64, u64> = HashMap::new();
+        for c in idx.all_with("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION") {
+            let e = idx.get(c)?;
+            let p = P::new(
+                c,
+                "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION",
+                e.part("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION")
+                    .unwrap_or(&[]),
+            );
+            let (rel, pds_id) = (p.r(0)?, p.r(1)?);
+            if let Some(n) = pds_def.get(&pds_id) {
+                cdsr_of.insert(*n, rel);
+            }
+        }
+        let mut is_child = vec![false; products.len()];
+        for &n in &nauos {
+            let (_, p) = idx.simple(n, &["NEXT_ASSEMBLY_USAGE_OCCURRENCE"])?;
+            let (parent, child) = (p.r(3)?, p.r(4)?);
+            let (Some(&pi), Some(&ci)) = (index.get(&parent), index.get(&child)) else {
+                return Err(fail(format!(
+                    "NEXT_ASSEMBLY_USAGE_OCCURRENCE #{n}: unknown product definition"
+                )));
+            };
+            let name = p
+                .opt_s(1)
+                .or(p.opt_s(0))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            let m = cdsr_of
+                .get(&n)
+                .and_then(|rel| self.rel.get(rel))
+                .copied()
+                .ok_or_else(|| {
+                    fail(format!(
+                        "NEXT_ASSEMBLY_USAGE_OCCURRENCE #{n}: no placement \
+                         (CONTEXT_DEPENDENT_SHAPE_REPRESENTATION with a transformation)"
+                    ))
+                })?;
+            check_rigid(&m)?;
+            products[pi].children.push((ci, name, m));
+            is_child[ci] = true;
+        }
+        // Acyclic, bounded depth (memoized longest path; recursion depth is
+        // bounded by MAX_DEPTH).
+        fn longest(
+            p: &[SProduct],
+            i: usize,
+            state: &mut [u8],
+            memo: &mut [usize],
+            level: usize,
+        ) -> Result<usize, StepError> {
+            match state[i] {
+                2 => return Ok(memo[i]),
+                1 => return Err(fail("cyclic product usage".into())),
+                _ => {}
+            }
+            if level > MAX_DEPTH {
+                return Err(fail("assembly nesting too deep".into()));
+            }
+            state[i] = 1;
+            let mut best = 0;
+            for (c, _, _) in &p[i].children {
+                best = best.max(1 + longest(p, *c, state, memo, level + 1)?);
+            }
+            state[i] = 2;
+            memo[i] = best;
+            Ok(best)
+        }
+        let roots: Vec<usize> = (0..products.len())
+            .filter(|&i| !is_child[i] && !products[i].children.is_empty())
+            .collect();
+        let mut state = vec![0u8; products.len()];
+        let mut memo = vec![0usize; products.len()];
+        for i in 0..products.len() {
+            if longest(&products, i, &mut state, &mut memo, 0)? > MAX_DEPTH {
+                return Err(fail("assembly nesting too deep".into()));
+            }
+        }
+        Ok(Some(Structure { products, roots }))
     }
 
     /// PRODUCT name owning the representation that contains `item`, if found.

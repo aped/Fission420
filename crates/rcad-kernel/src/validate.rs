@@ -379,19 +379,74 @@ impl PrismTest {
 /// Generalized winding number of a closed triangle mesh (1 inside, 0 outside).
 struct Winding {
     tris: Vec<[[f64; 3]; 3]>,
+    /// Ray-crossing acceleration (closed, consistently oriented meshes only):
+    /// triangles by the (y, z) cells their bounds touch.
+    grid: Option<RayGrid>,
+}
+
+/// Uniform (y, z) grid of triangle indices for +X ray casting.
+struct RayGrid {
+    lo: [f64; 2],
+    cell: [f64; 2],
+    n: usize,
+    cells: Vec<Vec<u32>>,
+    /// Relative tolerance for "the ray grazes an edge, vertex or plane".
+    eps: f64,
 }
 
 impl Winding {
     fn new(m: &crate::TriMesh) -> Self {
-        Self {
-            tris: m
-                .triangles
-                .iter()
-                .map(|t| t.map(|i| m.positions[i as usize]))
-                .collect(),
-        }
+        let tris: Vec<[[f64; 3]; 3]> = m
+            .triangles
+            .iter()
+            .map(|t| t.map(|i| m.positions[i as usize]))
+            .collect();
+        // Run 7 (performance qualification): for a watertight mesh the winding
+        // number equals the signed count of +X ray crossings; a grid makes a
+        // probe cost O(triangles per cell) instead of O(all triangles).
+        let grid = (tris.len() >= 256 && crate::check_mesh(m).watertight).then(|| {
+            let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+            for t in &tris {
+                for p in t {
+                    for k in 0..2 {
+                        lo[k] = lo[k].min(p[k + 1]);
+                        hi[k] = hi[k].max(p[k + 1]);
+                    }
+                }
+            }
+            let n = ((tris.len() as f64).sqrt() as usize / 2).clamp(1, 512);
+            let cell = [0, 1].map(|k| ((hi[k] - lo[k]) / n as f64).max(1e-12));
+            let mut cells = vec![Vec::new(); n * n];
+            let idx =
+                |v: f64, k: usize| (((v - lo[k]) / cell[k]).floor().max(0.0) as usize).min(n - 1);
+            for (ti, t) in tris.iter().enumerate() {
+                let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+                for p in t {
+                    for k in 0..2 {
+                        a[k] = a[k].min(p[k + 1]);
+                        b[k] = b[k].max(p[k + 1]);
+                    }
+                }
+                for y in idx(a[0], 0)..=idx(b[0], 0) {
+                    for z in idx(a[1], 1)..=idx(b[1], 1) {
+                        cells[y * n + z].push(ti as u32);
+                    }
+                }
+            }
+            let size = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
+            RayGrid {
+                lo,
+                cell,
+                n,
+                cells,
+                eps: 1e-9 * size,
+            }
+        });
+        Self { tris, grid }
     }
-    fn number(&self, p: [f64; 3]) -> f64 {
+
+    /// Exact solid-angle sum over all triangles.
+    fn brute(&self, p: [f64; 3]) -> f64 {
         let mut sum = 0.0;
         for t in &self.tris {
             let a = sub(t[0], p);
@@ -403,6 +458,76 @@ impl Winding {
             sum += 2.0 * num.atan2(den);
         }
         sum / (4.0 * std::f64::consts::PI)
+    }
+
+    /// Signed +X ray crossings, or None when the ray grazes a candidate
+    /// (then the caller uses the exact sum).
+    fn crossings(&self, g: &RayGrid, p: [f64; 3]) -> Option<f64> {
+        let (y, z) = (p[1], p[2]);
+        // Outside the mesh's (y, z) bounds (with margin): no crossing at all.
+        let hi = [0, 1].map(|k| g.lo[k] + g.cell[k] * g.n as f64);
+        if y < g.lo[0] - g.eps || z < g.lo[1] - g.eps || y > hi[0] + g.eps || z > hi[1] + g.eps {
+            return Some(0.0);
+        }
+        let iy = (((y - g.lo[0]) / g.cell[0]).floor().max(0.0) as usize).min(g.n - 1);
+        let iz = (((z - g.lo[1]) / g.cell[1]).floor().max(0.0) as usize).min(g.n - 1);
+        // A probe on a cell border could need the neighbouring cell's
+        // triangles: use the exact sum there.
+        let fy = (y - g.lo[0]) / g.cell[0];
+        let fz = (z - g.lo[1]) / g.cell[1];
+        let border = |f: f64| (f - f.round()).abs() * g.cell[0].min(g.cell[1]) <= g.eps;
+        if border(fy) || border(fz) {
+            return None;
+        }
+        let mut count = 0i64;
+        for &ti in &g.cells[iy * g.n + iz] {
+            let [a, b, c] = self.tris[ti as usize];
+            // Edge functions of (y, z) in the triangle's projection.
+            let e =
+                |u: [f64; 3], v: [f64; 3]| (v[1] - u[1]) * (z - u[2]) - (v[2] - u[2]) * (y - u[1]);
+            let (w0, w1, w2) = (e(b, c), e(c, a), e(a, b));
+            let area = w0 + w1 + w2;
+            let scale = g.eps * (norm(sub(b, a)) + norm(sub(c, b)) + norm(sub(a, c)));
+            if area.abs() <= scale * scale {
+                // Triangle seen edge-on by the ray: only a problem if the ray
+                // lies in its plane within its extent.
+                let (ymin, ymax) = (a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]));
+                let (zmin, zmax) = (a[2].min(b[2]).min(c[2]), a[2].max(b[2]).max(c[2]));
+                if y >= ymin - g.eps && y <= ymax + g.eps && z >= zmin - g.eps && z <= zmax + g.eps
+                {
+                    return None;
+                }
+                continue;
+            }
+            let s = area.signum();
+            let (w0, w1, w2) = (w0 * s, w1 * s, w2 * s);
+            let tol = scale * area.abs().sqrt().max(scale);
+            if w0.min(w1).min(w2) < -tol {
+                continue; // the ray misses the projection
+            }
+            if w0.abs() <= tol || w1.abs() <= tol || w2.abs() <= tol {
+                return None; // through (or very near) an edge or vertex
+            }
+            // Hit point x along the ray.
+            let x = (w0 * a[0] + w1 * b[0] + w2 * c[0]) / (w0 + w1 + w2);
+            if (x - p[0]).abs() <= g.eps {
+                return None; // the probe lies on the triangle
+            }
+            if x > p[0] {
+                // Normal x component: positive = the ray exits the solid.
+                count += if area > 0.0 { 1 } else { -1 };
+            }
+        }
+        Some(count as f64)
+    }
+
+    fn number(&self, p: [f64; 3]) -> f64 {
+        if let Some(g) = &self.grid
+            && let Some(w) = self.crossings(g, p)
+        {
+            return w;
+        }
+        self.brute(p)
     }
     /// `Some(inside)`, or `None` when the winding number is not near 0 or 1.
     fn classify(&self, p: [f64; 3]) -> Option<bool> {

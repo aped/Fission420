@@ -454,3 +454,59 @@ fn ring_and_thin_slot_tools_are_sampled() {
         );
     }
 }
+
+/// Run 7: the ray-crossing fast path of `Winding` agrees with the exact
+/// solid-angle sum wherever the latter is decisive (a plate with eight
+/// through holes, ~10^4 triangles; 4000 deterministic pseudo-random probes,
+/// including points on hole axes and face planes).
+#[test]
+fn ray_crossing_winding_matches_the_exact_sum() {
+    let p = crate::Profile::Polygon(vec![[0.0, 0.0], [80.0, 0.0], [80.0, 50.0], [0.0, 50.0]]);
+    let mut b = crate::extrude(&p, &crate::Frame::XY, 10.0).unwrap();
+    for i in 0..8 {
+        let c = crate::Profile::Circle {
+            center: [8.0 + i as f64 * 9.0, 25.0],
+            radius: 3.0,
+        };
+        b = crate::cut_through_all(&b, &c, &crate::Frame::XY.offset(10.0)).unwrap();
+    }
+    let m = crate::tessellate(&b, 0.005).unwrap();
+    let w = Winding::new(&m);
+    assert!(w.grid.is_some(), "watertight mesh gets the grid");
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut fast, mut agree) = (0, 0);
+    for k in 0..4000 {
+        let mut q = [
+            rnd() * 100.0 - 10.0,
+            rnd() * 70.0 - 10.0,
+            rnd() * 30.0 - 10.0,
+        ];
+        // Every 10th probe on a hole axis or a face plane (degenerate rays).
+        match k % 10 {
+            0 => q[1] = 25.0,
+            1 => q[2] = 10.0,
+            _ => {}
+        }
+        let exact = w.brute(q);
+        if let Some(g) = &w.grid
+            && let Some(c) = w.crossings(g, q)
+        {
+            fast += 1;
+            if (exact - 1.0).abs() < 0.1 || exact.abs() < 0.1 {
+                assert_eq!(
+                    c,
+                    exact.round(),
+                    "probe {q:?}: crossings {c} vs exact {exact}"
+                );
+                agree += 1;
+            }
+        }
+    }
+    assert!(fast > 3000 && agree > 3000, "fast {fast}, compared {agree}");
+}

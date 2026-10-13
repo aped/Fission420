@@ -125,6 +125,10 @@ pub struct AssemblyUi {
     /// Interference row whose occurrences are highlighted.
     pub interference_pick: Option<usize>,
     pub joint_dialog: Option<crate::joint_ui::JointDialog>,
+    /// Last joint sweep: (doc, revision, joint, samples).
+    pub sweep: Option<(u64, u64, JointId, Vec<rcad_commands::assembly::SweepStep>)>,
+    /// Joint of the sweep request in flight.
+    pub sweep_joint: Option<JointId>,
     /// Instance path of the last viewport face pick (a new pick selects its
     /// tree row).
     pub last_pick: Option<String>,
@@ -160,6 +164,9 @@ impl AssemblyUi {
                 b.clone(),
                 a.structured_bom.clone().unwrap_or_default(),
             ));
+        }
+        if let (Some(sw), Some(j)) = (&a.sweep, self.sweep_joint.take()) {
+            self.sweep = Some((summary.doc_id, summary.revision, j, sw.clone()));
         }
         if let Some(x) = &a.external {
             self.external_status = Some((summary.doc_id, summary.revision, x.clone()));
@@ -452,12 +459,28 @@ impl RcadApp {
                 .clicked()
             {
                 send.push(Command::InsertExternalComponent {
-                    path: p.into(),
+                    path: p.clone().into(),
                     name: None,
                     linked: self.assembly_ui.external_linked,
                 });
             }
         });
+        {
+            let p = self.assembly_ui.external_path.trim().to_string();
+            let tip = "Import a STEP file with its product structure: components, \
+                       sub-assemblies and linked occurrences with their placements";
+            if ui
+                .add_enabled(!p.is_empty(), egui::Button::new("Import STEP assembly"))
+                .on_hover_text(tip)
+                .named("Import STEP assembly")
+                .clicked()
+            {
+                send.push(Command::ImportStepAssembly {
+                    path: p.into(),
+                    units_to_mm: None,
+                });
+            }
+        }
         if asm.components.iter().any(|c| c.external.is_some()) {
             if ui
                 .small_button("Check external files")
@@ -1161,6 +1184,24 @@ impl RcadApp {
                     if let (Some(a), Some(b)) = (smin, smax)
                         && a < b
                     {
+                        let l = format!("Sweep check{sfx} {}", j.name);
+                        if ui
+                            .small_button("Sweep check")
+                            .on_hover_text("Static interference at 21 samples across the limits (contacts between samples are not detected)")
+                            .named(&l)
+                            .probe(&l)
+                            .clicked()
+                        {
+                            self.assembly_ui.sweep_joint = Some(j.id);
+                            send.push(Command::JointSweep {
+                                joint: j.id,
+                                index: i,
+                                from: a,
+                                to: b,
+                                steps: 21,
+                                occurrences: None,
+                            });
+                        }
                         let mut x = parse(&vals[i]).unwrap_or(a).clamp(a, b);
                         let l = format!("Drive{sfx} {}", j.name);
                         let r = ui
@@ -1199,6 +1240,39 @@ impl RcadApp {
                     });
                 }
             }
+        }
+        let (doc, rev) = (self.summary.doc_id, self.summary.revision);
+        if let Some((d, r, jid, steps)) = &self.assembly_ui.sweep
+            && (*d, *r) == (doc, rev)
+        {
+            let hits: Vec<String> = steps
+                .iter()
+                .filter(|s| !s.interference.is_empty())
+                .map(|s| fmt(s.value))
+                .collect();
+            let name = asm
+                .joints
+                .iter()
+                .find(|j| j.id == *jid)
+                .map_or(jid.to_string(), |j| j.name.clone());
+            let t = if hits.is_empty() {
+                format!("{name} sweep: no interference at {} samples", steps.len())
+            } else {
+                format!(
+                    "{name} sweep: interference at {} of {} samples: {}",
+                    hits.len(),
+                    steps.len(),
+                    hits.join(", ")
+                )
+            };
+            ui.colored_label(
+                if hits.is_empty() {
+                    Color32::GRAY
+                } else {
+                    Color32::from_rgb(255, 150, 120)
+                },
+                t,
+            );
         }
     }
 

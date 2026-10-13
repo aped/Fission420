@@ -114,3 +114,97 @@ fn two_level_structure_and_reread() {
         assert_eq!(s.name.as_deref(), Some("Part"));
     }
 }
+
+fn centre(b: &Body) -> [f64; 3] {
+    let bb = bounds(b).unwrap();
+    std::array::from_fn(|i| (bb.min[i] + bb.max[i]) / 2.0)
+}
+
+/// The product structure is read back: definitions in their own coordinates
+/// (written once), usages with placements; composing them reproduces the
+/// flattened placements.
+#[test]
+fn structure_is_read_back() {
+    let b = extrude(&rect_at(1.0, 0.0, 2.0, 2.0), &Frame::XY, 1.0).unwrap();
+    let id = Rigid::IDENTITY;
+    let rot = Rigid::new(
+        [10.0, 0.0, 0.0],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        std::f64::consts::FRAC_PI_2,
+    )
+    .unwrap();
+    let up = Rigid::new([0.0, 100.0, 0.0], [0.0; 3], [0.0, 0.0, 1.0], 0.0).unwrap();
+    let p = [
+        asm(
+            "Top",
+            vec![(1, "Sub#1".into(), id), (1, "Sub#2".into(), up)],
+        ),
+        asm(
+            "Sub",
+            vec![(2, "Part#1".into(), id), (2, "Part#2".into(), rot)],
+        ),
+        part(&b, vec![]),
+    ];
+    let text = export_step_assembly(&p, 0, "R-CAD").unwrap();
+    let imp = import_step(&text, &StepImportOptions::default()).unwrap();
+    let a = imp.assembly.expect("structure");
+    let by = |n: &str| a.products.iter().position(|p| p.name == n).unwrap();
+    let (top, sub, prt) = (by("Top"), by("Sub"), by("Part"));
+    assert_eq!(a.roots, vec![top]);
+    assert_eq!(a.products[top].children.len(), 2);
+    assert_eq!(a.products[sub].children.len(), 2);
+    assert!(a.products[top].solids.is_empty() && a.products[sub].solids.is_empty());
+    assert_eq!(a.products[prt].solids.len(), 1);
+    let c = centre(&a.products[prt].solids[0].body);
+    assert!(
+        (0..3).all(|i| (c[i] - [1.0, 0.0, 0.5][i]).abs() < 1e-9),
+        "{c:?}"
+    );
+    let names: Vec<&str> = a.products[sub]
+        .children
+        .iter()
+        .map(|x| x.1.as_str())
+        .collect();
+    assert_eq!(names, ["Part#1", "Part#2"]);
+    // Part#2 placement = rot (rotation about Z by 90°, +10 x).
+    let t = a.products[sub].children[1].2;
+    for i in 0..3 {
+        for j in 0..3 {
+            assert!((t.r[i][j] - rot.r[i][j]).abs() < 1e-9);
+        }
+        assert!((t.t[i] - rot.t[i]).abs() < 1e-9);
+    }
+}
+
+/// An OpenCascade-written assembly (FreeCAD `Import.export`, independent of
+/// R-CAD's writer): two products under the root, their placements composing to
+/// the flattened solids.
+#[test]
+fn occt_assembly_structure() {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/step/two_boxes_assembly_mm.step"),
+    )
+    .unwrap();
+    let imp = import_step(&text, &StepImportOptions::default()).unwrap();
+    let a = imp.assembly.expect("structure");
+    assert_eq!(a.roots.len(), 1);
+    let root = &a.products[a.roots[0]];
+    assert_eq!(root.children.len(), 2);
+    let mut placed: Vec<[i64; 3]> = Vec::new();
+    for (c, _, t) in &root.children {
+        let p = &a.products[*c];
+        assert_eq!(p.solids.len(), 1, "{}", p.name);
+        let w = transform_body(&p.solids[0].body, t).unwrap();
+        placed.push(centre(&w).map(|x| (x * 1e6).round() as i64));
+    }
+    let mut flat: Vec<[i64; 3]> = imp
+        .solids
+        .iter()
+        .map(|s| centre(&s.body).map(|x| (x * 1e6).round() as i64))
+        .collect();
+    placed.sort();
+    flat.sort();
+    assert_eq!(placed, flat);
+}

@@ -497,6 +497,14 @@ pub enum Command {
         /// Run 7: slot direction (pin-slot) / in-plane u (planar, ball).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir2: Option<[f64; 3]>,
+        /// Run 7: snap the child first: its axis (a cylinder face or the edge
+        /// line of two planar faces of the child's definition) is brought onto
+        /// the joint axis (direction aligned, reversed with `flip`; the axial
+        /// position along the joint axis is kept), then the joint is made.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        child_axis_from: Option<assembly::AxisFrom>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
     },
     /// Set value `index` (default 0) of a joint; refused outside its limits.
     SetJointValue {
@@ -527,6 +535,21 @@ pub enum Command {
         axis_from: Option<assembly::AxisFrom>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir2: Option<[f64; 3]>,
+    },
+    /// Run 7: sampled motion check (read-only): value `index` of `joint` is
+    /// stepped from `from` to `to` (both within its limits) in `steps`
+    /// samples (2–200); at each sample the static interference check runs on
+    /// the solved placements (`Response.assembly.sweep`). Contacts between
+    /// samples are not detected; the document is unchanged.
+    JointSweep {
+        joint: rcad_document::assembly::JointId,
+        #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
+        index: usize,
+        from: f64,
+        to: f64,
+        steps: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<rcad_document::assembly::OccurrenceId>>,
     },
     /// Run 7: set all values of a multi-DOF joint at once (atomic).
     SetJointValues {
@@ -561,6 +584,16 @@ pub enum Command {
         name: Option<String>,
         #[serde(default)]
         linked: bool,
+    },
+    /// Run 7: import a STEP assembly preserving its product structure: one
+    /// component per product (solids in its own coordinates, embedded as a
+    /// STEP copy), sub-assemblies, and one occurrence per usage with its
+    /// placement; reused products are written once (linked occurrences).
+    /// Refused for a file without assembly usages (use `import_step`).
+    ImportStepAssembly {
+        path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        units_to_mm: Option<f64>,
     },
     /// Run 7: re-read a linked component's source file (explicit update):
     /// missing → refused with the embedded copy kept; unchanged → no-op;
@@ -1237,7 +1270,9 @@ impl Command {
             Command::ExportAssembly { .. } => "export_assembly",
             Command::SetJointValues { .. } => "set_joint_values",
             Command::SetJointAxis { .. } => "set_joint_axis",
+            Command::JointSweep { .. } => "joint_sweep",
             Command::InsertExternalComponent { .. } => "insert_external_component",
+            Command::ImportStepAssembly { .. } => "import_step_assembly",
             Command::UpdateExternalComponent { .. } => "update_external_component",
             Command::CheckExternalComponents => "check_external_components",
             Command::RenameComponent { .. } => "rename_component",
@@ -3483,7 +3518,9 @@ impl Session {
             | Command::ExportAssembly { .. }
             | Command::SetJointValues { .. }
             | Command::SetJointAxis { .. }
+            | Command::JointSweep { .. }
             | Command::InsertExternalComponent { .. }
+            | Command::ImportStepAssembly { .. }
             | Command::UpdateExternalComponent { .. }
             | Command::CheckExternalComponents
             | Command::RenameComponent { .. }

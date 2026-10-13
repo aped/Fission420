@@ -26,9 +26,19 @@ pub struct AssemblyOut {
     /// Run 7: indented BOM (quantity per parent; see [`structured_bom`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_bom: Option<Vec<StructuredBomRow>>,
+    /// Run 7: sampled motion check (`joint_sweep`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep: Option<Vec<SweepStep>>,
     /// Run 7: status of external components (`check_external_components`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<Vec<ExternalStatus>>,
+}
+
+/// One sample of a joint sweep (run 7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SweepStep {
+    pub value: f64,
+    pub interference: Vec<Interference>,
 }
 
 /// Source status of an external component (run 7).
@@ -546,6 +556,8 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             max,
             extra,
             dir2,
+            child_axis_from,
+            flip,
         } => {
             let (kind, parent, child) = (*kind, *parent, *child);
             let (origin, axis) = match axis_from {
@@ -594,10 +606,18 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     kind.dof()
                 )));
             }
-            let rest = check_new_joint(m, &j)?;
+            // Optional snap of the child's own axis onto the joint axis.
+            let snapped = match child_axis_from {
+                Some(f) => Some(snap_child_axis(m, &j, f, *flip)?),
+                None => None,
+            };
+            let rest = check_new_joint_at(m, &j, snapped)?;
             j.rest = Pose::from(rest);
             let name = name.clone();
             let id = m.transact(&format!("Add {kind:?} joint"), |d| {
+                if let Some(t) = snapped {
+                    d.assembly.occurrence_mut(j.child)?.placement = placement_from_rigid(&t);
+                }
                 let id = d.assembly.new_joint_id();
                 j.id = id;
                 j.name = name.clone().unwrap_or_else(|| format!("Joint{}", id.0));
@@ -874,9 +894,29 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                 }
             ));
         }
+        Command::ImportStepAssembly { path, units_to_mm } => {
+            r.message = Some(import_step_assembly(m, path, *units_to_mm)?);
+        }
         Command::UpdateExternalComponent { component } => {
             r.message = Some(update_external(m, *component)?);
             out.component = Some(*component);
+        }
+        Command::JointSweep {
+            joint,
+            index,
+            from,
+            to,
+            steps,
+            occurrences,
+        } => {
+            out.sweep = Some(joint_sweep(
+                m,
+                *joint,
+                *index,
+                (*from, *to),
+                *steps,
+                occurrences.as_deref(),
+            )?);
         }
         Command::CheckExternalComponents => {
             out.external = Some(external_status(m));
@@ -1078,6 +1118,174 @@ fn insert_external(
     })
 }
 
+/// Import a STEP assembly with its product structure (see
+/// `Command::ImportStepAssembly`).
+fn import_step_assembly(
+    m: &mut Model,
+    path: &std::path::Path,
+    unit: Option<f64>,
+) -> Result<String, DocError> {
+    let bytes = read_source(path)?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| {
+        v(format!(
+            "{}: STEP file is not valid text: {e}",
+            path.display()
+        ))
+    })?;
+    let opts = k::StepImportOptions {
+        max_bytes: rcad_document::MAX_FILE_BYTES as usize,
+        unit_override_to_mm: unit,
+        ..Default::default()
+    };
+    let imp = k::import_step(text, &opts).map_err(|e| v(e.to_string()))?;
+    let Some(asm) = imp.assembly else {
+        return Err(v(format!(
+            "{}: no assembly structure (NEXT_ASSEMBLY_USAGE_OCCURRENCE); use import_step",
+            path.display()
+        )));
+    };
+    // Products reachable from the roots, parents first.
+    let mut order: Vec<usize> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack: Vec<usize> = asm.roots.iter().rev().copied().collect();
+    while let Some(p) = stack.pop() {
+        if !seen.insert(p) {
+            continue;
+        }
+        order.push(p);
+        for (c, _, _) in asm.products[p].children.iter().rev() {
+            stack.push(*c);
+        }
+    }
+    // Embedded STEP copy per product with solids (own coordinates).
+    let mut texts: BTreeMap<usize, (String, Vec<String>)> = BTreeMap::new();
+    for &p in &order {
+        let pr = &asm.products[p];
+        if pr.solids.is_empty() {
+            continue;
+        }
+        let names: Vec<String> = pr
+            .solids
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                s.name
+                    .clone()
+                    .unwrap_or_else(|| format!("{}-{}", pr.name, i + 1))
+            })
+            .collect();
+        let refs: Vec<(&str, &Body)> = names
+            .iter()
+            .zip(&pr.solids)
+            .map(|(n, s)| (n.as_str(), &s.body))
+            .collect();
+        let t = k::export_step_bodies(&refs, "R-CAD")
+            .map_err(|e| v(format!("{}: product '{}': {e}", path.display(), pr.name)))?;
+        texts.insert(p, (t, names));
+    }
+    let empty: std::collections::BTreeSet<usize> = order
+        .iter()
+        .copied()
+        .filter(|p| asm.products[*p].solids.is_empty() && asm.products[*p].children.is_empty())
+        .collect();
+    let file = path.file_name().map_or("assembly.step".to_string(), |f| {
+        f.to_string_lossy().into_owned()
+    });
+    let (nc, no) = m.transact(&format!("Import assembly {file}"), |d| {
+        let active = d.assembly.active.take();
+        let mut comp: BTreeMap<usize, ComponentId> = BTreeMap::new();
+        for &p in &order {
+            if empty.contains(&p) {
+                continue;
+            }
+            let pr = &asm.products[p];
+            let base = if pr.name.trim().is_empty() {
+                format!("Product{}", p + 1)
+            } else {
+                pr.name.trim().to_string()
+            };
+            let cname = (1..)
+                .map(|i| {
+                    if i == 1 {
+                        base.clone()
+                    } else {
+                        format!("{base} {i}")
+                    }
+                })
+                .find(|n| !d.assembly.components.iter().any(|c| &c.name == n))
+                .unwrap_or_default();
+            let mut bodies = Vec::new();
+            if let Some((t, names)) = texts.get(&p) {
+                let blob = d.add_blob(&format!("{cname}.step"), t.as_bytes());
+                for n in names {
+                    let b0 = format!("{cname}/{n}");
+                    let bn = (1..)
+                        .map(|i| {
+                            if i == 1 {
+                                b0.clone()
+                            } else {
+                                format!("{b0} {i}")
+                            }
+                        })
+                        .find(|x| !d.bodies.iter().any(|b| &b.name == x))
+                        .unwrap_or_default();
+                    bodies.push(d.add_body(bn));
+                }
+                let fname = d.default_name("Import");
+                d.push(
+                    fname,
+                    rcad_document::FeatureKind::ImportStep {
+                        blob,
+                        unit_override_to_mm: None,
+                        bodies: bodies.clone(),
+                    },
+                );
+            }
+            let c = d.assembly.new_component(cname, bodies, String::new());
+            comp.insert(p, c);
+        }
+        let mut occ = 0usize;
+        let mut place = |d: &mut rcad_document::Document,
+                         c: ComponentId,
+                         owner: Option<ComponentId>,
+                         name: &str,
+                         t: &Rigid|
+         -> Result<(), DocError> {
+            let cn = d.assembly.component(c)?.name.clone();
+            let n = if !name.trim().is_empty()
+                && !d.assembly.occurrences.iter().any(|o| o.name == name.trim())
+            {
+                name.trim().to_string()
+            } else {
+                d.assembly.default_occurrence_name(&cn)
+            };
+            let o = d.assembly.new_occurrence(c, n, placement_from_rigid(t));
+            d.assembly.occurrence_mut(o)?.owner = owner;
+            occ += 1;
+            Ok(())
+        };
+        for &r in &asm.roots {
+            if let Some(&c) = comp.get(&r) {
+                place(d, c, None, "", &Rigid::IDENTITY)?;
+            }
+        }
+        for &p in &order {
+            let Some(&pc) = comp.get(&p) else { continue };
+            for (c, n, t) in &asm.products[p].children {
+                if let Some(&cc) = comp.get(c) {
+                    place(d, cc, Some(pc), n, t)?;
+                }
+            }
+        }
+        d.assembly.active = active;
+        Ok((comp.len(), occ))
+    })?;
+    Ok(format!(
+        "imported {file} with its product structure: {nc} components, {no} occurrences \
+         (definitions embedded as STEP copies; placements from the file)"
+    ))
+}
+
 /// The import feature (and its blob) that holds an external component's copy.
 fn external_feature(
     d: &rcad_document::Document,
@@ -1210,6 +1418,68 @@ pub fn external_status(m: &Model) -> Vec<ExternalStatus> {
 /// Validate a new joint against the current document; return its rest pose
 /// (the child keeps its current local pose: as-built).
 fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
+    check_new_joint_at(m, j, None)
+}
+
+/// The child's local transform after bringing its axis `f` onto the joint
+/// axis: minimal rotation of the child axis direction onto the joint axis
+/// (about the child axis point), then the translation perpendicular to the
+/// joint axis that puts the child axis line on it.
+fn snap_child_axis(m: &Model, j: &Joint, f: &AxisFrom, flip: bool) -> Result<Rigid, DocError> {
+    let a = &m.document().assembly;
+    if a.occurrence(j.child)?.grounded {
+        return Err(v("the child is grounded"));
+    }
+    let (c0, cd) = axis_from_faces(m, j.child, f)?;
+    let l = locals(m)?;
+    let lp = l.get(&j.parent).copied().unwrap_or(Rigid::IDENTITY);
+    let lc = l.get(&j.child).copied().unwrap_or(Rigid::IDENTITY);
+    let n = |x: [f64; 3]| {
+        let k = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        x.map(|y| y / k)
+    };
+    let p0 = lp.point(j.origin);
+    let pd = n(lp.vector(j.axis));
+    let q0 = lc.point(c0);
+    let mut qd = n(lc.vector(cd));
+    if flip {
+        qd = qd.map(|x| -x);
+    }
+    let dot = qd[0] * pd[0] + qd[1] * pd[1] + qd[2] * pd[2];
+    let ax = [
+        qd[1] * pd[2] - qd[2] * pd[1],
+        qd[2] * pd[0] - qd[0] * pd[2],
+        qd[0] * pd[1] - qd[1] * pd[0],
+    ];
+    let s = (ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]).sqrt();
+    let rot = if s < 1e-12 && dot > 0.0 {
+        Rigid::IDENTITY
+    } else if s < 1e-12 {
+        let seed = if qd[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let p = [
+            qd[1] * seed[2] - qd[2] * seed[1],
+            qd[2] * seed[0] - qd[0] * seed[2],
+            qd[0] * seed[1] - qd[1] * seed[0],
+        ];
+        Rigid::new([0.0; 3], q0, p, std::f64::consts::PI).map_err(|e| v(e.to_string()))?
+    } else {
+        Rigid::new([0.0; 3], q0, ax, s.atan2(dot)).map_err(|e| v(e.to_string()))?
+    };
+    // q0 is fixed by the rotation; move it perpendicular onto the joint line.
+    let w = [q0[0] - p0[0], q0[1] - p0[1], q0[2] - p0[2]];
+    let along = w[0] * pd[0] + w[1] * pd[1] + w[2] * pd[2];
+    let shift: [f64; 3] = std::array::from_fn(|i| p0[i] + along * pd[i] - q0[i]);
+    let t = Rigid::new(shift, [0.0; 3], [0.0, 0.0, 1.0], 0.0).map_err(|e| v(e.to_string()))?;
+    Ok(t.after(&rot).after(&lc))
+}
+
+/// [`check_new_joint`] with the child at `child_local` (a snap) instead of
+/// its current local transform.
+fn check_new_joint_at(m: &Model, j: &Joint, child_local: Option<Rigid>) -> Result<Rigid, DocError> {
     let a = &m.document().assembly;
     let pocc = a.occurrence(j.parent)?;
     let cocc = a.occurrence(j.child)?;
@@ -1260,7 +1530,11 @@ fn check_new_joint(m: &Model, j: &Joint) -> Result<Rigid, DocError> {
             .copied()
             .ok_or_else(|| v(format!("occurrence {o} is not solved")))
     };
-    let (tp, tc) = (get(j.parent)?, get(j.child)?);
+    let tp = get(j.parent)?;
+    let tc = match child_local {
+        Some(t) => t,
+        None => get(j.child)?,
+    };
     Ok(inverse(&tp.after(&j.current_motion()?)).after(&tc))
 }
 
@@ -1637,11 +1911,21 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
 /// Placed B-rep bodies of instance `i` of the evaluation (evaluated
 /// definition bodies; visibility is display only).
 fn placed(m: &Model, i: usize) -> Result<Vec<Body>, DocError> {
-    let ev = m.evaluation();
-    let eo = ev
+    let eo = m
+        .evaluation()
         .occurrences
         .get(i)
         .ok_or_else(|| v(format!("unknown instance {i}")))?;
+    placed_instance(m, eo)
+}
+
+/// Placed B-rep bodies of instance `eo` (its transform; bodies from the
+/// current evaluation).
+fn placed_instance(
+    m: &Model,
+    eo: &rcad_document::assembly::EvalOccurrence,
+) -> Result<Vec<Body>, DocError> {
+    let ev = m.evaluation();
     let mut out = Vec::new();
     for b in &eo.bodies {
         // Review run 6 #7: a definition body that is not evaluated (consumed
@@ -1763,20 +2047,67 @@ pub fn interference(
     m: &Model,
     list: Option<&[OccurrenceId]>,
 ) -> Result<Vec<Interference>, DocError> {
-    let ev = m.evaluation();
+    interference_with(m, &m.evaluation().occurrences, list)
+}
+
+/// Interference at `steps` samples of one joint value (document unchanged).
+fn joint_sweep(
+    m: &Model,
+    id: JointId,
+    index: usize,
+    (from, to): (f64, f64),
+    steps: usize,
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<SweepStep>, DocError> {
+    if !(2..=200).contains(&steps) {
+        return Err(v("a sweep takes 2 to 200 samples"));
+    }
+    let a = &m.document().assembly;
+    let j = a.joint(id)?;
+    let base = j.values();
+    if index >= base.len() {
+        return Err(v(format!("{} has no value {index}", j.name)));
+    }
+    let mut out = Vec::with_capacity(steps);
+    for k in 0..steps {
+        let t = k as f64 / (steps - 1) as f64;
+        let x = from + (to - from) * t;
+        let mut vals = base.clone();
+        vals[index] = x;
+        // Limits are enforced for every sample (no motion beyond them).
+        j.check_values(&vals)?;
+        let mut asm = a.clone();
+        let jm = asm.joint_mut(id)?;
+        jm.set_value(index, x);
+        let inst = asm.evaluate()?;
+        out.push(SweepStep {
+            value: x,
+            interference: interference_with(m, &inst, list)?,
+        });
+    }
+    Ok(out)
+}
+
+/// [`interference`] for the instances `inst` (current geometry, given
+/// placements; used by the joint sweep).
+fn interference_with(
+    m: &Model,
+    inst: &[rcad_document::assembly::EvalOccurrence],
+    list: Option<&[OccurrenceId]>,
+) -> Result<Vec<Interference>, DocError> {
     if let Some(l) = list {
         for o in l {
             m.document().assembly.occurrence(*o)?;
         }
     }
-    let ids: Vec<usize> = (0..ev.occurrences.len())
-        .filter(|&i| list.is_none_or(|l| ev.occurrences[i].path.iter().any(|p| l.contains(p))))
+    let ids: Vec<usize> = (0..inst.len())
+        .filter(|&i| list.is_none_or(|l| inst[i].path.iter().any(|p| l.contains(p))))
         .collect();
     // Review run 7 #22: a listed occurrence without any evaluated instance
     // (suppressed, or no bodies anywhere below it) is an error, not "clear".
     if let Some(l) = list {
         for o in l {
-            if !ids.iter().any(|&i| ev.occurrences[i].path.contains(o)) {
+            if !ids.iter().any(|&i| inst[i].path.contains(o)) {
                 let n = m.document().assembly.occurrence(*o)?.name.clone();
                 return Err(v(format!(
                     "{n} has no evaluated instance with bodies (suppressed, or nothing to \
@@ -1787,7 +2118,7 @@ pub fn interference(
     }
     let mut cache: BTreeMap<usize, Vec<Body>> = BTreeMap::new();
     for i in &ids {
-        cache.insert(*i, placed(m, *i)?);
+        cache.insert(*i, placed_instance(m, &inst[*i])?);
     }
     let mut out = Vec::new();
     for (n, a) in ids.iter().enumerate() {
@@ -1823,7 +2154,7 @@ pub fn interference(
                 },
                 (None, None) => continue,
             };
-            let (ea, eb) = (&ev.occurrences[*a], &ev.occurrences[*b]);
+            let (ea, eb) = (&inst[*a], &inst[*b]);
             out.push(Interference {
                 a: ea.id,
                 b: eb.id,

@@ -657,6 +657,7 @@ fn regen_impl(
         }
         st.index.insert(id, i);
         let f = doc.feature(id)?;
+        let t_feature = std::time::Instant::now();
         let mut r = FeatureResult {
             id,
             name: f.name.clone(),
@@ -1626,9 +1627,12 @@ fn regen_impl(
             }
         }
         st.results.push(r);
+        trace_regen(id, "feature", t_feature);
+        let t_cache = std::time::Instant::now();
         if let Some(c) = cache.as_deref_mut() {
             c.insert(keys[i].clone(), st.clone());
         }
+        trace_regen(id, "cache_insert", t_cache);
     }
 
     // Per-body measurements (cached by the prefix that last touched the body).
@@ -2155,12 +2159,14 @@ fn extrude_feature(
                     "{id}: the cut points away from the material of {target}; clear 'reverse'"
                 )));
             }
+            let t_apply = std::time::Instant::now();
             let (mut cut, used) = if opts.taper != 0.0 {
                 let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Cut)?;
                 (r, (a, b))
             } else {
                 apply_tool(&t, &out, &frame, None, id, None)?
             };
+            trace_regen(id, "apply_tool", t_apply);
             (a, b) = used;
             for (i, (p, ents, h)) in extra.iter().enumerate() {
                 let o = ExtrudeOut {
@@ -2891,6 +2897,17 @@ fn verify_applied(
 /// * Through-all cut: the span covers `body` along the normal plus a margin.
 ///
 /// Returns the new body and the span `(a, b)` along `frame.z` actually used.
+/// Opt-in timing of regeneration steps (`RCAD_TRACE_REGEN=1`, stderr).
+fn trace_regen(id: FeatureId, what: &str, t: std::time::Instant) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("RCAD_TRACE_REGEN").is_some_and(|v| v == "1")) {
+        eprintln!(
+            "regen {id} {what} {:.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
+    }
+}
+
 fn apply_tool(
     body: &Body,
     e: &ExtrudeOut,
@@ -2923,7 +2940,12 @@ fn apply_tool(
                 v.push(a);
                 Ok(())
             }
-            None => verify_applied(id, &prefix, body, result, std::slice::from_ref(&a)),
+            None => {
+                let t = std::time::Instant::now();
+                let r = verify_applied(id, &prefix, body, result, std::slice::from_ref(&a));
+                trace_regen(id, "verify_applied", t);
+                r
+            }
         }
     };
     if !khole.is_empty() {
@@ -2977,14 +2999,21 @@ fn apply_tool(
                 blind_cut_span(body, frame, &kp, e.nominal, e.dir, e.side, margin).map_err(err)?,
             )
         };
-        let truck = k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0)
-            .map_err(|x| match x {
+        let t = std::time::Instant::now();
+        let truck =
+            k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(|x| match x {
                 x if refused.is_some() => coplanar_cut_error(id, refused, x),
                 x => err(x),
-            })
-            .and_then(|out| check(&out, k::PrismOp::Cut, nominal, span).map(|()| out));
+            });
+        trace_regen(id, "cut_prism", t);
+        let truck = truck.and_then(|out| check(&out, k::PrismOp::Cut, nominal, span).map(|()| out));
         let out = match truck {
-            Ok(out) => exact_instead(id, &prefix, body, out, &kp, frame, nominal, span, true),
+            Ok(out) => {
+                let t = std::time::Instant::now();
+                let r = exact_instead(id, &prefix, body, out, &kp, frame, nominal, span, true);
+                trace_regen(id, "exact_instead", t);
+                r
+            }
             Err(e) => {
                 let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Cut, e)?;
                 check(&out, k::PrismOp::Cut, nominal, span).map_err(slab_checked)?;
@@ -3848,12 +3877,16 @@ fn legacy_cut(
             ),
         })
     };
+    let t0 = std::time::Instant::now();
     let truck = match depth {
         None => k::cut_through_all(&t, &kp, &s.frame),
         Some(d) => k::cut_blind(&t, &kp, &s.frame, d),
     }
-    .map_err(kernel(id))
-    .and_then(|b| verify(&b, used).map(|_| b));
+    .map_err(kernel(id));
+    trace_regen(id, "truck_cut", t0);
+    let t0 = std::time::Instant::now();
+    let truck = truck.and_then(|b| verify(&b, used).map(|_| b));
+    trace_regen(id, "verify", t0);
     // As for Extrude Cut (ADR 0006/0007): when Truck fails or its result fails
     // the check on a prismatic target, the exact slab construction over the
     // nominal span, checked the same way.

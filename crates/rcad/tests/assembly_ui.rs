@@ -120,6 +120,8 @@ fn components_section_create_move_ground_bom_interference_joint() {
         max: Some(40.0),
         extra: vec![],
         dir2: None,
+        child_axis_from: None,
+        flip: false,
     });
     settle(&mut h);
     assert_eq!(h.state().summary().assembly.joints.len(), 1);

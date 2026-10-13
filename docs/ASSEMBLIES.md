@@ -72,8 +72,11 @@ document without them still saves as v6 (frozen fixtures in
 ## Joints (as-built tree solver)
 
 `L_child = L_parent ∘ M(values) ∘ rest` in the coordinates of the common owner; `rest` is
-captured when the joint is made, so nothing jumps (every joint is *as-built*; there is no
-snap-to-origin joint). `origin`/`axis` are in the parent's definition coordinates, given
+captured when the joint is made, so nothing jumps (*as-built*). Optionally the child is
+**snapped** first (`child_axis_from`: a cylinder face or two-face edge of the child, `flip`): its
+axis is rotated onto the joint axis (minimal rotation about the child axis point) and moved
+perpendicular onto the joint line, keeping its axial position; then the joint is made (one undo
+step). UI: joint dialog **Use selected face as child axis**, **Flip**. `origin`/`axis` are in the parent's definition coordinates, given
 explicitly or taken exactly from the parent's faces (`axis_from`: cylinder face axis, or the
 line where two planar faces meet; captured at creation, not re-derived after edits;
 `set_joint_axis` redefines it later without moving the child). The joint editor also has a
@@ -139,6 +142,13 @@ decides (the **sampled** scope): points inside both → "overlap, volume unknown
 Touching contact and overlaps thinner than the sample spacing are not reported. Results carry
 both instance paths; clicking a result in the browser highlights both occurrences in the view.
 
+**Sampled motion check** (`joint_sweep {joint, index?, from, to, steps, occurrences?}`,
+read-only): one joint value is stepped across `[from, to]` (inside its limits; 2–200 samples)
+and the static check runs on the solved placements at each sample (`Response.assembly.sweep`).
+Interference between samples is not detected; this is a sampled check of the joint solver's
+poses, not collision avoidance or simulation. UI: joint **Edit…** → **Sweep check** (21 samples
+across the limits).
+
 ## Exploded view
 
 Per-instance offsets (`set_explode_offset {path, offset}`, world mm, accumulating down the
@@ -158,11 +168,22 @@ interference and export are unchanged. Persisted (v7) and undoable.
   `tools/check_step_assembly.sh` (hinge example: 7 solids with analytic volumes and centres,
   FreeCAD rebuilds the `Wing` App::Part under `Assembly` with leaf B and three screws, placed
   at the hinge angle). Evidence: `artifacts/step_assembly/hinge_tree_freecad.txt`.
-* **STEP import flattens**: placements of every instance are composed (including the
-  simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link, fixed in run 7) and bodies are named by
-  product, but no components/occurrences are recreated; the import notes say so ("assembly
-  structure flattened: N component usage(s) … not recreated"). A flattened import is not
-  assembly fidelity.
+* **STEP import, flattened** (`import_step`): placements of every instance are composed
+  (including the simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link, fixed in run 7) and
+  bodies are named by product, but no components/occurrences are recreated; the import notes
+  say so ("assembly structure flattened: … import_step_assembly does"). A flattened import is
+  not assembly fidelity.
+* **STEP import with hierarchy** (`import_step_assembly {path}`, run 7): the product structure
+  (`PRODUCT_DEFINITION`s, `NEXT_ASSEMBLY_USAGE_OCCURRENCE` + `CONTEXT_DEPENDENT_SHAPE_REPRESENTATION`
+  placements) becomes components (one per product reachable from a root; its solids, in the
+  product's own coordinates, embedded as a STEP copy behind an import feature), sub-assemblies
+  (products with usages) and one occurrence per usage with its rigid placement (named by the
+  usage); reused products give linked occurrences of one definition. One undo step. Verified on
+  R-CAD's own hierarchical export (hinge: same BOM, nested screw at the closed-form pose) and on
+  an OpenCascade/FreeCAD-written assembly fixture. Refused for files without usages, cyclic or
+  too deep product graphs, unresolvable placements, `MAPPED_ITEM` placements. Product metadata
+  beyond the name (part numbers, colours) is not read. UI: **External document** path +
+  **Import STEP assembly**.
 
 ## UI (browser "Assembly" section)
 
