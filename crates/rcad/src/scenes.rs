@@ -14,6 +14,7 @@ use crate::app::{Dialog, RcadApp};
 use crate::exchange::ExportScope;
 use crate::extrude::ExtrudeForm;
 
+#[allow(clippy::large_enum_variant)] // a static list of scene steps
 pub enum SceneStep {
     Cmd(Command),
     Ui(fn(&mut RcadApp)),

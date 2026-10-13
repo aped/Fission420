@@ -276,6 +276,22 @@ pub enum Command {
         #[serde(default)]
         with_dependents: bool,
     },
+    /// Timeline marker (run 6; one undo step): evaluate history up to and
+    /// including `at`; later features are kept but not evaluated, and new
+    /// features are inserted after the marker. `at: null` rolls to the end.
+    SetRollback {
+        #[serde(default)]
+        at: Option<FeatureId>,
+    },
+    /// Reorder history (run 6; one undo step): move `feature` before
+    /// `before` (null: to the end). Refused when a dependency would come after
+    /// it or a dependent before it, or when the new order does not regenerate
+    /// (the document is unchanged).
+    MoveFeature {
+        feature: FeatureId,
+        #[serde(default)]
+        before: Option<FeatureId>,
+    },
     /// Re-attach a sketch to another plane or face (repair of a broken face
     /// reference; one undo step). The sketch's local geometry is kept.
     SetSketchPlane {
@@ -452,6 +468,8 @@ impl Command {
             Command::RenameFeature { .. } => "rename_feature",
             Command::RenameBody { .. } => "rename_body",
             Command::SetSuppressed { .. } => "set_suppressed",
+            Command::SetRollback { .. } => "set_rollback",
+            Command::MoveFeature { .. } => "move_feature",
             Command::SetBodyVisible { .. } => "set_body_visible",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
@@ -587,6 +605,9 @@ pub struct FeatureSummary {
     /// Suppressed: in history, not evaluated (run 5).
     #[serde(default)]
     pub suppressed: bool,
+    /// After the timeline marker: in history, not evaluated (run 6).
+    #[serde(default)]
+    pub rolled_back: bool,
 }
 
 /// A named user parameter with its evaluated value and relationships.
@@ -1568,6 +1589,18 @@ impl Session {
                     )));
                 }
                 m.transact(&format!("Delete {name}"), |d| {
+                    // The marker on the deleted feature moves to its predecessor.
+                    if d.rollback == Some(feature) {
+                        let p = d.features.iter().position(|f| f.id == feature);
+                        d.rollback = p.and_then(|p| p.checked_sub(1)).map(|q| d.features[q].id);
+                        if d.rollback.is_none() {
+                            return Err(DocError::Validation(
+                                "the first feature holds the timeline marker; roll to the end \
+                                 before deleting it"
+                                    .into(),
+                            ));
+                        }
+                    }
                     d.features.retain(|f| f.id != feature);
                     d.prune_bodies();
                     d.prune_blobs();
@@ -1633,6 +1666,23 @@ impl Session {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ));
+            }
+            Command::SetRollback { at } => {
+                let at = *at;
+                let m = self.model_mut()?;
+                let label = match at {
+                    Some(a) => format!("Roll back to {}", m.document().feature(a)?.name),
+                    None => "Roll to end".to_string(),
+                };
+                m.transact(&label, |d| d.set_rollback(at))?;
+                r.feature = at;
+            }
+            Command::MoveFeature { feature, before } => {
+                let (feature, before) = (*feature, *before);
+                let m = self.model_mut()?;
+                let name = m.document().feature(feature)?.name.clone();
+                m.transact(&format!("Move {name}"), |d| d.move_feature(feature, before))?;
+                r.feature = Some(feature);
             }
             Command::SetBodyVisible { body, visible } => {
                 let (body, visible) = (*body, *visible);
@@ -2246,6 +2296,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                     .collect(),
                 expressions: f.expressions.clone(),
                 suppressed: f.suppressed,
+                rolled_back: doc.is_rolled_back(f.id),
             }
         })
         .collect()

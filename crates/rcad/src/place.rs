@@ -460,6 +460,7 @@ mod tests {
             expressions: Default::default(),
             region: None,
             suppressed: false,
+            rolled_back: false,
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

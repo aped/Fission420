@@ -650,7 +650,24 @@ impl RcadApp {
         let mut rename = None;
         let mut delete = None;
         let feats = self.summary.features.clone();
-        for f in &feats {
+        let first_rolled = feats.iter().position(|f| f.rolled_back);
+        for (i, f) in feats.iter().enumerate() {
+            if Some(i) == first_rolled {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("▶ timeline marker (later features rolled back)")
+                            .color(Color32::from_rgb(255, 200, 90))
+                            .small(),
+                    );
+                    if ui
+                        .small_button("Roll to end")
+                        .probe("Roll to end")
+                        .clicked()
+                    {
+                        self.request(Command::SetRollback { at: None });
+                    }
+                });
+            }
             let sel = self.selected == Some(f.id);
             let kind = match f.kind.as_str() {
                 "sketch" => "Sketch",
@@ -675,12 +692,16 @@ impl RcadApp {
                 );
                 let label = if f.suppressed {
                     RichText::new(&f.name).weak().strikethrough()
+                } else if f.rolled_back {
+                    RichText::new(&f.name).weak().italics()
                 } else {
                     RichText::new(&f.name)
                 };
                 let r = ui.selectable_label(sel, label).probe(&f.name);
                 if f.suppressed {
                     ui.label(RichText::new("suppressed").weak().small());
+                } else if f.rolled_back {
+                    ui.label(RichText::new("rolled back").weak().small());
                 }
                 if r.clicked() {
                     clicked = Some(f.id);
@@ -920,6 +941,37 @@ impl RcadApp {
                         feature: f.id,
                         suppressed: true,
                         with_dependents: true,
+                    });
+                }
+            }
+        });
+        // Run 6: timeline marker and reorder (each one Undo step; a move that
+        // breaks a dependency or does not regenerate is refused unchanged).
+        ui.horizontal_wrapped(|ui| {
+            let ids: Vec<FeatureId> = self.summary.features.iter().map(|x| x.id).collect();
+            let pos = ids.iter().position(|x| *x == f.id);
+            if ui
+                .small_button("Roll back here")
+                .probe("Roll back here")
+                .on_hover_text(
+                    "Evaluate history up to this feature; later ones are kept but not \
+                     evaluated, and new features are inserted here",
+                )
+                .clicked()
+            {
+                self.request(Command::SetRollback { at: Some(f.id) });
+            }
+            if let Some(p) = pos {
+                if p > 0 && ui.small_button("Move up").probe("Move up").clicked() {
+                    self.request(Command::MoveFeature {
+                        feature: f.id,
+                        before: Some(ids[p - 1]),
+                    });
+                }
+                if p + 1 < ids.len() && ui.small_button("Move down").probe("Move down").clicked() {
+                    self.request(Command::MoveFeature {
+                        feature: f.id,
+                        before: ids.get(p + 2).copied(),
                     });
                 }
             }

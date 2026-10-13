@@ -447,6 +447,9 @@ fn prefix_keys(doc: &Document, order: &[FeatureId]) -> Result<Vec<String>> {
         let f = serde_json::to_string(feature)
             .map_err(|e| DocError::Validation(format!("cannot serialize feature {id}: {e}")))?;
         key.push_str(&f);
+        if doc.is_rolled_back(*id) {
+            key.push_str("\trolled back");
+        }
         // A missing blob fails regeneration of this feature anyway.
         if let Some(b) = feature.blob().and_then(|b| doc.blob(b).ok()) {
             key.push_str(&format!("\tblob {} {}", b.len, b.fnv64));
@@ -550,9 +553,13 @@ pub fn regenerate_cached_opts(
             body: None,
             notes: vec![],
         };
-        if f.suppressed {
+        if f.suppressed || doc.is_rolled_back(id) {
             // Not evaluated (no dependent is evaluated: `check_suppression`).
-            r.notes.push("suppressed: not evaluated".into());
+            r.notes.push(if f.suppressed {
+                "suppressed: not evaluated".into()
+            } else {
+                "rolled back: after the timeline marker, not evaluated".into()
+            });
             st.results.push(r);
             if let Some(c) = cache.as_deref_mut() {
                 c.insert(keys[i].clone(), st.clone());
@@ -1121,7 +1128,6 @@ fn replace_body(st: &mut Snapshot, id: FeatureId, body: BodyId, b: Body) {
 const JOIN_OVERLAP: f64 = 0.5;
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn extrude_feature(
     st: &mut Snapshot,
     id: FeatureId,
@@ -1181,7 +1187,6 @@ fn extrude_feature(
         )));
     }
     // Thin: the band between the outer loop and its inward offset.
-    let profile = profile;
     if let Some(t) = opts.thin {
         if !t.is_finite() || t <= 0.0 {
             return Err(invalid(format!(
@@ -1286,7 +1291,7 @@ fn extrude_feature(
     } else {
         (s0 - opts.distance2, s0 + distance)
     };
-    if u1 - u0 <= k::tol::MIN_LENGTH {
+    if extent == Extent::Distance && u1 - u0 <= k::tol::MIN_LENGTH {
         return Err(invalid("the extrusion has no length".into()));
     }
     // Tool = prism of the profile over [a, b] along the sketch normal.

@@ -1175,6 +1175,12 @@ pub struct Document {
     /// Named user parameters (v4), in display order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<crate::Parameter>,
+    /// Timeline marker (run 6, format v6): history is evaluated up to and
+    /// including this feature; later features are rolled back (kept, not
+    /// evaluated) and new features are inserted right after it (the marker
+    /// then moves to the new feature). None: at the end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback: Option<FeatureId>,
 }
 
 fn one() -> u32 {
@@ -1191,6 +1197,7 @@ impl Document {
             blobs: Vec::new(),
             next_blob_id: 1,
             parameters: Vec::new(),
+            rollback: None,
         }
     }
 
@@ -1344,8 +1351,27 @@ impl Document {
     /// Every evaluated feature's dependencies are evaluated: a feature that is
     /// not suppressed may not depend on a suppressed one.
     pub fn check_suppression(&self) -> Result<()> {
-        for f in self.features.iter().filter(|f| !f.suppressed) {
+        if let Some(m) = self.rollback {
+            self.feature(m).map_err(|_| {
+                DocError::Validation(format!("the timeline marker names missing feature {m}"))
+            })?;
+        }
+        for f in self
+            .features
+            .iter()
+            .filter(|f| !f.suppressed && !self.is_rolled_back(f.id))
+        {
             for d in self.dependencies_of(f) {
+                if self.is_rolled_back(d) {
+                    return Err(DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!(
+                            "{} ({}) depends on {d}, which is after the timeline marker; move \
+                             the marker past {d}",
+                            f.id, f.name
+                        ),
+                    });
+                }
                 if let Ok(g) = self.feature(d)
                     && g.suppressed
                 {
@@ -1497,15 +1523,119 @@ impl Document {
     pub fn push(&mut self, name: impl Into<String>, kind: FeatureKind) -> FeatureId {
         let id = FeatureId(self.next_id.clamp(1, u32::MAX - 1));
         self.next_id = id.0.saturating_add(1);
-        self.features.push(Feature {
+        let f = Feature {
             id,
             name: name.into(),
             kind,
             notes: vec![],
             expressions: Default::default(),
             suppressed: false,
-        });
+        };
+        // With the timeline rolled back, insert at the marker and move it.
+        match self
+            .rollback
+            .and_then(|m| self.features.iter().position(|x| x.id == m))
+        {
+            Some(p) => {
+                self.features.insert(p + 1, f);
+                self.rollback = Some(id);
+            }
+            None => self.features.push(f),
+        }
         id
+    }
+
+    /// Whether `id` lies after the timeline marker (rolled back).
+    pub fn is_rolled_back(&self, id: FeatureId) -> bool {
+        let pos = |x: FeatureId| self.features.iter().position(|f| f.id == x);
+        match (self.rollback.and_then(pos), pos(id)) {
+            (Some(m), Some(p)) => p > m,
+            _ => false,
+        }
+    }
+
+    /// Move the timeline marker after `at` (None: to the end). The marker at
+    /// the last feature is stored as None.
+    pub fn set_rollback(&mut self, at: Option<FeatureId>) -> Result<()> {
+        if let Some(a) = at {
+            self.feature(a)?;
+        }
+        self.rollback = at.filter(|a| self.features.last().map(|f| f.id) != Some(*a));
+        Ok(())
+    }
+
+    /// Reorder: move `id` before `before` (None: to the end of history).
+    /// Allowed only when every feature it depends on stays before it and every
+    /// feature depending on it stays after it (`dependencies_of`, face and
+    /// plane references, patterns' seeds); regeneration then decides whether
+    /// the new order of operations on a body still builds. Refused otherwise
+    /// with the blocking feature named.
+    pub fn move_feature(&mut self, id: FeatureId, before: Option<FeatureId>) -> Result<()> {
+        if before == Some(id) {
+            return Ok(());
+        }
+        let from = self
+            .features
+            .iter()
+            .position(|f| f.id == id)
+            .ok_or(DocError::UnknownFeature(id))?;
+        let f = self.features.remove(from);
+        let to = match before {
+            Some(b) => self
+                .features
+                .iter()
+                .position(|x| x.id == b)
+                .ok_or(DocError::UnknownFeature(b))?,
+            None => self.features.len(),
+        };
+        self.features.insert(to, f);
+        let pos = |x: FeatureId| self.features.iter().position(|g| g.id == x);
+        let me = self.feature(id)?.clone();
+        for d in self.dependencies_of(&me) {
+            if pos(d).is_some_and(|p| p > to) {
+                let g = self.feature(d)?;
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move before {d} ({}), which it depends on",
+                    me.name, g.name
+                )));
+            }
+        }
+        for u in self.dependents_of(id) {
+            if pos(u).is_some_and(|p| p < to) {
+                let g = self.feature(u)?;
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move after {u} ({}), which depends on it",
+                    me.name, g.name
+                )));
+            }
+        }
+        // A body must be created before anything that modifies it.
+        if let Some(b) = self.modified_body(&me) {
+            let creator = self
+                .features
+                .iter()
+                .position(|x| x.created_bodies().contains(&b));
+            if creator.is_some_and(|c| c > to) {
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) cannot move before the feature that creates {b}",
+                    me.name
+                )));
+            }
+        }
+        for b in me.created_bodies() {
+            if let Some(u) = self
+                .features
+                .iter()
+                .take(to)
+                .find(|x| self.modified_body(x) == Some(b))
+            {
+                return Err(DocError::Validation(format!(
+                    "{id} ({}) creates {b}; it cannot move after {} ({}), which modifies it",
+                    me.name, u.id, u.name
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Append a new-body distance extrusion of `sketch`, allocating its body

@@ -172,6 +172,9 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
 /// Every run-6 addition that an older build would ignore or misread must be
 /// listed here.
 pub fn v6_feature(doc: &Document) -> Option<&'static str> {
+    if doc.rollback.is_some() {
+        return Some("a rolled-back timeline marker");
+    }
     for f in &doc.features {
         if let crate::FeatureKind::Extrude {
             options, operation, ..
