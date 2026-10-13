@@ -687,3 +687,155 @@ fn hidden_hole_silhouettes_have_no_visible_specks() {
     // Front: 4 outline edges + nothing else visible.
     assert_eq!(views[0].visible_curves, 4, "front: {:?}", views[0]);
 }
+
+/// Review run 7 #3: a hole reference must not print a stale value after the
+/// body moves (the hole's frame is where it was made): the dimension dangles.
+#[test]
+fn hole_dimension_dangles_after_the_body_moves() {
+    let mut s = Session::new();
+    let (e, hole) = block(&mut s);
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: None,
+            assembly: false,
+        },
+    )
+    .drawing
+    .unwrap();
+    let left = side_face(&s, e, [-1.0, 0.0, 0.0]);
+    ok(
+        &mut s,
+        Command::AddDrawingDimension {
+            drawing: d,
+            view: ViewId(2),
+            a: DimRef::Face(left),
+            b: Some(DimRef::Hole(hole)),
+            tolerance: Tolerance::None,
+        },
+    );
+    let (r, _) = export(&mut s, d, "moved_0.svg");
+    assert_eq!(user_dims(&r, 2)[0].1, Some(20.0));
+    ok(
+        &mut s,
+        serde_json::from_value(serde_json::json!({"cmd": "move_body", "body": 1,
+            "translate": [5.0, 0.0, 0.0]}))
+        .unwrap(),
+    );
+    let (r, svg) = export(&mut s, d, "moved_1.svg");
+    let dims = user_dims(&r, 2);
+    assert!(dims[0].1.is_none() && dims[0].3, "{dims:?}");
+    assert!(
+        !svg.contains(">20<") && !svg.contains(">25<"),
+        "a value is drawn"
+    );
+}
+
+/// Review run 7 #14: a file whose detail views are each other's parent (or
+/// any invalid drawing) is refused on load instead of recursing later.
+#[test]
+fn invalid_drawings_are_refused_on_load() {
+    let mut s = Session::new();
+    block(&mut s);
+    ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: Some(false),
+            assembly: false,
+        },
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("d.rcad.json");
+    ok(&mut s, Command::Save { path: path.clone() });
+    let mut v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let views = v["document"]["drawings"][0]["views"]
+        .as_array_mut()
+        .unwrap();
+    let detail = |id: u32, parent: u32| {
+        serde_json::json!({"id": id, "kind": {"detail": {"parent": parent, "center": [0.0, 0.0],
+            "radius": 5.0, "scale": 2.0, "position": [100.0, 100.0],
+            "label": format!("D{id}")}}})
+    };
+    views.push(detail(7, 8));
+    views.push(detail(8, 7));
+    v["document"]["drawings"][0]["next_view"] = serde_json::json!(9);
+    v["version"] = serde_json::json!(7);
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let mut t = Session::new();
+    let r = t.execute(&Command::Open { path });
+    assert!(!r.ok, "cyclic detail views loaded");
+    assert!(
+        format!("{:?}", r.error).contains("drawing"),
+        "{:?}",
+        r.error
+    );
+}
+
+/// Review run 7 #15: an occurrence whose definition body is not evaluated
+/// (here: rolled back) flags the assembly view instead of vanishing silently.
+#[test]
+fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let sk = sketch_rect(&mut s, 60.0, 40.0, [0.0, 0.0]);
+    ok(&mut s, Command::extrude(None, sk, 5.0));
+    let sk = sketch_rect(&mut s, 4.0, 4.0, [-20.0, 0.0]);
+    ok(&mut s, Command::extrude(None, sk, 8.0));
+    let json = |v: serde_json::Value| -> Command { serde_json::from_value(v).unwrap() };
+    ok(
+        &mut s,
+        json(serde_json::json!({"cmd": "create_component", "name": "Plate", "bodies": [1]})),
+    );
+    ok(
+        &mut s,
+        json(serde_json::json!({"cmd": "create_component", "name": "Screw", "bodies": [2]})),
+    );
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![],
+            standard_views: None,
+            assembly: true,
+        },
+    )
+    .drawing
+    .unwrap();
+    let (r, _) = export(&mut s, d, "rollback_0.svg");
+    assert!(r.drawing_report.as_ref().unwrap().issues.is_empty());
+    // Roll back to after the plate: the screw's body is not evaluated.
+    let r0 = s.execute(&json(serde_json::json!({"cmd": "set_rollback", "at": 2})));
+    if !r0.ok {
+        eprintln!("rollback refused: {:?}", r0.error);
+        // The assembly refuses the rollback outright: equally safe (nothing
+        // silently disappears).
+        assert!(format!("{:?}", r0.error).contains("B2"), "{:?}", r0.error);
+        return;
+    }
+    let (r, _) = export(&mut s, d, "rollback_1.svg");
+    let issues = &r.drawing_report.as_ref().unwrap().issues;
+    assert!(
+        issues.iter().any(|i| i.contains("B2")),
+        "missing occurrence body not reported: {issues:?}"
+    );
+}

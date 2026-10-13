@@ -150,7 +150,9 @@ fn find(p: &mut [u32], mut i: u32) -> u32 {
 
 /// Weld: returns (new positions, map old index -> new index, merged count,
 /// merged by tolerance).
-fn weld(positions: &[[f64; 3]], tol: f64) -> (Vec<[f64; 3]>, Vec<u32>, usize, usize) {
+type Welded = (Vec<[f64; 3]>, Vec<u32>, usize, usize);
+
+fn weld(positions: &[[f64; 3]], tol: f64) -> Result<Welded, String> {
     let n = positions.len();
     let mut parent: Vec<u32> = (0..n as u32).collect();
     // Exact duplicates.
@@ -168,6 +170,18 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> (Vec<[f64; 3]>, Vec<u32>, usize, us
         .filter(|(i, p)| **p != *i as u32)
         .count();
     if tol > 0.0 {
+        // Review run 7 #11: the grid index must not saturate (tolerance tiny
+        // relative to the coordinates) and cells must stay small.
+        let big = positions
+            .iter()
+            .flatten()
+            .fold(0.0f64, |m, x| m.max(x.abs()));
+        if big / tol > 1e12 {
+            return Err(format!(
+                "weld tolerance {tol} mm is too small for coordinates up to {big} mm (below \
+                 floating-point resolution); use 0 for exact welding"
+            ));
+        }
         // Grid of cell size `tol`: pairs within `tol` are in the same or
         // neighbouring cells. Only exact-weld representatives take part.
         let cell = |p: [f64; 3]| p.map(|x| (x / tol).floor() as i64);
@@ -176,6 +190,14 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> (Vec<[f64; 3]>, Vec<u32>, usize, us
             if parent[i] == i as u32 {
                 grid.entry(cell(positions[i])).or_default().push(i as u32);
             }
+        }
+        if let Some(c) = grid.values().map(Vec::len).max()
+            && c > MAX_CELL
+        {
+            return Err(format!(
+                "weld tolerance {tol} mm is too coarse for this mesh ({c} vertices within one \
+                 tolerance cell); use a smaller tolerance"
+            ));
         }
         let keys: Vec<[i64; 3]> = {
             let mut k: Vec<_> = grid.keys().copied().collect();
@@ -219,9 +241,25 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> (Vec<[f64; 3]>, Vec<u32>, usize, us
             (out.len() - 1) as u32
         });
     }
+    // Review run 7 #27: union-find merges transitively; refuse when a chain
+    // moved a vertex farther than the tolerance from where it was.
+    if tol > 0.0 {
+        let far = (0..n)
+            .map(|i| len(sub(positions[i], out[map[i] as usize])))
+            .fold(0.0f64, f64::max);
+        if far > tol {
+            return Err(format!(
+                "weld tolerance {tol} mm chains vertices together: one would move {far:.4} mm \
+                 (more than the tolerance); use a smaller tolerance"
+            ));
+        }
+    }
     let merged = n - out.len();
-    (out, map, merged, merged - exact_merged)
+    Ok((out, map, merged, merged - exact_merged))
 }
+
+/// Largest number of vertices in one weld cell.
+const MAX_CELL: usize = 4096;
 
 fn signed_volume(pos: &[[f64; 3]], tris: &[[u32; 3]]) -> f64 {
     tris.iter()
@@ -259,7 +297,7 @@ pub fn repair(
     }
     let before = diagnose(positions, triangles);
     let mut notes = Vec::new();
-    let (pos, map, welded, welded_tol) = weld(positions, opts.weld_tolerance);
+    let (pos, map, welded, welded_tol) = weld(positions, opts.weld_tolerance)?;
     let mut tris: Vec<[u32; 3]> = triangles
         .iter()
         .map(|t| t.map(|i| map[i as usize]))
@@ -294,8 +332,8 @@ pub fn repair(
             !dup
         });
     }
-    // Orientation.
-    let mut flipped_triangles = 0;
+    // Orientation (consistency only; the outward pass runs after filling).
+    let original = tris.clone();
     if opts.orient && !tris.is_empty() {
         let mut edge_tris: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
         for (ti, t) in tris.iter().enumerate() {
@@ -308,13 +346,11 @@ pub fn repair(
             |t: &[u32; 3], a: u32, b: u32| (0..3).any(|k| t[k] == a && t[(k + 1) % 3] == b);
         let mut flip = vec![false; tris.len()];
         let mut seen = vec![false; tris.len()];
-        let mut components: Vec<Vec<usize>> = Vec::new();
         for start in 0..tris.len() {
             if seen[start] {
                 continue;
             }
             seen[start] = true;
-            let mut comp = vec![start];
             let mut q = VecDeque::from([start]);
             while let Some(ti) = q.pop_front() {
                 let t = tris[ti];
@@ -334,41 +370,15 @@ pub fn repair(
                     seen[other] = true;
                     // Consistent: the neighbour traverses a→b as b→a.
                     flip[other] = has_dir(&tris[other], a, b);
-                    comp.push(other);
                     q.push_back(other);
                 }
             }
-            components.push(comp);
         }
         for (ti, f) in flip.iter().enumerate() {
             if *f {
                 tris[ti].swap(1, 2);
             }
         }
-        // Outward: closed components with negative volume flip entirely.
-        let mut count: HashMap<(u32, u32), usize> = HashMap::new();
-        for t in &tris {
-            for k in 0..3 {
-                let (a, b) = (t[k], t[(k + 1) % 3]);
-                *count.entry((a.min(b), a.max(b))).or_default() += 1;
-            }
-        }
-        for comp in &components {
-            let closed = comp.iter().all(|&ti| {
-                (0..3).all(|k| {
-                    let (a, b) = (tris[ti][k], tris[ti][(k + 1) % 3]);
-                    count[&(a.min(b), a.max(b))] == 2
-                })
-            });
-            let ct: Vec<[u32; 3]> = comp.iter().map(|&ti| tris[ti]).collect();
-            if closed && signed_volume(&pos, &ct) < 0.0 {
-                for &ti in comp {
-                    tris[ti].swap(1, 2);
-                    flip[ti] = !flip[ti];
-                }
-            }
-        }
-        flipped_triangles = flip.iter().filter(|f| **f).count();
     }
     // Hole filling.
     let (mut filled_holes, mut fill_triangles, mut unfilled_holes) = (0, 0, 0);
@@ -393,6 +403,11 @@ pub fn repair(
         }
         let mut new_tris = Vec::new();
         let mut used: HashMap<(u32, u32), bool> = HashMap::new();
+        // Review run 7 #10: computed once (was per walk: quadratic).
+        let cap = count.values().filter(|c| **c == 1).count() + 1;
+        // Review run 7 #9: the outline of a planar open sheet is not a hole
+        // (filling it makes a zero-volume "closed" pillow).
+        let planar_sheet = planar_components(&pos, &tris, opts.weld_tolerance);
         let starts: Vec<u32> = next.keys().copied().collect();
         for s in starts {
             let outs = next[&s].clone();
@@ -408,7 +423,6 @@ pub fn repair(
                 let mut ok = true;
                 // Walk the whole loop (marking its edges) before deciding;
                 // bounded by the number of boundary edges.
-                let cap = count.values().filter(|c| **c == 1).count() + 1;
                 while cur != s {
                     lp.push(cur);
                     if lp.len() > cap {
@@ -448,6 +462,14 @@ pub fn repair(
                     );
                     continue;
                 }
+                if planar_sheet.contains(&lp[0]) {
+                    unfilled_holes += 1;
+                    notes.push(format!(
+                        "a {}-edge loop is the outline of a flat open sheet, not a hole; left open",
+                        lp.len()
+                    ));
+                    continue;
+                }
                 match fill_loop(&pos, &lp, opts.weld_tolerance) {
                     Ok(t) => {
                         filled_holes += 1;
@@ -463,6 +485,17 @@ pub fn repair(
         }
         tris.extend(new_tris);
     }
+    // Outward (review run 7 #4, #8): after filling; each closed component is
+    // oriented by its nesting depth among the closed components (even: outward,
+    // odd: a void, inward).
+    if opts.orient {
+        orient_outward(&pos, &mut tris);
+    }
+    let flipped_triangles = original
+        .iter()
+        .zip(&tris)
+        .filter(|(a, b)| !same_cycle(a, b))
+        .count();
     let after = diagnose(&pos, &tris);
     if after.closed && !before.closed {
         notes
@@ -486,6 +519,157 @@ pub fn repair(
             notes,
         },
     ))
+}
+
+/// Whether `b` has the same cyclic vertex order as `a`.
+fn same_cycle(a: &[u32; 3], b: &[u32; 3]) -> bool {
+    (0..3).any(|r| (0..3).all(|k| a[k] == b[(k + r) % 3]))
+}
+
+/// Vertices of connected components (through shared vertices) whose vertices
+/// all lie within `max(tol, 1e-9 × size)` of one plane: flat open sheets.
+fn planar_components(
+    pos: &[[f64; 3]],
+    tris: &[[u32; 3]],
+    tol: f64,
+) -> std::collections::HashSet<u32> {
+    let mut parent: Vec<u32> = (0..pos.len() as u32).collect();
+    for t in tris {
+        let a = find(&mut parent, t[0]);
+        for &v in &t[1..] {
+            let b = find(&mut parent, v);
+            if a != b {
+                parent[b as usize] = a;
+            }
+        }
+    }
+    let mut comps: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (ti, t) in tris.iter().enumerate() {
+        comps.entry(find(&mut parent, t[0])).or_default().push(ti);
+    }
+    let mut out = std::collections::HashSet::new();
+    for ts in comps.values() {
+        let mut nrm = [0.0; 3];
+        let mut c = [0.0; 3];
+        let mut nv = 0.0;
+        for &ti in ts {
+            let [a, b, cc] = tris[ti].map(|i| pos[i as usize]);
+            let n = cross(sub(b, a), sub(cc, a));
+            for k in 0..3 {
+                nrm[k] += n[k];
+                c[k] += a[k];
+            }
+            nv += 1.0;
+        }
+        let l = len(nrm);
+        if l <= 0.0 {
+            continue;
+        }
+        let nrm = nrm.map(|x| x / l);
+        let c = c.map(|x| x / nv);
+        let verts = ts.iter().flat_map(|&ti| tris[ti]);
+        let size = verts
+            .clone()
+            .map(|v| len(sub(pos[v as usize], c)))
+            .fold(0.0, f64::max);
+        let t = tol.max(1e-9 * size);
+        if verts
+            .clone()
+            .all(|v| dot(sub(pos[v as usize], c), nrm).abs() <= t)
+        {
+            out.extend(verts);
+        }
+    }
+    out
+}
+
+/// Generalized winding number of `p` with respect to triangles `ts`.
+fn winding(pos: &[[f64; 3]], ts: &[[u32; 3]], p: [f64; 3]) -> f64 {
+    let mut sum = 0.0;
+    for t in ts {
+        let [a, b, c] = t.map(|i| sub(pos[i as usize], p));
+        let (la, lb, lc) = (len(a), len(b), len(c));
+        let num = dot(a, cross(b, c));
+        let den = la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb;
+        sum += 2.0 * num.atan2(den);
+    }
+    sum / (4.0 * std::f64::consts::PI)
+}
+
+/// Orient each closed component (connected through two-triangle edges) by its
+/// nesting depth: a component inside an odd number of others is a void and
+/// faces inward, otherwise outward.
+fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]]) {
+    let mut edge_tris: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    for (ti, t) in tris.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            edge_tris.entry((a.min(b), a.max(b))).or_default().push(ti);
+        }
+    }
+    let mut seen = vec![false; tris.len()];
+    let mut comps: Vec<Vec<usize>> = Vec::new();
+    for start in 0..tris.len() {
+        if seen[start] {
+            continue;
+        }
+        seen[start] = true;
+        let (mut comp, mut q, mut closed) = (vec![start], VecDeque::from([start]), true);
+        while let Some(ti) = q.pop_front() {
+            for k in 0..3 {
+                let (a, b) = (tris[ti][k], tris[ti][(k + 1) % 3]);
+                let list = &edge_tris[&(a.min(b), a.max(b))];
+                if list.len() != 2 {
+                    closed = false;
+                    continue;
+                }
+                let other = if list[0] == ti { list[1] } else { list[0] };
+                if !seen[other] {
+                    seen[other] = true;
+                    comp.push(other);
+                    q.push_back(other);
+                }
+            }
+        }
+        if closed {
+            comps.push(comp);
+        }
+    }
+    let sets: Vec<Vec<[u32; 3]>> = comps
+        .iter()
+        .map(|c| c.iter().map(|&ti| tris[ti]).collect())
+        .collect();
+    let boxes: Vec<([f64; 3], [f64; 3])> = sets
+        .iter()
+        .map(|ts| {
+            let mut lo = [f64::INFINITY; 3];
+            let mut hi = [f64::NEG_INFINITY; 3];
+            for v in ts.iter().flatten() {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(pos[*v as usize][k]);
+                    hi[k] = hi[k].max(pos[*v as usize][k]);
+                }
+            }
+            (lo, hi)
+        })
+        .collect();
+    for (ci, comp) in comps.iter().enumerate() {
+        let p = pos[sets[ci][0][0] as usize];
+        let depth = (0..sets.len())
+            .filter(|&o| {
+                o != ci
+                    && (0..3).all(|k| p[k] >= boxes[o].0[k] && p[k] <= boxes[o].1[k])
+                    && winding(pos, &sets[o], p).abs() > 0.5
+            })
+            .count();
+        let v = signed_volume(pos, &sets[ci]);
+        let want_positive = depth % 2 == 0;
+        if (v > 0.0) != want_positive {
+            for &ti in comp {
+                tris[ti].swap(1, 2);
+            }
+        }
+    }
 }
 
 /// Ear-clipping triangulation of a nearly planar loop (vertex indices in
@@ -567,6 +751,8 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
     let mut idx: Vec<usize> = (0..n).collect();
     let mut out = Vec::new();
     let mut guard = 0;
+    // Review run 7 #28: resume after the last ear instead of restarting.
+    let mut from = 0usize;
     while idx.len() > 3 {
         guard += 1;
         if guard > 4 * n * n {
@@ -574,7 +760,8 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
         }
         let m = idx.len();
         let mut clipped = false;
-        for k in 0..m {
+        for step in 0..m {
+            let k = (from + step) % m;
             let (ia, ib, ic) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
             let (a, b, cc) = (p2[ia], p2[ib], p2[ic]);
             if area2(a, b, cc) <= 0.0 {
@@ -593,6 +780,7 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
             }
             out.push([lp[ia], lp[ib], lp[ic]]);
             idx.remove(k);
+            from = k.saturating_sub(1);
             clipped = true;
             break;
         }
@@ -600,7 +788,9 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
             return Err("no ear found (degenerate outline)".into());
         }
     }
-    out.push([lp[idx[0]], lp[idx[1]], lp[idx[2]]]);
+    if area2(p2[idx[0]], p2[idx[1]], p2[idx[2]]) > 0.0 {
+        out.push([lp[idx[0]], lp[idx[1]], lp[idx[2]]]);
+    }
     Ok(out)
 }
 
@@ -758,6 +948,100 @@ mod tests {
             "{:?}",
             r.notes
         );
+    }
+
+    /// Cube of edge `e` at `o`, outward.
+    fn cube_at(o: [f64; 3], e: f64, base: u32) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+        let (p, t) = cube();
+        (
+            p.iter()
+                .map(|q| [o[0] + q[0] * e, o[1] + q[1] * e, o[2] + q[2] * e])
+                .collect(),
+            t.iter().map(|x| x.map(|i| i + base)).collect(),
+        )
+    }
+
+    /// Review run 7 #4: a hollow part (outer shell outward, inner void shell
+    /// inward) is already correct: nothing flips, volume 8 − 1.
+    #[test]
+    fn void_shells_keep_their_inward_orientation() {
+        let (mut p, mut t) = cube_at([0.0; 3], 2.0, 0);
+        let (p2, mut t2) = cube_at([0.5; 3], 1.0, 8);
+        for x in &mut t2 {
+            x.swap(1, 2); // void: inward
+        }
+        p.extend(p2);
+        t.extend(t2);
+        let (_, _, r) = repair(&p, &t, &RepairOptions::default()).unwrap();
+        assert_eq!(r.flipped_triangles, 0, "{r:?}");
+        assert!((r.after.signed_volume.unwrap() - 7.0).abs() < 1e-12);
+        // Both shells inside out: both flip, same result.
+        let rev: Vec<[u32; 3]> = t.iter().map(|x| [x[0], x[2], x[1]]).collect();
+        let (_, _, r) = repair(&p, &rev, &RepairOptions::default()).unwrap();
+        assert_eq!(r.flipped_triangles, 24);
+        assert!((r.after.signed_volume.unwrap() - 7.0).abs() < 1e-12);
+    }
+
+    /// Review run 7 #8: an inside-out open cube is closed by the fill and
+    /// then turned outward (the outward pass runs after filling).
+    #[test]
+    fn inside_out_open_mesh_ends_outward_after_filling() {
+        let (p, mut t) = cube();
+        t.retain(|x| !(x.contains(&4) && x.contains(&6) && (x.contains(&5) || x.contains(&7))));
+        for x in &mut t {
+            x.swap(1, 2);
+        }
+        let o = RepairOptions {
+            fill_holes_max_edges: 8,
+            ..Default::default()
+        };
+        let (_, _, r) = repair(&p, &t, &o).unwrap();
+        assert!(r.after.closed);
+        assert!(
+            (r.after.signed_volume.unwrap() - 1.0).abs() < 1e-12,
+            "{r:?}"
+        );
+        assert_eq!(r.flipped_triangles, 10);
+    }
+
+    /// Review run 7 #9: a flat open sheet's outline is not filled.
+    #[test]
+    fn flat_sheet_outline_is_not_a_hole() {
+        let p = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        let t = vec![[0, 1, 2], [0, 2, 3]];
+        let o = RepairOptions {
+            fill_holes_max_edges: 8,
+            ..Default::default()
+        };
+        let (_, tris, r) = repair(&p, &t, &o).unwrap();
+        assert_eq!((tris.len(), r.filled_holes, r.unfilled_holes), (2, 0, 1));
+        assert!(!r.after.closed);
+    }
+
+    /// Review run 7 #11, #27: tolerances below floating-point resolution and
+    /// chains that move vertices farther than the tolerance are refused.
+    #[test]
+    fn weld_tolerance_guards() {
+        let (p, t) = cube_at([1.0e6; 3], 1.0, 0);
+        let o = RepairOptions {
+            weld_tolerance: 1e-9,
+            ..Default::default()
+        };
+        assert!(repair(&p, &t, &o).unwrap_err().contains("too small"));
+        // A chain of vertices 0.09 apart with tolerance 0.1 would collapse
+        // 1 mm of mesh: refused.
+        let p: Vec<[f64; 3]> = (0..12).map(|i| [i as f64 * 0.09, 0.0, 0.0]).collect();
+        let t: Vec<[u32; 3]> = (0..10).map(|i| [i, i + 1, i + 2]).collect();
+        let o = RepairOptions {
+            weld_tolerance: 0.1,
+            ..Default::default()
+        };
+        assert!(repair(&p, &t, &o).unwrap_err().contains("chains"));
     }
 
     #[test]

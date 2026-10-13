@@ -17,15 +17,15 @@ pub struct MeshRepairUi {
     pub tolerance: String,
     /// Hole size limit as typed (edges; 0 = no filling).
     pub max_edges: String,
-    /// (doc_id, revision, body, report) of the last preview or repair.
-    pub report: Option<(u64, u64, BodyId, RepairReport)>,
-    pending: Option<BodyId>,
+    /// (doc_id, revision, body, preview?, report) of the last preview or repair.
+    pub report: Option<(u64, u64, BodyId, bool, RepairReport)>,
+    pending: Option<(BodyId, bool)>,
 }
 
 impl MeshRepairUi {
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
-        if let (Some(r), Some(b)) = (&response.mesh_repair, self.pending.take()) {
-            self.report = Some((summary.doc_id, summary.revision, b, r.clone()));
+        if let (Some(r), Some((b, preview))) = (&response.mesh_repair, self.pending.take()) {
+            self.report = Some((summary.doc_id, summary.revision, b, preview, r.clone()));
         }
     }
 }
@@ -110,7 +110,7 @@ impl RcadApp {
                             .clicked()
                             && let Some(o) = opts
                         {
-                            st.pending = Some(body);
+                            st.pending = Some((body, preview));
                             send = Some(Command::RepairMesh(RepairMeshArgs {
                                 body,
                                 options: o,
@@ -121,11 +121,15 @@ impl RcadApp {
                         }
                     }
                 });
-                if let Some((d, r, b, rep)) = &st.report
+                // Review run 7 #29: only for this body at this revision (an
+                // applied repair is one revision older than the new body's
+                // document state, so it is shown on the source until edited).
+                if let Some((d, r, b, preview, rep)) = &st.report
                     && *d == doc
-                    && (*b == body || *r == rev)
+                    && *b == body
+                    && *r == rev
                 {
-                    let t = rcad_commands::mesh_repair::summary(rep, false);
+                    let t = rcad_commands::mesh_repair::summary(rep, *preview);
                     let colour = if rep.after.closed {
                         Color32::from_rgb(120, 200, 120)
                     } else {

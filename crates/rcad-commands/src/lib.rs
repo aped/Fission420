@@ -2396,6 +2396,18 @@ impl Session {
                             *e = params::rename_in(e, &old, &new);
                         }
                     }
+                    // Review run 7 #7: configurations follow the rename (keys
+                    // and expressions).
+                    for c in &mut d.configurations {
+                        let values = std::mem::take(&mut c.values);
+                        c.values = values
+                            .into_iter()
+                            .map(|(k, e)| {
+                                let k = if k == old { new.clone() } else { k };
+                                (k, params::rename_in(&e, &old, &new))
+                            })
+                            .collect();
+                    }
                     Ok(())
                 })?;
                 r.message = Some(format!(
@@ -2413,7 +2425,17 @@ impl Session {
                         detail: "no such parameter".into(),
                     });
                 }
-                let users = params::users_of(m.document(), &name);
+                let mut users = params::users_of(m.document(), &name);
+                // Review run 7 #7: a configuration that sets or uses it.
+                for c in &m.document().configurations {
+                    if c.values.contains_key(&name)
+                        || c.values
+                            .values()
+                            .any(|e| params::rename_in(e, &name, "rcad_probe_name") != *e)
+                    {
+                        users.push(format!("configuration '{}'", c.name));
+                    }
+                }
                 if !users.is_empty() {
                     return Err(DocError::Expression {
                         name,

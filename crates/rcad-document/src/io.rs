@@ -519,6 +519,12 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     }
     nf.document.evaluation_order()?;
     nf.document.validate_bodies()?;
+    // Review run 7 #14: drawings are validated on load (views ordered after
+    // their parents, so derived views cannot form cycles; finite placements).
+    for d in &nf.document.drawings {
+        d.validate()
+            .map_err(|e| DocError::File(format!("drawing {}: {e}", d.id)))?;
+    }
     // Configurations may only name features of this document (review run 6 #4).
     for c in &nf.document.configurations {
         for f in &c.suppressed {

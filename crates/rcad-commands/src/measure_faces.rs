@@ -30,7 +30,8 @@ pub struct FaceMeasureReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pair: Option<FacePairMeasure>,
     /// Run 7: area of planar face `a` (mm², exact for line and arc
-    /// boundaries, holes subtracted); None for other faces.
+    /// boundaries, holes subtracted); None for other faces and for planar
+    /// faces whose boundary has other curves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub area: Option<f64>,
 }
@@ -88,13 +89,10 @@ pub fn report(
                 .evaluation()
                 .body_by_id(a.body)
                 .and_then(|b| b.geometry.brep());
-            match g {
-                Some(g) => Some(
-                    k::planar_face_area(g, a.face as usize)
-                        .map_err(|e| DocError::Validation(e.to_string()))?,
-                ),
-                None => None,
-            }
+            // Review run 7 #12: faces the exact area does not support
+            // (ellipse/spline boundaries, multi-shell bodies) still measure
+            // their plane; the area is then omitted, never estimated.
+            g.and_then(|g| k::planar_face_area(g, a.face as usize).ok())
         }
         _ => None,
     };

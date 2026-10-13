@@ -1122,6 +1122,7 @@ impl RcadApp {
         self.assembly_ui.on_reply(&response, &summary);
         self.drawing_ui.on_reply(&response, &summary);
         self.mesh_repair.on_reply(&response, &summary);
+        self.config_table.on_reply(&response);
         if doc_changed {
             self.fitted = false;
             self.selected = None;
