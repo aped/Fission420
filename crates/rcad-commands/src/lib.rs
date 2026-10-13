@@ -2236,6 +2236,10 @@ impl Session {
                         }
                     }
                     d.features.retain(|f| f.id != feature);
+                    // Review run 6 #4: configurations stop controlling it.
+                    for c in d.configurations.iter_mut() {
+                        c.suppressed.remove(&feature);
+                    }
                     d.prune_bodies();
                     d.prune_blobs();
                     Ok(())
@@ -2658,6 +2662,18 @@ impl Session {
                             )));
                         }
                         plan.push((c.name.clone(), *e, p));
+                    }
+                }
+                // Review run 6 #11: sanitized names must not collide.
+                {
+                    let mut seen = std::collections::BTreeSet::new();
+                    for (n, _, p) in &plan {
+                        if !seen.insert(p.clone()) {
+                            return Err(DocError::Validation(format!(
+                                "configuration '{n}' maps to {} like another one; rename one of them",
+                                p.display()
+                            )));
+                        }
                     }
                 }
                 std::fs::create_dir_all(&dir)

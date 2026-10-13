@@ -897,7 +897,12 @@ impl Feature {
             | FeatureKind::ScaleBody { body: target, .. }
             | FeatureKind::Combine { target, .. }
             | FeatureKind::Revolve {
-                merge: Some(Operation::Join { target } | Operation::Cut { target }),
+                merge:
+                    Some(
+                        Operation::Join { target }
+                        | Operation::Cut { target }
+                        | Operation::Intersect { target },
+                    ),
                 ..
             } => Some(*target),
             FeatureKind::DirectEdit {

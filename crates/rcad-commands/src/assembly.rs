@@ -620,12 +620,16 @@ fn placed(m: &Model, o: OccurrenceId) -> Result<Vec<Body>, DocError> {
         .ok_or_else(|| v(format!("unknown occurrence {o}")))?;
     let mut out = Vec::new();
     for b in &eo.bodies {
+        // Review run 6 #7: a definition body that is not evaluated (consumed
+        // by a Combine, suppressed, rolled back) is reported, not skipped;
+        // hidden bodies count (visibility is display only).
         let Some(eb) = ev.body_by_id(*b) else {
-            continue;
+            return Err(v(format!(
+                "{}: body {b} of its component is not evaluated (consumed, suppressed or \
+                 rolled back)",
+                eo.name
+            )));
         };
-        if !eb.visible {
-            continue;
-        }
         match &eb.geometry {
             BodyGeometry::Brep(g) => out.push(
                 k::transform_body(g, &eo.transform).map_err(|e| v(format!("{}: {e}", eo.name)))?,

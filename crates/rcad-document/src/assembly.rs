@@ -392,6 +392,34 @@ impl Assembly {
     /// within limits.
     pub fn validate(&self, bodies: &[crate::BodyInfo]) -> Result<()> {
         let v = |m: String| Err(DocError::Validation(m));
+        // Review run 6 #6: stored poses must be proper rigid motions.
+        for j in &self.joints {
+            let p = &j.rest;
+            let finite =
+                p.r.iter()
+                    .flatten()
+                    .chain(p.t.iter())
+                    .all(|x| x.is_finite());
+            let mut ok = finite;
+            for a in 0..3 {
+                for b in 0..3 {
+                    let d: f64 = (0..3).map(|k| p.r[k][a] * p.r[k][b]).sum();
+                    let want = if a == b { 1.0 } else { 0.0 };
+                    ok &= (d - want).abs() <= 1e-9;
+                }
+            }
+            let det = p.r[0][0] * (p.r[1][1] * p.r[2][2] - p.r[1][2] * p.r[2][1])
+                - p.r[0][1] * (p.r[1][0] * p.r[2][2] - p.r[1][2] * p.r[2][0])
+                + p.r[0][2] * (p.r[1][0] * p.r[2][1] - p.r[1][1] * p.r[2][0]);
+            ok &= det > 0.0;
+            if !ok {
+                return v(format!(
+                    "joint {} has a rest pose that is not a rigid motion (finite orthonormal, \
+                     det +1)",
+                    j.id
+                ));
+            }
+        }
         let mut owner: BTreeMap<BodyId, ComponentId> = BTreeMap::new();
         for (i, c) in self.components.iter().enumerate() {
             if c.id.0 == 0 || c.id.0 >= self.next_component {

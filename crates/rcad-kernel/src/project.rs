@@ -37,7 +37,10 @@ const SAMPLES: usize = 16;
 
 fn circle3(p: [f64; 2], q: [f64; 2], r: [f64; 2]) -> Option<([f64; 2], f64)> {
     let d = 2.0 * (p[0] * (q[1] - r[1]) + q[0] * (r[1] - p[1]) + r[0] * (p[1] - q[1]));
-    if d.abs() < 1e-12 {
+    // Collinear within a relative 1e-9 (review run 6 #12): d is twice the
+    // signed triangle area; compare it with the product of the side lengths.
+    let span = (q[0] - p[0]).hypot(q[1] - p[1]) * (r[0] - p[0]).hypot(r[1] - p[1]);
+    if d.abs() <= 1e-9 * span {
         return None;
     }
     let s = |v: [f64; 2]| v[0] * v[0] + v[1] * v[1];

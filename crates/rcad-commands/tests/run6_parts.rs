@@ -507,3 +507,41 @@ fn loft_through_three_sections() {
     let r = tray::exec(&mut s, &json!({"cmd": "loft", "a": 2, "b": 3, "via": [1]}));
     assert!(!r.ok);
 }
+
+/// Review run 6 #1: a concave edge interrupted by a notch (two collinear
+/// edges with a gap) is refused instead of filling the notch.
+#[test]
+fn fillet_of_an_interrupted_edge_is_refused() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "polygon", "vertices":
+            [[0.0, 0.0], [40.0, 0.0], [40.0, 6.0], [6.0, 6.0], [6.0, 30.0], [0.0, 30.0]]}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 1, "distance": 20.0}),
+    );
+    // Pocket x 3..6, y 3..9, z 8..12 eating the inside corner line without
+    // splitting either face.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch",
+        "plane": {"Offset": {"base": "WorldXY", "distance": 8.0}},
+        "template": "centered_rectangle", "width": 3.0, "height": 6.0, "center": [4.5, 6.0]}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 3, "distance": 4.0, "op": "cut", "target": 1}),
+    );
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(&mut s, &fillet(side(3), side(4), 2.0));
+    assert!(!r.ok, "fillet across the notch accepted");
+    let e = format!("{:?}", r.error);
+    assert!(
+        e.contains("interrupted") || e.contains("inconsistent"),
+        "{e}"
+    );
+    assert_eq!(s.model().unwrap().document(), &before);
+}

@@ -433,6 +433,17 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     }
     nf.document.evaluation_order()?;
     nf.document.validate_bodies()?;
+    // Configurations may only name features of this document (review run 6 #4).
+    for c in &nf.document.configurations {
+        for f in &c.suppressed {
+            if nf.document.feature(*f).is_err() {
+                return Err(DocError::File(format!(
+                    "configuration '{}' suppresses missing feature {f}",
+                    c.name
+                )));
+            }
+        }
+    }
     for f in &nf.document.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &f.kind {
             sketch

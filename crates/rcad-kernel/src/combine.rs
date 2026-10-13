@@ -387,6 +387,22 @@ fn check_combine(
             ]
         })
         .collect();
+    // Review run 6 #5: a tool much smaller than the union (a small hole in a
+    // large plate) can fall between grid points; also sample a grid over
+    // each tool's own bounds so every tool is probed.
+    let mut pts = pts;
+    for t in tools {
+        let tb = raw_bounds(&t.solid)?;
+        let ts = [0, 1, 2].map(|i| (tb.max[i] - tb.min[i]) / n as f64);
+        for k in 0..n * n * n {
+            let (i, j, l) = (k % n, (k / n) % n, k / (n * n));
+            pts.push([
+                tb.min[0] + (i as f64 + 0.5) * ts[0],
+                tb.min[1] + (j as f64 + 0.5) * ts[1],
+                tb.min[2] + (l as f64 + 0.5) * ts[2],
+            ]);
+        }
+    }
     // (expected, result) per sample; None = skipped.
     let classify = |p: [f64; 3]| -> Option<(bool, bool)> {
         if near(&mt, p, skip) || mtools.iter().any(|m| near(m, p, skip)) {
@@ -434,15 +450,20 @@ fn check_combine(
         volume_ok: None,
         first_mismatch: None,
     };
-    for (p, r) in pts.iter().zip(&results) {
+    let global = n * n * n; // only the union grid estimates the volume
+    let mut skipped_global = 0usize;
+    for (k, (p, r)) in pts.iter().zip(&results).enumerate() {
         match r {
             None => {
                 c.skipped += 1;
-                c.grid_volume += 0.5 * cell;
+                if k < global {
+                    skipped_global += 1;
+                    c.grid_volume += 0.5 * cell;
+                }
             }
             Some((want, got)) => {
                 c.compared += 1;
-                if *want {
+                if *want && k < global {
                     c.grid_volume += cell;
                 }
                 if want != got {
@@ -453,7 +474,7 @@ fn check_combine(
         }
     }
     let h = (step[0] * step[0] + step[1] * step[1] + step[2] * step[2]).sqrt();
-    c.volume_tolerance = 0.5 * c.skipped as f64 * cell + area(&mo) * h;
+    c.volume_tolerance = 0.5 * skipped_global as f64 * cell + area(&mo) * h;
     if c.compared == 0 {
         return Err(KernelError::InvalidResult(
             "combine: independent check found no classifiable sample point".into(),

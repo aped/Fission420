@@ -271,21 +271,38 @@ pub(crate) fn straight_edge(
         let w = Vector3::new(q.x, q.y, q.z) - p;
         (w - e * w.dot(e)).magnitude() <= eps
     };
-    let (mut smin, mut smax) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut spans: Vec<(f64, f64)> = Vec::new();
     guarded("edge search", || {
         for edge in body.solid.edge_iter() {
             let c = edge.oriented_curve();
             let (t0, t1) = c.range_tuple();
             let (a, b, m) = (c.subs(t0), c.subs(t1), c.subs(0.5 * (t0 + t1)));
             if on_line(a) && on_line(b) && on_line(m) {
-                for q in [a, b] {
-                    let s = (Vector3::new(q.x, q.y, q.z) - p).dot(e);
-                    smin = smin.min(s);
-                    smax = smax.max(s);
-                }
+                let s = |q: Point3| (Vector3::new(q.x, q.y, q.z) - p).dot(e);
+                let (sa, sb) = (s(a), s(b));
+                spans.push((sa.min(sb), sa.max(sb)));
             }
         }
     })?;
+    if spans.is_empty() {
+        return Err(KernelError::InvalidInput(format!(
+            "{what}: the two faces do not meet in a straight edge of the body"
+        )));
+    }
+    // The edge must be one uninterrupted run (review run 6 #1): collinear
+    // edges with a gap between them (e.g. a slot crossing the corner) are
+    // separate edges, and the fillet/chamfer tool would bridge the gap.
+    spans.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let (smin, mut smax) = spans[0];
+    for &(a, b) in &spans[1..] {
+        if a > smax + eps {
+            return Err(KernelError::InvalidInput(format!(
+                "{what}: the edge is interrupted between {smax:.6} and {a:.6} mm along it \
+                 (several separate collinear edges); only one continuous edge is supported"
+            )));
+        }
+        smax = smax.max(b);
+    }
     if smin >= smax {
         return Err(KernelError::InvalidInput(format!(
             "{what}: the two faces do not meet in a straight edge of the body"

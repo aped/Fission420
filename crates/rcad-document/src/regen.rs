@@ -1125,6 +1125,18 @@ fn regen_impl(
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
                 let b = brep_target(&st, id, *body)?;
                 let scaled = k::transform_body(&b, &t).map_err(kernel(id))?;
+                // Review run 6 #13: keep every dimension above the modelling
+                // tolerances.
+                let bb = k::bounds(&scaled).map_err(kernel(id))?;
+                let small = (0..3)
+                    .map(|i| bb.max[i] - bb.min[i])
+                    .fold(f64::INFINITY, f64::min);
+                if small < 10.0 * k::tol::MIN_LENGTH {
+                    return Err(DocError::Validation(format!(
+                        "{id}: scaled by {factor} the body would be {small:.6} mm thin, below the \
+                         modelling tolerances"
+                    )));
+                }
                 replace_body(&mut st, id, *body, scaled);
                 st.moves.push((*body, i, t));
                 r.body = Some(*body);
@@ -1247,6 +1259,14 @@ fn regen_impl(
                     .ok_or_else(|| {
                         DocError::Validation(format!("{id}: {hole} is not a Hole feature"))
                     })??;
+                // Review run 6 #2: the hole's tool is where the hole was made;
+                // after a move/scale of its body that is not where it is now.
+                if st.moved_since(Some(target), *hole) {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: the body of {hole} was moved or scaled after it; add the \
+                         countersink before the move"
+                    )));
+                }
                 let tool = st.holes.get(hole).and_then(|t| t.last()).ok_or_else(|| {
                     DocError::BrokenReference {
                         from: id,
@@ -1765,7 +1785,8 @@ fn extrude_feature(
             return Err(invalid("the 'to' plane is the sketch plane itself".into()));
         }
         dir = h.signum();
-        if dir * s0 >= h.abs() - k::tol::MIN_LENGTH && s0 != 0.0 {
+        // `start_offset` is measured along the direction (review run 6 #8).
+        if s0 >= h.abs() - k::tol::MIN_LENGTH {
             return Err(invalid(format!(
                 "the start offset {s0} mm reaches the 'to' plane ({:.6} mm away)",
                 h.abs()
@@ -1815,6 +1836,21 @@ fn extrude_feature(
                 "a tapered extrusion needs a region without inner loops".into(),
             ));
         }
+        // Review run 6 #9: the taper is anchored at the near end of the span;
+        // only a span starting on the sketch plane keeps the sketch profile
+        // exact there.
+        if opts.symmetric || opts.distance2 != 0.0 || opts.start_offset != 0.0 {
+            return Err(limit(
+                "a taper with symmetric, two-sided or offset-start extents is not supported \
+                 (the sketch profile would not be the section at the sketch plane)"
+                    .into(),
+            ));
+        }
+    }
+    if matches!(operation, Operation::Intersect { .. }) && extent == Extent::ThroughAll {
+        return Err(invalid(
+            "'through all' is not available for Intersect".into(),
+        ));
     }
     match (operation, target) {
         (Operation::NewBody { body }, _) => {
@@ -2246,6 +2282,22 @@ fn open_band(id: FeatureId, pts: &[[f64; 2]], t: f64) -> Result<SketchProfile> {
         .sum();
     if area < 0.0 {
         poly.reverse();
+    }
+    // Review run 6 #10: a chain folding back over itself makes a crossing band.
+    let m = poly.len();
+    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    for i in 0..m {
+        for j in i + 2..m {
+            if i == 0 && j == m - 1 {
+                continue;
+            }
+            let (a, b, c, d) = (poly[i], poly[(i + 1) % m], poly[j], poly[(j + 1) % m]);
+            if cross(a, b, c) * cross(a, b, d) < 0.0 && cross(c, d, a) * cross(c, d, b) < 0.0 {
+                return Err(bad("the band crosses itself (the chain folds back)".into()));
+            }
+        }
     }
     Ok(SketchProfile::Polygon(poly))
 }
