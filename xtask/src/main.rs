@@ -3,10 +3,18 @@
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-/// Run records belong under `runs/` (local, git-ignored; see AGENTS.md), not in the root.
+/// Run records belong under `.meta/runs/` (local, git-ignored), not in the root.
 /// Returns the offending root entries.
 fn stray_run_files(root: &Path) -> std::io::Result<Vec<String>> {
-    const EXACT: &[&str] = &["GOAL.md", "PLAN.md", "KICKOFF.md", "STATUS.md", "plan"];
+    const EXACT: &[&str] = &[
+        "GOAL.md",
+        "PLAN.md",
+        "KICKOFF.md",
+        "STATUS.md",
+        "plan",
+        "runs",
+        "AGENTS.md",
+    ];
     const PREFIX: &[&str] = &["SESSION_", "NIGHT_", "MORNING_REPORT"];
     let mut stray = Vec::new();
     for entry in std::fs::read_dir(root)? {
@@ -20,7 +28,7 @@ fn stray_run_files(root: &Path) -> std::io::Result<Vec<String>> {
 }
 
 fn check_layout() -> bool {
-    eprintln!("==> layout: run records under runs/");
+    eprintln!("==> layout: run records under .meta/runs/");
     // xtask lives one level below the workspace root.
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     match stray_run_files(&root) {
@@ -31,7 +39,7 @@ fn check_layout() -> bool {
         Ok(stray) => {
             eprintln!(
                 "<== layout: FAILED: run files in the repository root: {}\n    \
-                 move them to runs/run-N/ (status: runs/STATUS.md); see AGENTS.md",
+                 move them to .meta/runs/run-N/ (status: .meta/runs/STATUS.md; agent instructions: .meta/agents/)",
                 stray.join(", ")
             );
             false

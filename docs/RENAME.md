@@ -13,7 +13,7 @@ records what changed and how to bring work from the old history over.
 | native files | `*.f420.json`, `"format": "fission420"` | `*.rcad.json`, `"format": "r-cad"` | old files open unchanged (`LEGACY_FORMAT_NAMES` in `crates/rcad-document/src/io.rs`). The extension was never checked. The format **version is unchanged**; the rename touches only the name. A build from before the rename refuses new files with "not a fission420 document" |
 | autosave | `F420_RECOVERY_DIR`, `F420_AUTOSAVE_SECS`, `…/fission420/recovery`, `*.autosave.f420.json` | `RCAD_*`, `…/r-cad/recovery`, `*.autosave.rcad.json` | the old variables are read when the new ones are unset; the old directory and suffix are still searched at start-up (`crates/rcad/src/recovery.rs`) |
 | other variables | `F420_TRACE_ENGINE`, `F420_PROBE`, `F420_WRITE_EXAMPLES`, … | `RCAD_*` | none (developer and test diagnostics) |
-| run records | committed under `runs/` | git-ignored; kept locally (AGENTS.md) | removed from the entire history |
+| internal material | run records committed under `runs/`; `AGENTS.md`, `CLAUDE.md` and per-run scripts tracked | everything internal in the git-ignored `.meta/` (`agents/`, `runs/`, `tools/`, `logs/`, `notes/`); Claude Code loads the agent instructions through an ignored `CLAUDE.local.md` (`@.meta/agents/AGENTS.md`) | `runs/` removed from the entire history; `cargo xtask check` refuses `runs/` or `AGENTS.md` in the root. Note: `AGENTS.md`/`CLAUDE.md` and the run-3/run-4 scripts are still in older commits of `main` |
 | history | 261 commits, placeholder author `Your GitHub Username` | 247 commits, author and committer `Andrew <542314+aped@users.noreply.github.com>` | commits that only touched `runs/` disappeared; home paths and the five affected screenshots were redacted in every commit |
 
 Tests that guard the compatibility: `crates/rcad-document/tests/legacy_name.rs` (a frozen
@@ -71,8 +71,13 @@ the old files since `f0bcf6c`, then renamed everything.
 | `crates/rcad-document/src/io.rs` | run-5: `FORMAT_VERSION = 5`, `v5_feature`, `required_version` (feature suppression and pattern/mirror face references); main: `"r-cad"` name plus `LEGACY_FORMAT_NAMES` in the header check | keep both. The rename deliberately left the version at 4 so that run-5's v5 keeps its meaning. Check that `parse` still runs the legacy-name check before the version checks |
 | `tools/print/validate_examples.sh` | run-5: tray slices; main: `CARGO_TARGET_DIR` default from `git rev-parse --git-common-dir` instead of the home path | keep both |
 | `crates/rcad/src/recovery.rs` | run-5: `dropped` field (review run 4 #19); main: `legacy_dir`, `recovery_dirs`, `autosave_interval`, legacy suffix | different hunks; keep both |
-| `xtask/src/main.rs` | run-5: new stages; main: layout messages point at AGENTS.md | keep both |
+| `xtask/src/main.rs` | run-5: new stages; main: the layout stage checks for `.meta/runs/` and refuses root `runs`/`AGENTS.md` | keep both |
 | `docs/COMMANDS.md`, `docs/FORMAT_SUPPORT.md`, `docs/UI.md` | run-5: v5 and suppression docs; main: format-name and recovery-compatibility notes | keep both |
+
+Port-time moves (these are run-only, so keep them out of the tracked tree):
+
+- `tools/run5_final_verify.sh` (and any other `tools/runN_*`) goes to `.meta/tools/`.
+- Changes run-5 made to `AGENTS.md` (if any) go into `.meta/agents/AGENTS.md`.
 
 After applying, fix these leftovers. `rename_f420.py check` does not catch them, because
 they are not old names:
@@ -93,5 +98,21 @@ they are not old names:
 - Run-5's `bbd19c9` (save cache volume rounded to 1e-6 mm³) fixes the intermittent macOS
   failure of `bracket_exports_and_saves_are_byte_identical` (docs/CI.md L7). Porting it
   is what lets macOS gate.
-- Run records stay in `runs/` locally. They are git-ignored on the new `main` and must
-  not be committed.
+- In the R-CAD checkout, internal material lives in `.meta/` (git-ignored). Until the
+  swap-over below, run-5's records stay where they are, in Fission420's `runs/`.
+
+## Swap-over (once the run-5 agent has finished)
+
+Do it in one sitting, in this order, so nothing is written to both places:
+
+1. **Stop:** the run-5 agent reports done (final verification, report written, tree clean
+   and committed on `work/run-5`), and no other session is building in Fission420.
+2. **Port:** port `work/run-5` to a `port/run-5` branch in R-CAD as above, run
+   `cargo xtask check`, and review.
+3. **Move internal records:**
+   ```bash
+   rsync -a <Fission420>/runs/ <R-CAD>/.meta/runs/
+   ```
+   Then copy Fission420's `artifacts/` subtrees worth keeping into `.meta/logs/`.
+4. **Switch:** from here on, start agents in the R-CAD checkout. Archive the Fission420
+   checkout read-only; don't delete it until the port is merged and pushed.

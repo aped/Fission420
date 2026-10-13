@@ -20,10 +20,10 @@ through the real widgets:
 | Re-attach | After a `BrokenReference` refusal, choose a world plane or an earlier face for the sketch. A dashed outline previews the result, and one `SetSketchPlane` applies it as a single undo step. | `reattach.rs` | `reattach.rs` |
 | Frame pacing | Each worker reply calls the repaint callback. An idle UI requests no repaint. While work is pending the UI polls every 50 ms. | `engine.rs`, `app.rs` | `frame_pacing.rs` |
 
-Screenshots: `tools/run3_screenshots.sh` renders the `--scene` states
-(`crates/rcad/src/scenes.rs`) in a private headless mutter at 1280×800 and 1920×1080.
-Curated copies are in `docs/screenshots/12-17`. The full set is written to
-`artifacts/run3/screenshots/` (not tracked).
+Screenshots: `tools/screenshots.sh [binary] [out-dir] [scenes...]` renders the `--scene`
+states (`crates/rcad/src/scenes.rs`) in a private headless mutter at 1280×800 and
+1920×1080, into `artifacts/screenshots/` (not tracked). Curated copies are in
+`docs/screenshots/`.
 
 Cancelling the Import dialog while an import is running only closes the dialog. The import cannot
 be interrupted and still completes, and Undo removes it in one step.

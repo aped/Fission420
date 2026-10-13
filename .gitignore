@@ -1,5 +1,10 @@
 target/
-# Agent run records (specs, status, reports) are kept locally, never committed.
+# Internal, local-only material: agent instructions, run records (specs, status, reports),
+# one-off run scripts, logs and notes. Never committed. Layout: .meta/{agents,runs,tools,logs,notes}.
+/.meta/
+# Loads .meta/agents/AGENTS.md for Claude Code (@-import); local only.
+/CLAUDE.local.md
+# Legacy location of run records (before .meta/); refused by `cargo xtask check`.
 /runs/
 artifacts/
 .claude/

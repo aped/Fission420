@@ -4,7 +4,7 @@
 //! checked against ANALYTIC volume and bounds (derived below from elementary
 //! geometry), not against the pre-export measurement.
 //!
-//! Caveat (AGENTS.md "Testing and evidence"): writer and reader are both ours, so
+//! Caveat: writer and reader are both ours, so
 //! this is a regression guard for the pair, not independent interoperability
 //! evidence; the FreeCAD fixtures in tests/step_import.rs cover that direction.
 //!
