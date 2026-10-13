@@ -7,10 +7,15 @@
 use crate::{DocError, FeatureId, Result};
 use rcad_kernel::{self as k, Body};
 
+/// Kernel refusals of unsupported input are validation errors (a stated
+/// limit, not a kernel failure); other kernel errors stay kernel errors.
 fn kerr(id: FeatureId) -> impl Fn(k::KernelError) -> DocError {
-    move |e| DocError::Kernel {
-        feature: id,
-        detail: e.to_string(),
+    move |e| match e {
+        k::KernelError::InvalidInput(m) => DocError::Validation(format!("{id}: {m}")),
+        other => DocError::Kernel {
+            feature: id,
+            detail: other.to_string(),
+        },
     }
 }
 

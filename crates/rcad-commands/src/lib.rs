@@ -1288,7 +1288,8 @@ pub struct BodySummary {
     pub id: BodyId,
     pub name: String,
     pub visible: bool,
-    /// "brep" (exact solid) or "mesh" (triangle mesh, STL import).
+    /// "brep" (exact solid), "surface" (exact open-shell surface body, run 7)
+    /// or "mesh" (triangle mesh, STL import).
     pub kind: String,
     pub source: BodySource,
     pub created_by: FeatureId,
@@ -3988,7 +3989,9 @@ impl Session {
                     id: b.id,
                     name: b.name.clone(),
                     visible: b.visible,
-                    kind: match b.geometry {
+                    kind: match &b.geometry {
+                        // Run 7: open-shell surface bodies are not solids.
+                        BodyGeometry::Brep(g) if g.is_open_shell() => "surface",
                         BodyGeometry::Brep(_) => "brep",
                         BodyGeometry::Mesh(_) => "mesh",
                     }

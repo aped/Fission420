@@ -74,6 +74,7 @@ fn open_box_stays_open_then_fills_to_a_solid() {
     let r = tray::ok(&mut s, &json!({"cmd": "fill_surface", "body": 1}));
     assert!(r.message.unwrap().contains("closed solid"));
     assert!((volume(&s, 2).unwrap() - 24000.0).abs() < 1e-6);
+    assert_eq!(body(&s, 2).kind, "brep");
     assert!(!body(&s, 1).visible);
     assert_eq!(volume(&s, 1), None);
     // Undo / redo / save / reopen.

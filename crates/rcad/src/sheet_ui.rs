@@ -436,7 +436,7 @@ impl RcadApp {
                 a.non_manifold_edges
             ));
         }
-        if closed == Some(false) {
+        if closed != Some(true) {
             ui.horizontal(|ui| {
                 num_field(ui, "Healing tolerance (mm)", &mut form.tolerance);
             });
@@ -471,7 +471,8 @@ impl RcadApp {
             });
             ui.horizontal(|ui| {
                 num_field(ui, "Thickness (mm)", &mut form.thickness);
-                ui.checkbox(&mut form.reverse, "Against normal");
+                ui.checkbox(&mut form.reverse, "Against normal")
+                    .probe("Against normal");
                 if ui
                     .add_enabled(
                         parse(&form.thickness).is_some(),

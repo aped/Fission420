@@ -54,6 +54,10 @@ fn open_box_is_open_and_fills_to_the_box() {
     assert!((v - 24000.0).abs() < 1e-6, "{v}");
     let b = measure(&solid).unwrap().bounds;
     assert_eq!((b.min, b.max), ([0.0; 3], [40.0, 30.0, 20.0]));
+    // Deep copies (used by the app's measuring thread) keep open shells.
+    let c = s.body.deep_copy().unwrap();
+    assert!(c.is_open_shell());
+    assert!(!measure(&c).unwrap().all_shells_closed);
     // Open shells tessellate for display (per shell, not as a solid).
     let mesh = rcad_kernel::tessellate_display(&s.body, 0.01).unwrap();
     assert!(!mesh.triangles.is_empty());

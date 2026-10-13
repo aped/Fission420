@@ -255,6 +255,7 @@ impl RcadApp {
                 }
                 let (badge, col) = match (&b.source, b.kind.as_str()) {
                     (_, "mesh") => ("mesh", Color32::from_rgb(220, 190, 120)),
+                    (_, "surface") => ("open surface", Color32::from_rgb(255, 200, 120)),
                     (BodySource::ImportedStep { .. }, _) => ("STEP", Color32::from_rgb(150, 200, 255)),
                     _ => ("solid", Color32::GRAY),
                 };
