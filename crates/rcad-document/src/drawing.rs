@@ -262,11 +262,18 @@ impl ViewFrame {
 pub enum ViewKind {
     /// Bodies seen in a standard orientation at `scale` (sheet mm per model
     /// mm), centred at `position` (sheet mm from the bottom-left corner).
+    ///
+    /// Run 7 (format v7): with `assembly`, the view also shows every placed
+    /// component occurrence of the evaluated assembly (suppressed ones
+    /// excluded; `bodies` are then loose bodies shown in addition, and may
+    /// be empty).
     Base {
         bodies: Vec<BodyId>,
         orientation: Orientation,
         scale: f64,
         position: [f64; 2],
+        #[serde(default, skip_serializing_if = "is_false")]
+        assembly: bool,
     },
     /// The parent seen from `from`, at the parent's scale, aligned with it and
     /// placed by the drawing's projection convention.
@@ -326,6 +333,10 @@ impl ViewKind {
     }
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// A semantic annotation of a view, resolved at every render.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -333,6 +344,125 @@ pub enum Annotation {
     /// Diameter callout of Hole feature `feature`, attached to its circle
     /// where the hole is seen end-on.
     HoleCallout { feature: FeatureId },
+    /// Run 7 (v7): a driven dimension between semantic references, measured
+    /// from the current model at every render (never stored). With `b`: the
+    /// distance between `a` and `b` (parallel planar faces, a face and a
+    /// parallel hole axis, or two parallel hole axes), measured
+    /// perpendicular to them. Without `b`: the diameter of hole `a`. Drawn
+    /// only where the measured direction lies in the view plane along the
+    /// view's horizontal or vertical axis; otherwise, or when a reference no
+    /// longer resolves, it is drawn in red without a value and reported as
+    /// dangling.
+    Dimension {
+        a: DimRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        b: Option<DimRef>,
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+    },
+    /// Run 7 (v7): a balloon (item number of the drawing's BOM) for every
+    /// component shown in this view, with a leader to the centre of its
+    /// first occurrence. Only meaningful in assembly views.
+    Balloons,
+}
+
+/// A stable geometric reference for a drawing dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DimRef {
+    /// A planar face by its semantic reference (originating feature + role).
+    Face(crate::FaceRef),
+    /// The axis (and diameter) of a Hole feature.
+    Hole(FeatureId),
+}
+
+/// Tolerance printed with a dimension value (model mm).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum Tolerance {
+    #[default]
+    None,
+    /// `value ±t`.
+    Symmetric { value: f64 },
+    /// `value +upper/lower` (deviations; `lower` is usually negative).
+    Deviation { upper: f64, lower: f64 },
+    /// Limit dimensions: `value+upper` over `value+lower`.
+    Limits { upper: f64, lower: f64 },
+}
+
+impl Tolerance {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Tolerance::None)
+    }
+
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        match *self {
+            Tolerance::None => Ok(()),
+            Tolerance::Symmetric { value } => {
+                if value.is_finite() && value > 0.0 {
+                    Ok(())
+                } else {
+                    Err(format!("a ± tolerance must be positive, got {value}"))
+                }
+            }
+            Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => {
+                if upper.is_finite() && lower.is_finite() && upper > lower {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "the upper deviation {upper} must exceed the lower {lower}"
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Dimension text for nominal `v`: "40", "40 ±0.1", "40 +0.1/-0.05",
+    /// "40.1/39.95".
+    pub fn text(&self, v: f64) -> String {
+        let signed = |x: f64| {
+            if x >= 0.0 {
+                format!("+{}", fmt_tol(x))
+            } else {
+                format!("-{}", fmt_tol(-x))
+            }
+        };
+        match *self {
+            Tolerance::None => fmt_len(v),
+            Tolerance::Symmetric { value } => format!("{} ±{}", fmt_len(v), fmt_tol(value)),
+            Tolerance::Deviation { upper, lower } => {
+                format!("{} {}/{}", fmt_len(v), signed(upper), signed(lower))
+            }
+            Tolerance::Limits { upper, lower } => {
+                format!("{}/{}", fmt_tol(v + upper), fmt_tol(v + lower))
+            }
+        }
+    }
+}
+
+/// Tolerance values keep three decimals (0.005 is a common deviation).
+fn fmt_tol(x: f64) -> String {
+    let s = format!("{:.3}", x + 0.0);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".into() } else { s.to_string() }
+}
+
+/// A free text note on the sheet (run 7, v7). `position`: sheet mm of the
+/// first line's start; lines are separated by `\n`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Note {
+    pub text: String,
+    pub position: [f64; 2],
+}
+
+/// The bill-of-materials table on the sheet (run 7, v7): flattened
+/// quantities of the evaluated assembly (see [`bom_rows`]). `position`: its
+/// bottom-left corner in sheet mm (default: the sheet's top-right corner
+/// inside the border).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct BomTable {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -372,6 +502,12 @@ pub struct Drawing {
     /// Overall bounding dimensions (each world axis once) and hole diameters.
     #[serde(default = "yes")]
     pub auto_dimensions: bool,
+    /// Run 7 (v7): free text notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<Note>,
+    /// Run 7 (v7): BOM table on the sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bom: Option<BomTable>,
 }
 
 fn one() -> u32 {
@@ -401,6 +537,8 @@ impl Drawing {
             views: Vec::new(),
             next_view: 1,
             auto_dimensions: true,
+            notes: Vec::new(),
+            bom: None,
         }
     }
 
@@ -486,9 +624,10 @@ impl Drawing {
                     bodies,
                     scale,
                     position,
+                    assembly,
                     ..
                 } => {
-                    if bodies.is_empty() {
+                    if bodies.is_empty() && !assembly {
                         return bad(format!("{} shows no body", v.id));
                     }
                     if !(scale.is_finite() && (MIN_SCALE..=MAX_SCALE).contains(scale)) {
@@ -615,8 +754,73 @@ impl Drawing {
                     }
                 }
             }
+            for a in &v.annotations {
+                if let Annotation::Dimension { a, b, tolerance } = a {
+                    tolerance
+                        .validate()
+                        .or_else(|e| bad(format!("{}: {e}", v.id)))?;
+                    if b.is_none() && !matches!(a, DimRef::Hole(_)) {
+                        return bad(format!(
+                            "{}: a dimension with one reference must name a hole (diameter)",
+                            v.id
+                        ));
+                    }
+                    if b.as_ref() == Some(a) {
+                        return bad(format!(
+                            "{}: a dimension needs two different references",
+                            v.id
+                        ));
+                    }
+                }
+            }
+        }
+        for (i, n) in self.notes.iter().enumerate() {
+            if n.text.trim().is_empty() || n.text.chars().count() > 500 {
+                return bad(format!("note {} must have 1 to 500 characters", i + 1));
+            }
+            if n.text.chars().any(|c| c.is_control() && c != '\n') {
+                return bad(format!("note {} contains control characters", i + 1));
+            }
+            if !(n.position.iter().all(|x| x.is_finite())
+                && (0.0..=w).contains(&n.position[0])
+                && (0.0..=h).contains(&n.position[1]))
+            {
+                return bad(format!("note {} is outside the sheet", i + 1));
+            }
+        }
+        if let Some(BomTable { position: Some(p) }) = &self.bom
+            && !(p.iter().all(|x| x.is_finite())
+                && (0.0..=w).contains(&p[0])
+                && (0.0..=h).contains(&p[1]))
+        {
+            return bad("the BOM table position is outside the sheet".into());
         }
         Ok(())
+    }
+
+    /// Whether this drawing uses a run-7 (format v7) addition.
+    pub fn v7_feature(&self) -> Option<&'static str> {
+        if self
+            .views
+            .iter()
+            .any(|v| matches!(v.kind, ViewKind::Base { assembly: true, .. }))
+        {
+            return Some("assembly drawing views");
+        }
+        if self.views.iter().any(|v| {
+            v.annotations
+                .iter()
+                .any(|a| !matches!(a, Annotation::HoleCallout { .. }))
+        }) {
+            return Some("drawing dimensions and balloons");
+        }
+        if !self.notes.is_empty() {
+            return Some("drawing notes");
+        }
+        if self.bom.is_some() {
+            return Some("drawing BOM tables");
+        }
+        None
     }
 }
 
@@ -679,7 +883,8 @@ pub enum ViewStatus {
 /// One dimension or callout as drawn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionReport {
-    /// "horizontal", "vertical", "diameter", "hole_callout".
+    /// "horizontal", "vertical", "diameter", "hole_callout"; run 7: "distance",
+    /// "hole_diameter" (user dimensions), "balloon" (value = item number).
     pub kind: String,
     /// Model value (mm); None for a dangling callout.
     pub value: Option<f64>,
@@ -715,6 +920,9 @@ pub struct DrawingRender {
     /// Sampled-HLR parameters used (mm).
     pub sample_spacing: f64,
     pub chord: f64,
+    /// Rows of the BOM table as drawn (empty without a table).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bom: Vec<BomRow>,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -783,9 +991,14 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
     })
 }
 
+/// One occluding triangle: projected corners, depths, shared edges.
+type OccTri = ([[f64; 2]; 3], [f64; 3], [bool; 3]);
+
 /// Front-facing triangles in view coordinates with a uniform grid.
 struct Occluder {
-    tris: Vec<([[f64; 2]; 3], [f64; 3])>,
+    /// (projected corners, depths, edge `i` (opposite corner `i`) shared
+    /// with another front-facing triangle).
+    tris: Vec<OccTri>,
     lo: [f64; 2],
     cell: f64,
     nx: usize,
@@ -798,19 +1011,44 @@ struct Occluder {
 impl Occluder {
     fn new(meshes: &[&k::TriMesh], f: &ViewFrame, margin: f64, depth_eps: f64) -> Self {
         let mut tris = Vec::new();
+        // Edges between two front-facing triangles are interior to the
+        // occluding surface (a triangulation diagonal, or a convex edge
+        // between two faces both seen from the front): a point near them is
+        // still covered. Keyed by the exact 3D end points.
+        type EdgeKey = ([u64; 3], [u64; 3]);
+        let key = |a: [f64; 3], b: [f64; 3]| -> EdgeKey {
+            let (a, b) = (a.map(f64::to_bits), b.map(f64::to_bits));
+            if a <= b { (a, b) } else { (b, a) }
+        };
+        let mut corners: Vec<[[f64; 3]; 3]> = Vec::new();
+        let mut count: HashMap<EdgeKey, u32> = HashMap::new();
         for m in meshes {
             for t in &m.triangles {
-                let p = t.map(|i| f.project(m.positions[i as usize]));
+                let w = t.map(|i| m.positions[i as usize]);
+                let p = w.map(|x| f.project(x));
                 let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
                     - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
                 if area > 1e-12 {
-                    tris.push((p.map(|q| [q[0], q[1]]), p.map(|q| q[2])));
+                    tris.push((p.map(|q| [q[0], q[1]]), p.map(|q| q[2]), [false; 3]));
+                    corners.push(w);
+                    for i in 0..3 {
+                        *count
+                            .entry(key(w[(i + 1) % 3], w[(i + 2) % 3]))
+                            .or_default() += 1;
+                    }
                 }
+            }
+        }
+        for (t, w) in tris.iter_mut().zip(&corners) {
+            for i in 0..3 {
+                t.2[i] = count
+                    .get(&key(w[(i + 1) % 3], w[(i + 2) % 3]))
+                    .is_some_and(|c| *c >= 2);
             }
         }
         let mut lo = [f64::INFINITY; 2];
         let mut hi = [f64::NEG_INFINITY; 2];
-        for (p, _) in &tris {
+        for (p, _, _) in &tris {
             for q in p {
                 for i in 0..2 {
                     lo[i] = lo[i].min(q[i]);
@@ -827,7 +1065,7 @@ impl Occluder {
         let nx = (((hi[0] - lo[0]) / cell).ceil() as usize).max(1);
         let ny = (((hi[1] - lo[1]) / cell).ceil() as usize).max(1);
         let mut grid = vec![Vec::new(); nx * ny];
-        for (ti, (p, _)) in tris.iter().enumerate() {
+        for (ti, (p, _, _)) in tris.iter().enumerate() {
             let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
             for q in p {
                 for i in 0..2 {
@@ -864,8 +1102,12 @@ impl Occluder {
         }
         let cell = &self.grid[gy as usize * self.nx + gx as usize];
         cell.iter().any(|&ti| {
-            let (p, z) = &self.tris[ti as usize];
-            // Signed distances to the three edges (counter-clockwise triangle).
+            let (p, z, shared) = &self.tris[ti as usize];
+            // Signed distances to the three edges (counter-clockwise
+            // triangle): strictly inside by the margin across outline edges;
+            // across an edge shared with another front-facing triangle (a
+            // triangulation diagonal) no margin: a point on such an edge is
+            // covered by the surface, not near its outline.
             let mut bary = [0.0; 3];
             let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
                 - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
@@ -874,7 +1116,14 @@ impl Occluder {
                 let e = [b[0] - a[0], b[1] - a[1]];
                 let len = e[0].hypot(e[1]);
                 let c = e[0] * (q[1] - a[1]) - e[1] * (q[0] - a[0]);
-                if c / len <= self.margin {
+                // Across a shared edge the neighbour continues the surface:
+                // inside (or on) this triangle is enough there.
+                let inside = if shared[i] {
+                    c / len >= 0.0
+                } else {
+                    c / len > self.margin
+                };
+                if !inside {
                     return false;
                 }
                 bary[i] = c / area;
@@ -1460,6 +1709,8 @@ fn linear_dim(
         [mid[0], mid[1] - 1.0 - TEXT]
     } else if normal[0] > 0.0 {
         [mid[0] + 1.0, mid[1] - TEXT / 2.0]
+    } else if normal[0] < 0.0 {
+        [mid[0] - 1.0, mid[1] - TEXT / 2.0]
     } else {
         [mid[0], mid[1] + 1.0]
     };
@@ -1469,6 +1720,8 @@ fn linear_dim(
         text: text.to_string(),
         anchor: if normal[0] > 0.0 {
             Anchor::Start
+        } else if normal[0] < 0.0 {
+            Anchor::End
         } else {
             Anchor::Middle
         },
@@ -1850,55 +2103,87 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
     let dr = doc.drawing(id)?;
     dr.validate()?;
     let (w, h) = dr.sheet.mm();
-    // Bodies used anywhere in the drawing, with one shared HLR resolution.
-    let mut used: Vec<BodyId> = Vec::new();
+    // Everything drawn anywhere in the drawing (definition bodies and placed
+    // occurrence bodies), with one shared HLR resolution.
+    let mut used_keys: Vec<Key> = Vec::new();
     for v in &dr.views {
-        if let ViewKind::Base { bodies, .. } = &v.kind {
-            for b in bodies {
-                if !used.contains(b) {
-                    used.push(*b);
+        if matches!(v.kind, ViewKind::Base { .. }) {
+            for key in view_keys(dr, v.id, eval)? {
+                if !used_keys.contains(&key) {
+                    used_keys.push(key);
                 }
             }
         }
     }
+    let mut used: Vec<BodyId> = Vec::new();
+    for (_, b) in &used_keys {
+        if !used.contains(b) {
+            used.push(*b);
+        }
+    }
     let mut diag: f64 = 0.0;
-    let mut breps: BTreeMap<BodyId, &k::Body> = BTreeMap::new();
+    let mut breps: BTreeMap<Key, k::Body> = BTreeMap::new();
     let mut unsupported: Vec<BodyId> = Vec::new();
-    for b in &used {
-        let Some(eb) = eval.body_by_id(*b) else {
+    for key in &used_keys {
+        let Some(eb) = eval.body_by_id(key.1) else {
             continue;
         };
         match eb.geometry.brep() {
             Some(body) => {
+                let body = match key.0 {
+                    0 => body.clone(),
+                    i => {
+                        let t = &eval.occurrences[i - 1].transform;
+                        k::transform_body(body, t)
+                            .map_err(|e| DocError::Validation(format!("drawing: {e}")))?
+                    }
+                };
                 let bb =
-                    k::bounds(body).map_err(|e| DocError::Validation(format!("drawing: {e}")))?;
+                    k::bounds(&body).map_err(|e| DocError::Validation(format!("drawing: {e}")))?;
                 let d = (0..3)
                     .map(|i| (bb.max[i] - bb.min[i]).powi(2))
                     .sum::<f64>()
                     .sqrt();
                 diag = diag.max(d);
-                breps.insert(*b, body);
+                breps.insert(*key, body);
             }
-            None => unsupported.push(*b),
+            None => {
+                if !unsupported.contains(&key.1) {
+                    unsupported.push(key.1)
+                }
+            }
         }
     }
     let diag = diag.max(1.0);
     let chord = hlr_chord(diag);
     let spacing = sample_spacing(diag);
-    let mut data: HashMap<BodyId, BodyData> = HashMap::new();
-    for (b, body) in &breps {
-        data.insert(*b, body_data(body, chord)?);
+    let mut data: HashMap<Key, BodyData> = HashMap::new();
+    for (key, body) in &breps {
+        data.insert(*key, body_data(body, chord)?);
     }
+    let bom = bom_rows(doc, eval);
 
     let mut groups: Vec<Group> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
     let mut reports: Vec<ViewReport> = Vec::new();
     let mut placed: BTreeMap<ViewId, Placed> = BTreeMap::new();
     let mut dimensioned = [false; 3];
+    // Balloons are laid out after every view is placed (they must avoid the
+    // other views): (view, anchors, view box, clearance left/right/below).
+    #[allow(clippy::type_complexity)]
+    let mut pending_balloons: Vec<(
+        ViewId,
+        Vec<(usize, [f64; 2])>,
+        [f64; 2],
+        [f64; 2],
+        [f64; 3],
+    )> = Vec::new();
 
     for v in &dr.views {
         let (frame, scale, base) = dr.resolve(v.id)?;
         let bodies = dr.bodies(v.id)?;
+        let keys = view_keys(dr, v.id, eval)?;
+        let assembly_view = keys.iter().any(|k| k.0 != 0);
         let missing: Vec<BodyId> = bodies
             .iter()
             .copied()
@@ -1909,7 +2194,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             .copied()
             .filter(|b| unsupported.contains(b))
             .collect();
-        let mut shown: Vec<&BodyData> = bodies.iter().filter_map(|b| data.get(b)).collect();
+        let mut shown: Vec<&BodyData> = keys.iter().filter_map(|k| data.get(k)).collect();
         let label = match &v.kind {
             ViewKind::Base { orientation, .. } => {
                 format!("{} {} (base)", v.id, orientation.label())
@@ -1942,14 +2227,14 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 z: frame.toward,
             };
             cut_plane = Some(plane);
-            for b in &bodies {
-                let Some(body) = breps.get(b) else { continue };
+            for key in &keys {
+                let Some(body) = breps.get(key) else { continue };
                 match crate::regen::split_by_plane(body, &plane, FeatureId(0))
                     .and_then(|(behind, _)| body_data(&behind, chord))
                 {
                     Ok(d) => section_data.push(d),
                     Err(e) => {
-                        section_error = Some(format!("{b}: {e}"));
+                        section_error = Some(format!("{}: {e}", key.1));
                         break;
                     }
                 }
@@ -2115,7 +2400,9 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             // Hole callouts (semantic; resolved now).
             let mut called: Vec<usize> = Vec::new();
             for a in &v.annotations {
-                let Annotation::HoleCallout { feature } = a;
+                let Annotation::HoleCallout { feature } = a else {
+                    continue;
+                };
                 match resolve_hole(doc, eval, *feature, &frame, g, &bodies) {
                     Ok((ci, d)) => {
                         let (c, r) = g.circles[ci];
@@ -2266,6 +2553,175 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 }
             }
         }
+        // Run 7: driven dimensions between semantic references, and balloons.
+        // Rows of user dimensions below the view (the view label goes under them).
+        let mut user_rows_below = 0usize;
+        if let Some(g) = &geom {
+            let auto_h = dims.iter().any(|d| d.kind == "horizontal");
+            let auto_v = dims.iter().any(|d| d.kind == "vertical");
+            let (mut nh, mut nv, mut nflag) = (0usize, 0usize, 0usize);
+            for a in &v.annotations {
+                let Annotation::Dimension { a, b, tolerance } = a else {
+                    continue;
+                };
+                let resolved = if assembly_view {
+                    Err(
+                        "dimensions refer to definition bodies; they are not supported in \
+                         assembly views"
+                            .to_string(),
+                    )
+                } else {
+                    measure_dimension(doc, eval, a, b.as_ref(), &frame, &bodies)
+                };
+                let kind = if b.is_some() {
+                    "distance"
+                } else {
+                    "hole_diameter"
+                };
+                match resolved {
+                    Ok(Measured::Diameter { d }) => {
+                        let text = tolerance.text(d);
+                        let found = match a {
+                            DimRef::Hole(f) => resolve_hole(doc, eval, *f, &frame, g, &bodies),
+                            DimRef::Face(_) => Err("not a hole".into()),
+                        };
+                        match found {
+                            Ok((ci, _)) => {
+                                let (c, r) = g.circles[ci];
+                                diameter_callout(
+                                    &mut dims_prims,
+                                    [off[0] + c[0] * scale, off[1] + c[1] * scale],
+                                    r * scale,
+                                    &format!("Ø{text}"),
+                                    LineStyle::Thin,
+                                );
+                                dims.push(DimensionReport {
+                                    kind: kind.into(),
+                                    value: Some(d),
+                                    text: format!("Ø{text}"),
+                                    dangling: None,
+                                });
+                            }
+                            Err(why) => {
+                                nflag += 1;
+                                dangling_dim(
+                                    &mut dims_prims,
+                                    &mut dims,
+                                    &mut issues,
+                                    (dr.id, v.id),
+                                    [lo[0], hi[1] + 3.0 + (TEXT + 1.0) * (nflag - 1) as f64],
+                                    kind,
+                                    why,
+                                );
+                            }
+                        }
+                    }
+                    Ok(Measured::Distance {
+                        value,
+                        ta,
+                        tb,
+                        horizontal,
+                        sign,
+                    }) => {
+                        let text = tolerance.text(value);
+                        if horizontal {
+                            let off_y = if auto_h { 16.0 } else { 8.0 } + 8.0 * nh as f64;
+                            nh += 1;
+                            user_rows_below = nh;
+                            let xa = off[0] + sign * ta * scale;
+                            let xb = off[0] + sign * tb * scale;
+                            linear_dim(
+                                &mut dims_prims,
+                                [xa.min(xb), lo[1]],
+                                [xa.max(xb), lo[1]],
+                                [0.0, -1.0],
+                                off_y,
+                                &text,
+                            );
+                        } else {
+                            let off_x = if auto_v { 8.0 } else { 0.0 } + 8.0 + 8.0 * nv as f64;
+                            nv += 1;
+                            let ya = off[1] + sign * ta * scale;
+                            let yb = off[1] + sign * tb * scale;
+                            linear_dim(
+                                &mut dims_prims,
+                                [lo[0], ya.min(yb)],
+                                [lo[0], ya.max(yb)],
+                                [-1.0, 0.0],
+                                off_x,
+                                &text,
+                            );
+                        }
+                        dims.push(DimensionReport {
+                            kind: kind.into(),
+                            value: Some(value),
+                            text,
+                            dangling: None,
+                        });
+                    }
+                    Err(why) => {
+                        nflag += 1;
+                        dangling_dim(
+                            &mut dims_prims,
+                            &mut dims,
+                            &mut issues,
+                            (dr.id, v.id),
+                            [lo[0], hi[1] + 3.0 + (TEXT + 1.0) * (nflag - 1) as f64],
+                            kind,
+                            why,
+                        );
+                    }
+                }
+            }
+            if v.annotations.contains(&Annotation::Balloons) {
+                // Anchor: the centre of each BOM item's first occurrence in
+                // this view (view coordinates), then balloons outside the view.
+                let mut anchors: Vec<(usize, [f64; 2])> = Vec::new();
+                for row in &bom {
+                    let mut bb: Option<k::Bounds> = None;
+                    let first = keys
+                        .iter()
+                        .find(|key| {
+                            key.0 != 0 && eval.occurrences[key.0 - 1].component == row.component
+                        })
+                        .map(|key| key.0);
+                    let Some(occ) = first else { continue };
+                    for key in keys.iter().filter(|key| key.0 == occ) {
+                        if let Some(d) = data.get(key) {
+                            let b = bb.get_or_insert(d.bounds);
+                            for i in 0..3 {
+                                b.min[i] = b.min[i].min(d.bounds.min[i]);
+                                b.max[i] = b.max[i].max(d.bounds.max[i]);
+                            }
+                        }
+                    }
+                    let Some(b) = bb else { continue };
+                    let c3 = [0, 1, 2].map(|i| (b.min[i] + b.max[i]) / 2.0);
+                    let c = frame.project(c3);
+                    anchors.push((row.item, [off[0] + c[0] * scale, off[1] + c[1] * scale]));
+                }
+                // Clear the dimensions on each side: automatic vertical
+                // dimensions stand right of the view, user ones left of it.
+                let right = if auto_v { 18.0 } else { 0.0 };
+                let left = if nv > 0 { 8.0 * nv as f64 + 14.0 } else { 0.0 };
+                let below = if auto_h { 22.0 } else { 10.0 } + 8.0 * nh as f64;
+                pending_balloons.push((v.id, anchors.clone(), lo, hi, [left, right, below]));
+                for (item, _) in &anchors {
+                    dims.push(DimensionReport {
+                        kind: "balloon".into(),
+                        value: Some(*item as f64),
+                        text: item.to_string(),
+                        dangling: None,
+                    });
+                }
+                if anchors.is_empty() {
+                    issues.push(format!(
+                        "{} view {}: balloons requested but the view shows no component occurrence",
+                        dr.id, v.id
+                    ));
+                }
+            }
+        }
         if !unsup.is_empty() && geom.is_some() {
             issues.push(format!(
                 "{} view {}: mesh bodies not drawn: {:?}",
@@ -2281,6 +2737,16 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                         18.0
                     } else {
                         6.0
+                    }
+                    - if user_rows_below > 0 {
+                        8.0 * user_rows_below as f64
+                            + if dims.iter().any(|d| d.kind == "horizontal") {
+                                0.0
+                            } else {
+                                4.0
+                            }
+                    } else {
+                        0.0
                     },
             ],
             size: 2.5,
@@ -2385,6 +2851,85 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             ));
         }
     }
+    let table_box = dr.bom.as_ref().map(|t| {
+        let (_, lo, hi) = bom_table(&bom, t, w, h);
+        (lo, hi)
+    });
+    for (vid, anchors, lo, hi, clear) in &pending_balloons {
+        let mut others: Vec<([f64; 2], [f64; 2])> = placed
+            .iter()
+            .filter(|(id, _)| *id != vid)
+            .map(|(_, p)| (p.lo, p.hi))
+            .collect();
+        others.extend(table_box);
+        let free = |b: &([f64; 2], [f64; 2])| {
+            b.0[0] >= 10.0
+                && b.0[1] >= 10.0
+                && b.1[0] <= w - 10.0
+                && b.1[1] <= h - 10.0
+                && others.iter().all(|o| {
+                    b.1[0] <= o.0[0] || b.0[0] >= o.1[0] || b.1[1] <= o.0[1] || b.0[1] >= o.1[1]
+                })
+        };
+        let layouts: Vec<BalloonLayout> = [
+            BalloonSide::Right,
+            BalloonSide::Left,
+            BalloonSide::Above,
+            BalloonSide::Below,
+        ]
+        .into_iter()
+        .map(|side| balloons(anchors, *lo, *hi, *clear, side))
+        .collect();
+        let pick = layouts.iter().position(|(_, b)| free(b));
+        if pick.is_none() {
+            issues.push(format!(
+                "{} view {vid}: the balloons overlap another view or the BOM table on every side",
+                dr.id
+            ));
+        }
+        groups.push(Group {
+            id: format!("balloons-{}", vid.0),
+            label: format!("{vid} balloons"),
+            prims: layouts[pick.unwrap_or(0)].0.clone(),
+        });
+    }
+    if let Some(t) = &dr.bom {
+        let (g, lo, hi) = bom_table(&bom, t, w, h);
+        for (vid, p) in &placed {
+            if lo[0] < p.hi[0] && hi[0] > p.lo[0] && lo[1] < p.hi[1] && hi[1] > p.lo[1] {
+                issues.push(format!(
+                    "{} the BOM table overlaps view {vid} (move the table or the view)",
+                    dr.id
+                ));
+            }
+        }
+        if bom.is_empty() {
+            issues.push(format!(
+                "{} the BOM table is empty (no evaluated component occurrences)",
+                dr.id
+            ));
+        }
+        groups.push(g);
+    }
+    if !dr.notes.is_empty() {
+        let mut prims = Vec::new();
+        for n in &dr.notes {
+            for (i, line) in n.text.lines().enumerate() {
+                prims.push(Prim::Text {
+                    at: [n.position[0], n.position[1] - 1.6 * TEXT * i as f64],
+                    size: TEXT,
+                    text: line.to_string(),
+                    anchor: Anchor::Start,
+                    style: LineStyle::Thin,
+                });
+            }
+        }
+        groups.push(Group {
+            id: "notes".into(),
+            label: "Notes".into(),
+            prims,
+        });
+    }
     issues.sort();
     let mut all = vec![border(dr, w, h), title_block(doc, dr, w, &used)];
     all.extend(groups);
@@ -2399,7 +2944,473 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         issues,
         sample_spacing: spacing,
         chord,
+        bom: if dr.bom.is_some() { bom } else { Vec::new() },
     })
+}
+
+/// What is drawn: (0, body) for a definition/loose body at its own
+/// placement, (i + 1, body) for a body of `eval.occurrences[i]` placed by its
+/// transform.
+type Key = (usize, BodyId);
+
+/// The drawn items of view `id` (its base view's bodies and, for an assembly
+/// view, every evaluated occurrence's bodies).
+fn view_keys(dr: &Drawing, id: ViewId, eval: &Evaluation) -> Result<Vec<Key>> {
+    let (_, _, base) = dr.resolve(id)?;
+    let ViewKind::Base {
+        bodies, assembly, ..
+    } = &dr.view(base)?.kind
+    else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<Key> = bodies.iter().map(|b| (0, *b)).collect();
+    if *assembly {
+        for (i, o) in eval.occurrences.iter().enumerate() {
+            out.extend(o.bodies.iter().map(|b| (i + 1, *b)));
+        }
+    }
+    Ok(out)
+}
+
+/// One row of the drawing's bill of materials.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BomRow {
+    /// Item number (balloons show it).
+    pub item: usize,
+    pub component: crate::assembly::ComponentId,
+    pub name: String,
+    pub part_number: String,
+    /// Evaluated (not suppressed) occurrences, nested ones included.
+    pub quantity: usize,
+    /// Distinct materials of the definition bodies ("-" when none).
+    pub material: String,
+}
+
+/// Flattened BOM of the evaluated assembly: one row per component with at
+/// least one evaluated occurrence, in component order; quantity = number of
+/// evaluated occurrences (suppressed ones are not evaluated). Item numbers
+/// are 1.. in that order.
+pub fn bom_rows(doc: &Document, eval: &Evaluation) -> Vec<BomRow> {
+    let mut rows = Vec::new();
+    for c in &doc.assembly.components {
+        let quantity = eval
+            .occurrences
+            .iter()
+            .filter(|o| o.component == c.id)
+            .count();
+        if quantity == 0 {
+            continue;
+        }
+        let mut mats: Vec<String> = c
+            .bodies
+            .iter()
+            .filter_map(|b| doc.bodies.iter().find(|x| x.id == *b))
+            .filter_map(|b| b.material.as_ref().map(|m| m.name.clone()))
+            .collect();
+        mats.sort();
+        mats.dedup();
+        rows.push(BomRow {
+            item: rows.len() + 1,
+            component: c.id,
+            name: c.name.clone(),
+            part_number: if c.part_number.is_empty() {
+                "-".into()
+            } else {
+                c.part_number.clone()
+            },
+            quantity,
+            material: if mats.is_empty() {
+                "-".into()
+            } else {
+                mats.join(", ")
+            },
+        });
+    }
+    rows
+}
+
+/// Geometry of a dimension reference.
+enum RefGeom {
+    Plane { o: [f64; 3], n: [f64; 3] },
+    Axis { p: [f64; 3], d: [f64; 3], dia: f64 },
+}
+
+enum Measured {
+    Diameter {
+        d: f64,
+    },
+    /// `value` = |tb − ta|; `ta`/`tb` are the references' coordinates along
+    /// the view's right (horizontal) or up axis, times `sign`.
+    Distance {
+        value: f64,
+        ta: f64,
+        tb: f64,
+        horizontal: bool,
+        sign: f64,
+    },
+}
+
+fn resolve_ref(
+    doc: &Document,
+    eval: &Evaluation,
+    r: &DimRef,
+    bodies: &[BodyId],
+) -> std::result::Result<RefGeom, String> {
+    match r {
+        DimRef::Face(fr) => {
+            let c = eval
+                .faces
+                .iter()
+                .find(|c| c.reference == *fr)
+                .ok_or_else(|| {
+                    format!(
+                        "face {:?} of {} no longer exists (deleted, suppressed or changed)",
+                        fr.role, fr.feature
+                    )
+                })?;
+            if !bodies.contains(&c.body) {
+                return Err(format!(
+                    "the face is on {}, which this view does not show",
+                    c.body
+                ));
+            }
+            Ok(RefGeom::Plane {
+                o: c.frame.origin,
+                n: c.frame.z,
+            })
+        }
+        DimRef::Hole(feature) => {
+            let f = doc
+                .features
+                .iter()
+                .find(|f| f.id == *feature)
+                .ok_or_else(|| format!("hole {feature} no longer exists"))?;
+            let FeatureKind::Hole {
+                center,
+                diameter,
+                target,
+                ..
+            } = &f.kind
+            else {
+                return Err(format!("{feature} is not a hole"));
+            };
+            if f.suppressed {
+                return Err(format!("hole {feature} is suppressed"));
+            }
+            if !bodies.contains(target) {
+                return Err(format!(
+                    "hole {feature} is in {target}, which this view does not show"
+                ));
+            }
+            let fr = eval
+                .features
+                .iter()
+                .find(|r| r.id == *feature)
+                .and_then(|r| r.frame)
+                .ok_or_else(|| format!("hole {feature} was not evaluated"))?;
+            Ok(RefGeom::Axis {
+                p: fr.to_world(*center),
+                d: fr.z,
+                dia: *diameter,
+            })
+        }
+    }
+}
+
+/// Measure a dimension in the current model and check it can be drawn in
+/// true length along the view's horizontal or vertical axis.
+fn measure_dimension(
+    doc: &Document,
+    eval: &Evaluation,
+    a: &DimRef,
+    b: Option<&DimRef>,
+    frame: &ViewFrame,
+    bodies: &[BodyId],
+) -> std::result::Result<Measured, String> {
+    const PAR: f64 = 1e-9;
+    let ga = resolve_ref(doc, eval, a, bodies)?;
+    let Some(b) = b else {
+        return match ga {
+            RefGeom::Axis { d, dia, .. } => {
+                if (dot(d, frame.toward).abs() - 1.0).abs() > PAR {
+                    Err("the hole is not seen end-on in this view".into())
+                } else {
+                    Ok(Measured::Diameter { d: dia })
+                }
+            }
+            RefGeom::Plane { .. } => Err("a diameter needs a hole reference".into()),
+        };
+    };
+    let gb = resolve_ref(doc, eval, b, bodies)?;
+    let (dir, pa, pb) = match (&ga, &gb) {
+        (RefGeom::Plane { o: oa, n: na }, RefGeom::Plane { o: ob, n: nb }) => {
+            if dot(*na, *nb).abs() < 1.0 - PAR {
+                return Err("the faces are not parallel".into());
+            }
+            (*na, *oa, *ob)
+        }
+        (RefGeom::Plane { o, n }, RefGeom::Axis { p, d, .. })
+        | (RefGeom::Axis { p, d, .. }, RefGeom::Plane { o, n }) => {
+            if dot(*n, *d).abs() > PAR {
+                return Err("the hole axis is not parallel to the face".into());
+            }
+            if matches!(ga, RefGeom::Plane { .. }) {
+                (*n, *o, *p)
+            } else {
+                (*n, *p, *o)
+            }
+        }
+        (RefGeom::Axis { p: pa, d: da, .. }, RefGeom::Axis { p: pb, d: db, .. }) => {
+            if dot(*da, *db).abs() < 1.0 - PAR {
+                return Err("the hole axes are not parallel".into());
+            }
+            let w = sub(*pb, *pa);
+            let along = dot(w, *da);
+            let perp = [0, 1, 2].map(|i| w[i] - along * da[i]);
+            if dot(perp, perp).sqrt() <= k::tol::MIN_LENGTH {
+                return Err("the hole axes coincide".into());
+            }
+            (norm(perp), *pa, *pb)
+        }
+    };
+    if dot(dir, frame.toward).abs() > PAR {
+        return Err("the measured direction is not in this view's plane (not true length)".into());
+    }
+    let (x, y) = (dot(dir, frame.right), dot(dir, frame.up));
+    let horizontal = if x.abs() > 1.0 - PAR {
+        true
+    } else if y.abs() > 1.0 - PAR {
+        false
+    } else {
+        return Err("oblique dimensions are not supported (measured direction is not along the view's horizontal or vertical axis)".into());
+    };
+    let sign = if horizontal { x.signum() } else { y.signum() };
+    let (ta, tb) = (dot(pa, dir), dot(pb, dir));
+    Ok(Measured::Distance {
+        value: (tb - ta).abs(),
+        ta,
+        tb,
+        horizontal,
+        sign,
+    })
+}
+
+/// A dangling dimension: red text without a value, reported as an issue.
+fn dangling_dim(
+    prims: &mut Vec<Prim>,
+    dims: &mut Vec<DimensionReport>,
+    issues: &mut Vec<String>,
+    (did, vid): (DrawingId, ViewId),
+    at: [f64; 2],
+    kind: &str,
+    why: String,
+) {
+    let text = format!("? {kind}: {why}");
+    prims.push(Prim::Text {
+        at,
+        size: 2.5,
+        text: text.clone(),
+        anchor: Anchor::Start,
+        style: LineStyle::Flag,
+    });
+    issues.push(format!(
+        "{did} view {vid}: {kind} dimension is dangling: {why}"
+    ));
+    dims.push(DimensionReport {
+        kind: kind.into(),
+        value: None,
+        text,
+        dangling: Some(why),
+    });
+}
+
+/// Balloon radius (sheet mm).
+const BALLOON_R: f64 = 4.0;
+
+/// Balloon primitives and the box of their circles.
+type BalloonLayout = (Vec<Prim>, ([f64; 2], [f64; 2]));
+
+#[derive(Clone, Copy, PartialEq)]
+enum BalloonSide {
+    Right,
+    Left,
+    Above,
+    Below,
+}
+
+/// Balloons in a column right or left of the view, or a row above or below
+/// it, past `clear` (left, right, below) sheet mm of dimensions, at least
+/// 2.25 balloon radii apart, each with a leader ending in a dot at its
+/// anchor. Returns the primitives and the box of the balloon circles.
+fn balloons(
+    anchors: &[(usize, [f64; 2])],
+    lo: [f64; 2],
+    hi: [f64; 2],
+    clear: [f64; 3],
+    side: BalloonSide,
+) -> BalloonLayout {
+    let mut out = Vec::new();
+    let mut sorted: Vec<&(usize, [f64; 2])> = anchors.iter().collect();
+    let column = matches!(side, BalloonSide::Right | BalloonSide::Left);
+    if column {
+        sorted.sort_by(|a, b| b.1[1].total_cmp(&a.1[1]).then(a.0.cmp(&b.0)));
+    } else {
+        sorted.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]).then(a.0.cmp(&b.0)));
+    }
+    let fixed = match side {
+        BalloonSide::Right => hi[0] + clear[1] + 3.0 * BALLOON_R,
+        BalloonSide::Left => lo[0] - clear[0] - 3.0 * BALLOON_R,
+        BalloonSide::Above => hi[1] + 2.5 * BALLOON_R,
+        BalloonSide::Below => lo[1] - clear[2] - 2.0 * BALLOON_R,
+    };
+    let (mut blo, mut bhi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let mut last = if column {
+        f64::INFINITY
+    } else {
+        f64::NEG_INFINITY
+    };
+    for (item, a) in sorted {
+        let c = if column {
+            let y = a[1].min(last - 2.25 * BALLOON_R);
+            last = y;
+            [fixed, y]
+        } else {
+            let x = a[0].max(last + 2.25 * BALLOON_R);
+            last = x;
+            [x, fixed]
+        };
+        for i in 0..2 {
+            blo[i] = blo[i].min(c[i] - BALLOON_R);
+            bhi[i] = bhi[i].max(c[i] + BALLOON_R);
+        }
+        out.push(Prim::Arc {
+            c,
+            r: BALLOON_R,
+            start: 0.0,
+            sweep: TAU,
+            style: LineStyle::Thin,
+        });
+        out.push(Prim::Text {
+            at: [c[0], c[1] - TEXT / 3.0],
+            size: TEXT,
+            text: item.to_string(),
+            anchor: Anchor::Middle,
+            style: LineStyle::Thin,
+        });
+        let d = [a[0] - c[0], a[1] - c[1]];
+        let l = d[0].hypot(d[1]).max(1e-9);
+        out.push(Prim::Line {
+            a: [c[0] + d[0] / l * BALLOON_R, c[1] + d[1] / l * BALLOON_R],
+            b: *a,
+            style: LineStyle::Thin,
+        });
+        let r = 0.6;
+        out.push(Prim::Polygon {
+            pts: vec![
+                [a[0] - r, a[1]],
+                [a[0], a[1] - r],
+                [a[0] + r, a[1]],
+                [a[0], a[1] + r],
+            ],
+            fill: true,
+            style: LineStyle::Thin,
+        });
+    }
+    (out, (blo, bhi))
+}
+
+/// Column titles and widths (mm) of the BOM table.
+const BOM_COLS: [(&str, f64); 5] = [
+    ("ITEM", 12.0),
+    ("PART NUMBER", 36.0),
+    ("NAME", 40.0),
+    ("QTY", 12.0),
+    ("MATERIAL", 30.0),
+];
+const BOM_ROW: f64 = 6.0;
+
+/// Text cut to the characters that fit `width` at `size` (Helvetica average
+/// width ≈ 0.55 em), with "..." when cut.
+fn fit_text(t: &str, width: f64, size: f64) -> String {
+    let n = ((width - 2.0) / (0.55 * size)).floor().max(1.0) as usize;
+    if t.chars().count() <= n {
+        t.to_string()
+    } else {
+        let mut s: String = t.chars().take(n.saturating_sub(3)).collect();
+        s.push_str("...");
+        s
+    }
+}
+
+/// The BOM table group and its sheet box (header row on top, items below
+/// in order, bottom row = last item).
+fn bom_table(rows: &[BomRow], t: &BomTable, w: f64, h: f64) -> (Group, [f64; 2], [f64; 2]) {
+    let width: f64 = BOM_COLS.iter().map(|c| c.1).sum();
+    let height = BOM_ROW * (rows.len() + 1) as f64;
+    // Default: top-right corner inside the border (views are placed from the
+    // lower left, the title block is bottom right).
+    let p0 = t.position.unwrap_or([w - 10.0 - width, h - 10.0 - height]);
+    let (lo, hi) = (p0, [p0[0] + width, p0[1] + height]);
+    let mut prims = vec![Prim::Polygon {
+        pts: vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]],
+        fill: false,
+        style: LineStyle::Thin,
+    }];
+    for r in 1..=rows.len() {
+        let y = lo[1] + BOM_ROW * r as f64;
+        prims.push(Prim::Line {
+            a: [lo[0], y],
+            b: [hi[0], y],
+            style: LineStyle::Thin,
+        });
+    }
+    let mut x = lo[0];
+    for (i, (_, cw)) in BOM_COLS.iter().enumerate() {
+        if i > 0 {
+            prims.push(Prim::Line {
+                a: [x, lo[1]],
+                b: [x, hi[1]],
+                style: LineStyle::Thin,
+            });
+        }
+        x += cw;
+    }
+    let size = 2.5;
+    let mut line = |y: f64, cells: [String; 5]| {
+        let mut x = lo[0];
+        for (c, (_, cw)) in cells.iter().zip(BOM_COLS.iter()) {
+            prims.push(Prim::Text {
+                at: [x + 1.0, y + (BOM_ROW - size) / 2.0],
+                size,
+                text: fit_text(c, *cw, size),
+                anchor: Anchor::Start,
+                style: LineStyle::Thin,
+            });
+            x += cw;
+        }
+    };
+    line(hi[1] - BOM_ROW, BOM_COLS.map(|c| c.0.to_string()));
+    for (i, r) in rows.iter().enumerate() {
+        line(
+            hi[1] - BOM_ROW * (i + 2) as f64,
+            [
+                r.item.to_string(),
+                r.part_number.clone(),
+                r.name.clone(),
+                r.quantity.to_string(),
+                r.material.clone(),
+            ],
+        );
+    }
+    (
+        Group {
+            id: "bom".into(),
+            label: "Bill of materials".into(),
+            prims,
+        },
+        lo,
+        hi,
+    )
 }
 
 /// Find the end-on circle of Hole `feature` in a view: (circle index, diameter).

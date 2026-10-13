@@ -397,11 +397,20 @@ pub enum Command {
     /// Components / occurrences / joints (run 6 pull-forward of Run-7 §1-2,
     /// docs/ASSEMBLIES.md; format v6). A component groups bodies of this
     /// document and gets a first occurrence at identity.
+    ///
+    /// Run 7: `occurrences` (siblings with the same owner) move into the new
+    /// component's definition, which becomes a sub-assembly; its first
+    /// occurrence takes their former owner at identity, so nothing moves.
+    /// With neither bodies nor occurrences an empty component is made (activate
+    /// it to model into it).
     CreateComponent {
         name: String,
+        #[serde(default)]
         bodies: Vec<BodyId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         part_number: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        occurrences: Vec<rcad_document::assembly::OccurrenceId>,
     },
     /// Remove a component and its occurrences (its bodies become loose bodies).
     DeleteComponent {
@@ -413,10 +422,16 @@ pub enum Command {
     },
     /// A further linked occurrence: rotate `angle_deg` about `axis` (default +Z)
     /// through the world origin, then translate.
+    ///
+    /// Run 7: with `owner`, the occurrence is a child in that component's
+    /// definition (a sub-assembly; placement relative to it). Cyclic
+    /// containment is refused.
     AddOccurrence {
         component: rcad_document::assembly::ComponentId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<rcad_document::assembly::ComponentId>,
         #[serde(default)]
         translate: [f64; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -463,10 +478,20 @@ pub enum Command {
         min: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<f64>,
+        /// Run 7: second/third values with limits (cylindrical, pin-slot,
+        /// planar, ball).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra: Vec<rcad_document::assembly::DofValue>,
+        /// Run 7: slot direction (pin-slot) / in-plane u (planar, ball).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir2: Option<[f64; 3]>,
     },
+    /// Set value `index` (default 0) of a joint; refused outside its limits.
     SetJointValue {
         joint: rcad_document::assembly::JointId,
         value: f64,
+        #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
+        index: usize,
     },
     SetJointLimits {
         joint: rcad_document::assembly::JointId,
@@ -474,6 +499,13 @@ pub enum Command {
         min: Option<f64>,
         #[serde(default)]
         max: Option<f64>,
+        #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
+        index: usize,
+    },
+    /// Run 7: set all values of a multi-DOF joint at once (atomic).
+    SetJointValues {
+        joint: rcad_document::assembly::JointId,
+        values: Vec<f64>,
     },
     DeleteJoint {
         joint: rcad_document::assembly::JointId,
@@ -491,6 +523,63 @@ pub enum Command {
     ExportAssembly {
         path: PathBuf,
         format: assembly::AssemblyFormat,
+    },
+    /// Run 7: rename a component (definition name; BOM row).
+    RenameComponent {
+        component: rcad_document::assembly::ComponentId,
+        name: String,
+    },
+    /// Run 7: rename an occurrence.
+    RenameOccurrence {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        name: String,
+    },
+    /// Run 7: make `component` the active component (bodies created while it
+    /// is active join its definition); `null` returns to the top level.
+    ActivateComponent {
+        #[serde(default)]
+        component: Option<rcad_document::assembly::ComponentId>,
+    },
+    /// Run 7: hide/show an occurrence (display only; still in BOM, mass,
+    /// interference and export).
+    SetOccurrenceHidden {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        hidden: bool,
+    },
+    /// Run 7: break the link of `occurrence`: a new component (independent
+    /// copy) with copies of the definition bodies, made from the current
+    /// geometry by body-copy features; the occurrence keeps its placement and
+    /// stops following later edits of the source definition.
+    MakeIndependent {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Run 7: rigid group: rigid joints from the first occurrence to each of
+    /// the others (siblings, free, not grounded); one undo step.
+    CreateRigidGroup {
+        occurrences: Vec<rcad_document::assembly::OccurrenceId>,
+    },
+    /// Run 7: exploded-view offset (world mm) of the instance `path` ("O3/O7");
+    /// display state only. A zero offset removes the entry.
+    SetExplodeOffset {
+        path: String,
+        offset: [f64; 3],
+    },
+    /// Run 7: show or hide the exploded view.
+    SetExploded {
+        exploded: bool,
+    },
+    /// Run 7: move a free occurrence so that planar face `from` (of its
+    /// definition) lies on planar face `to` of another occurrence, facing it
+    /// (normals opposite) with `offset` mm gap; translation + minimal rotation.
+    AlignOccurrence {
+        occurrence: rcad_document::assembly::OccurrenceId,
+        from: measure_faces::FacePick,
+        target: rcad_document::assembly::OccurrenceId,
+        to: measure_faces::FacePick,
+        #[serde(default)]
+        offset: f64,
     },
     /// Exact geometry of face `a` (plane, or cylinder with radius/diameter)
     /// and, with `b`, the distance or angle between the two faces
@@ -584,6 +673,14 @@ pub enum Command {
     },
     DeleteConfiguration {
         name: String,
+    },
+    /// Run 7: replace every configuration at once (the configuration table
+    /// editor; one undo step). Each row is checked like `set_configuration`
+    /// and names must be unique; the active configuration is re-applied (or
+    /// cleared when it is no longer in the table). Features and occurrences
+    /// that no configuration controls any more are restored (unsuppressed).
+    SetConfigurationTable {
+        configurations: Vec<rcad_document::Configuration>,
     },
     /// Apply configuration `name` (one undo step): its parameter values and
     /// the suppression of every configured feature; refused unchanged when the
@@ -856,6 +953,11 @@ pub enum Command {
         bodies: Vec<BodyId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         standard_views: Option<bool>,
+        /// Run 7: an assembly drawing: the base view shows the evaluated
+        /// assembly (every placed occurrence, plus `bodies` as loose bodies),
+        /// with balloons on it and a BOM table on the sheet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        assembly: bool,
     },
     /// Change drawing fields (empty `part_number` / `material`: from the model).
     EditDrawing {
@@ -911,6 +1013,58 @@ pub enum Command {
         drawing: rcad_document::drawing::DrawingId,
         view: rcad_document::drawing::ViewId,
         feature: FeatureId,
+    },
+    /// Run 7: a driven dimension in a view between semantic references
+    /// (`{"face": {feature, role}}` planar face or `{"hole": F}` hole axis),
+    /// or the diameter of a hole (`b` omitted), with an optional tolerance
+    /// (`{"type": "symmetric", "value"}`, `deviation`/`limits` with
+    /// `upper`/`lower`). Measured at every render; a reference that stops
+    /// resolving is shown and reported as dangling.
+    AddDrawingDimension {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        a: rcad_document::drawing::DimRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        b: Option<rcad_document::drawing::DimRef>,
+        #[serde(default)]
+        tolerance: rcad_document::drawing::Tolerance,
+    },
+    /// Change the tolerance of annotation `index` (a dimension) of a view.
+    SetDimensionTolerance {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        index: usize,
+        tolerance: rcad_document::drawing::Tolerance,
+    },
+    /// Remove annotation `index` (0-based, in the view's annotation list) of a view.
+    RemoveDrawingAnnotation {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        index: usize,
+    },
+    /// Show (or hide) BOM balloons in a view.
+    SetBalloons {
+        drawing: rcad_document::drawing::DrawingId,
+        view: rcad_document::drawing::ViewId,
+        show: bool,
+    },
+    /// Show (or hide) the BOM table; `position`: its bottom-left corner
+    /// (sheet mm; default on the title block).
+    SetBomTable {
+        drawing: rcad_document::drawing::DrawingId,
+        show: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<[f64; 2]>,
+    },
+    /// Add a text note at a sheet position (mm); `Response.view` unused.
+    AddDrawingNote {
+        drawing: rcad_document::drawing::DrawingId,
+        text: String,
+        position: [f64; 2],
+    },
+    RemoveDrawingNote {
+        drawing: rcad_document::drawing::DrawingId,
+        index: usize,
     },
     /// Render the drawing from the current geometry and write it (`format`
     /// default from the extension: .svg / .pdf / .dxf). `Response.drawing_report`.
@@ -978,6 +1132,7 @@ impl Command {
             Command::SetRollback { .. } => "set_rollback",
             Command::SetConfiguration { .. } => "set_configuration",
             Command::DeleteConfiguration { .. } => "delete_configuration",
+            Command::SetConfigurationTable { .. } => "set_configuration_table",
             Command::SetOccurrenceSuppressed { .. } => "set_occurrence_suppressed",
             Command::ActivateConfiguration { .. } => "activate_configuration",
             Command::ExportConfigurations { .. } => "export_configurations",
@@ -1019,6 +1174,16 @@ impl Command {
             Command::Bom => "bom",
             Command::Interference { .. } => "interference",
             Command::ExportAssembly { .. } => "export_assembly",
+            Command::SetJointValues { .. } => "set_joint_values",
+            Command::RenameComponent { .. } => "rename_component",
+            Command::RenameOccurrence { .. } => "rename_occurrence",
+            Command::ActivateComponent { .. } => "activate_component",
+            Command::SetOccurrenceHidden { .. } => "set_occurrence_hidden",
+            Command::MakeIndependent { .. } => "make_independent",
+            Command::CreateRigidGroup { .. } => "create_rigid_group",
+            Command::SetExplodeOffset { .. } => "set_explode_offset",
+            Command::SetExploded { .. } => "set_exploded",
+            Command::AlignOccurrence { .. } => "align_occurrence",
             Command::SetSketchPlane { .. } => "set_sketch_plane",
             Command::ImportStep { .. } => "import_step",
             Command::ImportStl { .. } => "import_stl",
@@ -1046,6 +1211,13 @@ impl Command {
             Command::RemoveDrawingView { .. } => "remove_drawing_view",
             Command::AddHoleCallout { .. } => "add_hole_callout",
             Command::RemoveHoleCallout { .. } => "remove_hole_callout",
+            Command::AddDrawingDimension { .. } => "add_drawing_dimension",
+            Command::SetDimensionTolerance { .. } => "set_dimension_tolerance",
+            Command::RemoveDrawingAnnotation { .. } => "remove_drawing_annotation",
+            Command::SetBalloons { .. } => "set_balloons",
+            Command::SetBomTable { .. } => "set_bom_table",
+            Command::AddDrawingNote { .. } => "add_drawing_note",
+            Command::RemoveDrawingNote { .. } => "remove_drawing_note",
             Command::ExportDrawing { .. } => "export_drawing",
             Command::Measure => "measure",
             Command::Inspect => "inspect",
@@ -2682,47 +2854,16 @@ impl Session {
                 part_number,
                 excluded_occurrences,
             } => {
-                use rcad_document::params;
-                let name = name.trim().to_string();
-                if name.is_empty()
-                    || !name
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
-                {
-                    return Err(DocError::Validation(format!(
-                        "configuration name '{name}': letters, digits, space, _ - . only"
-                    )));
-                }
-                for (p, e) in values {
-                    params::check_syntax(e).map_err(|x| DocError::Expression {
-                        name: p.clone(),
-                        detail: format!("'{e}': {x}"),
-                    })?;
-                }
                 let c = rcad_document::Configuration {
-                    name: name.clone(),
+                    name: name.trim().to_string(),
                     values: values.clone(),
                     suppressed: suppressed.iter().copied().collect(),
                     part_number: part_number.trim().to_string(),
                     excluded_occurrences: excluded_occurrences.iter().copied().collect(),
                 };
                 let m = self.model_mut()?;
-                for f in &c.suppressed {
-                    m.document().feature(*f)?;
-                }
-                for o in &c.excluded_occurrences {
-                    if !m.document().assembly.occurrences.iter().any(|x| x.id == *o) {
-                        return Err(DocError::Validation(format!("unknown occurrence {o:?}")));
-                    }
-                }
-                for p in c.values.keys() {
-                    if !m.document().parameters.iter().any(|x| x.name == *p) {
-                        return Err(DocError::Expression {
-                            name: p.clone(),
-                            detail: "no such parameter".into(),
-                        });
-                    }
-                }
+                check_configuration(m.document(), &c)?;
+                let name = c.name.clone();
                 m.transact(&format!("Configuration {name}"), |d| {
                     match d.configurations.iter_mut().find(|x| x.name == name) {
                         Some(x) => *x = c,
@@ -2730,6 +2871,55 @@ impl Session {
                     }
                     if d.active_configuration.as_deref() == Some(&name) {
                         d.apply_configuration(&name)?;
+                    }
+                    Ok(())
+                })?;
+            }
+            Command::SetConfigurationTable { configurations } => {
+                let mut list = configurations.clone();
+                let m = self.model_mut()?;
+                for (i, c) in list.iter_mut().enumerate() {
+                    c.name = c.name.trim().to_string();
+                    c.part_number = c.part_number.trim().to_string();
+                    check_configuration(m.document(), c)?;
+                    if list_has_name(&configurations[..i], &c.name) {
+                        return Err(DocError::Validation(format!(
+                            "configuration '{}' appears twice in the table",
+                            c.name
+                        )));
+                    }
+                }
+                m.transact("Edit configuration table", |d| {
+                    // Features/occurrences no configuration controls any more
+                    // return to unsuppressed (instead of keeping whatever the
+                    // last activation left).
+                    let old_f = d.configured_features();
+                    let old_o: std::collections::BTreeSet<_> = d
+                        .configurations
+                        .iter()
+                        .flat_map(|c| c.excluded_occurrences.iter().copied())
+                        .collect();
+                    d.configurations = list;
+                    let new_f = d.configured_features();
+                    for f in old_f.difference(&new_f) {
+                        d.feature_mut(*f)?.suppressed = false;
+                    }
+                    let new_o: std::collections::BTreeSet<_> = d
+                        .configurations
+                        .iter()
+                        .flat_map(|c| c.excluded_occurrences.iter().copied())
+                        .collect();
+                    for o in old_o.difference(&new_o) {
+                        if let Some(x) = d.assembly.occurrences.iter_mut().find(|x| x.id == *o) {
+                            x.suppressed = false;
+                        }
+                    }
+                    match d.active_configuration.clone() {
+                        Some(a) if d.configurations.iter().any(|c| c.name == a) => {
+                            d.apply_configuration(&a)?;
+                        }
+                        Some(_) => d.active_configuration = None,
+                        None => {}
                     }
                     Ok(())
                 })?;
@@ -3192,7 +3382,17 @@ impl Session {
             | Command::DeleteJoint { .. }
             | Command::Bom
             | Command::Interference { .. }
-            | Command::ExportAssembly { .. } => {
+            | Command::ExportAssembly { .. }
+            | Command::SetJointValues { .. }
+            | Command::RenameComponent { .. }
+            | Command::RenameOccurrence { .. }
+            | Command::ActivateComponent { .. }
+            | Command::SetOccurrenceHidden { .. }
+            | Command::MakeIndependent { .. }
+            | Command::CreateRigidGroup { .. }
+            | Command::SetExplodeOffset { .. }
+            | Command::SetExploded { .. }
+            | Command::AlignOccurrence { .. } => {
                 let m = self.model_mut()?;
                 assembly::run(m, cmd, r)?;
             }
@@ -3710,6 +3910,13 @@ impl Session {
             | Command::RemoveDrawingView { .. }
             | Command::AddHoleCallout { .. }
             | Command::RemoveHoleCallout { .. }
+            | Command::AddDrawingDimension { .. }
+            | Command::SetDimensionTolerance { .. }
+            | Command::RemoveDrawingAnnotation { .. }
+            | Command::SetBalloons { .. }
+            | Command::SetBomTable { .. }
+            | Command::AddDrawingNote { .. }
+            | Command::RemoveDrawingNote { .. }
             | Command::ExportDrawing { .. } => {}
         }
         r.summary = Some(self.summary());
@@ -4226,4 +4433,50 @@ pub fn end_cap_of(extrude: FeatureId) -> SketchPlane {
         feature: extrude,
         role: FaceRole::ExtrudeEndCap,
     })
+}
+
+fn list_has_name(list: &[rcad_document::Configuration], name: &str) -> bool {
+    list.iter().any(|c| c.name.trim() == name)
+}
+
+/// A configuration's name, expressions, features, occurrences and parameters
+/// must be valid for `d` (shared by `set_configuration` and the table).
+fn check_configuration(
+    d: &rcad_document::Document,
+    c: &rcad_document::Configuration,
+) -> Result<(), DocError> {
+    use rcad_document::params;
+    let name = &c.name;
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ' '))
+    {
+        return Err(DocError::Validation(format!(
+            "configuration name '{name}': letters, digits, space, _ - . only"
+        )));
+    }
+    for (p, e) in &c.values {
+        params::check_syntax(e).map_err(|x| DocError::Expression {
+            name: p.clone(),
+            detail: format!("'{e}': {x}"),
+        })?;
+    }
+    for f in &c.suppressed {
+        d.feature(*f)?;
+    }
+    for o in &c.excluded_occurrences {
+        if !d.assembly.occurrences.iter().any(|x| x.id == *o) {
+            return Err(DocError::Validation(format!("unknown occurrence {o:?}")));
+        }
+    }
+    for p in c.values.keys() {
+        if !d.parameters.iter().any(|x| x.name == *p) {
+            return Err(DocError::Expression {
+                name: p.clone(),
+                detail: "no such parameter".into(),
+            });
+        }
+    }
+    Ok(())
 }

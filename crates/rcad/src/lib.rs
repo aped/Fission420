@@ -7,6 +7,7 @@
 pub mod app;
 pub mod assembly_ui;
 pub mod bodies;
+pub mod config_ui;
 pub mod direct_edit_ui;
 #[cfg(test)]
 mod display_fault_tests;
@@ -15,6 +16,7 @@ pub mod engine;
 pub mod exchange;
 pub mod extrude;
 pub mod face_measure;
+pub mod joint_ui;
 pub mod panels;
 pub mod params_ui;
 pub mod pattern_ui;

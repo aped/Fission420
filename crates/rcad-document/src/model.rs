@@ -2027,6 +2027,13 @@ impl Document {
             visible: true,
             material: None,
         });
+        // Run 7: a body created while a component is active joins its
+        // definition (docs/ASSEMBLIES.md, active-component editing).
+        if let Some(c) = self.assembly.active
+            && let Ok(c) = self.assembly.component_mut(c)
+        {
+            c.bodies.push(id);
+        }
         id
     }
 

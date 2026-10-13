@@ -3,12 +3,16 @@
 //! the right), add an iso view, switch the projection convention, export to
 //! PDF/SVG and read the last export's report (flagged views and dangling
 //! callouts in red). Everything goes through the shared commands.
+//! Run 7: assembly drawings (placed occurrences, BOM table, balloons),
+//! driven dimensions between semantic references with tolerances, notes.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 use eframe::egui::{self, Color32, RichText};
 use rcad_commands::drawings::{DrawingReport, ViewSpec};
 use rcad_commands::{Command, DocSummary, Response};
-use rcad_document::drawing::{DrawingId, Orientation, Projection, ViewKind};
+use rcad_document::drawing::{
+    Annotation, DimRef, Drawing, DrawingId, Orientation, Projection, Tolerance, ViewId, ViewKind,
+};
 
 /// Drawings section state.
 #[derive(Debug, Clone)]
@@ -17,6 +21,15 @@ pub struct DrawingUi {
     pub path: String,
     /// (doc_id, revision, report) of the last export.
     pub report: Option<(u64, u64, DrawingReport)>,
+    /// Run 7 annotation editor: target view, references, tolerance, note text.
+    pub dim_view: Option<ViewId>,
+    pub dim_a: Option<DimRef>,
+    pub dim_b: Option<DimRef>,
+    /// 0 none, 1 ±, 2 deviation, 3 limits.
+    pub tol_kind: usize,
+    pub tol_upper: f64,
+    pub tol_lower: f64,
+    pub note: String,
 }
 
 impl Default for DrawingUi {
@@ -24,9 +37,38 @@ impl Default for DrawingUi {
         Self {
             path: "drawing.pdf".into(),
             report: None,
+            dim_view: None,
+            dim_a: None,
+            dim_b: None,
+            tol_kind: 0,
+            tol_upper: 0.1,
+            tol_lower: -0.1,
+            note: String::new(),
         }
     }
 }
+
+impl DrawingUi {
+    /// The tolerance the editor describes.
+    pub fn tolerance(&self) -> Tolerance {
+        match self.tol_kind {
+            1 => Tolerance::Symmetric {
+                value: self.tol_upper,
+            },
+            2 => Tolerance::Deviation {
+                upper: self.tol_upper,
+                lower: self.tol_lower,
+            },
+            3 => Tolerance::Limits {
+                upper: self.tol_upper,
+                lower: self.tol_lower,
+            },
+            _ => Tolerance::None,
+        }
+    }
+}
+
+const TOL_KINDS: [&str; 4] = ["No tolerance", "± symmetric", "+/- deviation", "Limits"];
 
 impl DrawingUi {
     /// Keep the report of an `ExportDrawing` reply (engine hook in `handle_reply`).
@@ -73,6 +115,30 @@ impl RcadApp {
                         material: None,
                         bodies: vec![b],
                         standard_views: None,
+                        assembly: false,
+                    });
+                }
+                let occurrences = !self.summary.assembly.occurrences.is_empty();
+                if ui
+                    .add_enabled(occurrences, egui::Button::new("New assembly drawing"))
+                    .named("New assembly drawing")
+                    .on_hover_text(
+                        "Every placed component occurrence in a Front view with the views from \
+                         above and from the right, balloons and a BOM table (flattened \
+                         quantities)",
+                    )
+                    .clicked()
+                {
+                    send.push(Command::CreateDrawing {
+                        name: None,
+                        sheet: None,
+                        projection: None,
+                        title: None,
+                        part_number: None,
+                        material: None,
+                        bodies: vec![],
+                        standard_views: None,
+                        assembly: true,
                     });
                 }
                 ui.horizontal(|ui| {
@@ -132,6 +198,7 @@ impl RcadApp {
                                     orientation: Orientation::Iso,
                                     scale: None,
                                     position: Some([w * 0.75, h * 0.68]),
+                                    assembly: false,
                                 },
                             });
                         }
@@ -243,7 +310,25 @@ impl RcadApp {
                             }
                         };
                         ui.label(RichText::new(text).small());
+                        for (i, a) in v.annotations.iter().enumerate() {
+                            let t = annotation_label(a, &self.summary);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("  {t}")).small());
+                                if ui
+                                    .small_button("×")
+                                    .named(&format!("Remove annotation {i} of {} {}", d.name, v.id))
+                                    .clicked()
+                                {
+                                    send.push(Command::RemoveDrawingAnnotation {
+                                        drawing: d.id,
+                                        view: v.id,
+                                        index: i,
+                                    });
+                                }
+                            });
+                        }
                     }
+                    self.annotate_ui(ui, d, &mut send);
                     self.report_ui(ui, d.id);
                 }
             });
@@ -251,6 +336,180 @@ impl RcadApp {
         for c in send {
             self.request(c);
         }
+    }
+
+    /// BOM/balloon toggles, the dimension editor and notes of drawing `d`.
+    fn annotate_ui(&mut self, ui: &mut egui::Ui, d: &Drawing, send: &mut Vec<Command>) {
+        let first_base = d
+            .views
+            .iter()
+            .find(|v| matches!(v.kind, ViewKind::Base { .. }))
+            .map(|v| (v.id, v.annotations.contains(&Annotation::Balloons)));
+        let assembly = d
+            .views
+            .iter()
+            .any(|v| matches!(v.kind, ViewKind::Base { assembly: true, .. }));
+        ui.horizontal_wrapped(|ui| {
+            let mut bom = d.bom.is_some();
+            if ui
+                .checkbox(&mut bom, "BOM table")
+                .named(&format!("BOM table of {}", d.name))
+                .on_hover_text("Flattened quantities of the evaluated assembly")
+                .changed()
+            {
+                send.push(Command::SetBomTable {
+                    drawing: d.id,
+                    show: bom,
+                    position: None,
+                });
+            }
+            if let Some((vid, has)) = first_base
+                && assembly
+            {
+                let mut b = has;
+                if ui
+                    .checkbox(&mut b, "Balloons")
+                    .named(&format!("Balloons of {}", d.name))
+                    .changed()
+                {
+                    send.push(Command::SetBalloons {
+                        drawing: d.id,
+                        view: vid,
+                        show: b,
+                    });
+                }
+            }
+        });
+        egui::CollapsingHeader::new("Dimension / note")
+            .id_salt(("drawing_annotate", d.id.0))
+            .show(ui, |ui| {
+                let refs = references(&self.summary);
+                let st = &mut self.drawing_ui;
+                let views: Vec<ViewId> = d
+                    .views
+                    .iter()
+                    .filter(|v| !matches!(v.kind, ViewKind::Detail { .. }))
+                    .map(|v| v.id)
+                    .collect();
+                if st.dim_view.is_none_or(|v| !views.contains(&v)) {
+                    st.dim_view = views.first().copied();
+                }
+                egui::ComboBox::from_label("Dimension view")
+                    .selected_text(st.dim_view.map(|v| v.to_string()).unwrap_or_default())
+                    .show_ui(ui, |ui| {
+                        for v in &views {
+                            ui.selectable_value(&mut st.dim_view, Some(*v), v.to_string());
+                        }
+                    });
+                let name = |r: &Option<DimRef>| {
+                    r.and_then(|r| refs.iter().find(|(x, _)| *x == r))
+                        .map(|(_, n)| n.clone())
+                        .unwrap_or_else(|| "(choose)".into())
+                };
+                egui::ComboBox::from_label("Dimension from")
+                    .selected_text(name(&st.dim_a))
+                    .show_ui(ui, |ui| {
+                        for (r, n) in &refs {
+                            ui.selectable_value(&mut st.dim_a, Some(*r), n);
+                        }
+                    });
+                let b_text = if st.dim_b.is_none() {
+                    "(none: hole diameter)".to_string()
+                } else {
+                    name(&st.dim_b)
+                };
+                egui::ComboBox::from_label("Dimension to")
+                    .selected_text(b_text)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut st.dim_b, None, "(none: hole diameter)");
+                        for (r, n) in &refs {
+                            ui.selectable_value(&mut st.dim_b, Some(*r), n);
+                        }
+                    });
+                egui::ComboBox::from_label("Dimension tolerance")
+                    .selected_text(TOL_KINDS[st.tol_kind.min(3)])
+                    .show_ui(ui, |ui| {
+                        for (i, k) in TOL_KINDS.iter().enumerate() {
+                            ui.selectable_value(&mut st.tol_kind, i, *k);
+                        }
+                    });
+                if st.tol_kind > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label(if st.tol_kind == 1 { "±" } else { "Upper" });
+                        ui.add(
+                            egui::DragValue::new(&mut st.tol_upper)
+                                .speed(0.01)
+                                .max_decimals(3),
+                        )
+                        .named("Tolerance upper");
+                        if st.tol_kind > 1 {
+                            ui.label("Lower");
+                            ui.add(
+                                egui::DragValue::new(&mut st.tol_lower)
+                                    .speed(0.01)
+                                    .max_decimals(3),
+                            )
+                            .named("Tolerance lower");
+                        }
+                    });
+                }
+                if ui
+                    .add_enabled(
+                        st.dim_view.is_some() && st.dim_a.is_some(),
+                        egui::Button::new("Add dimension"),
+                    )
+                    .named(&format!("Add dimension to {}", d.name))
+                    .on_hover_text(
+                        "Driven by the model: measured at every export; shown as dangling \
+                         (red, no value) when a reference stops resolving",
+                    )
+                    .clicked()
+                    && let (Some(view), Some(a)) = (st.dim_view, st.dim_a)
+                {
+                    send.push(Command::AddDrawingDimension {
+                        drawing: d.id,
+                        view,
+                        a,
+                        b: st.dim_b,
+                        tolerance: st.tolerance(),
+                    });
+                }
+                ui.separator();
+                ui.add(
+                    egui::TextEdit::multiline(&mut st.note)
+                        .desired_rows(2)
+                        .desired_width(220.0),
+                )
+                .named("Drawing note text");
+                if ui
+                    .add_enabled(!st.note.trim().is_empty(), egui::Button::new("Add note"))
+                    .named(&format!("Add note to {}", d.name))
+                    .on_hover_text("Placed at the lower left of the sheet, above the border")
+                    .clicked()
+                {
+                    let y = 20.0 + 12.0 * d.notes.len() as f64;
+                    send.push(Command::AddDrawingNote {
+                        drawing: d.id,
+                        text: std::mem::take(&mut st.note),
+                        position: [15.0, y.min(d.sheet.mm().1 - 15.0)],
+                    });
+                }
+                for (i, n) in d.notes.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(n.text.replace('\n', " / ")).small());
+                        if ui
+                            .small_button("×")
+                            .named(&format!("Remove note {i} of {}", d.name))
+                            .clicked()
+                        {
+                            send.push(Command::RemoveDrawingNote {
+                                drawing: d.id,
+                                index: i,
+                            });
+                        }
+                    });
+                }
+            });
     }
 
     /// The last export report of drawing `id`, if it is for the current revision.
@@ -288,5 +547,70 @@ fn edit_projection(drawing: DrawingId, p: Projection) -> Command {
         part_number: None,
         material: None,
         auto_dimensions: None,
+    }
+}
+
+/// Dimension references offered by the editor: every referenceable planar
+/// face of the model and every hole axis.
+fn references(summary: &DocSummary) -> Vec<(DimRef, String)> {
+    let mut out = Vec::new();
+    for f in &summary.features {
+        for fs in &f.faces {
+            out.push((
+                DimRef::Face(fs.reference),
+                format!(
+                    "{} {}: {}",
+                    f.id,
+                    f.name,
+                    crate::face_role_label(&fs.reference.role)
+                ),
+            ));
+        }
+        if f.kind == "hole" {
+            out.push((
+                DimRef::Hole(f.id),
+                format!("{} {}: hole axis", f.id, f.name),
+            ));
+        }
+    }
+    out
+}
+
+fn ref_label(r: &DimRef, summary: &DocSummary) -> String {
+    match r {
+        DimRef::Face(fr) => format!("{} {}", fr.feature, crate::face_role_label(&fr.role)),
+        DimRef::Hole(f) => {
+            let n = summary
+                .features
+                .iter()
+                .find(|x| x.id == *f)
+                .map(|x| x.name.clone())
+                .unwrap_or_else(|| "missing".into());
+            format!("{f} {n} axis")
+        }
+    }
+}
+
+/// One line describing an annotation in the browser.
+fn annotation_label(a: &Annotation, summary: &DocSummary) -> String {
+    match a {
+        Annotation::HoleCallout { feature } => format!("callout of {feature}"),
+        Annotation::Balloons => "balloons".into(),
+        Annotation::Dimension { a, b, tolerance } => {
+            let tol = match *tolerance {
+                Tolerance::None => String::new(),
+                Tolerance::Symmetric { value } => format!(" [±{value}]"),
+                Tolerance::Deviation { upper, lower } => format!(" [{upper:+}/{lower:+}]"),
+                Tolerance::Limits { upper, lower } => format!(" [limits {upper:+}/{lower:+}]"),
+            };
+            match b {
+                Some(b) => format!(
+                    "distance {} – {}{tol}",
+                    ref_label(a, summary),
+                    ref_label(b, summary)
+                ),
+                None => format!("diameter of {}{tol}", ref_label(a, summary)),
+            }
+        }
     }
 }

@@ -155,6 +155,18 @@ fn main() -> ExitCode {
             ],
         ),
         (
+            "hinge assembly example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/hinge_assembly_workflow.json",
+            ],
+        ),
+        (
             "scenario A example",
             &[
                 "run",

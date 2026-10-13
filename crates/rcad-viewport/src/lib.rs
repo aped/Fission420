@@ -35,6 +35,11 @@ pub use overlay::{
 };
 pub use triad::{axis_triad_origin, axis_triad_shapes};
 
+/// Tint palette index of highlighted assembly occurrences (run 7).
+pub const TINT_HIGHLIGHT: u8 = 8;
+/// Tint palette index of bodies outside the active component (run 7).
+pub const TINT_DIMMED: u8 = 9;
+
 use eframe::egui;
 use gpu::{FLAG_SELECTED, Gpu, LineVertex, MeshVertex, TINT_SHIFT, Uniforms};
 use grid::GridSpec;
@@ -165,7 +170,8 @@ impl Viewport {
     }
 
     /// Tint group ranges with a palette colour (`0` = the default body colour,
-    /// `1..=6` distinct body tints, `7` = mesh-body colour). Groups outside every
+    /// `1..=6` distinct body tints, `7` = mesh-body colour, [`TINT_HIGHLIGHT`],
+    /// [`TINT_DIMMED`]). Groups outside every
     /// range use the default. Used to tell several bodies apart; applies to the
     /// current and later meshes until changed.
     pub fn set_group_tints(&mut self, tints: &[(std::ops::Range<u32>, u8)]) {
@@ -189,7 +195,7 @@ impl Viewport {
         if !self.tints.is_empty() {
             for (f, g) in flags.iter_mut().zip(&self.vertex_groups) {
                 if let Some((_, t)) = self.tints.iter().find(|(r, _)| r.contains(g)) {
-                    *f |= u32::from(*t & 0x7) << TINT_SHIFT;
+                    *f |= u32::from(*t & 0xF) << TINT_SHIFT;
                 }
             }
         }

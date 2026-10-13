@@ -159,3 +159,142 @@ fn create_export_and_flag_a_drawing_from_the_browser() {
     click(&mut h, &format!("Delete drawing {dname}"));
     assert!(h.state().summary().drawings.is_empty());
 }
+
+fn combo(h: &mut Harness<'_, RcadApp>, combo: &str, option: &str) {
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, combo)
+        .click();
+    let _ = h.try_run();
+    h.get_by_label(option).click();
+    settle(h);
+}
+
+/// Run 7: dimension with tolerance, note, BOM/balloons through the widgets.
+#[test]
+fn annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser() {
+    let mut h = harness();
+    click(&mut h, "New");
+    request(
+        &mut h,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: 40.0,
+                height: 30.0,
+                center: Some([20.0, 15.0]),
+            },
+        },
+    );
+    let sk = h.state().summary().features[0].id;
+    request(&mut h, Command::extrude(None, sk, 10.0));
+    let e = h.state().summary().features[1].id;
+    request(
+        &mut h,
+        Command::Hole {
+            name: None,
+            plane: SketchPlane::Face(FaceRef {
+                feature: e,
+                role: FaceRole::ExtrudeEndCap,
+            }),
+            center: [20.0, 15.0],
+            diameter: 8.0,
+            depth: None,
+            counterbore: None,
+            target: None,
+        },
+    );
+    let hole = h.state().summary().features[2].clone();
+    click(&mut h, "Drawings (0)");
+    let name = h.state().summary().bodies[0].name.clone();
+    click(&mut h, &name);
+    click(&mut h, "New drawing of selected body");
+    let dname = h.state().summary().drawings[0].name.clone();
+    click(&mut h, "Dimension / note");
+    // View V2 (top), From: the hole axis, To: none (diameter), ± tolerance.
+    combo(&mut h, "Dimension view", "V2");
+    combo(
+        &mut h,
+        "Dimension from",
+        &format!("{} {}: hole axis", hole.id, hole.name),
+    );
+    combo(&mut h, "Dimension tolerance", "± symmetric");
+    click(&mut h, &format!("Add dimension to {dname}"));
+    let d = h.state().summary().drawings[0].clone();
+    let v2 = d.views.iter().find(|v| v.id == ViewId(2)).unwrap();
+    assert_eq!(
+        v2.annotations,
+        vec![rcad_document::drawing::Annotation::Dimension {
+            a: rcad_document::drawing::DimRef::Hole(hole.id),
+            b: None,
+            tolerance: rcad_document::drawing::Tolerance::Symmetric { value: 0.1 },
+        }]
+    );
+    // A dimension that cannot be drawn is refused (hole not end-on in V1).
+    combo(&mut h, "Dimension view", "V1");
+    click(&mut h, &format!("Add dimension to {dname}"));
+    assert_eq!(
+        h.state().summary().drawings[0].views[0].annotations.len(),
+        0
+    );
+    // A note.
+    type_into(&mut h, "Drawing note text", "BREAK SHARP EDGES");
+    click(&mut h, &format!("Add note to {dname}"));
+    assert_eq!(
+        h.state().summary().drawings[0].notes[0].text,
+        "BREAK SHARP EDGES"
+    );
+    let svg = out("ui_annotated.svg");
+    type_into(&mut h, "Drawing export path", svg.to_str().unwrap());
+    click(&mut h, &format!("Export {dname}"));
+    let text = std::fs::read_to_string(&svg).unwrap();
+    assert!(text.contains("Ø8 ±0.1"), "toleranced diameter in the SVG");
+    assert!(text.contains("BREAK SHARP EDGES"));
+    // Remove the dimension through its × button.
+    click(&mut h, &format!("Remove annotation 0 of {dname} V2"));
+    assert!(
+        h.state().summary().drawings[0].views[1]
+            .annotations
+            .is_empty()
+    );
+
+    // Assembly drawing: components and occurrences, then the button.
+    let body = h.state().summary().bodies[0].id;
+    request(
+        &mut h,
+        Command::CreateComponent {
+            name: "Block".into(),
+            bodies: vec![body],
+            part_number: Some("BL-1".into()),
+            occurrences: vec![],
+        },
+    );
+    request(
+        &mut h,
+        Command::AddOccurrence {
+            component: rcad_document::assembly::ComponentId(1),
+            name: None,
+            translate: [50.0, 0.0, 0.0],
+            axis: None,
+            angle_deg: 0.0,
+            owner: None,
+        },
+    );
+    click(&mut h, "New assembly drawing");
+    let ds = h.state().summary().drawings.clone();
+    assert_eq!(ds.len(), 2);
+    let a = &ds[1];
+    assert!(a.bom.is_some());
+    assert!(
+        a.views[0]
+            .annotations
+            .contains(&rcad_document::drawing::Annotation::Balloons)
+    );
+    let svg = out("ui_assembly.svg");
+    type_into(&mut h, "Drawing export path", svg.to_str().unwrap());
+    click(&mut h, &format!("Export {}", a.name));
+    let text = std::fs::read_to_string(&svg).unwrap();
+    assert!(text.contains(">BL-1<") && text.contains(">QTY<"));
+    // BOM table off through its checkbox, then undo.
+    click(&mut h, &format!("BOM table of {}", a.name));
+    assert!(h.state().summary().drawings[1].bom.is_none());
+}

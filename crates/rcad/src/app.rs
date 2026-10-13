@@ -429,6 +429,7 @@ pub struct RcadApp {
     pub(crate) config_form: (String, String),
     /// Browser Drawings section: export path, last export report (run 6).
     pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
+    pub(crate) config_table: crate::config_ui::ConfigTableUi,
     /// Body material form and last mass-properties report (run 6).
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state (run 6).
@@ -535,6 +536,7 @@ impl RcadApp {
             split_form: (0, "0".into()),
             config_form: Default::default(),
             drawing_ui: Default::default(),
+            config_table: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
             assembly_ui: Default::default(),
@@ -974,7 +976,9 @@ impl RcadApp {
                 format!("not displayed: {e} (the model is unchanged; export and measurements use the exact solid)"),
             );
         }
-        match upload(&scene.mesh, &scene.tints()) {
+        // Run 7: assembly highlight / inactive dimming (assembly_ui::tints).
+        let hl = self.assembly_ui.highlight_paths(&self.summary);
+        match upload(&scene.mesh, &crate::assembly_ui::tints(&scene, &hl)) {
             Ok(()) => {
                 self.mesh_triangles = scene.mesh.triangle_count();
                 self.selected_face = None;

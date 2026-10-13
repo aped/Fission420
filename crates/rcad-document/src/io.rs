@@ -277,13 +277,38 @@ pub fn v7_feature(doc: &Document) -> Option<&'static str> {
 }
 
 /// Run-7 assembly additions (nesting, joint types, ...).
-fn assembly_v7_feature(_doc: &Document) -> Option<&'static str> {
+fn assembly_v7_feature(doc: &Document) -> Option<&'static str> {
+    let a = &doc.assembly;
+    if a.occurrences.iter().any(|o| o.owner.is_some()) {
+        return Some("nested sub-assembly occurrences");
+    }
+    if a.components.iter().any(|c| c.bodies.is_empty()) {
+        return Some("components without bodies");
+    }
+    if a.components.iter().any(|c| c.derived_from.is_some()) {
+        return Some("independent component copies");
+    }
+    if a.occurrences.iter().any(|o| o.hidden) {
+        return Some("hidden occurrences");
+    }
+    if a.active.is_some() {
+        return Some("an active component");
+    }
+    if !a.explode.is_empty() || a.exploded {
+        return Some("exploded-view offsets");
+    }
+    if a.joints
+        .iter()
+        .any(|j| j.kind.is_v7() || !j.extra.is_empty() || j.dir2.is_some())
+    {
+        return Some("cylindrical / pin-slot / planar / ball joints");
+    }
     None
 }
 
 /// Run-7 drawing / configuration / property additions.
-fn drawing_v7_feature(_doc: &Document) -> Option<&'static str> {
-    None
+fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
+    doc.drawings.iter().find_map(|d| d.v7_feature())
 }
 
 /// Run-7 part-modeling additions (sheet metal, surfaces, ...).

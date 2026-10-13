@@ -85,9 +85,12 @@ fn components_section_create_move_ground_bom_interference_joint() {
     );
     assert_eq!(a.components[0].part_number, "P-7");
     assert_eq!(a.occurrences.len(), 1);
+    click(&mut h, "Occurrence Block#1");
     click(&mut h, "Add occurrence of Block");
     assert_eq!(h.state().summary().assembly.occurrences.len(), 2);
-    // Move Block#2 numerically so it overlaps Block#1 by 10 × 27 × 35.
+    // Move Block#2 numerically so it overlaps Block#1 by 10 × 27 × 35
+    // (run 7: select the tree row, then its actions).
+    click(&mut h, "Occurrence Block#2");
     click(&mut h, "Move Block#2");
     type_into(&mut h, "X (mm)", "10");
     type_into(&mut h, "Y (mm)", "3");
@@ -95,6 +98,7 @@ fn components_section_create_move_ground_bom_interference_joint() {
     click(&mut h, "Apply placement");
     let o2 = h.state().summary().assembly.occurrences[1].clone();
     assert_eq!(o2.translate, [10.0, 3.0, 5.0]);
+    click(&mut h, "Occurrence Block#1");
     click(&mut h, "Ground Block#1");
     assert!(h.state().summary().assembly.occurrences[0].grounded);
     click(&mut h, "Bill of materials");
@@ -114,6 +118,8 @@ fn components_section_create_move_ground_bom_interference_joint() {
         value: 0.0,
         min: Some(0.0),
         max: Some(40.0),
+        extra: vec![],
+        dir2: None,
     });
     settle(&mut h);
     assert_eq!(h.state().summary().assembly.joints.len(), 1);
@@ -142,10 +148,12 @@ fn display_scene_draws_each_occurrence_placed() {
             name: "Block".into(),
             bodies: vec![body],
             part_number: None,
+            occurrences: vec![],
         },
         Command::AddOccurrence {
             component: rcad_document::assembly::ComponentId(1),
             name: None,
+            owner: None,
             translate: [100.0, 0.0, 0.0],
             axis: None,
             angle_deg: 0.0,
