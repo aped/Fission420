@@ -60,7 +60,9 @@ impl Session {
                     "another body is already named '{n}'"
                 )));
             }
-            let body = d.add_body(n);
+            // Review run 7 #16: the repaired copy takes the source's place in
+            // its component (if any), never joins the active one by accident.
+            let body = d.add_derived_body(n, a.body);
             if a.hide_source {
                 d.body_mut(a.body)?.visible = false;
             }

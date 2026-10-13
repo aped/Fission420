@@ -1366,7 +1366,8 @@ pub struct BodySummary {
     pub id: BodyId,
     pub name: String,
     pub visible: bool,
-    /// "brep" (exact solid) or "mesh" (triangle mesh, STL import).
+    /// "brep" (exact solid), "surface" (exact open-shell surface body, run 7)
+    /// or "mesh" (triangle mesh, STL import).
     pub kind: String,
     pub source: BodySource,
     pub created_by: FeatureId,
@@ -3581,15 +3582,8 @@ impl Session {
                 let imp = rcad_document::import::step(&bytes, unit)?;
                 if imp.solids.is_empty() {
                     return Err(DocError::Validation(format!(
-                        "{}: no solids found{}",
-                        path.display(),
-                        imp.surfaces
-                            .as_ref()
-                            .map(|s| format!(
-                                " ({} surface shell(s): import them with import_surfaces)",
-                                s.shells
-                            ))
-                            .unwrap_or_default()
+                        "{}: no solids found",
+                        path.display()
                     )));
                 }
                 let names: Vec<Option<String>> =
@@ -4100,7 +4094,9 @@ impl Session {
                     id: b.id,
                     name: b.name.clone(),
                     visible: b.visible,
-                    kind: match b.geometry {
+                    kind: match &b.geometry {
+                        // Run 7: open-shell surface bodies are not solids.
+                        BodyGeometry::Brep(g) if g.is_open_shell() => "surface",
                         BodyGeometry::Brep(_) => "brep",
                         BodyGeometry::Mesh(_) => "mesh",
                     }
@@ -4357,7 +4353,8 @@ fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
     let breps: Vec<_> = ev
         .bodies
         .iter()
-        .filter(|b| b.geometry.brep().is_some())
+        // Run 7 (review #25): open surface bodies are not join/cut targets.
+        .filter(|b| b.geometry.brep().is_some_and(|g| !g.is_open_shell()))
         .collect();
     match breps.as_slice() {
         [one] => Ok(one.id),

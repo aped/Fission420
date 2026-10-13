@@ -1,0 +1,120 @@
+# Run 7 (SESSION_7 acceptance 6/7 UI): sheet metal and surface repair through real
+# pointer/keyboard input. U-channel (examples/sheet_u_channel.rcad.json: base 60 x 40,
+# t 1, R 2, K 0.4, two 90° flanges of 20): V = 4000 + 100 pi = 4314.159265.
+# Rule edit t 2, R 3 -> V = 8000 + 80 (pi/4)(25 - 9) = 9005.309649.
+# Flat state (flat body B2, V = 40 t L, L = 100 + pi (R + 0.4 t)); flat DXF export.
+# Surfaces: loose faces of the open box (FreeCAD fixture) imported as a surface body,
+# analysed, stitched, filled (V = 24000); half tube r 10 thickened 2 mm
+# (V = 660 pi = 2073.451151) and a refused 12 mm inward thicken; undo; save/reopen.
+key ctrl+o
+typew File path | @ROOT@/examples/sheet_u_channel.rcad.json
+key Return
+wait_idle
+expect body_volume.B1 4314.159265 0.001
+expect bodies.B1.visible true
+clickw Sheet
+wait_idle
+shot
+typew Thickness (mm) | 2
+typew Inside bend radius (mm) | 3
+clickw Apply sheet rule
+wait_idle
+expect last_reply.ok true
+expect body_volume.B1 9005.309649 0.001
+clickw Sheet
+clickw Sheet flat
+wait_idle
+expect bodies.B1.visible false
+expect bodies.B2.visible true
+expect body_volume.B2 8955.044167 0.001
+shot
+clickw Sheet
+clickw Sheet folded
+wait_idle
+expect bodies.B1.visible true
+clickw Sheet
+typew Flat pattern DXF path | @OUT@/u_channel_flat.dxf
+clickw Export flat pattern
+wait_idle
+expect last_reply.ok true
+key ctrl+z
+wait_idle
+key ctrl+z
+wait_idle
+key ctrl+z
+wait_idle
+expect body_volume.B1 4314.159265 0.001
+key ctrl+shift+s
+typew File path | @OUT@/u_channel.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/u_channel.rcad.json
+key Return
+wait_idle
+expect body_volume.B1 4314.159265 0.001
+clickw Close
+wait_idle
+clickw New
+wait_idle
+clickw Import…
+typew Import file path | @ROOT@/crates/rcad-kernel/tests/fixtures/step/loose_faces_mm.step
+clickw Import surfaces
+clickw OK
+wait_idle
+expect last_reply.ok true
+expect bodies.B1.closed false
+clickw Surfaces1
+typew Gap search (mm) | 0.001
+clickw Analyse surface
+wait_idle
+expect last_reply.ok true
+shot
+typew Healing tolerance (mm) | 0.001
+clickw Stitch surface
+wait_idle
+expect last_reply.ok true
+expect bodies.B2.closed false
+clickw Stitch1
+clickw Fill surface
+wait_idle
+expect last_reply.ok true
+expect bodies.B3.closed true
+expect body_volume.B3 24000 0.001
+shot
+clickw Import…
+typew Import file path | @ROOT@/crates/rcad-kernel/tests/fixtures/step/half_tube_mm.step
+clickw Import surfaces
+clickw OK
+wait_idle
+clickw Surfaces2
+typew Thickness (mm) | 2
+clickw Thicken surface
+wait_idle
+expect last_reply.ok true
+expect body_volume.B5 2073.451151 0.001
+clickw Surfaces2
+typew Thickness (mm) | 12
+clickw Against normal
+clickw Thicken surface
+wait_idle
+expect last_reply.ok false
+shot
+key ctrl+z
+wait_idle
+expect body_volume.B5 null
+key ctrl+shift+s
+typew File path | @OUT@/surfaces.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/surfaces.rcad.json
+key Return
+wait_idle
+expect body_volume.B3 24000 0.001
+expect bodies.B4.closed false
+shot

@@ -379,6 +379,19 @@ impl Body {
     /// another thread while `self` is in use.
     pub fn deep_copy(&self) -> Result<Body> {
         let compressed = guarded("compress body", || self.solid.compress())?;
+        if self.is_open_shell() {
+            // Run 7: surface bodies (open shells) are not closed solids;
+            // extract shell by shell.
+            let shells = compressed
+                .boundaries
+                .into_iter()
+                .map(truck_modeling::Shell::extract)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| KernelError::Internal(format!("extract surface body: {e}")))?;
+            return Ok(Body {
+                solid: Solid::new_unchecked(shells),
+            });
+        }
         let solid = Solid::extract(compressed)
             .map_err(|e| KernelError::Internal(format!("extract body: {e}")))?;
         Ok(Body { solid })

@@ -275,26 +275,141 @@ fn orient_ccw(segs: Vec<LoopSegment>) -> Vec<LoopSegment> {
     out
 }
 
-/// No two non-adjacent edges of the polygonized loop intersect.
+/// No two edges of the polygonized loop intersect or touch, other than
+/// neighbours at their shared vertex (review S1: collinear overlaps, an end
+/// point on another edge and a spike back along the previous edge count).
 fn check_simple(segs: &[LoopSegment]) -> std::result::Result<(), String> {
     let p = polyline(segs);
     let n = p.len();
-    let hit = |a: P, b: P, c: P, d: P| {
-        let o = |p: P, q: P, r: P| cross(sub(q, p), sub(r, p));
-        let (d1, d2, d3, d4) = (o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b));
-        d1 * d2 < 0.0 && d3 * d4 < 0.0
+    let scale = p
+        .iter()
+        .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
+    let eps = 1e-9 * scale;
+    let o = |a: P, b: P, c: P| cross(sub(b, a), sub(c, a));
+    // Point c on the closed segment a-b (within eps).
+    let on = |a: P, b: P, c: P| {
+        let l = norm(sub(b, a));
+        if l == 0.0 {
+            return norm(sub(c, a)) <= eps;
+        }
+        let d = o(a, b, c).abs() / l;
+        let t = ((c[0] - a[0]) * (b[0] - a[0]) + (c[1] - a[1]) * (b[1] - a[1])) / (l * l);
+        d <= eps && t >= -eps / l && t <= 1.0 + eps / l
     };
+    let hit = |a: P, b: P, c: P, d: P| segs_meet(a, b, c, d, eps);
+    let _ = (&o, &on);
     for i in 0..n {
-        for j in i + 2..n {
-            if i == 0 && j == n - 1 {
+        let (a, b) = (p[i], p[(i + 1) % n]);
+        for j in i + 1..n {
+            let (c, d) = (p[j], p[(j + 1) % n]);
+            let next = j == i + 1;
+            let wrap = i == 0 && j == n - 1;
+            if next || wrap {
+                // Neighbours share one vertex; they must not fold back onto
+                // each other (collinear and opposite).
+                let (u, v) = if next {
+                    (sub(b, a), sub(d, c))
+                } else {
+                    (sub(d, c), sub(b, a))
+                };
+                let (lu, lv) = (norm(u), norm(v));
+                if lu > 0.0
+                    && lv > 0.0
+                    && (cross(u, v) / (lu * lv)).abs() < 1e-12
+                    && u[0] * v[0] + u[1] * v[1] < 0.0
+                {
+                    return Err(format!("edges fold back at ({:.3}, {:.3})", b[0], b[1]));
+                }
                 continue;
             }
-            if hit(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n]) {
-                return Err(format!("edges near ({:.3}, {:.3}) cross", p[i][0], p[i][1]));
+            if hit(a, b, c, d) {
+                return Err(format!("edges near ({:.3}, {:.3}) meet", a[0], a[1]));
             }
         }
     }
     Ok(())
+}
+
+/// Closed segments a-b and c-d intersect or touch (within `eps`).
+fn segs_meet(a: P, b: P, c: P, d: P, eps: f64) -> bool {
+    let o = |a: P, b: P, c: P| cross(sub(b, a), sub(c, a));
+    let on = |a: P, b: P, c: P| {
+        let l = norm(sub(b, a));
+        if l == 0.0 {
+            return norm(sub(c, a)) <= eps;
+        }
+        let dd = o(a, b, c).abs() / l;
+        let t = ((c[0] - a[0]) * (b[0] - a[0]) + (c[1] - a[1]) * (b[1] - a[1])) / (l * l);
+        dd <= eps && t >= -eps / l && t <= 1.0 + eps / l
+    };
+    let (d1, d2, d3, d4) = (o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b));
+    (d1 * d2 < 0.0 && d3 * d4 < 0.0) || on(a, b, c) || on(a, b, d) || on(c, d, a) || on(c, d, b)
+}
+
+/// Even-odd point-in-polygon.
+fn inside(poly: &[P], q: P) -> bool {
+    let n = poly.len();
+    let mut c = false;
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        if (a[1] > q[1]) != (b[1] > q[1])
+            && q[0] < a[0] + (q[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+        {
+            c = !c;
+        }
+    }
+    c
+}
+
+/// Polygon of a kernel hole profile (arcs/circles at ≤ 2° chords).
+fn hole_poly(h: &kk::Profile) -> Vec<P> {
+    match h {
+        kk::Profile::Polygon(v) => v.clone(),
+        kk::Profile::Loop(l) => polyline(&to_sk(l)),
+        kk::Profile::Circle { center, radius } => (0..180)
+            .map(|k| {
+                let a = k as f64 * std::f64::consts::TAU / 180.0;
+                [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+            })
+            .collect(),
+    }
+}
+
+/// Review S4: every hole stays strictly inside the (relief-cut) outline.
+fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::Result<(), String> {
+    let p = polyline(outline);
+    let scale = p
+        .iter()
+        .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
+    let eps = 1e-9 * scale;
+    for (k, h) in holes.iter().enumerate() {
+        let hp = hole_poly(h);
+        if hp.is_empty() {
+            continue;
+        }
+        if !inside(&p, hp[0]) {
+            return Err(format!("hole {} is no longer inside the plate", k + 1));
+        }
+        for i in 0..hp.len() {
+            let (a, b) = (hp[i], hp[(i + 1) % hp.len()]);
+            for j in 0..p.len() {
+                if segs_meet(a, b, p[j], p[(j + 1) % p.len()], eps) {
+                    return Err(format!(
+                        "hole {} meets the outline near ({:.3}, {:.3})",
+                        k + 1,
+                        a[0],
+                        a[1]
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Polygonized loop area (arcs at ≤ 2° chords).
+fn poly_area(segs: &[LoopSegment]) -> f64 {
+    signed_area(&polyline(segs))
 }
 
 /// The non-construction lines of `s` as one open chain of vertices, from
@@ -523,7 +638,8 @@ pub struct FlangeDef {
     pub id: FeatureId,
     /// Sketch line entity (of the base profile) the flange is attached to.
     pub edge: u32,
-    /// Bend angle (rad), in (0, π): 90° makes the flange perpendicular.
+    /// Bend angle (rad), in (0, π]: 90° makes the flange perpendicular, π
+    /// folds it back over the plate (open hem, gap 2R).
     pub angle: f64,
     /// Straight flange length beyond the bend (tangent line to flange end).
     pub length: f64,
@@ -549,6 +665,9 @@ pub struct SheetModel {
     pub flanges: Vec<FlangeDef>,
     /// Last feature that changed the body (base or flange).
     pub last_feature: FeatureId,
+    /// The flat-pattern feature evaluated so far, if any (later flanges are
+    /// refused: the flat would be out of date).
+    pub flat: Option<FeatureId>,
 }
 
 /// A bend line of the flat pattern (sketch coordinates).
@@ -797,9 +916,9 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
     let mut on_seg: Vec<Vec<(usize, f64, f64)>> = vec![Vec::new(); n_out];
     for (fi, f) in m.flanges.iter().enumerate() {
         let bad = |s: String| DocError::Validation(format!("{}: flange: {s}", f.id));
-        if !(f.angle.is_finite() && f.angle > 1e-6 && f.angle < std::f64::consts::PI - 1e-6) {
+        if !(f.angle.is_finite() && f.angle > 1e-6 && f.angle <= std::f64::consts::PI + 1e-12) {
             return Err(bad(format!(
-                "bend angle must be in (0°, 180°), got {:.6}° (180° hems are not supported)",
+                "bend angle must be in (0°, 180°] (180° = open hem), got {:.6}°",
                 f.angle.to_degrees()
             )));
         }
@@ -845,6 +964,7 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
     let mut bends = Vec::new();
     let mut prisms = Vec::new();
     let mut footprints: Vec<(FeatureId, [P; 4])> = Vec::new();
+    let mut strip_areas: Vec<f64> = Vec::new();
     let mut outward: Vec<(FeatureId, P, P, P, f64, f64, f64)> = Vec::new();
     let bottom = if m.flip { m.frame.offset(-t) } else { m.frame };
     let world_dir = |v: P| -> [f64; 3] {
@@ -953,6 +1073,7 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
             // Attachment: folded keeps the edge, flat adds the unfolded strip.
             let ba = rule.bend_allowance(f.angle);
             let wflat = ba + f.length;
+            strip_areas.push((s1 - s0) * wflat);
             if s0 > 1e-9 {
                 folded.push(KSeg::Line { start: p(s0, 0.0) });
                 flat.push(KSeg::Line { start: p(s0, 0.0) });
@@ -1047,6 +1168,12 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
             who(m.flanges.last().map(|f| f.id))
         ))
     })?;
+    check_holes(&to_sk(&folded), &m.holes).map_err(|e| {
+        DocError::Validation(format!(
+            "{}: a relief cuts into a hole of the plate ({e}); move the flange or use a smaller relief",
+            who(m.flanges.last().map(|f| f.id))
+        ))
+    })?;
     // Flanges against each other and against the plate.
     for i in 0..footprints.len() {
         for j in i + 1..footprints.len() {
@@ -1077,6 +1204,17 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
             who(m.flanges.last().map(|f| f.id))
         ))
     })?;
+    // Review S1: the flat outline must add exactly the unfolded strips to the
+    // plate (same arcs on both, so their chord areas cancel).
+    let strips: f64 = strip_areas.iter().sum();
+    let grown = poly_area(&to_sk(&flat)) - poly_area(&to_sk(&folded));
+    if (grown - strips).abs() > 1e-9 * (1.0 + strips.abs()) * 1e3 {
+        return Err(DocError::Validation(format!(
+            "{}: the flat pattern overlaps itself (unfolded strips overlap by {:.6} mm²); flanges collide when unfolded",
+            who(m.flanges.last().map(|f| f.id)),
+            strips - grown
+        )));
+    }
     let plate = kk::extrude_region(&kk::Profile::Loop(folded.clone()), &m.holes, &bottom, t)
         .map_err(|e| DocError::Kernel {
             feature: m.base,
@@ -1318,6 +1456,7 @@ pub fn base_model(
         holes,
         flanges: Vec::new(),
         last_feature: id,
+        flat: None,
     })
 }
 

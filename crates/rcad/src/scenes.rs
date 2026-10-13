@@ -163,6 +163,36 @@ impl RcadApp {
     pub fn start_scene(&mut self, name: &str) -> bool {
         use SceneStep::*;
         let steps: Vec<SceneStep> = match name {
+            // Run 7: committed examples (assembly, drawings/configurations,
+            // sheet metal, surface repair) in the iso view.
+            "run7_hinge" | "run7_drawing_set" | "run7_sheet" | "run7_open_box" => {
+                let file = match name {
+                    "run7_hinge" => "hinge_assembly",
+                    "run7_drawing_set" => "drawing_set",
+                    "run7_sheet" => "sheet_u_channel",
+                    _ => "open_box_repair",
+                };
+                vec![
+                    Cmd(Command::Open {
+                        path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join(format!("../../examples/{file}.rcad.json")),
+                    }),
+                    Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
+                ]
+            }
+            // Run 7: mesh repair inspector on the broken-cube STL fixture.
+            "run7_mesh_repair" => vec![
+                Cmd(Command::NewDocument),
+                Cmd(Command::ImportStl {
+                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../tools/fixtures/stl/broken_cube.stl"),
+                    units_to_mm: Some(1.0),
+                }),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    a.select_body(Some(BodyId(1)));
+                }),
+            ],
             // Run 6: the rounded labelled enclosure (committed example).
             "run6_enclosure" => vec![
                 Cmd(Command::Open {

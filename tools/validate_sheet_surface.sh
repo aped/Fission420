@@ -77,5 +77,7 @@ done
 step open_box_filled.step 24000 1e-6 "[0, 0, 0, 40, 30, 20]"
 step gap_box_filled.step 24000 "0.02*600 + 1e-6" None
 step half_tube_thick.step "pi/2*(144-100)*30" 1e-6 "[0, -12, 0, 12, 12, 30]"
+# Open hem (180°, R 0.5, t 1, leg 10 back over a 60 x 40 plate): 2400 + 60 (π/2)(1.5² − 0.5²) + 600
+step hem_plate.step "3000 + 60*pi" 1e-6 "[0, -1.5, 0, 60, 40, 3]"
 echo "overall: $([ $status -eq 0 ] && echo PASS || echo FAIL)"
 exit $status
