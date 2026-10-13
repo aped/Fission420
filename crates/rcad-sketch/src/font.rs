@@ -5,8 +5,11 @@
 //! and reads only each file's table directory, `name` and `OS/2` tables (a few
 //! kilobytes per file). Directories, in order: `RCAD_FONT_DIRS` (`:`-separated),
 //! `$XDG_DATA_HOME/fonts` (default `~/.local/share/fonts`), `~/.fonts`,
-//! `/usr/local/share/fonts`, `/usr/share/fonts`. The index is built once per
-//! process.
+//! `/usr/local/share/fonts`, `/usr/share/fonts`; on macOS also
+//! `~/Library/Fonts`, `/Library/Fonts`, `/System/Library/Fonts`; on Windows
+//! `%LOCALAPPDATA%\\Microsoft\\Windows\\Fonts` and `%WINDIR%\\Fonts`
+//! (`RCAD_FONT_DIRS` is `;`-separated there). Missing directories are skipped.
+//! The index is built once per process.
 //!
 //! Matching ([`FontSpec`]): the family name compares case-insensitively with the
 //! typographic family (name ID 16) or the legacy family (name ID 1); the style
@@ -68,6 +71,22 @@ pub fn font_dirs() -> Vec<PathBuf> {
     }
     v.push(PathBuf::from("/usr/local/share/fonts"));
     v.push(PathBuf::from("/usr/share/fonts"));
+    // macOS (docs/CI.md F4): user, local and system font folders.
+    if cfg!(target_os = "macos") {
+        if let Some(h) = &home {
+            v.push(h.join("Library/Fonts"));
+        }
+        v.push(PathBuf::from("/Library/Fonts"));
+        v.push(PathBuf::from("/System/Library/Fonts"));
+    }
+    // Windows: per-user fonts, then the system Fonts folder.
+    if cfg!(windows) {
+        if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+            v.push(PathBuf::from(l).join("Microsoft").join("Windows").join("Fonts"));
+        }
+        let win = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
+        v.push(PathBuf::from(win).join("Fonts"));
+    }
     v
 }
 
