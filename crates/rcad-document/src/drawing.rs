@@ -991,11 +991,14 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
     })
 }
 
+/// One occluding triangle: projected corners, depths, shared edges.
+type OccTri = ([[f64; 2]; 3], [f64; 3], [bool; 3]);
+
 /// Front-facing triangles in view coordinates with a uniform grid.
 struct Occluder {
     /// (projected corners, depths, edge `i` (opposite corner `i`) shared
     /// with another front-facing triangle).
-    tris: Vec<([[f64; 2]; 3], [f64; 3], [bool; 3])>,
+    tris: Vec<OccTri>,
     lo: [f64; 2],
     cell: f64,
     nx: usize,
@@ -2868,7 +2871,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     b.1[0] <= o.0[0] || b.0[0] >= o.1[0] || b.1[1] <= o.0[1] || b.0[1] >= o.1[1]
                 })
         };
-        let layouts: Vec<(Vec<Prim>, ([f64; 2], [f64; 2]))> = [
+        let layouts: Vec<BalloonLayout> = [
             BalloonSide::Right,
             BalloonSide::Left,
             BalloonSide::Above,
@@ -3224,6 +3227,9 @@ fn dangling_dim(
 /// Balloon radius (sheet mm).
 const BALLOON_R: f64 = 4.0;
 
+/// Balloon primitives and the box of their circles.
+type BalloonLayout = (Vec<Prim>, ([f64; 2], [f64; 2]));
+
 #[derive(Clone, Copy, PartialEq)]
 enum BalloonSide {
     Right,
@@ -3242,7 +3248,7 @@ fn balloons(
     hi: [f64; 2],
     clear: [f64; 3],
     side: BalloonSide,
-) -> (Vec<Prim>, ([f64; 2], [f64; 2])) {
+) -> BalloonLayout {
     let mut out = Vec::new();
     let mut sorted: Vec<&(usize, [f64; 2])> = anchors.iter().collect();
     let column = matches!(side, BalloonSide::Right | BalloonSide::Left);
