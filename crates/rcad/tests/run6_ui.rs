@@ -490,3 +490,49 @@ fn align_a_body_from_the_face_inspector() {
     let bb = h.state().summary().bodies[1].bounds.unwrap();
     assert!((bb.min[2] - 10.0).abs() < 1e-9, "{bb:?}");
 }
+
+/// The sketch bar must keep the tool row on one line and use at most two rows
+/// at the live-input window size (1280×800 output, 1272×768 client). A third
+/// row moves the viewport down while a user (or a live script) clicks sketch
+/// points. Regression: the Pattern… button wrapped the bar to three rows and
+/// broke the organizer-tray live walkthrough.
+#[test]
+fn sketch_bar_fits_two_rows_at_1280() {
+    let mut h = Harness::builder()
+        .with_size([1272.0, 768.0])
+        .with_max_steps(64)
+        .build_ui_state(
+            |ui, app: &mut RcadApp| app.ui(ui),
+            RcadApp::new(ExecMode::Sync, None),
+        );
+    click(&mut h, "New");
+    click(&mut h, "Create Sketch");
+    let row = |h: &Harness<'_, RcadApp>, l: &str| h.get_by_label(l).rect().center().y;
+    let first = row(&h, "Select");
+    for l in ["Text", "Pattern…", "Construction", "Delete"] {
+        assert!(
+            (row(&h, l) - first).abs() < 1.0,
+            "{l} wrapped off the tool row"
+        );
+    }
+    let mut rows: Vec<f32> = vec![];
+    for l in [
+        "Select",
+        "Delete",
+        "Finish Sketch",
+        "Cancel Sketch",
+        "Help",
+        "Undo step",
+        "Redo step",
+    ] {
+        let y = row(&h, l);
+        if !rows.iter().any(|r| (r - y).abs() < 1.0) {
+            rows.push(y);
+        }
+    }
+    assert!(
+        rows.len() <= 2,
+        "sketch bar uses {} rows: {rows:?}",
+        rows.len()
+    );
+}
