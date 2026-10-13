@@ -20,14 +20,15 @@ mod project;
 mod step;
 mod step_in;
 mod sweep;
+mod taper;
 mod transform;
 mod validate;
 
 pub use build::{cut_blind, cut_through_all, extrude, extrude_region, revolve};
 pub use chamfer::chamfer_edge;
 pub use direct::{
-    CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, cylinder_feature,
-    offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,
+    CylinderFeature, DirectEdit, DirectFace, classify_face, classify_faces, countersink,
+    cylinder_feature, offset_face, planar_face_area, remove_cylinder, renumber, resize_cylinder,
 };
 pub use faceref::{planar_faces_overlapping, profile_outline};
 pub use fillet::fillet_edge;
@@ -53,10 +54,11 @@ pub use step_in::{
     import_step,
 };
 pub use sweep::{PathSegment, sweep};
+pub use taper::{taper_section, tapered_boolean, tapered_tool};
 pub use transform::{Rigid, transform_body};
 pub use validate::{
     BooleanCheck, Prism, PrismOp, clear_depth, point_membership, prism_is_empty,
-    verify_prism_boolean, verify_prisms_boolean,
+    verify_prism_boolean, verify_prisms_boolean, verify_tapered_boolean,
 };
 
 use serde::{Deserialize, Serialize};

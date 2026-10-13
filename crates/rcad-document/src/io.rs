@@ -182,13 +182,24 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
         if matches!(f.kind, crate::FeatureKind::DirectEdit { .. }) {
             return Some("direct edits of imported bodies");
         }
+        if matches!(f.kind, crate::FeatureKind::Countersink { .. }) {
+            return Some("countersinks");
+        }
         if matches!(f.kind, crate::FeatureKind::MoveBody { .. }) {
             return Some("body moves/copies");
         }
-        if let crate::FeatureKind::Sketch { links, .. } = &f.kind
-            && !links.is_empty()
-        {
-            return Some("projected sketch geometry (projection links)");
+        if let crate::FeatureKind::Sketch { links, sketch, .. } = &f.kind {
+            if !links.is_empty() {
+                return Some("projected sketch geometry (projection links)");
+            }
+            if sketch.constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    rcad_sketch::Constraint::FixedX { .. } | rcad_sketch::Constraint::FixedY { .. }
+                )
+            }) {
+                return Some("single-coordinate fixed constraints");
+            }
         }
         if let crate::FeatureKind::Extrude {
             options, operation, ..

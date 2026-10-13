@@ -3,6 +3,7 @@
 //! text through [`SketchEditor::apply_text`] (one local undo step), so the
 //! document changes only at Finish Sketch like every other editor tool.
 
+use crate::probe::Probe as _;
 use crate::sketch_edit::SketchEditor;
 use eframe::egui;
 use rcad_sketch::{HAlign, VAlign};
@@ -24,7 +25,8 @@ fn families() -> &'static [String] {
 fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32) {
     let l = ui.label(label);
     ui.add(egui::TextEdit::singleline(buf).desired_width(width))
-        .labelled_by(l.id);
+        .labelled_by(l.id)
+        .probe(label);
     ui.end_row();
 }
 
@@ -115,7 +117,7 @@ pub fn text_window(ctx: &egui::Context, ed: &mut SketchEditor) {
             ui.colored_label(egui::Color32::from_rgb(210, 60, 60), &fb.text);
         }
         ui.horizontal(|ui| {
-            apply = ui.button("Apply text").clicked();
+            apply = ui.button("Apply text").probe("Apply text").clicked();
             cancel = ui.button("Cancel text").clicked();
             if t.id.is_some() {
                 delete = ui.button("Delete text").clicked();

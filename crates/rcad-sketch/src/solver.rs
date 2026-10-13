@@ -495,6 +495,18 @@ impl System {
                     push(Eq::Fix { c, v: *x });
                     push(Eq::Fix { c: c + 1, v: *y });
                 }
+                Constraint::FixedX { p, x } => {
+                    push(Eq::Fix {
+                        c: point_col[p],
+                        v: *x,
+                    });
+                }
+                Constraint::FixedY { p, y } => {
+                    push(Eq::Fix {
+                        c: point_col[p] + 1,
+                        v: *y,
+                    });
+                }
                 Constraint::Horizontal { line } => {
                     let (a, b) = lines[line];
                     push(Eq::Diff {

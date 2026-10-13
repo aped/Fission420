@@ -754,8 +754,19 @@ impl RcadApp {
                     ui.label(RichText::new(sym).color(c)).on_hover_text(t);
                 }
                 if f.profile_error.is_some() {
-                    ui.label(RichText::new("open").color(BAD_COLOR).small())
-                        .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                    // Several loops (e.g. text): regions are extrudable one by
+                    // one or all together; only a sketch with none is "open".
+                    let n = crate::extrude::sketch_regions(f).len();
+                    if n > 0 {
+                        ui.label(RichText::new(format!("{n} regions")).weak().small())
+                            .on_hover_text(
+                                "No single profile: extrude picks a region (or all \
+                                 outermost regions)",
+                            );
+                    } else {
+                        ui.label(RichText::new("open").color(BAD_COLOR).small())
+                            .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                    }
                 }
             });
             if let Some(p) = &f.plane
@@ -1126,6 +1137,7 @@ impl RcadApp {
                     }
                 });
             }
+            "hole" => self.countersink_action(ui, f.id),
             _ => {}
         }
         ui.separator();
@@ -1892,9 +1904,12 @@ impl RcadApp {
                                     .selected_text(current)
                                     .show_ui(ui, |ui| {
                                         for f in &others {
-                                            ui.selectable_value(b, Some(f.reference), label(f));
+                                            ui.selectable_value(b, Some(f.reference), label(f))
+                                                .probe(&label(f));
                                         }
-                                    });
+                                    })
+                                    .response
+                                    .probe("Second face");
                             }
                             None => {
                                 ui.label("The selected face is no longer available.");
@@ -2308,52 +2323,57 @@ impl RcadApp {
                 ));
             }
         }
-        ui.collapsing("Project geometry into this sketch", |ui| {
-            if choices.is_empty() {
-                ui.weak("No earlier parallel face or sketch to project.");
-            }
-            for (label, src) in choices {
-                ui.horizontal(|ui| {
-                    ui.label(&label);
-                    if ui
-                        .small_button("Project")
-                        .named(&format!("Project {label}"))
-                        .clicked()
-                    {
-                        self.request(Command::Project {
-                            sketch: f.id,
-                            source: src,
-                            construction: false,
-                        });
-                    }
-                    if ui.small_button("as construction").clicked() {
-                        self.request(Command::Project {
-                            sketch: f.id,
-                            source: src,
-                            construction: true,
-                        });
-                    }
-                });
-            }
-            ui.small(
-                "Projected lines/arcs follow their source at every regeneration; if the source \
+        let header = egui::CollapsingHeader::new("Project geometry into this sketch")
+            .id_salt(("project_into", f.id.0))
+            .show(ui, |ui| {
+                if choices.is_empty() {
+                    ui.weak("No earlier parallel face or sketch to project.");
+                }
+                for (label, src) in choices {
+                    ui.horizontal(|ui| {
+                        ui.label(&label);
+                        if ui
+                            .small_button("Project")
+                            .named(&format!("Project {label}"))
+                            .clicked()
+                        {
+                            self.request(Command::Project {
+                                sketch: f.id,
+                                source: src,
+                                construction: false,
+                            });
+                        }
+                        if ui.small_button("as construction").clicked() {
+                            self.request(Command::Project {
+                                sketch: f.id,
+                                source: src,
+                                construction: true,
+                            });
+                        }
+                    });
+                }
+                ui.small(
+                    "Projected lines/arcs follow their source at every regeneration; if the source \
                  changes shape the sketch reports a broken reference until you unlink it.",
-            );
-            for (i, p) in f.projections.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Link {}: {p:?}", i + 1));
-                    if ui
-                        .small_button("Unlink")
-                        .named(&format!("Unlink {}", i + 1))
-                        .clicked()
-                    {
-                        self.request(Command::UnlinkProjection {
-                            sketch: f.id,
-                            link: i,
-                        });
-                    }
-                });
-            }
-        });
+                );
+                for (i, p) in f.projections.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Link {}: {p:?}", i + 1));
+                        if ui
+                            .small_button("Unlink")
+                            .named(&format!("Unlink {}", i + 1))
+                            .clicked()
+                        {
+                            self.request(Command::UnlinkProjection {
+                                sketch: f.id,
+                                link: i,
+                            });
+                        }
+                    });
+                }
+            });
+        header
+            .header_response
+            .probe("Project geometry into this sketch");
     }
 }

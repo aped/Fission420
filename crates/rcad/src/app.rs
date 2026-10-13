@@ -1312,7 +1312,7 @@ impl RcadApp {
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
             Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
-            Dialog::DirectEdit(f) => (vec![f.face.feature], vec![]),
+            Dialog::DirectEdit(f) => (f.refs(), vec![]),
             Dialog::Shell { extrude, .. } => (vec![*extrude], vec![]),
             Dialog::OffsetPlane { face, .. } => {
                 (face.iter().map(|(r, _)| r.feature).collect(), vec![])
@@ -1733,11 +1733,8 @@ impl RcadApp {
         let sketch = s.editor.sketch.clone();
         let cmd = match &s.target {
             SketchTarget::New { plane } => {
-                if sketch.entities.is_empty() {
-                    // Nothing drawn: finishing an empty new sketch just closes it.
-                    self.end_sketch_session();
-                    return;
-                }
+                // An empty (or text-only) sketch is still created (run 6): it
+                // can receive projected geometry from the sketch inspector.
                 Command::CreateSketch {
                     name: None,
                     plane: *plane,

@@ -257,6 +257,8 @@ impl Sketch {
             Constraint::FixedPoint { p: q, x, y } => {
                 format!("Fixed {} at ({}, {})", p(q), fmt_mm(*x), fmt_mm(*y))
             }
+            Constraint::FixedX { p: q, x } => format!("Fixed {} at x = {}", p(q), fmt_mm(*x)),
+            Constraint::FixedY { p: q, y } => format!("Fixed {} at y = {}", p(q), fmt_mm(*y)),
             Constraint::Horizontal { line } => format!("Horizontal L{}", line.0),
             Constraint::Vertical { line } => format!("Vertical L{}", line.0),
             Constraint::HorizontalDistance { a, b, dim: d } => {
@@ -481,7 +483,9 @@ impl Sketch {
 /// Points a constraint references (not the line entities' endpoints).
 pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
     match c {
-        Constraint::FixedPoint { p, .. } => vec![*p],
+        Constraint::FixedPoint { p, .. }
+        | Constraint::FixedX { p, .. }
+        | Constraint::FixedY { p, .. } => vec![*p],
         Constraint::HorizontalDistance { a, b, .. }
         | Constraint::VerticalDistance { a, b, .. }
         | Constraint::Distance { a, b, .. }

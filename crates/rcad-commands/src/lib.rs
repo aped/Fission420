@@ -192,6 +192,17 @@ pub enum Command {
         face: FaceRef,
         op: rcad_document::DirectOp,
     },
+    /// Exact countersink (run 6) at the entry of Hole feature `hole`: `diameter`
+    /// mm at the entry face, included angle `angle_deg` (default 90).
+    /// Parameters `diameter`, `angle_deg`.
+    Countersink {
+        #[serde(default)]
+        name: Option<String>,
+        hole: FeatureId,
+        diameter: f64,
+        #[serde(default = "default_csink_angle")]
+        angle_deg: f64,
+    },
     /// Query (run 6): the faces of imported body `body` that direct edits can
     /// name, as JSON in `message`: `[{"face": FaceRef, "kind": DirectFace}]`
     /// in current B-rep order. Fails when the body is not an imported body
@@ -560,6 +571,7 @@ impl Command {
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
             Command::DirectEdit { .. } => "direct_edit",
+            Command::Countersink { .. } => "countersink",
             Command::ImportedFaces { .. } => "imported_faces",
             Command::SetParameter { .. } => "set_parameter",
             Command::Hole { .. } => "hole",
@@ -1357,6 +1369,37 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
+            Command::Countersink {
+                name,
+                hole,
+                diameter,
+                angle_deg,
+            } => {
+                let (name, hole, diameter, angle_deg) =
+                    (name.clone(), *hole, *diameter, *angle_deg);
+                if !(diameter.is_finite() && diameter > 0.0) {
+                    return Err(DocError::Validation(format!(
+                        "countersink diameter must be > 0 mm, got {diameter}"
+                    )));
+                }
+                if !(angle_deg > 0.0 && angle_deg < 180.0) {
+                    return Err(DocError::Validation(format!(
+                        "countersink angle must be between 0 and 180 degrees, got {angle_deg}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Countersink", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Countersink"));
+                    Ok(d.push(
+                        n,
+                        FeatureKind::Countersink {
+                            hole,
+                            diameter,
+                            angle: angle_deg.to_radians(),
+                        },
+                    ))
+                })?;
+                r.feature = Some(id);
+            }
             Command::ImportedFaces { body } => {
                 let m = self
                     .model
@@ -1927,8 +1970,20 @@ impl Session {
                                 }
                                 rcad_kernel::Curve2::Arc { c, a, b, ccw } => {
                                     let (a, b) = if ccw { (a, b) } else { (b, a) };
-                                    let (pc, pa, pb) =
-                                        (point(sketch, c), point(sketch, a), point(sketch, b));
+                                    let (pa, pb) = (point(sketch, a), point(sketch, b));
+                                    // The centre follows from the fixed ends and
+                                    // the arc's equal-radius equation plus one
+                                    // coordinate (the well-conditioned one: x
+                                    // when the chord is steep, else y), so
+                                    // nothing is pinned twice.
+                                    let pc = sketch.add_point(c[0], c[1]);
+                                    sketch.constraints.push(
+                                        if (b[1] - a[1]).abs() >= (b[0] - a[0]).abs() {
+                                            rcad_sketch::Constraint::FixedX { p: pc, x: c[0] }
+                                        } else {
+                                            rcad_sketch::Constraint::FixedY { p: pc, y: c[1] }
+                                        },
+                                    );
                                     let id = sketch.next_entity_id();
                                     sketch.entities.push(rcad_sketch::Entity::Arc {
                                         id,
@@ -1998,10 +2053,19 @@ impl Session {
                                 continue;
                             };
                             for c in sketch.constraints.iter_mut() {
-                                if let rcad_sketch::Constraint::FixedPoint { p: r, x, y } = c
-                                    && r == q
-                                {
-                                    (*x, *y) = (p.x, p.y);
+                                match c {
+                                    rcad_sketch::Constraint::FixedPoint { p: r, x, y }
+                                        if r == q =>
+                                    {
+                                        (*x, *y) = (p.x, p.y);
+                                    }
+                                    rcad_sketch::Constraint::FixedX { p: r, x } if r == q => {
+                                        *x = p.x;
+                                    }
+                                    rcad_sketch::Constraint::FixedY { p: r, y } if r == q => {
+                                        *y = p.y;
+                                    }
+                                    _ => {}
                                 }
                             }
                             if let Some(sp) = sketch.points.iter_mut().find(|sp| sp.id == *q) {
@@ -2728,6 +2792,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
                 FeatureKind::MoveBody { .. } => ("copy_body", None),
                 FeatureKind::DirectEdit { .. } => ("direct_edit", None),
+                FeatureKind::Countersink { .. } => ("countersink", None),
             };
             let (operation, extent, reverse) = match &f.kind {
                 FeatureKind::Extrude {
@@ -2790,6 +2855,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
             }
         })
         .collect()
+}
+
+fn default_csink_angle() -> f64 {
+    90.0
 }
 
 /// [`BodySummary::imported_faces`] (empty when the body has no valid import

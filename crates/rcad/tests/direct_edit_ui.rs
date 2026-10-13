@@ -153,3 +153,79 @@ fn offset_resize_remove_from_picked_faces() {
     click(&mut h, "Undo");
     assert!((volume(&h) - v2).abs() < 1e-6 * v2);
 }
+
+/// Countersink from the Hole feature's inspector: plate 60x40x10, Ø6 hole,
+/// Ø12 x 90° countersink removes 36π (frustum h = 3 minus the Ø6 cylinder).
+#[test]
+fn countersink_from_the_hole_inspector() {
+    use rcad_commands::SketchTemplate;
+    use rcad_document::{FaceRef, FaceRole, SketchPlane};
+    let mut h = harness();
+    click(&mut h, "New");
+    let req = |h: &mut Harness<'_, RcadApp>, c: Command| {
+        h.state_mut().request(c);
+        settle(h);
+        h.state().summary().features.last().unwrap().id
+    };
+    let sk = req(
+        &mut h,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::CenteredRectangle {
+                width: 60.0,
+                height: 40.0,
+                center: Some([30.0, 20.0]),
+            },
+        },
+    );
+    let ext = req(&mut h, Command::extrude(None, sk, 10.0));
+    let hole = req(
+        &mut h,
+        Command::Hole {
+            name: None,
+            plane: SketchPlane::Face(FaceRef {
+                feature: ext,
+                role: FaceRole::ExtrudeEndCap,
+            }),
+            center: [30.0, 20.0],
+            diameter: 6.0,
+            depth: None,
+            counterbore: None,
+            target: None,
+        },
+    );
+    let name = h
+        .state()
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.id == hole)
+        .unwrap()
+        .name
+        .clone();
+    click(&mut h, &name);
+    click(&mut h, "Countersink…");
+    type_into(&mut h, "Countersink diameter (mm)", "12");
+    click(&mut h, "OK");
+    let s = h.state().summary();
+    let last = s.features.last().unwrap();
+    assert_eq!(
+        last.kind,
+        "countersink",
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    let want = 24000.0 - 90.0 * PI - 36.0 * PI;
+    match s.bodies[0].measurements.as_ref().unwrap().volume {
+        rcad_kernel::VolumeResult::Value {
+            volume,
+            error_estimate,
+            ..
+        } => assert!(
+            (volume - want).abs() <= error_estimate.max(1e-6 * want),
+            "{volume} ± {error_estimate} vs {want}"
+        ),
+        ref v => panic!("{v:?}"),
+    }
+}

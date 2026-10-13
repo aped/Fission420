@@ -7,7 +7,7 @@ use crate::app::{Dialog, RcadApp};
 use crate::probe::Probe;
 use eframe::egui::{self, RichText};
 use rcad_commands::{Command, ImportedFace};
-use rcad_document::{DirectOp, FaceRef};
+use rcad_document::{DirectOp, FaceRef, FeatureId};
 use rcad_kernel::DirectFace;
 
 /// What the dialog does.
@@ -16,6 +16,8 @@ pub enum DirectKind {
     Offset,
     Resize,
     Remove,
+    /// Countersink the hole of this Hole feature (`face` unused).
+    Countersink(FeatureId),
 }
 
 /// Form state of a direct edit dialog.
@@ -27,6 +29,8 @@ pub struct DirectForm {
     pub value: String,
     /// What was picked (shown in the dialog).
     pub description: String,
+    /// Countersink: included angle (degrees).
+    pub angle: String,
 }
 
 impl DirectForm {
@@ -35,11 +39,28 @@ impl DirectForm {
             DirectKind::Offset => "Offset face",
             DirectKind::Resize => "Resize hole / boss",
             DirectKind::Remove => "Remove hole / boss",
+            DirectKind::Countersink(_) => "Countersink",
+        }
+    }
+
+    /// Features the dialog refers to.
+    pub fn refs(&self) -> Vec<FeatureId> {
+        match self.kind {
+            DirectKind::Countersink(h) => vec![h],
+            _ => vec![self.face.feature],
         }
     }
 
     pub fn command(&self) -> Result<Command, String> {
         let op = match self.kind {
+            DirectKind::Countersink(hole) => {
+                return Ok(Command::Countersink {
+                    name: None,
+                    hole,
+                    diameter: crate::app::parse_num("countersink diameter", &self.value)?,
+                    angle_deg: crate::app::parse_num("countersink angle", &self.angle)?,
+                });
+            }
             DirectKind::Offset => DirectOp::OffsetFace {
                 distance: crate::app::parse_num("distance", &self.value)?,
             },
@@ -65,6 +86,11 @@ impl DirectForm {
             DirectKind::Resize => {
                 crate::panels::num_field(ui, "New diameter (mm)", &mut self.value);
                 ui.small("Through hole, flat-floored blind hole or flat-topped boss ending on planes perpendicular to its axis. Growing is checked against every other edge of those planes. Bindable afterwards as the parameter diameter.");
+            }
+            DirectKind::Countersink(_) => {
+                crate::panels::num_field(ui, "Countersink diameter (mm)", &mut self.value);
+                crate::panels::num_field(ui, "Countersink angle (deg)", &mut self.angle);
+                ui.small("Exact cone at the hole's entry face (planar, perpendicular to the hole; no counterbore). Refused when it leaves the face or reaches the end of the hole. Parameters diameter and angle_deg stay editable.");
             }
             DirectKind::Remove => {
                 ui.small("Deletes the hole or boss and closes the openings it leaves on the planar faces (exact). References to its faces become broken.");
@@ -95,6 +121,7 @@ impl RcadApp {
                 kind,
                 value,
                 description,
+                angle: String::new(),
             })
         };
         match f.kind {
@@ -145,6 +172,36 @@ impl RcadApp {
                         .small(),
                 );
             }
+        }
+    }
+}
+
+impl RcadApp {
+    /// Feature inspector action for a selected Hole feature.
+    pub(crate) fn countersink_action(&mut self, ui: &mut egui::Ui, hole: FeatureId) {
+        let d = self
+            .summary
+            .features
+            .iter()
+            .find(|f| f.id == hole)
+            .and_then(|f| f.parameters.iter().find(|(n, _)| n == "diameter"))
+            .map_or(6.0, |(_, v)| *v);
+        if ui
+            .button("Countersink…")
+            .on_hover_text("Add an exact countersink (cone) at this hole's entry")
+            .probe("Countersink…")
+            .clicked()
+        {
+            self.dialog = Some(Dialog::DirectEdit(DirectForm {
+                face: FaceRef {
+                    feature: hole,
+                    role: rcad_document::FaceRole::ExtrudeEndCap,
+                },
+                kind: DirectKind::Countersink(hole),
+                value: crate::params_ui::fmt_value(2.0 * d),
+                description: format!("Hole Ø{} mm", crate::params_ui::fmt_value(d)),
+                angle: "90".into(),
+            }));
         }
     }
 }

@@ -201,15 +201,80 @@ struct PrismTest {
     length: f64,
     poly: Vec<[f64; 2]>,
     holes: Vec<Vec<[f64; 2]>>,
+    /// Run 6: tan of the draft angle; the section at height `w` is the
+    /// profile offset inward by `w * taper` (0: a right prism).
+    taper: f64,
+    /// Tapered sections: the exact base shape.
+    base: Section,
+}
+
+/// Base shape of a tapered section.
+#[derive(Clone)]
+enum Section {
+    Polygon(Vec<[f64; 2]>),
+    Circle([f64; 2], f64),
+    /// Not taperable (the check uses the base polygon at every height).
+    Other,
 }
 
 impl PrismTest {
-    fn new(p: &Prism) -> Self {
+    fn tapered(p: &Prism, taper_tan: f64) -> Self {
         Self {
             start: *p.start,
             length: p.length,
             poly: profile_polygon(p.profile),
             holes: p.holes.iter().map(profile_polygon).collect(),
+            taper: taper_tan,
+            base: match p.profile {
+                Profile::Polygon(v) => Section::Polygon(v.clone()),
+                Profile::Circle { center, radius } => Section::Circle(*center, *radius),
+                Profile::Loop(_) => Section::Other,
+            },
+        }
+    }
+    /// Section polygon at height `w` (tapered polygons; None when the offset
+    /// is degenerate there: an empty section).
+    fn section_poly(&self, w: f64) -> Option<std::borrow::Cow<'_, [[f64; 2]]>> {
+        if self.taper == 0.0 {
+            return Some(std::borrow::Cow::Borrowed(self.poly.as_slice()));
+        }
+        match &self.base {
+            Section::Polygon(v) => {
+                crate::taper::offset_polygon(v, w * self.taper).map(std::borrow::Cow::Owned)
+            }
+            Section::Circle(c, r) => {
+                let rr = r - w * self.taper;
+                (rr > 0.0).then(|| {
+                    std::borrow::Cow::Owned(profile_polygon(&Profile::Circle {
+                        center: *c,
+                        radius: rr,
+                    }))
+                })
+            }
+            Section::Other => Some(std::borrow::Cow::Borrowed(self.poly.as_slice())),
+        }
+    }
+    /// (inside, distance to the boundary) of `q` in the section at `w`.
+    fn at(&self, q: [f64; 2], w: f64) -> (bool, f64) {
+        if self.taper != 0.0
+            && let Section::Circle(c, r) = &self.base
+        {
+            let rr = r - w * self.taper;
+            let d = (q[0] - c[0]).hypot(q[1] - c[1]);
+            return (d < rr, (d - rr).abs());
+        }
+        match self.section_poly(w) {
+            Some(poly) => {
+                let inside = point_in_polygon(q, &poly)
+                    && !self.holes.iter().any(|h| point_in_polygon(q, h));
+                let d = self
+                    .holes
+                    .iter()
+                    .map(|h| dist_to_polygon(q, h))
+                    .fold(dist_to_polygon(q, &poly), f64::min);
+                (inside, d)
+            }
+            None => (false, f64::INFINITY),
         }
     }
     /// Inside the profile region (outer loop minus holes).
@@ -296,14 +361,16 @@ impl PrismTest {
     fn classify(&self, x: [f64; 3], eps: f64) -> Option<bool> {
         let [u, v, w] = local(&self.start, x);
         let d_cap = w.abs().min((w - self.length).abs());
-        let d_side = self.boundary_dist([u, v]);
-        if d_cap < eps && (self.inside([u, v]) || d_side < eps) {
+        let (inside, d_side) = self.at([u, v], w.clamp(0.0, self.length));
+        // A drafted side is inclined: its distance is at most the in-plane one.
+        let d_side = d_side * (1.0 + self.taper * self.taper).sqrt().recip();
+        if d_cap < eps && (inside || d_side < eps) {
             return None;
         }
         if d_side < eps && w > -eps && w < self.length + eps {
             return None;
         }
-        Some(w > 0.0 && w < self.length && self.inside([u, v]))
+        Some(w > 0.0 && w < self.length && inside)
     }
 }
 
@@ -402,6 +469,41 @@ pub fn verify_prisms_boolean(
     op: PrismOp,
     tools: &[(&Prism, (f64, f64))],
 ) -> Result<BooleanCheck> {
+    verify_impl(target, result, op, tools, 0.0)
+}
+
+/// [`verify_prism_boolean`] for a drafted tool (run 6, `crate::taper`): the
+/// section at height `w` along `prism.start.z` is `prism.profile` offset
+/// inward by `w * tan(taper)` (polygons mitred, circles by radius). `used` as
+/// for [`verify_prism_boolean`].
+pub fn verify_tapered_boolean(
+    target: &Body,
+    result: &Body,
+    op: PrismOp,
+    prism: &Prism,
+    taper: f64,
+    used: (f64, f64),
+) -> Result<BooleanCheck> {
+    if !(taper.is_finite() && taper.abs() < 89f64.to_radians()) {
+        return Err(KernelError::InvalidInput(
+            "result check: draft angle must be below 89 degrees".into(),
+        ));
+    }
+    if matches!(prism.profile, Profile::Loop(_)) && taper != 0.0 {
+        return Err(KernelError::InvalidInput(
+            "result check: tapered line/arc loops are not supported".into(),
+        ));
+    }
+    verify_impl(target, result, op, &[(prism, used)], taper.tan())
+}
+
+fn verify_impl(
+    target: &Body,
+    result: &Body,
+    op: PrismOp,
+    tools: &[(&Prism, (f64, f64))],
+    taper_tan: f64,
+) -> Result<BooleanCheck> {
     if tools.is_empty() {
         return Err(KernelError::InvalidInput("result check: no tools".into()));
     }
@@ -427,7 +529,9 @@ pub fn verify_prisms_boolean(
         ));
     }
     guarded("result check", || {
-        check_faces(target, result, op, tools, &tmesh, &rmesh, chord, diag)
+        check_faces(
+            target, result, op, tools, taper_tan, &tmesh, &rmesh, chord, diag,
+        )
     })?
 }
 
@@ -437,12 +541,16 @@ fn check_faces(
     result: &Body,
     op: PrismOp,
     tools: &[(&Prism, (f64, f64))],
+    taper_tan: f64,
     tmesh: &crate::TriMesh,
     rmesh: &crate::TriMesh,
     chord: f64,
     diag: f64,
 ) -> Result<BooleanCheck> {
-    let tests: Vec<PrismTest> = tools.iter().map(|(p, _)| PrismTest::new(p)).collect();
+    let tests: Vec<PrismTest> = tools
+        .iter()
+        .map(|(p, _)| PrismTest::tapered(p, taper_tan))
+        .collect();
     let wind = Winding::new(tmesh);
     let planar = planar_faces(result);
     // Probe offsets: exact faces need only clear float noise; curved faces must
@@ -458,8 +566,20 @@ fn check_faces(
         .map(|((prism, used), tool)| {
             let mut lo = [f64::INFINITY; 3];
             let mut hi = [f64::NEG_INFINITY; 3];
-            for q in &tool.poly {
-                for w in [used.0.min(0.0), used.1.max(prism.length)] {
+            for w in [used.0.min(0.0), used.1.max(prism.length)] {
+                // Tapered: the section at that end (the widest one bounds it).
+                let sect = match &tool.base {
+                    Section::Circle(c, r) if tool.taper != 0.0 => {
+                        profile_polygon(&Profile::Circle {
+                            center: *c,
+                            radius: (r - w * tool.taper).max(0.0) + 1e-9,
+                        })
+                    }
+                    _ => tool
+                        .section_poly(w)
+                        .map_or_else(|| tool.poly.clone(), |c| c.into_owned()),
+                };
+                for q in sect.iter().chain(&tool.poly) {
                     let p = prism.start.offset(w).to_world(*q);
                     for i in 0..3 {
                         lo[i] = lo[i].min(p[i]);

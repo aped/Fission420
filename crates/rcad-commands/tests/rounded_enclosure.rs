@@ -85,7 +85,14 @@ impl P {
         (self.length / 2.0 - g, self.width / 2.0 - g)
     }
     fn base_volume(&self) -> f64 {
-        let (l, w, h, t, f, r) = (self.length, self.width, self.height, self.wall, self.floor, self.r);
+        let (l, w, h, t, f, r) = (
+            self.length,
+            self.width,
+            self.height,
+            self.wall,
+            self.floor,
+            self.r,
+        );
         let inner_r = r - t;
         assert!(inner_r > 0.0, "the cavity corner needs r > wall");
         Self::rr_area(l, w, r) * h - Self::rr_area(l - 2.0 * t, w - 2.0 * t, inner_r) * (h - f)
@@ -179,8 +186,10 @@ fn build(p: &P) -> Built {
         ("boss_d", p.boss_d, "screw boss diameter"),
         ("lid_t", p.lid_t, "lid thickness"),
     ] {
-        b.json(json!({"cmd": "set_user_parameter", "name": n, "expression": v.to_string(),
-                      "unit": "mm", "comment": c}));
+        b.json(
+            json!({"cmd": "set_user_parameter", "name": n, "expression": v.to_string(),
+                      "unit": "mm", "comment": c}),
+        );
     }
     // Block: rectangle on XY bound to length x width, extruded height.
     let sk = b
@@ -217,7 +226,8 @@ fn build(p: &P) -> Built {
     b.json(json!({"cmd": "project", "sketch": cav, "source": top}));
     let mut s = b.sketch(cav);
     let first = s.entities[0].id();
-    s.offset_loop(first, -p.wall, Some("wall")).expect("inward offset");
+    s.offset_loop(first, -p.wall, Some("wall"))
+        .expect("inward offset");
     b.cmd(Command::EditSketch {
         feature: cav,
         sketch: s,
@@ -232,8 +242,10 @@ fn build(p: &P) -> Built {
         .expect("inner region")
         .id;
     let cut = b
-        .json(json!({"cmd": "extrude", "sketch": cav, "distance": p.height - p.floor,
-                     "op": "cut", "target": 1, "region": inner}))
+        .json(
+            json!({"cmd": "extrude", "sketch": cav, "distance": p.height - p.floor,
+                     "op": "cut", "target": 1, "region": inner}),
+        )
         .feature
         .unwrap();
     b.bind(cut, "distance", "height - floor");
@@ -251,11 +263,21 @@ fn build(p: &P) -> Built {
             .feature
             .unwrap();
         b.bind(f, "diameter", "boss_d");
-        b.bind(f, "center_x", &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }));
-        b.bind(f, "center_y", &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }));
+        b.bind(
+            f,
+            "center_x",
+            &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }),
+        );
+        b.bind(
+            f,
+            "center_y",
+            &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }),
+        );
         let e = b
-            .json(json!({"cmd": "extrude", "sketch": f, "op": "join", "target": 1,
-                         "options": {"to": plane_z(p.height)}}))
+            .json(
+                json!({"cmd": "extrude", "sketch": f, "op": "join", "target": 1,
+                         "options": {"to": plane_z(p.height)}}),
+            )
             .feature
             .unwrap();
         b.bind(e, "to_offset", "height");
@@ -263,14 +285,24 @@ fn build(p: &P) -> Built {
     // Pilot holes from the rim plane into the bosses.
     for (sx, sy) in corners {
         let h = b
-            .json(json!({"cmd": "hole", "plane": plane_z(p.height), "target": 1,
+            .json(
+                json!({"cmd": "hole", "plane": plane_z(p.height), "target": 1,
                          "center": [sx * bx, sy * by], "diameter": p.pilot_d,
-                         "depth": p.pilot_depth}))
+                         "depth": p.pilot_depth}),
+            )
             .feature
             .unwrap();
         b.bind(h, "plane_offset", "height");
-        b.bind(h, "center_x", &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }));
-        b.bind(h, "center_y", &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }));
+        b.bind(
+            h,
+            "center_x",
+            &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }),
+        );
+        b.bind(
+            h,
+            "center_y",
+            &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }),
+        );
     }
     // Lid: the base's bottom outline projected to a plane lid_gap above it.
     let lz = p.height + p.lid_gap;
@@ -279,26 +311,46 @@ fn build(p: &P) -> Built {
     b.json(json!({"cmd": "project", "sketch": lid_sk,
                   "source": {"Face": {"feature": blk, "role": "ExtrudeStartCap"}}}));
     let lid = b
-        .json(json!({"cmd": "extrude", "sketch": lid_sk, "distance": p.lid_t,
-                     "body_name": "Lid"}))
+        .json(
+            json!({"cmd": "extrude", "sketch": lid_sk, "distance": p.lid_t,
+                     "body_name": "Lid"}),
+        )
         .feature
         .unwrap();
     b.bind(lid, "distance", "lid_t");
     // Counterbored clearance holes over the bosses, from the lid top.
     for (sx, sy) in corners {
         let h = b
-            .json(json!({"cmd": "hole", "plane": plane_z(lz + p.lid_t), "target": 2,
+            .json(
+                json!({"cmd": "hole", "plane": plane_z(lz + p.lid_t), "target": 2,
                          "center": [sx * bx, sy * by], "diameter": p.clear_d,
-                         "counterbore": [p.cbore_d, p.cbore_depth]}))
+                         "counterbore": [p.cbore_d, p.cbore_depth]}),
+            )
             .feature
             .unwrap();
-        b.bind(h, "plane_offset", &format!("height + {} + lid_t", p.lid_gap));
-        b.bind(h, "center_x", &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }));
-        b.bind(h, "center_y", &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }));
+        b.bind(
+            h,
+            "plane_offset",
+            &format!("height + {} + lid_t", p.lid_gap),
+        );
+        b.bind(
+            h,
+            "center_x",
+            &format!("{}({gx})", if sx < 0.0 { "-" } else { "" }),
+        );
+        b.bind(
+            h,
+            "center_y",
+            &format!("{}({gy})", if sy < 0.0 { "-" } else { "" }),
+        );
     }
     // Raised "B8" on the lid top, centred; all glyph regions in one Join.
     let ts = empty_sketch(&mut b, plane_z(lz + p.lid_t));
-    b.bind(ts, "plane_offset", &format!("height + {} + lid_t", p.lid_gap));
+    b.bind(
+        ts,
+        "plane_offset",
+        &format!("height + {} + lid_t", p.lid_gap),
+    );
     let mut t = TextSpec::new("B8", FAMILY, p.text_h, [0.0, 0.0]);
     t.halign = HAlign::Center;
     t.valign = VAlign::Middle;
@@ -316,8 +368,10 @@ fn build(p: &P) -> Built {
         .collect();
     assert_eq!(glyphs.len(), 2, "B and 8");
     let (first, rest) = glyphs.split_first().unwrap();
-    b.json(json!({"cmd": "extrude", "sketch": ts, "distance": p.text_raise, "op": "join",
-                  "target": 2, "region": first, "options": {"regions": rest}}));
+    b.json(
+        json!({"cmd": "extrude", "sketch": ts, "distance": p.text_raise, "op": "join",
+                  "target": 2, "region": first, "options": {"regions": rest}}),
+    );
     b.text_sketch = ts;
     b
 }
@@ -421,7 +475,14 @@ fn probe(s: &Session, body: u32, pts: &[[f64; 3]]) -> Vec<Option<bool>> {
 
 /// Wall, corner, floor, boss and hole probes of the base (true = material).
 fn base_probes(p: &P) -> Vec<([f64; 3], bool, &'static str)> {
-    let (l2, w2, h, t, f, r) = (p.length / 2.0, p.width / 2.0, p.height, p.wall, p.floor, p.r);
+    let (l2, w2, h, t, f, r) = (
+        p.length / 2.0,
+        p.width / 2.0,
+        p.height,
+        p.wall,
+        p.floor,
+        p.r,
+    );
     let mid = h / 2.0;
     let (bx, by) = p.boss();
     // Corner arc centre (outer and inner arcs share it).
@@ -435,13 +496,33 @@ fn base_probes(p: &P) -> Vec<([f64; 3], bool, &'static str)> {
         ([0.0, -w2 + t + 0.05, mid], false, "inside the front wall"),
         ([0.0, 0.0, f / 2.0], true, "floor"),
         ([0.0, 0.0, f + 0.05], false, "above the floor"),
-        ([cx + (r - t / 2.0) * d, cy + (r - t / 2.0) * d, mid], true, "rounded corner wall"),
-        ([cx + (r + 0.05) * d, cy + (r + 0.05) * d, mid], false, "outside the round"),
-        ([cx + (r - t - 0.05) * d, cy + (r - t - 0.05) * d, mid], false, "inside the round"),
+        (
+            [cx + (r - t / 2.0) * d, cy + (r - t / 2.0) * d, mid],
+            true,
+            "rounded corner wall",
+        ),
+        (
+            [cx + (r + 0.05) * d, cy + (r + 0.05) * d, mid],
+            false,
+            "outside the round",
+        ),
+        (
+            [cx + (r - t - 0.05) * d, cy + (r - t - 0.05) * d, mid],
+            false,
+            "inside the round",
+        ),
         ([bx + p.boss_d / 2.0 - 0.2, by, mid], true, "boss wall"),
-        ([bx + p.boss_d / 2.0 + 0.2, by, mid], false, "beside the boss"),
+        (
+            [bx + p.boss_d / 2.0 + 0.2, by, mid],
+            false,
+            "beside the boss",
+        ),
         ([bx, by, h - 1.0], false, "pilot hole"),
-        ([bx, by, h - p.pilot_depth - 0.5], true, "below the pilot hole"),
+        (
+            [bx, by, h - p.pilot_depth - 0.5],
+            true,
+            "below the pilot hole",
+        ),
         ([-bx, -by, h - 1.0], false, "opposite pilot hole"),
     ]
 }
@@ -465,9 +546,17 @@ fn rounded_labelled_enclosure_from_new() {
     let ta = text_area(&b);
     assert!(ta > 20.0 && ta < 200.0, "glyph area {ta}");
     let base = vol(&b.s, 1);
-    assert!((base - p.base_volume()).abs() < 1e-5, "base {base} vs {}", p.base_volume());
+    assert!(
+        (base - p.base_volume()).abs() < 1e-5,
+        "base {base} vs {}",
+        p.base_volume()
+    );
     let lid = vol(&b.s, 2);
-    assert!((lid - p.lid_volume(ta)).abs() < 1e-5, "lid {lid} vs {}", p.lid_volume(ta));
+    assert!(
+        (lid - p.lid_volume(ta)).abs() < 1e-5,
+        "lid {lid} vs {}",
+        p.lid_volume(ta)
+    );
     check_base(&b.s, &p);
     // Lid: counterbore, clearance hole, plate, and the "B" counters open.
     let (bx, by) = p.boss();
@@ -483,7 +572,16 @@ fn rounded_labelled_enclosure_from_new() {
             [0.0, 0.0, lz + p.lid_t / 2.0],
         ],
     );
-    assert_eq!(lp, vec![Some(false), Some(false), Some(true), Some(false), Some(true)]);
+    assert_eq!(
+        lp,
+        vec![
+            Some(false),
+            Some(false),
+            Some(true),
+            Some(false),
+            Some(true)
+        ]
+    );
     // Text: a point inside a counter of "B" (a hole of a glyph region) is air
     // at the raised height; a point on the glyph body is material.
     let sk = b.solved(b.text_sketch);
@@ -496,13 +594,19 @@ fn rounded_labelled_enclosure_from_new() {
     let glyph = interior(&regions.iter().find(|r| r.depth == 0).unwrap().region);
     let z = lz + p.lid_t + p.text_raise / 2.0;
     let tp = probe(&b.s, 2, &[[c[0], c[1], z], [glyph[0], glyph[1], z]]);
-    assert_eq!(tp, vec![Some(false), Some(true)], "counter open, glyph raised");
+    assert_eq!(
+        tp,
+        vec![Some(false), Some(true)],
+        "counter open, glyph raised"
+    );
 
     // Upstream edits: longer box, larger radius. Cavity, bosses, holes, lid
     // and text follow.
     for (name, v) in [("length", 120.0), ("corner_r", 8.0)] {
-        b.json(json!({"cmd": "set_user_parameter", "name": name, "expression": v.to_string(),
-                      "unit": "mm"}));
+        b.json(
+            json!({"cmd": "set_user_parameter", "name": name, "expression": v.to_string(),
+                      "unit": "mm"}),
+        );
     }
     let p2 = P {
         length: 120.0,
@@ -535,7 +639,10 @@ fn rounded_labelled_enclosure_from_new() {
     let mut t = Session::new();
     let r = t.execute(&Command::Open { path: path.clone() });
     assert!(r.ok, "{:?}", r.error);
-    assert_eq!(t.model().unwrap().document(), b.s.model().unwrap().document());
+    assert_eq!(
+        t.model().unwrap().document(),
+        b.s.model().unwrap().document()
+    );
     assert!((vol(&t, 1) - p2.base_volume()).abs() < 1e-5);
     assert!((vol(&t, 2) - p2.lid_volume(ta)).abs() < 1e-5);
     // Exports.

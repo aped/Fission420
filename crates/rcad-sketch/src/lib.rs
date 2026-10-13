@@ -135,6 +135,11 @@ impl Dimension {
 pub enum Constraint {
     /// `p == (x, y)`; 2 equations.
     FixedPoint { p: PointId, x: f64, y: f64 },
+    /// `p.x == x`; 1 equation (run 6: pins one coordinate, e.g. the centre of
+    /// a projected arc whose ends are fixed, without a redundant equation).
+    FixedX { p: PointId, x: f64 },
+    /// `p.y == y`; 1 equation (run 6).
+    FixedY { p: PointId, y: f64 },
     /// Line endpoints share y; 1 equation.
     Horizontal { line: EntityId },
     /// Line endpoints share x; 1 equation.
@@ -780,6 +785,14 @@ impl Sketch {
                     if !x.is_finite() || !y.is_finite() {
                         return Err(SketchError::InvalidValue(format!(
                             "constraint {i}: fixed point target is non-finite"
+                        )));
+                    }
+                }
+                Constraint::FixedX { p, x: v } | Constraint::FixedY { p, y: v } => {
+                    need_point(p)?;
+                    if !v.is_finite() {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: fixed coordinate target is non-finite"
                         )));
                     }
                 }
