@@ -1,0 +1,2518 @@
+{
+  "format": "r-cad",
+  "version": 6,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Sketch1",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 2.2760782289112943e-10,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -59.999999999491195,
+                "y": -35.0
+              },
+              {
+                "id": 2,
+                "x": 60.000000000453966,
+                "y": -35.0
+              },
+              {
+                "id": 3,
+                "x": 60.000000000362135,
+                "y": 35.0
+              },
+              {
+                "id": 4,
+                "x": -59.999999999399364,
+                "y": 35.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 120.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 70.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "height": "width",
+          "width": "length"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Extrude1",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 30.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "height"
+        }
+      },
+      {
+        "id": 3,
+        "name": "Fillet1",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "radius": 8.0
+        },
+        "expressions": {
+          "radius": "corner_r"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Fillet2",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "radius": 8.0
+        },
+        "expressions": {
+          "radius": "corner_r"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Fillet3",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "radius": 8.0
+        },
+        "expressions": {
+          "radius": "corner_r"
+        }
+      },
+      {
+        "id": 6,
+        "name": "Fillet4",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "radius": 8.0
+        },
+        "expressions": {
+          "radius": "corner_r"
+        }
+      },
+      {
+        "id": 7,
+        "name": "Sketch2",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": -44.0,
+                "y": -35.0
+              },
+              {
+                "id": 1,
+                "x": 44.0,
+                "y": -35.0
+              },
+              {
+                "id": 2,
+                "x": 43.999999999999226,
+                "y": -28.999999999999233
+              },
+              {
+                "id": 3,
+                "x": 50.0,
+                "y": -29.0
+              },
+              {
+                "id": 4,
+                "x": 50.0,
+                "y": 29.0
+              },
+              {
+                "id": 5,
+                "x": 44.00000000000158,
+                "y": 29.000000000001602
+              },
+              {
+                "id": 6,
+                "x": 44.0,
+                "y": 35.0
+              },
+              {
+                "id": 7,
+                "x": -44.0,
+                "y": 35.0
+              },
+              {
+                "id": 8,
+                "x": -43.999999999999744,
+                "y": 28.99999999999973
+              },
+              {
+                "id": 9,
+                "x": -50.0,
+                "y": 29.0
+              },
+              {
+                "id": 10,
+                "x": -50.0,
+                "y": -29.0
+              },
+              {
+                "id": 11,
+                "x": -44.00000000000006,
+                "y": -29.000000000000046
+              },
+              {
+                "id": 12,
+                "x": -44.00000000000002,
+                "y": -32.6
+              },
+              {
+                "id": 13,
+                "x": 44.0,
+                "y": -32.6
+              },
+              {
+                "id": 14,
+                "x": 47.6,
+                "y": -28.999999999999694
+              },
+              {
+                "id": 15,
+                "x": 47.6,
+                "y": 29.0
+              },
+              {
+                "id": 16,
+                "x": 44.00000000000063,
+                "y": 32.6
+              },
+              {
+                "id": 17,
+                "x": -44.0,
+                "y": 32.6
+              },
+              {
+                "id": 18,
+                "x": -47.6,
+                "y": 28.999999999999893
+              },
+              {
+                "id": 19,
+                "x": -47.6,
+                "y": -29.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Arc": {
+                  "id": 2,
+                  "center": 2,
+                  "start": 1,
+                  "end": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Arc": {
+                  "id": 4,
+                  "center": 5,
+                  "start": 4,
+                  "end": 6
+                }
+              },
+              {
+                "Line": {
+                  "id": 5,
+                  "a": 6,
+                  "b": 7
+                }
+              },
+              {
+                "Arc": {
+                  "id": 6,
+                  "center": 8,
+                  "start": 7,
+                  "end": 9
+                }
+              },
+              {
+                "Line": {
+                  "id": 7,
+                  "a": 9,
+                  "b": 10
+                }
+              },
+              {
+                "Arc": {
+                  "id": 8,
+                  "center": 11,
+                  "start": 10,
+                  "end": 0
+                }
+              },
+              {
+                "Line": {
+                  "id": 9,
+                  "a": 12,
+                  "b": 13
+                }
+              },
+              {
+                "Arc": {
+                  "id": 10,
+                  "center": 2,
+                  "start": 13,
+                  "end": 14
+                }
+              },
+              {
+                "Line": {
+                  "id": 11,
+                  "a": 14,
+                  "b": 15
+                }
+              },
+              {
+                "Arc": {
+                  "id": 12,
+                  "center": 5,
+                  "start": 15,
+                  "end": 16
+                }
+              },
+              {
+                "Line": {
+                  "id": 13,
+                  "a": 16,
+                  "b": 17
+                }
+              },
+              {
+                "Arc": {
+                  "id": 14,
+                  "center": 8,
+                  "start": 17,
+                  "end": 18
+                }
+              },
+              {
+                "Line": {
+                  "id": 15,
+                  "a": 18,
+                  "b": 19
+                }
+              },
+              {
+                "Arc": {
+                  "id": 16,
+                  "center": 11,
+                  "start": 19,
+                  "end": 12
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -44.0,
+                  "y": -35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 1,
+                  "x": 44.0,
+                  "y": -35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 2,
+                  "x": 43.999999999999226,
+                  "y": -28.999999999999233
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 3,
+                  "x": 50.0,
+                  "y": -29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 4,
+                  "x": 50.0,
+                  "y": 29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 5,
+                  "x": 44.00000000000158,
+                  "y": 29.000000000001602
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 6,
+                  "x": 44.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 7,
+                  "x": -44.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 8,
+                  "x": -43.999999999999744,
+                  "y": 28.99999999999973
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 9,
+                  "x": -50.0,
+                  "y": 29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 10,
+                  "x": -50.0,
+                  "y": -29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 11,
+                  "x": -44.00000000000006,
+                  "y": -29.000000000000046
+                }
+              },
+              {
+                "Offset": {
+                  "pairs": [
+                    {
+                      "source": 1,
+                      "copy": 9,
+                      "sign": 1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 2,
+                      "copy": 10,
+                      "sign": -1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 3,
+                      "copy": 11,
+                      "sign": 1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 4,
+                      "copy": 12,
+                      "sign": -1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 5,
+                      "copy": 13,
+                      "sign": 1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 6,
+                      "copy": 14,
+                      "sign": -1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 7,
+                      "copy": 15,
+                      "sign": 1,
+                      "tangent_next": true
+                    },
+                    {
+                      "source": 8,
+                      "copy": 16,
+                      "sign": -1,
+                      "tangent_next": true
+                    }
+                  ],
+                  "dim": {
+                    "name": "wall",
+                    "value": 2.4
+                  }
+                }
+              }
+            ]
+          },
+          "links": [
+            {
+              "source": {
+                "Face": {
+                  "feature": 2,
+                  "role": "ExtrudeEndCap"
+                }
+              },
+              "loops": [
+                [
+                  {
+                    "entity": 1,
+                    "points": [
+                      0,
+                      1
+                    ]
+                  },
+                  {
+                    "entity": 2,
+                    "points": [
+                      2,
+                      1,
+                      3
+                    ]
+                  },
+                  {
+                    "entity": 3,
+                    "points": [
+                      3,
+                      4
+                    ]
+                  },
+                  {
+                    "entity": 4,
+                    "points": [
+                      5,
+                      4,
+                      6
+                    ]
+                  },
+                  {
+                    "entity": 5,
+                    "points": [
+                      6,
+                      7
+                    ]
+                  },
+                  {
+                    "entity": 6,
+                    "points": [
+                      8,
+                      7,
+                      9
+                    ]
+                  },
+                  {
+                    "entity": 7,
+                    "points": [
+                      9,
+                      10
+                    ]
+                  },
+                  {
+                    "entity": 8,
+                    "points": [
+                      11,
+                      10,
+                      0
+                    ]
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        "expressions": {
+          "wall": "wall"
+        }
+      },
+      {
+        "id": 8,
+        "name": "Extrude2",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 7,
+          "distance": 27.6,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "region": {
+            "outer": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16
+            ]
+          }
+        },
+        "expressions": {
+          "distance": "height - floor"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Sketch3",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 8,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.5
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 53.1,
+                  "y": 28.1
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 7.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "diameter": "boss_d"
+        }
+      },
+      {
+        "id": 10,
+        "name": "Extrude3",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 9,
+          "distance": 0.0,
+          "operation": {
+            "Join": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "options": {
+            "to": {
+              "Offset": {
+                "base": "WorldXY",
+                "distance": 30.0
+              }
+            }
+          }
+        },
+        "expressions": {
+          "to_offset": "height"
+        }
+      },
+      {
+        "id": 11,
+        "name": "Sketch4",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 8,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.5
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -53.1,
+                  "y": 28.1
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 7.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "diameter": "boss_d"
+        }
+      },
+      {
+        "id": 12,
+        "name": "Extrude4",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 11,
+          "distance": 0.0,
+          "operation": {
+            "Join": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "options": {
+            "to": {
+              "Offset": {
+                "base": "WorldXY",
+                "distance": 30.0
+              }
+            }
+          }
+        },
+        "expressions": {
+          "to_offset": "height"
+        }
+      },
+      {
+        "id": 13,
+        "name": "Sketch5",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 8,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.5
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -53.1,
+                  "y": -28.1
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 7.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "diameter": "boss_d"
+        }
+      },
+      {
+        "id": 14,
+        "name": "Extrude5",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 13,
+          "distance": 0.0,
+          "operation": {
+            "Join": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "options": {
+            "to": {
+              "Offset": {
+                "base": "WorldXY",
+                "distance": 30.0
+              }
+            }
+          }
+        },
+        "expressions": {
+          "to_offset": "height"
+        }
+      },
+      {
+        "id": 15,
+        "name": "Sketch6",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 8,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 3.5
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 53.1,
+                  "y": -28.1
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 7.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "diameter": "boss_d"
+        }
+      },
+      {
+        "id": 16,
+        "name": "Extrude6",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 15,
+          "distance": 0.0,
+          "operation": {
+            "Join": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "options": {
+            "to": {
+              "Offset": {
+                "base": "WorldXY",
+                "distance": 30.0
+              }
+            }
+          }
+        },
+        "expressions": {
+          "to_offset": "height"
+        }
+      },
+      {
+        "id": 17,
+        "name": "Hole1",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 30.0
+            }
+          },
+          "center": [
+            53.1,
+            28.1
+          ],
+          "diameter": 2.5,
+          "depth": 8.0,
+          "counterbore": null,
+          "target": 1
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height"
+        }
+      },
+      {
+        "id": 18,
+        "name": "Hole2",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 30.0
+            }
+          },
+          "center": [
+            -53.1,
+            28.1
+          ],
+          "diameter": 2.5,
+          "depth": 8.0,
+          "counterbore": null,
+          "target": 1
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height"
+        }
+      },
+      {
+        "id": 19,
+        "name": "Hole3",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 30.0
+            }
+          },
+          "center": [
+            -53.1,
+            -28.1
+          ],
+          "diameter": 2.5,
+          "depth": 8.0,
+          "counterbore": null,
+          "target": 1
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height"
+        }
+      },
+      {
+        "id": 20,
+        "name": "Hole4",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 30.0
+            }
+          },
+          "center": [
+            53.1,
+            -28.1
+          ],
+          "diameter": 2.5,
+          "depth": 8.0,
+          "counterbore": null,
+          "target": 1
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height"
+        }
+      },
+      {
+        "id": 21,
+        "name": "Sketch7",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 40.0
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": -44.00000000000006,
+                "y": 29.000000000000018
+              },
+              {
+                "id": 1,
+                "x": -44.0,
+                "y": 35.0
+              },
+              {
+                "id": 2,
+                "x": -50.0,
+                "y": 29.0
+              },
+              {
+                "id": 3,
+                "x": 44.0,
+                "y": 35.0
+              },
+              {
+                "id": 4,
+                "x": 44.00000000000185,
+                "y": 29.000000000001794
+              },
+              {
+                "id": 5,
+                "x": 50.0,
+                "y": 29.0
+              },
+              {
+                "id": 6,
+                "x": 50.0,
+                "y": -29.0
+              },
+              {
+                "id": 7,
+                "x": 43.999999999998835,
+                "y": -28.999999999998842
+              },
+              {
+                "id": 8,
+                "x": 44.0,
+                "y": -35.0
+              },
+              {
+                "id": 9,
+                "x": -44.0,
+                "y": -35.0
+              },
+              {
+                "id": 10,
+                "x": -43.999999999999886,
+                "y": -28.999999999999908
+              },
+              {
+                "id": 11,
+                "x": -50.0,
+                "y": -29.0
+              }
+            ],
+            "entities": [
+              {
+                "Arc": {
+                  "id": 1,
+                  "center": 0,
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 1,
+                  "b": 3
+                }
+              },
+              {
+                "Arc": {
+                  "id": 3,
+                  "center": 4,
+                  "start": 5,
+                  "end": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 5,
+                  "b": 6
+                }
+              },
+              {
+                "Arc": {
+                  "id": 5,
+                  "center": 7,
+                  "start": 8,
+                  "end": 6
+                }
+              },
+              {
+                "Line": {
+                  "id": 6,
+                  "a": 8,
+                  "b": 9
+                }
+              },
+              {
+                "Arc": {
+                  "id": 7,
+                  "center": 10,
+                  "start": 11,
+                  "end": 9
+                }
+              },
+              {
+                "Line": {
+                  "id": 8,
+                  "a": 11,
+                  "b": 2
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": -44.00000000000006,
+                  "y": 29.000000000000018
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 1,
+                  "x": -44.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 2,
+                  "x": -50.0,
+                  "y": 29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 3,
+                  "x": 44.0,
+                  "y": 35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 4,
+                  "x": 44.00000000000185,
+                  "y": 29.000000000001794
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 5,
+                  "x": 50.0,
+                  "y": 29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 6,
+                  "x": 50.0,
+                  "y": -29.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 7,
+                  "x": 43.999999999998835,
+                  "y": -28.999999999998842
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 8,
+                  "x": 44.0,
+                  "y": -35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 9,
+                  "x": -44.0,
+                  "y": -35.0
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 10,
+                  "x": -43.999999999999886,
+                  "y": -28.999999999999908
+                }
+              },
+              {
+                "FixedPoint": {
+                  "p": 11,
+                  "x": -50.0,
+                  "y": -29.0
+                }
+              }
+            ]
+          },
+          "links": [
+            {
+              "source": {
+                "Face": {
+                  "feature": 2,
+                  "role": "ExtrudeStartCap"
+                }
+              },
+              "loops": [
+                [
+                  {
+                    "entity": 1,
+                    "points": [
+                      0,
+                      1,
+                      2
+                    ]
+                  },
+                  {
+                    "entity": 2,
+                    "points": [
+                      1,
+                      3
+                    ]
+                  },
+                  {
+                    "entity": 3,
+                    "points": [
+                      4,
+                      5,
+                      3
+                    ]
+                  },
+                  {
+                    "entity": 4,
+                    "points": [
+                      5,
+                      6
+                    ]
+                  },
+                  {
+                    "entity": 5,
+                    "points": [
+                      7,
+                      8,
+                      6
+                    ]
+                  },
+                  {
+                    "entity": 6,
+                    "points": [
+                      8,
+                      9
+                    ]
+                  },
+                  {
+                    "entity": 7,
+                    "points": [
+                      10,
+                      11,
+                      9
+                    ]
+                  },
+                  {
+                    "entity": 8,
+                    "points": [
+                      11,
+                      2
+                    ]
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        "expressions": {
+          "plane_offset": "height + 10"
+        }
+      },
+      {
+        "id": 22,
+        "name": "Extrude7",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 21,
+          "distance": 2.4,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "lid_t"
+        }
+      },
+      {
+        "id": 23,
+        "name": "Hole5",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 42.4
+            }
+          },
+          "center": [
+            53.1,
+            28.1
+          ],
+          "diameter": 3.2,
+          "depth": null,
+          "counterbore": {
+            "diameter": 6.0,
+            "depth": 1.2
+          },
+          "target": 2
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height + 10 + lid_t"
+        }
+      },
+      {
+        "id": 24,
+        "name": "Hole6",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 42.4
+            }
+          },
+          "center": [
+            -53.1,
+            28.1
+          ],
+          "diameter": 3.2,
+          "depth": null,
+          "counterbore": {
+            "diameter": 6.0,
+            "depth": 1.2
+          },
+          "target": 2
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height + 10 + lid_t"
+        }
+      },
+      {
+        "id": 25,
+        "name": "Hole7",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 42.4
+            }
+          },
+          "center": [
+            -53.1,
+            -28.1
+          ],
+          "diameter": 3.2,
+          "depth": null,
+          "counterbore": {
+            "diameter": 6.0,
+            "depth": 1.2
+          },
+          "target": 2
+        },
+        "expressions": {
+          "center_x": "-(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height + 10 + lid_t"
+        }
+      },
+      {
+        "id": 26,
+        "name": "Hole8",
+        "kind": {
+          "type": "Hole",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 42.4
+            }
+          },
+          "center": [
+            53.1,
+            -28.1
+          ],
+          "diameter": 3.2,
+          "depth": null,
+          "counterbore": {
+            "diameter": 6.0,
+            "depth": 1.2
+          },
+          "target": 2
+        },
+        "expressions": {
+          "center_x": "(length / 2 - wall - boss_d / 2 - 1)",
+          "center_y": "-(width / 2 - wall - boss_d / 2 - 1)",
+          "plane_offset": "height + 10 + lid_t"
+        }
+      },
+      {
+        "id": 27,
+        "name": "Sketch8",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 42.4
+            }
+          },
+          "sketch": {
+            "points": [],
+            "entities": [],
+            "constraints": [],
+            "texts": [
+              {
+                "id": 1,
+                "text": "B8",
+                "font": {
+                  "family": "Liberation Sans"
+                },
+                "height": 12.0,
+                "position": [
+                  0.0,
+                  0.0
+                ],
+                "rotation": 0.0,
+                "halign": "Center",
+                "valign": "Middle",
+                "resolved": {
+                  "font": {
+                    "family": "Liberation Sans",
+                    "style": "Regular",
+                    "file": "LiberationSans-Regular.ttf",
+                    "index": 0,
+                    "hash": "fnv1a64:14e7ac2827ae23e8",
+                    "units_per_em": 2048.0,
+                    "cap_height": 1409.0
+                  },
+                  "advance": 2505.0,
+                  "glyphs": [
+                    {
+                      "ch": "B",
+                      "x": 0.0,
+                      "contours": [
+                        {
+                          "start": [
+                            1258.0,
+                            397.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  1258.0,
+                                  209.0
+                                ],
+                                "to": [
+                                  1121.0,
+                                  104.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  984.0,
+                                  0.0
+                                ],
+                                "to": [
+                                  740.0,
+                                  0.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  168.0,
+                                  0.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  168.0,
+                                  1409.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  680.0,
+                                  1409.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1176.0,
+                                  1409.0
+                                ],
+                                "to": [
+                                  1176.0,
+                                  1067.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1176.0,
+                                  942.0
+                                ],
+                                "to": [
+                                  1106.0,
+                                  857.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1036.0,
+                                  772.0
+                                ],
+                                "to": [
+                                  908.0,
+                                  743.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1076.0,
+                                  723.0
+                                ],
+                                "to": [
+                                  1167.0,
+                                  630.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1258.0,
+                                  538.0
+                                ],
+                                "to": [
+                                  1258.0,
+                                  397.0
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "start": [
+                            984.0,
+                            1044.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  984.0,
+                                  1158.0
+                                ],
+                                "to": [
+                                  906.0,
+                                  1207.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  828.0,
+                                  1256.0
+                                ],
+                                "to": [
+                                  680.0,
+                                  1256.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  359.0,
+                                  1256.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  359.0,
+                                  810.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  680.0,
+                                  810.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  833.0,
+                                  810.0
+                                ],
+                                "to": [
+                                  908.5,
+                                  867.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  984.0,
+                                  925.0
+                                ],
+                                "to": [
+                                  984.0,
+                                  1044.0
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "start": [
+                            1065.0,
+                            412.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  1065.0,
+                                  661.0
+                                ],
+                                "to": [
+                                  715.0,
+                                  661.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  359.0,
+                                  661.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  359.0,
+                                  153.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  730.0,
+                                  153.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  905.0,
+                                  153.0
+                                ],
+                                "to": [
+                                  985.0,
+                                  218.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1065.0,
+                                  283.0
+                                ],
+                                "to": [
+                                  1065.0,
+                                  412.0
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "ch": "8",
+                      "x": 1366.0,
+                      "contours": [
+                        {
+                          "start": [
+                            1050.0,
+                            393.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  1050.0,
+                                  198.0
+                                ],
+                                "to": [
+                                  926.0,
+                                  89.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  802.0,
+                                  -20.0
+                                ],
+                                "to": [
+                                  570.0,
+                                  -20.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  344.0,
+                                  -20.0
+                                ],
+                                "to": [
+                                  216.5,
+                                  87.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  89.0,
+                                  194.0
+                                ],
+                                "to": [
+                                  89.0,
+                                  391.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  89.0,
+                                  529.0
+                                ],
+                                "to": [
+                                  168.0,
+                                  623.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  247.0,
+                                  717.0
+                                ],
+                                "to": [
+                                  370.0,
+                                  737.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  370.0,
+                                  741.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  255.0,
+                                  768.0
+                                ],
+                                "to": [
+                                  188.5,
+                                  858.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  122.0,
+                                  948.0
+                                ],
+                                "to": [
+                                  122.0,
+                                  1069.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  122.0,
+                                  1230.0
+                                ],
+                                "to": [
+                                  242.5,
+                                  1330.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  363.0,
+                                  1430.0
+                                ],
+                                "to": [
+                                  566.0,
+                                  1430.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  774.0,
+                                  1430.0
+                                ],
+                                "to": [
+                                  894.5,
+                                  1332.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1015.0,
+                                  1234.0
+                                ],
+                                "to": [
+                                  1015.0,
+                                  1067.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1015.0,
+                                  946.0
+                                ],
+                                "to": [
+                                  948.0,
+                                  856.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  881.0,
+                                  766.0
+                                ],
+                                "to": [
+                                  765.0,
+                                  743.0
+                                ]
+                              }
+                            },
+                            {
+                              "Line": {
+                                "to": [
+                                  765.0,
+                                  739.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  900.0,
+                                  717.0
+                                ],
+                                "to": [
+                                  975.0,
+                                  624.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  1050.0,
+                                  532.0
+                                ],
+                                "to": [
+                                  1050.0,
+                                  393.0
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "start": [
+                            828.0,
+                            1057.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  828.0,
+                                  1296.0
+                                ],
+                                "to": [
+                                  566.0,
+                                  1296.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  439.0,
+                                  1296.0
+                                ],
+                                "to": [
+                                  372.5,
+                                  1236.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  306.0,
+                                  1176.0
+                                ],
+                                "to": [
+                                  306.0,
+                                  1057.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  306.0,
+                                  936.0
+                                ],
+                                "to": [
+                                  374.5,
+                                  872.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  443.0,
+                                  809.0
+                                ],
+                                "to": [
+                                  568.0,
+                                  809.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  695.0,
+                                  809.0
+                                ],
+                                "to": [
+                                  761.5,
+                                  867.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  828.0,
+                                  926.0
+                                ],
+                                "to": [
+                                  828.0,
+                                  1057.0
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "start": [
+                            863.0,
+                            410.0
+                          ],
+                          "segs": [
+                            {
+                              "Quad": {
+                                "c": [
+                                  863.0,
+                                  541.0
+                                ],
+                                "to": [
+                                  785.0,
+                                  607.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  707.0,
+                                  674.0
+                                ],
+                                "to": [
+                                  566.0,
+                                  674.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  429.0,
+                                  674.0
+                                ],
+                                "to": [
+                                  352.0,
+                                  602.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  275.0,
+                                  531.0
+                                ],
+                                "to": [
+                                  275.0,
+                                  406.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  275.0,
+                                  115.0
+                                ],
+                                "to": [
+                                  572.0,
+                                  115.0
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  719.0,
+                                  115.0
+                                ],
+                                "to": [
+                                  791.0,
+                                  185.5
+                                ]
+                              }
+                            },
+                            {
+                              "Quad": {
+                                "c": [
+                                  863.0,
+                                  256.0
+                                ],
+                                "to": [
+                                  863.0,
+                                  410.0
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "plane_offset": "height + 10 + lid_t"
+        }
+      },
+      {
+        "id": 28,
+        "name": "Extrude8",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 27,
+          "distance": 0.8,
+          "operation": {
+            "Join": {
+              "target": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false,
+          "region": {
+            "outer": [
+              2181038080
+            ],
+            "holes": [
+              [
+                2181042176
+              ],
+              [
+                2181046272
+              ]
+            ]
+          },
+          "options": {
+            "regions": [
+              {
+                "outer": [
+                  2181103616
+                ],
+                "holes": [
+                  [
+                    2181107712
+                  ],
+                  [
+                    2181111808
+                  ]
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "next_id": 29,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Base",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Lid",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "length",
+        "expression": "120",
+        "unit": "mm",
+        "comment": "outside X"
+      },
+      {
+        "name": "width",
+        "expression": "70",
+        "unit": "mm",
+        "comment": "outside Y"
+      },
+      {
+        "name": "height",
+        "expression": "30",
+        "unit": "mm",
+        "comment": "base outside height"
+      },
+      {
+        "name": "wall",
+        "expression": "2.4",
+        "unit": "mm",
+        "comment": "side wall"
+      },
+      {
+        "name": "floor",
+        "expression": "2.4",
+        "unit": "mm",
+        "comment": "floor thickness"
+      },
+      {
+        "name": "corner_r",
+        "expression": "8",
+        "unit": "mm",
+        "comment": "outer vertical corner radius"
+      },
+      {
+        "name": "boss_d",
+        "expression": "7",
+        "unit": "mm",
+        "comment": "screw boss diameter"
+      },
+      {
+        "name": "lid_t",
+        "expression": "2.4",
+        "unit": "mm",
+        "comment": "lid thickness"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 19936.532055,
+    "bounds": {
+      "min": [
+        -59.999999999,
+        -35.0,
+        40.0
+      ],
+      "max": [
+        60.000000001,
+        35.0,
+        43.2
+      ]
+    },
+    "face_count": 409
+  }
+}
