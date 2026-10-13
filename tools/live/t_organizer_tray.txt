@@ -1,0 +1,168 @@
+# Run 5 (SESSION_5 §7): a parameterized organizer tray authored from New
+# through real pointer/keyboard input: parameters, drawn + bound sketches,
+# blank, compartment pocket + pattern (count = divider_count + 1), rim
+# notch; then edits (size, divider count 3/0, invalid), section view,
+# measurement, save/close/reopen and exports. Expected volumes are the
+# spec's formula (runs/run-5/SESSION_5.md §7).
+clickw New
+wait_idle
+typew New parameter name | tray_length
+typew New parameter expression | 120
+clickw Add parameter
+wait_idle
+typew New parameter name | tray_width
+typew New parameter expression | 80
+clickw Add parameter
+wait_idle
+typew New parameter name | tray_height
+typew New parameter expression | 30
+clickw Add parameter
+wait_idle
+typew New parameter name | wall
+typew New parameter expression | 2
+clickw Add parameter
+wait_idle
+typew New parameter name | floor
+typew New parameter expression | 2
+clickw Add parameter
+wait_idle
+typew New parameter name | divider_thickness
+typew New parameter expression | 2
+clickw Add parameter
+wait_idle
+typew New parameter name | notch_width
+typew New parameter expression | 16
+clickw Add parameter
+wait_idle
+typew New parameter name | notch_depth
+typew New parameter expression | 8
+clickw Add parameter
+wait_idle
+clickw new_unit unit
+clickw new_unit no unit
+typew New parameter name | divider_count
+typew New parameter expression | 2
+clickw Add parameter
+wait_idle
+typew New parameter name | compartment_count
+typew New parameter expression | divider_count + 1
+clickw Add parameter
+wait_idle
+clickw new_unit unit
+clickw new_unit mm
+typew New parameter name | compartment_width
+typew New parameter expression | (tray_length - 2 * wall - divider_count * divider_thickness) / compartment_count
+clickw Add parameter
+wait_idle
+typew New parameter name | cavity_width
+typew New parameter expression | tray_width - 2 * wall
+clickw Add parameter
+wait_idle
+typew New parameter name | cavity_depth
+typew New parameter expression | tray_height - floor
+clickw Add parameter
+wait_idle
+expect params.compartment_width 37.3333333 0.000001
+expect params.compartment_count 3 0
+# Collapse the parameter list so History fits at 1280x800.
+clickw Parameters header
+# Outline: corner rectangle from the origin, two dimensions, then bound.
+clickw New Sketch on XY
+wait_idle
+clickw 2-Point Rect
+sclick 0.3 0.2
+sclick 40 30
+expect editing.entities 4
+key d
+sclick 20 0
+type 120
+key Return
+key f
+wait_idle
+sclick 120 15
+type 80
+key Return
+expect editing.dims 2
+expect editing.status FullyConstrained
+shot
+clickw Finish Sketch
+wait_idle
+clickw Sketch1
+typew width (mm) | tray_length
+typew height (mm) | tray_width
+clickw Apply
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 30
+key Return
+wait_idle
+expect volume 288000 0.01
+clickw Extrude1
+typew distance (mm) | tray_height
+clickw Apply
+wait_idle
+# First compartment: sketch on the top face, corner at (wall, wall).
+key 0
+key f
+wait_idle
+wclick 60 40 30
+clickw Create Sketch
+wait_idle
+clickw 2-Point Rect
+sclick 5 5
+sclick 35 40
+expect editing.entities 4
+key d
+sclick 0 0
+sclick 5 5
+type 2
+key Return
+sclick 0 0
+sclick 2 5
+type 2
+key Return
+expect editing.dims 2
+sclick 18 2
+type 37
+key Return
+key f
+wait_idle
+sclick 39 20
+type 76
+key Return
+expect editing.dims 4
+expect editing.status FullyConstrained
+shot
+clickw Finish Sketch
+wait_idle
+clickw Sketch2
+typew width (mm) | compartment_width
+typew height (mm) | cavity_width
+typew dx (mm) | wall
+typew dy (mm) | wall
+clickw Apply
+wait_idle
+clickw Extrude…
+clickw Cut
+typew Extrude distance (mm) | 28
+key Return
+wait_idle
+# 288000 - (112/3)*76*28
+expect volume 208554.6667 0.01
+clickw Extrude2
+typew distance (mm) | cavity_depth
+clickw Apply
+wait_idle
+clickw Extrude2
+clickw Pattern…
+typew Pattern count | 3
+typew Pattern spacing (mm) | 39.3333
+clickw OK
+wait_idle
+clickw Pattern1
+typew count (count) | compartment_count
+typew spacing (mm) | compartment_width + divider_thickness
+clickw Apply
+wait_idle
+expect volume 49664 0.01
+shot

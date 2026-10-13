@@ -105,7 +105,7 @@ impl SketchTool {
                 "Click the start point, the end point, then a point on the arc · Esc cancels"
             }
             SketchTool::Dimension => {
-                "Click a line (length), circle (diameter), arc (radius), or two points (horizontal/vertical distance)"
+                "Click a line (length), circle (diameter), arc (radius), or two points (horizontal/vertical distance; the same two points again: the other axis)"
             }
             SketchTool::Trim => {
                 "Click the part of a line to remove: it is cut at the nearest intersections with other \
@@ -2244,7 +2244,22 @@ impl SketchEditor {
             return;
         };
         let (dx, dy) = ((pb[0] - pa[0]).abs(), (pb[1] - pa[1]).abs());
-        let c = if dx >= dy {
+        // The larger offset first; dimensioning the same two points again gives
+        // the other axis (run 5: a corner at (2, 2) needs both).
+        let pair = |x: PointId, y: PointId| (x == a && y == b) || (x == b && y == a);
+        let has_h = self.sketch.constraints.iter().any(
+            |c| matches!(c, Constraint::HorizontalDistance { a: x, b: y, .. } if pair(*x, *y)),
+        );
+        let has_v =
+            self.sketch.constraints.iter().any(
+                |c| matches!(c, Constraint::VerticalDistance { a: x, b: y, .. } if pair(*x, *y)),
+            );
+        let horizontal = match (has_h, has_v) {
+            (true, false) => false,
+            (false, true) => true,
+            _ => dx >= dy,
+        };
+        let c = if horizontal {
             let (a, b) = if pa[0] <= pb[0] { (a, b) } else { (b, a) };
             Constraint::HorizontalDistance {
                 a,
@@ -2790,6 +2805,52 @@ mod tests {
         ed.release();
         assert_eq!(ed.sketch, before);
         assert!(!ed.can_redo());
+    }
+
+    #[test]
+    fn same_two_points_dimensioned_twice_give_both_axes() {
+        // Corner at (2, 2): |dx| = |dy|, so one point-to-point dimension cannot
+        // place it; the second one between the same points takes the other axis.
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [2.0, 2.0]);
+        click(&mut ed, [12.0, 8.0]);
+        ed.set_tool(SketchTool::Dimension);
+        for want in ["dx", "dy"] {
+            click(&mut ed, [0.0, 0.0]); // origin
+            click(&mut ed, [2.0, 2.0]); // corner
+            let e = ed.dim_edit.clone().expect("inline editor opens");
+            assert!(e.fresh);
+            ed.dim_edit.as_mut().unwrap().buffer = "3".into();
+            assert!(ed.apply_dim_edit(), "{want}: {:?}", ed.feedback);
+            assert!(
+                ed.sketch
+                    .dimensions()
+                    .iter()
+                    .any(|(n, v)| n == want && *v == 3.0)
+            );
+        }
+        click(&mut ed, [7.0, 3.0]); // bottom edge
+        ed.dim_edit.as_mut().unwrap().buffer = "10".into();
+        assert!(ed.apply_dim_edit());
+        click(&mut ed, [13.0, 5.5]); // right edge (now x = 13, y 3..8)
+        ed.dim_edit.as_mut().unwrap().buffer = "6".into();
+        assert!(ed.apply_dim_edit());
+        assert_eq!(
+            ed.report.status,
+            SolveStatus::FullyConstrained,
+            "{:?}",
+            ed.status()
+        );
+        // A third dimension of the pair is redundant (refused, sketch kept).
+        let before = ed.sketch.clone();
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [3.0, 3.0]);
+        if let Some(e) = ed.dim_edit.as_mut() {
+            e.buffer = "3".into();
+            ed.apply_dim_edit();
+        }
+        assert_eq!(ed.sketch.constraints.len(), before.constraints.len());
     }
 
     #[test]

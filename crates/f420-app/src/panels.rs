@@ -56,6 +56,7 @@ impl F420App {
             ui.separator();
             if ui
                 .button("New")
+                .probe("New")
                 .on_hover_text("New document (Ctrl+N)")
                 .clicked()
             {

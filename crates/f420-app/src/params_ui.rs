@@ -32,14 +32,18 @@ fn unit_label(u: ParamUnit) -> &'static str {
 }
 
 fn unit_combo(ui: &mut egui::Ui, id: &str, u: &mut ParamUnit) {
+    use crate::probe::Probe;
     egui::ComboBox::from_id_salt(id)
         .selected_text(unit_label(*u))
         .width(70.0)
         .show_ui(ui, |ui| {
             for x in [ParamUnit::Mm, ParamUnit::Unitless, ParamUnit::Deg] {
-                ui.selectable_value(u, x, unit_label(x));
+                ui.selectable_value(u, x, unit_label(x))
+                    .probe(&format!("{id} {}", unit_label(x)));
             }
-        });
+        })
+        .response
+        .named(&format!("{id} unit"));
 }
 
 /// Number formatting for values (trims float noise for display only).
@@ -79,7 +83,9 @@ impl F420App {
         egui::CollapsingHeader::new(RichText::new(format!("Parameters ({n})")).strong())
             .id_salt("params_panel")
             .default_open(true)
-            .show(ui, |ui| self.parameters_body(ui));
+            .show(ui, |ui| self.parameters_body(ui))
+            .header_response
+            .probe("Parameters header");
     }
 
     fn parameters_body(&mut self, ui: &mut egui::Ui) {
