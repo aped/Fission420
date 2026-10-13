@@ -546,3 +546,117 @@ fn export_construction_policy() {
         .collect();
     assert_eq!(names, [("0", 1), ("CONSTRUCTION", 1)]);
 }
+
+/// Every coordinate an imported sketch carries (points, circle radii, derived arcs) is
+/// finite.
+fn assert_finite(imp: &DxfImport, what: &str) {
+    let s = &imp.sketch;
+    for p in &s.points {
+        assert!(p.x.is_finite() && p.y.is_finite(), "{what}: point {p:?}");
+    }
+    for e in &s.entities {
+        match e {
+            Entity::Circle { radius, .. } => assert!(radius.is_finite(), "{what}: {e:?}"),
+            Entity::Arc { id, .. } => {
+                if let Some(g) = s.arc_geometry(*id) {
+                    assert!(
+                        g.center.iter().all(|v| v.is_finite())
+                            && g.radius.is_finite()
+                            && g.start_angle.is_finite()
+                            && g.sweep.is_finite(),
+                        "{what}: {g:?}"
+                    );
+                }
+            }
+            Entity::Line { .. } => {}
+        }
+    }
+}
+
+const FUZZ_FIXTURES: [&str; 3] = [
+    "slot_freecad_r14.dxf",
+    "lwpoly_bulge.dxf",
+    "polyline_bulge_r12_unitless.dxf",
+];
+
+/// Strict and partial import, both with a unit override (25.4) so the unitless R12 file and
+/// prefixes that lost `$INSUNITS` still reach entity parsing and scaling.
+fn fuzz_options() -> [DxfImportOptions; 2] {
+    [false, true].map(|allow_partial| DxfImportOptions {
+        allow_partial,
+        unit_override_to_mm: Some(25.4),
+        ..Default::default()
+    })
+}
+
+/// Imports (must not panic) and checks any accepted sketch; returns whether it was accepted.
+fn import_checked(bytes: &[u8], opts: &DxfImportOptions, what: &str) -> bool {
+    match dxf::import(bytes, opts) {
+        Ok(imp) => {
+            assert_finite(&imp, what);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[test]
+fn every_prefix_of_a_dxf_fixture_is_handled() {
+    for name in FUZZ_FIXTURES {
+        let z = fixture(name);
+        for opts in &fuzz_options() {
+            let full = dxf::import(&z, opts).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_finite(&full, name);
+            for n in 0..z.len() {
+                import_checked(&z[..n], opts, &format!("{name} prefix {n}"));
+            }
+        }
+    }
+}
+
+/// One DXF-shaped byte (digit, sign, decimal point, newline) or, 1 time in 14, a random byte.
+fn pick(next: &mut impl FnMut() -> u64) -> u8 {
+    const REPLACEMENTS: &[u8] = b"0123456789-.\n";
+    let k = (next() as usize) % (REPLACEMENTS.len() + 1);
+    REPLACEMENTS.get(k).copied().unwrap_or(next() as u8)
+}
+
+/// Single-byte substitutions at every position (value chosen by xorshift from DXF-shaped
+/// bytes, or a random byte), then multi-byte mutants at xorshift positions.
+#[test]
+fn byte_substitutions_in_a_dxf_fixture_are_handled() {
+    // xorshift64, as in f420-kernel's STEP mutation test.
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for name in FUZZ_FIXTURES {
+        let z = fixture(name);
+        let opts = fuzz_options();
+        let mut accepted = 0usize;
+        for i in 0..z.len() {
+            let mut c = z.clone();
+            c[i] = pick(&mut next);
+            for o in &opts {
+                accepted +=
+                    import_checked(&c, o, &format!("{name} byte {i} = {:#04x}", c[i])) as usize;
+            }
+        }
+        for m in 0..1000 {
+            let mut c = z.clone();
+            for _ in 0..3 {
+                let i = (next() as usize) % c.len();
+                c[i] = pick(&mut next);
+            }
+            for o in &opts {
+                accepted += import_checked(&c, o, &format!("{name} mutant {m}")) as usize;
+            }
+        }
+        // Non-vacuous: many single-byte edits (e.g. in a layer name or a digit) still import,
+        // so the finiteness check above has run.
+        assert!(accepted > 0, "{name}");
+    }
+}

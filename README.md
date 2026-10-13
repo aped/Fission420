@@ -49,7 +49,12 @@ target/release/f420-cli acceptance --out artifacts/acceptance     # analytic acc
 cargo xtask check                              # fmt, clippy, tests, acceptance, example replays (~2 min)
 tools/external_validation.sh artifacts/acceptance   # independent STL/STEP checks (Python, FreeCAD)
 tools/live_walkthrough.sh                      # real-input UI walkthroughs in a private headless compositor
+tools/heavy.sh tools/ci/container_check.sh debian:trixie   # a Linux CI leg in a clean container (podman)
 ```
+
+CI (`.github/workflows/ci.yml`) runs `cargo xtask check` on Ubuntu 24.04, Debian 13, Windows x64
+and macOS ARM64 and uploads unsigned release binaries; see `docs/CI.md` for gating and known
+platform issues.
 
 ## Documentation
 
@@ -60,6 +65,7 @@ tools/live_walkthrough.sh                      # real-input UI walkthroughs in a
 | `docs/PRINT_EXPORT.md` | STL/3MF print export, placement, validation, slicing |
 | `runs/` | run specs, status log and reports for every run (see `runs/README.md`) |
 | `docs/behavior/sketching.md` | sketch editor behaviour (tools, snapping, drags, undo) |
+| `docs/CI.md` | CI matrix, toolchain pin, local reproduction, platform refactor plan |
 | `docs/COMMANDS.md` | command API and native format |
 | `docs/TOLERANCES.md` | every tolerance and why |
 | `docs/behavior/timings.md` | measured timings and the kernel bottleneck analysis |

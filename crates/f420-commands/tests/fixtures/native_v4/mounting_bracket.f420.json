@@ -1,0 +1,622 @@
+{
+  "format": "fission420",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Plate outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -30.0,
+                "y": -20.0
+              },
+              {
+                "id": 2,
+                "x": 30.0,
+                "y": -20.0
+              },
+              {
+                "id": 3,
+                "x": 30.0,
+                "y": 20.0
+              },
+              {
+                "id": 4,
+                "x": -30.0,
+                "y": 20.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 30.0,
+                  "y": 20.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 60.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "plate_l / 2",
+          "center_y": "plate_w / 2",
+          "height": "plate_w",
+          "width": "plate_l"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Plate",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 5.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "plate_t"
+        }
+      },
+      {
+        "id": 3,
+        "name": "Upright outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -25.0,
+                "y": -2.5
+              },
+              {
+                "id": 2,
+                "x": 25.0,
+                "y": -2.5
+              },
+              {
+                "id": 3,
+                "x": 25.0,
+                "y": 2.5
+              },
+              {
+                "id": 4,
+                "x": -25.0,
+                "y": 2.5
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 30.0,
+                  "y": 32.5
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 5.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "plate_l / 2",
+          "center_y": "plate_w - inset - upright_t / 2",
+          "height": "upright_t",
+          "width": "plate_l - 2 * inset"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Upright",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 35.0,
+          "operation": {
+            "Join": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        },
+        "expressions": {
+          "distance": "upright_h"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Plate hole outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": "ExtrudeEndCap"
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 2.75
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 15.0,
+                  "y": 15.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 5.5
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "(plate_l - hole_spacing) / 2",
+          "diameter": "hole_d"
+        }
+      },
+      {
+        "id": 6,
+        "name": "Plate hole",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 5,
+          "distance": 0.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "ThroughAll",
+          "reverse": false
+        }
+      },
+      {
+        "id": 7,
+        "name": "Plate holes",
+        "kind": {
+          "type": "LinearPattern",
+          "seed": 6,
+          "count": 2,
+          "spacing": 30.0,
+          "direction": [
+            1.0,
+            0.0
+          ]
+        },
+        "expressions": {
+          "count": "hole_count",
+          "spacing": "hole_spacing"
+        }
+      },
+      {
+        "id": 8,
+        "name": "Upright hole outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Face": {
+              "feature": 4,
+              "role": {
+                "ExtrudeSide": {
+                  "entity": 1
+                }
+              }
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 2.75
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 10.0,
+                  "y": 21.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 5.5
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "(plate_l - hole_spacing) / 2 - inset",
+          "center_y": "upright_h * 0.6",
+          "diameter": "hole_d"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Upright hole",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 8,
+          "distance": 0.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "ThroughAll",
+          "reverse": false
+        }
+      },
+      {
+        "id": 10,
+        "name": "Upright holes",
+        "kind": {
+          "type": "LinearPattern",
+          "seed": 9,
+          "count": 2,
+          "spacing": 30.0,
+          "direction": [
+            1.0,
+            0.0
+          ]
+        },
+        "expressions": {
+          "count": "hole_count",
+          "spacing": "hole_spacing"
+        }
+      },
+      {
+        "id": 11,
+        "name": "Front edge chamfer",
+        "kind": {
+          "type": "Chamfer",
+          "a": {
+            "feature": 2,
+            "role": "ExtrudeEndCap"
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "distance": 1.0
+        },
+        "expressions": {
+          "distance": "edge_chamfer"
+        }
+      }
+    ],
+    "next_id": 12,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Mounting bracket",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "plate_l",
+        "expression": "60",
+        "unit": "mm",
+        "comment": "base plate X"
+      },
+      {
+        "name": "plate_w",
+        "expression": "40",
+        "unit": "mm",
+        "comment": "base plate Y"
+      },
+      {
+        "name": "plate_t",
+        "expression": "5",
+        "unit": "mm",
+        "comment": "base plate thickness"
+      },
+      {
+        "name": "upright_h",
+        "expression": "35",
+        "unit": "mm",
+        "comment": "upright height above the plate"
+      },
+      {
+        "name": "upright_t",
+        "expression": "5",
+        "unit": "mm",
+        "comment": "upright thickness"
+      },
+      {
+        "name": "inset",
+        "expression": "5",
+        "unit": "mm",
+        "comment": "upright inset from the plate's sides and back"
+      },
+      {
+        "name": "hole_d",
+        "expression": "5.5",
+        "unit": "mm",
+        "comment": "screw clearance hole (M5)"
+      },
+      {
+        "name": "hole_spacing",
+        "expression": "30",
+        "unit": "mm",
+        "comment": "hole pitch"
+      },
+      {
+        "name": "hole_count",
+        "expression": "2",
+        "unit": "unitless",
+        "comment": "holes per row"
+      },
+      {
+        "name": "edge_chamfer",
+        "expression": "1",
+        "unit": "mm",
+        "comment": "front edge chamfer"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 20245.180555535,
+    "bounds": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        60.0,
+        40.0,
+        40.0
+      ]
+    },
+    "face_count": 24
+  }
+}

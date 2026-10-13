@@ -5,11 +5,15 @@
 //!   documents (the `examples/*_workflow.json` replays in `cargo xtask check` re-save the
 //!   examples themselves as v3, so they cannot serve as v2 evidence).
 //! * v3: the committed run-3 examples, and whatever version the other examples are in.
+//! * v4: `tests/fixtures/native_v4/*.f420.json`, frozen copies of the run-4 printable
+//!   examples (named parameters and expressions); the committed examples are re-saved by
+//!   the xtask replays, so they are checked separately.
 //!
 //! Each opens through `Command::Open`, regenerates to the analytic volume, re-saves as v3
 //! and reopens to an identical document.
+use f420_commands::printables::{COUPON, COUPON_CLEARANCES, ENCLOSURE_BASELINE, ENCLOSURE_VARIANT};
 use f420_commands::{Command, Session};
-use f420_kernel::VolumeResult;
+use f420_kernel::{VolumeMethod, VolumeResult};
 use std::f64::consts::PI;
 use std::path::PathBuf;
 
@@ -121,5 +125,104 @@ fn v3_run3_examples() {
         &format!("{d}/dxf_stl_import.f420.json"),
         Some(3),
         3.0 * (800.0 - 12.5 * PI),
+    );
+}
+
+/// Run-4 enclosure base + lid (`Enclosure::{base,lid}_volume` restate the box formulas).
+fn enclosure(p: &f420_commands::printables::Enclosure) -> f64 {
+    p.base_volume() + p.lid_volume()
+}
+
+/// Coupon plate 70 x 20 x t with four clearance holes, plus the Ø6 x h peg.
+fn coupon() -> f64 {
+    let (d, t, h, sp) = COUPON;
+    let len = sp * COUPON_CLEARANCES.len() as f64 + 10.0;
+    let holes: f64 = COUPON_CLEARANCES
+        .iter()
+        .map(|c| PI * ((d + 2.0 * c) / 2.0).powi(2) * t)
+        .sum();
+    len * 20.0 * t - holes + PI * (d / 2.0).powi(2) * h
+}
+
+/// Mounting bracket: 60 x 40 x 5 foot + 50 x 5 x 35 upright, 1 mm x 60 mm chamfer,
+/// four Ø5.5 holes through 5 mm.
+fn mounting_bracket() -> f64 {
+    60.0 * 40.0 * 5.0 + 50.0 * 5.0 * 35.0 - 0.5 * 60.0 - 4.0 * PI * (5.5f64 / 2.0).powi(2) * 5.0
+}
+
+/// The bracket's holes run along Z and along Y, so the kernel reports a tessellation
+/// estimate; it must hold within 3x its own error estimate (as in printable_examples.rs).
+fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
+    let path = repo().join(rel);
+    if let Some(v) = want_version {
+        assert_eq!(version(&path), v, "{rel}");
+    }
+    let mut s = Session::new();
+    let r = s.execute(&Command::Open { path });
+    assert!(r.ok, "{rel}: {:?}", r.error);
+    let bodies = s.summary().bodies;
+    assert_eq!(bodies.len(), 1, "{rel}");
+    match bodies[0].measurements.as_ref().unwrap().volume {
+        VolumeResult::Value {
+            volume,
+            method: VolumeMethod::TessellationEstimate,
+            error_estimate,
+        } => assert!(
+            (volume - expected).abs() <= (3.0 * error_estimate).max(1e-3),
+            "{rel}: {volume} vs {expected} (estimate error {error_estimate})"
+        ),
+        ref v => panic!("{rel}: {v:?}"),
+    }
+}
+
+/// Frozen run-4 (v4) documents: parameters and expressions load, regenerate to the
+/// analytic volume and re-save identically.
+#[test]
+fn v4_run4_printable_documents() {
+    let d = "crates/f420-commands/tests/fixtures/native_v4";
+    check(
+        &format!("{d}/enclosure.f420.json"),
+        Some(4),
+        enclosure(&ENCLOSURE_BASELINE),
+    );
+    check(
+        &format!("{d}/clearance_coupon.f420.json"),
+        Some(4),
+        coupon(),
+    );
+    check_estimate(
+        &format!("{d}/mounting_bracket.f420.json"),
+        Some(4),
+        mounting_bracket(),
+    );
+}
+
+/// The expressions in a frozen v4 file are live after loading: driving its user
+/// parameters to the variant regenerates to the variant's analytic volume.
+#[test]
+fn v4_parameters_drive_a_loaded_document() {
+    let path = repo().join("crates/f420-commands/tests/fixtures/native_v4/enclosure.f420.json");
+    let mut s = Session::new();
+    assert!(s.execute(&Command::Open { path }).ok);
+    for c in ENCLOSURE_VARIANT.set_parameters() {
+        let r = s.execute(&c);
+        assert!(r.ok, "{c:?}: {:?}", r.error);
+    }
+    let (v, want) = (total_volume(&s), enclosure(&ENCLOSURE_VARIANT));
+    assert!((v - want).abs() <= want * 1e-7, "{v} vs {want}");
+}
+
+#[test]
+fn committed_printable_examples() {
+    check(
+        "examples/enclosure.f420.json",
+        None,
+        enclosure(&ENCLOSURE_BASELINE),
+    );
+    check("examples/clearance_coupon.f420.json", None, coupon());
+    check_estimate(
+        "examples/mounting_bracket.f420.json",
+        None,
+        mounting_bracket(),
     );
 }
