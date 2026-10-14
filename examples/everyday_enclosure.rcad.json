@@ -255,6 +255,18 @@
       },
       {
         "id": 8,
+        "name": "Fillet5",
+        "kind": {
+          "type": "FilletLoop",
+          "face": {
+            "feature": 2,
+            "role": "ExtrudeStartCap"
+          },
+          "radius": 1.5
+        }
+      },
+      {
+        "id": 9,
         "name": "Lid outline",
         "kind": {
           "type": "Sketch",
@@ -385,11 +397,11 @@
         }
       },
       {
-        "id": 9,
+        "id": 10,
         "name": "Extrude2",
         "kind": {
           "type": "Extrude",
-          "sketch": 8,
+          "sketch": 9,
           "distance": 3.0,
           "operation": {
             "NewBody": {
@@ -401,12 +413,12 @@
         }
       },
       {
-        "id": 10,
-        "name": "Fillet5",
+        "id": 11,
+        "name": "Fillet6",
         "kind": {
           "type": "Fillet",
           "a": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
                 "entity": 1
@@ -414,34 +426,10 @@
             }
           },
           "b": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
                 "entity": 2
-              }
-            }
-          },
-          "radius": 6.0
-        }
-      },
-      {
-        "id": 11,
-        "name": "Fillet6",
-        "kind": {
-          "type": "Fillet",
-          "a": {
-            "feature": 9,
-            "role": {
-              "ExtrudeSide": {
-                "entity": 2
-              }
-            }
-          },
-          "b": {
-            "feature": 9,
-            "role": {
-              "ExtrudeSide": {
-                "entity": 3
               }
             }
           },
@@ -454,18 +442,18 @@
         "kind": {
           "type": "Fillet",
           "a": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
-                "entity": 3
+                "entity": 2
               }
             }
           },
           "b": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
-                "entity": 4
+                "entity": 3
               }
             }
           },
@@ -478,18 +466,18 @@
         "kind": {
           "type": "Fillet",
           "a": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
-                "entity": 4
+                "entity": 3
               }
             }
           },
           "b": {
-            "feature": 9,
+            "feature": 10,
             "role": {
               "ExtrudeSide": {
-                "entity": 1
+                "entity": 4
               }
             }
           },
@@ -500,16 +488,40 @@
         "id": 14,
         "name": "Fillet9",
         "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "b": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 15,
+        "name": "Fillet10",
+        "kind": {
           "type": "FilletLoop",
           "face": {
-            "feature": 9,
+            "feature": 10,
             "role": "ExtrudeEndCap"
           },
           "radius": 1.5
         }
       },
       {
-        "id": 15,
+        "id": 16,
         "name": "Screw hole",
         "kind": {
           "type": "Sketch",
@@ -572,11 +584,11 @@
         }
       },
       {
-        "id": 16,
+        "id": 17,
         "name": "Extrude3",
         "kind": {
           "type": "Extrude",
-          "sketch": 15,
+          "sketch": 16,
           "distance": 0.0,
           "operation": {
             "Cut": {
@@ -588,11 +600,11 @@
         }
       },
       {
-        "id": 17,
+        "id": 18,
         "name": "Pattern1",
         "kind": {
           "type": "LinearPattern",
-          "seed": 16,
+          "seed": 17,
           "count": 2,
           "spacing": 64.0,
           "direction": [
@@ -613,7 +625,7 @@
         }
       }
     ],
-    "next_id": 18,
+    "next_id": 19,
     "bodies": [
       {
         "id": 1,

@@ -118,6 +118,14 @@
     "thickness": 2.0
   },
   {
+    "cmd": "fillet_loop",
+    "face": {
+      "feature": 2,
+      "role": "ExtrudeStartCap"
+    },
+    "radius": 1.5
+  },
+  {
     "cmd": "create_sketch",
     "height": 50.0,
     "name": "Lid outline",
@@ -133,18 +141,18 @@
   {
     "cmd": "set_expression",
     "expression": "width",
-    "feature": 8,
+    "feature": 9,
     "name": "width"
   },
   {
     "body_name": "Enclosure lid",
     "cmd": "extrude",
     "distance": 3.0,
-    "sketch": 8
+    "sketch": 9
   },
   {
     "a": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 1
@@ -152,7 +160,7 @@
       }
     },
     "b": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 2
@@ -164,7 +172,7 @@
   },
   {
     "a": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 2
@@ -172,7 +180,7 @@
       }
     },
     "b": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 3
@@ -184,7 +192,7 @@
   },
   {
     "a": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 3
@@ -192,7 +200,7 @@
       }
     },
     "b": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 4
@@ -204,7 +212,7 @@
   },
   {
     "a": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 4
@@ -212,7 +220,7 @@
       }
     },
     "b": {
-      "feature": 9,
+      "feature": 10,
       "role": {
         "ExtrudeSide": {
           "entity": 1
@@ -225,7 +233,7 @@
   {
     "cmd": "fillet_loop",
     "face": {
-      "feature": 9,
+      "feature": 10,
       "role": "ExtrudeEndCap"
     },
     "radius": 1.5
@@ -249,13 +257,13 @@
   {
     "cmd": "set_expression",
     "expression": "width / 2 - 8",
-    "feature": 15,
+    "feature": 16,
     "name": "center_x"
   },
   {
     "cmd": "extrude",
     "op": "cut",
-    "sketch": 15,
+    "sketch": 16,
     "target": 2,
     "through_all": true
   },
@@ -266,7 +274,7 @@
       -1.0,
       0.0
     ],
-    "feature": 16,
+    "feature": 17,
     "second": {
       "count": 2,
       "direction": [
@@ -280,7 +288,7 @@
   {
     "cmd": "set_expression",
     "expression": "width - 16",
-    "feature": 17,
+    "feature": 18,
     "name": "spacing"
   },
   {

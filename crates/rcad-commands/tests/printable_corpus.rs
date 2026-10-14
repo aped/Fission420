@@ -4,11 +4,11 @@
 //! (`examples/<name>.rcad.json`):
 //!
 //! 1. `everyday_enclosure`: rounded-rectangle base (four vertical edge
-//!    fillets) shelled from the top face; a lid with the same outline, its top
-//!    outer loop filleted, and four through holes from a 2 × 2 rectangular
-//!    pattern; the width is a user parameter driving both outlines and the hole
-//!    pattern. (A loop fillet on the base's bottom loop is refused next to the
-//!    shell in either order: the kernel's loop blends need a plain prism.)
+//!    fillets) shelled from the top face, then its bottom outer loop filleted
+//!    (the reverse order, fillet then shell, is refused); a lid with the same
+//!    outline, its top outer loop filleted, and four through holes from a 2 × 2
+//!    rectangular pattern; the width is a user parameter driving both outlines
+//!    and the hole pattern.
 //! 2. `everyday_tray`: 3 × 2 organizer, rounded outline, top outer loop
 //!    chamfered, rounded compartments cut from one rounded sketch and repeated by
 //!    a rectangular pattern.
@@ -200,12 +200,14 @@ const ENCL: Encl = Encl {
 
 impl Encl {
     fn base(&self, w: f64) -> f64 {
+        let (a, m) = fillet_am(self.foot);
         rr(w, self.d, self.r) * self.h
             - rr(
                 w - 2.0 * self.wall,
                 self.d - 2.0 * self.wall,
                 self.r - self.wall,
             ) * (self.h - self.wall)
+            - loop_removal(w, self.d, self.r, a, m)
     }
     fn lid(&self, w: f64) -> f64 {
         let (a, m) = fillet_am(self.foot);
@@ -229,36 +231,37 @@ fn enclosure_steps(save: &str) -> Vec<Value> {
     ];
     // F3..F6 vertical edges.
     v.extend(vertical_fillets(2, e.r));
-    // F7 shell open at the top.
+    // F7 shell open at the top, F8 bottom outer loop rounded (radius <= wall).
     v.push(json!({"cmd": "shell_face", "face": cap(2, true), "thickness": e.wall}));
-    // Lid: F8 outline above the base, F9 plate, F10..F13 vertical edges, F14
+    v.push(json!({"cmd": "fillet_loop", "face": cap(2, false), "radius": e.foot}));
+    // Lid: F9 outline above the base, F10 plate, F11..F14 vertical edges, F15
     // top outer loop rounded.
     v.push(json!({"cmd": "create_sketch", "name": "Lid outline",
                   "plane": {"Offset": {"base": "WorldXY", "distance": e.lid_z}},
                   "template": "centered_rectangle", "width": e.w, "height": e.d}));
-    v.push(json!({"cmd": "set_expression", "feature": 8, "name": "width", "expression": "width"}));
+    v.push(json!({"cmd": "set_expression", "feature": 9, "name": "width", "expression": "width"}));
     v.push(
-        json!({"cmd": "extrude", "sketch": 8, "distance": e.lid_t, "body_name": "Enclosure lid"}),
+        json!({"cmd": "extrude", "sketch": 9, "distance": e.lid_t, "body_name": "Enclosure lid"}),
     );
-    v.extend(vertical_fillets(9, e.r));
-    v.push(json!({"cmd": "fillet_loop", "face": cap(9, true), "radius": e.foot}));
-    // F15 first screw hole, F16 its cut, F17 the 2 × 2 pattern.
+    v.extend(vertical_fillets(10, e.r));
+    v.push(json!({"cmd": "fillet_loop", "face": cap(10, true), "radius": e.foot}));
+    // F16 first screw hole, F17 its cut, F18 the 2 × 2 pattern.
     let (cx, cy) = (e.w / 2.0 - e.inset, e.d / 2.0 - e.inset);
     v.push(json!({"cmd": "create_sketch", "name": "Screw hole",
                   "plane": {"Offset": {"base": "WorldXY", "distance": e.lid_z + e.lid_t}},
                   "template": "centered_circle", "diameter": e.hole_d, "center": [cx, cy]}));
     v.push(
-        json!({"cmd": "set_expression", "feature": 15, "name": "center_x",
+        json!({"cmd": "set_expression", "feature": 16, "name": "center_x",
                   "expression": format!("width / 2 - {}", e.inset)}),
     );
-    v.push(json!({"cmd": "extrude", "sketch": 15, "op": "cut", "target": 2, "through_all": true}));
+    v.push(json!({"cmd": "extrude", "sketch": 16, "op": "cut", "target": 2, "through_all": true}));
     v.push(
-        json!({"cmd": "linear_pattern", "feature": 16, "count": 2, "spacing": 2.0 * cx,
+        json!({"cmd": "linear_pattern", "feature": 17, "count": 2, "spacing": 2.0 * cx,
                   "direction": [-1.0, 0.0],
                   "second": {"count": 2, "spacing": 2.0 * cy, "direction": [0.0, -1.0]}}),
     );
     v.push(
-        json!({"cmd": "set_expression", "feature": 17, "name": "spacing",
+        json!({"cmd": "set_expression", "feature": 18, "name": "spacing",
                   "expression": format!("width - {}", 2.0 * e.inset)}),
     );
     v.push(json!({"cmd": "save", "path": save}));
@@ -571,9 +574,17 @@ fn probe_part(name: &str, s: &Session) {
                         [e.w / 2.0 - e.wall / 2.0, 0.0, e.h / 2.0],
                         [0.0, 0.0, e.wall / 2.0],
                         [e.w / 2.0 - c, e.d / 2.0 - c, e.h / 2.0],
+                        // Bottom outer edge rounded: air at the old sharp edge.
+                        [0.0, -e.d / 2.0 + 0.1, 0.1],
                     ]
                 ),
-                vec![Some(false), Some(true), Some(true), Some(false)],
+                vec![
+                    Some(false),
+                    Some(true),
+                    Some(true),
+                    Some(false),
+                    Some(false)
+                ],
                 "base"
             );
         }
