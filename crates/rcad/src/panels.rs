@@ -270,6 +270,20 @@ impl RcadApp {
                 ui.separator();
                 ui.spinner();
                 ui.label("Regenerating…");
+                // Stops the running regeneration at the next feature; the
+                // edit is then not committed (the model keeps its last state).
+                if ui
+                    .small_button("Cancel")
+                    .named("Cancel regeneration")
+                    .on_hover_text(
+                        "Stop this regeneration at the next feature: the edit is not applied \
+                         and the model stays as it was (a kernel operation already running \
+                         finishes first)",
+                    )
+                    .clicked()
+                {
+                    rcad_document::request_cancel();
+                }
             }
         });
     }

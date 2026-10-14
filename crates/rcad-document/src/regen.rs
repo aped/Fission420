@@ -670,6 +670,7 @@ fn regen_impl(
         if stop == Some(id) {
             return Ok(Regen::Stopped(Box::new(st)));
         }
+        crate::check_cancel(id)?;
         st.index.insert(id, i);
         let f = doc.feature(id)?;
         let t_feature = std::time::Instant::now();
@@ -3913,6 +3914,7 @@ fn linear_pattern(
     let mut applied = Vec::new();
     let mut copies = Vec::new();
     for k in 1..total {
+        crate::check_cancel(id)?;
         let (i, j) = (k % count, k / count);
         let t = spacing * f64::from(i);
         let t2 = spacing2 * f64::from(j);
@@ -4007,6 +4009,7 @@ fn circular_pattern(
     let mut applied = Vec::new();
     let mut copies = Vec::new();
     for i in 1..count {
+        crate::check_cancel(id)?;
         let t = angle * f64::from(i);
         let o = rot(sub(f.origin, c), t);
         let frame = Frame {

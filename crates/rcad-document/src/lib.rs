@@ -82,8 +82,39 @@ pub enum DocError {
         pieces: usize,
         assigned: usize,
     },
+    /// The regeneration was cancelled ([`request_cancel`]) between features;
+    /// the edit is not committed and the model is unchanged.
+    #[error("cancelled: the regeneration was stopped before {0}; the model is unchanged")]
+    Cancelled(FeatureId),
     #[error("file error: {0}")]
     File(String),
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;
+
+/// Cooperative cancellation of the regeneration in progress. The flag is
+/// process-wide (one document worker per process): the UI thread sets it,
+/// regeneration checks it before each feature (and between pattern
+/// instances) and fails with [`DocError::Cancelled`], so the transaction is
+/// not committed. The command engine clears it before each command. A single
+/// kernel operation already running is not interrupted.
+static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask the regeneration in progress to stop at the next feature boundary.
+pub fn request_cancel() {
+    CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Clear a cancellation request (before starting a new command).
+pub fn clear_cancel() {
+    CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// [`DocError::Cancelled`] if cancellation was requested.
+pub(crate) fn check_cancel(next: FeatureId) -> Result<()> {
+    if CANCEL.load(std::sync::atomic::Ordering::SeqCst) {
+        Err(DocError::Cancelled(next))
+    } else {
+        Ok(())
+    }
+}
