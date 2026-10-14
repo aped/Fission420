@@ -511,3 +511,28 @@ fn polyline_bound_holds_for_flattened_spans() {
         }
     }
 }
+
+#[test]
+fn ellipse_minor_radius_drags_unless_dimensioned() {
+    let mut s = Sketch::default();
+    let (e, c, m) = s.add_ellipse([0.0, 0.0], [10.0, 0.0], 4.0).unwrap();
+    for (p, x) in [(c, 0.0), (m, 10.0)] {
+        s.constraints.push(Constraint::FixedPoint { p, x, y: 0.0 });
+    }
+    let r = s.drag_radius(e, 6.5);
+    assert_eq!(r.outcome, DragOutcome::Reached, "{r:?}");
+    let Some(Entity::Ellipse { minor, .. }) = s.entity(e) else {
+        panic!()
+    };
+    assert!((minor - 6.5).abs() < SOLVED);
+    // Dimensioned: the drag is blocked and nothing changes.
+    s.constraints.push(Constraint::EllipseRadius {
+        ellipse: e,
+        major: false,
+        dim: Dimension::new("b", 6.5),
+    });
+    let before = s.clone();
+    let r = s.drag_radius(e, 3.0);
+    assert_eq!(r.outcome, DragOutcome::Blocked);
+    assert_eq!(s, before);
+}

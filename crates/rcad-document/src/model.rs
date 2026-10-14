@@ -405,7 +405,8 @@ pub enum FeatureKind {
         direction: [f64; 2],
         /// A second direction (format v8): a rectangular `count` x
         /// `second.count` grid, as Fusion's rectangular pattern. Instance
-        /// `i + j·count` sits at `i·spacing` along `direction` and
+        /// number `i + j·MAX_PATTERN_COUNT` (stable when either count changes)
+        /// sits at `i·spacing` along `direction` and
         /// `j·second.spacing` along `second.direction`; the seed is (0, 0).
         /// Parameters "count2", "spacing2".
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -842,6 +843,19 @@ pub enum ProjectSource {
     /// The non-construction lines, arcs and circles of another sketch on a
     /// parallel plane, matched by entity id.
     Sketch(FeatureId),
+    /// One boundary edge (line, arc or circle) of a planar face, on a plane
+    /// parallel or oblique to the sketch: projected along the sketch normal
+    /// (a circle on an oblique face becomes an exact ellipse; an arc there
+    /// would be an elliptical arc and is refused). The edge is picked at
+    /// creation; regeneration keeps the face edge of the same kind nearest to
+    /// the projected curve's pinned points (ambiguous or missing: a
+    /// `BrokenReference`). Format v8.
+    Edge(FaceRef),
+    /// Intersect: the section of `body` by the sketch plane (lines, arcs and
+    /// circles; `rcad_kernel::section_curves`), read at the sketch's place in
+    /// history. `after` is the feature that last shaped the body when the
+    /// section was made (the dependency). Format v8.
+    Section { body: BodyId, after: FeatureId },
 }
 
 /// One projected curve: the sketch entity it drives and its pinned points
@@ -869,8 +883,9 @@ pub struct ProjectionLink {
 impl ProjectionLink {
     pub fn source_feature(&self) -> FeatureId {
         match self.source {
-            ProjectSource::Face(r) => r.feature,
+            ProjectSource::Face(r) | ProjectSource::Edge(r) => r.feature,
             ProjectSource::Sketch(f) => f,
+            ProjectSource::Section { after, .. } => after,
         }
     }
 }
@@ -2313,6 +2328,24 @@ impl Document {
     }
 
     /// Unique default body name like "Body1".
+    /// Name for a body split off `source`: "Bar (2)", "Bar (3)", ... (the
+    /// first free number; a source that is itself "Bar (2)" numbers from
+    /// "Bar", so names do not nest).
+    pub fn piece_name(&self, source: &str) -> String {
+        let base = match source.rsplit_once(" (") {
+            Some((b, n))
+                if n.ends_with(')') && n[..n.len() - 1].chars().all(|c| c.is_ascii_digit()) =>
+            {
+                b
+            }
+            _ => source,
+        };
+        (2..)
+            .map(|k| format!("{base} ({k})"))
+            .find(|n| !self.bodies.iter().any(|b| &b.name == n))
+            .unwrap_or_else(|| self.default_body_name())
+    }
+
     pub fn default_body_name(&self) -> String {
         (1..)
             .map(|i| format!("Body{i}"))
@@ -2421,6 +2454,16 @@ impl Document {
                         return self.face_body_depth(a, depth + 1);
                     }
                     _ => {}
+                }
+                // The body the feature's own faces live on: a cut's target
+                // (its extra piece bodies are created, but its faces are
+                // resolved on the target), else the first body it creates.
+                if let FeatureKind::Extrude {
+                    operation: Operation::Cut { target },
+                    ..
+                } = &f.kind
+                {
+                    return Some(*target);
                 }
                 match f.created_bodies().first() {
                     Some(b) => Some(*b),

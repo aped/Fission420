@@ -17,6 +17,16 @@ pub struct StepResult {
     pub notes: Vec<String>,
 }
 
+/// A reader error, or [`DocError::ImportCancelled`] when the read stopped
+/// because cancellation was requested (`rcad_cancel`).
+pub fn read_error(format: &str, e: impl std::fmt::Display) -> DocError {
+    if crate::cancel_requested() {
+        DocError::ImportCancelled(format!("a {format} file"))
+    } else {
+        DocError::Validation(e.to_string())
+    }
+}
+
 /// Parse an embedded STEP file into exact solids (mm).
 pub fn step(bytes: &[u8], unit_override_to_mm: Option<f64>) -> Result<StepResult> {
     step_opts(bytes, unit_override_to_mm, false)
@@ -37,8 +47,7 @@ pub fn step_opts(
         surfaces,
         ..Default::default()
     };
-    let imp =
-        rcad_kernel::import_step(text, &opts).map_err(|e| DocError::Validation(e.to_string()))?;
+    let imp = rcad_kernel::import_step(text, &opts).map_err(|e| read_error("STEP", e))?;
     let mut notes = vec![format!(
         "units: {} ({} mm per unit, {})",
         imp.length_unit.name,
@@ -96,7 +105,7 @@ fn presentation_styles(text: &str) -> Option<usize> {
 
 /// Parse an embedded STL file into a mesh body scaled by `to_mm`.
 pub fn stl(bytes: &[u8], to_mm: f64) -> Result<(MeshBody, Vec<String>)> {
-    let ex = |e: rcad_exchange::ExchangeError| DocError::Validation(e.to_string());
+    let ex = |e: rcad_exchange::ExchangeError| read_error("STL", e);
     let mut m = stl::read(bytes, &stl::StlLimits::default()).map_err(ex)?;
     m.scale(to_mm).map_err(ex)?;
     let diagnostics = rcad_exchange::mesh::diagnose(&m.positions, &m.triangles);
@@ -225,7 +234,7 @@ pub struct ThreeMfObject {
 pub fn threemf(bytes: &[u8]) -> Result<(Vec<ThreeMfObject>, Vec<String>)> {
     use rcad_exchange::threemf;
     let imp = threemf::read(bytes, &threemf::ThreeMfLimits::default())
-        .map_err(|e| DocError::Validation(e.to_string()))?;
+        .map_err(|e| read_error("3MF", e))?;
     let mut notes = vec![format!(
         "3MF, unit {} ({} mm), {} build item(s)",
         imp.unit.name(),

@@ -138,6 +138,27 @@ fn as_plane(s: &Surface) -> Option<Plane> {
     }
 }
 
+/// Start parameters for the nearest-point search on `s`: the nearest of a
+/// 16 x 16 parameter grid. Without a hint Truck's search may stop in another
+/// local minimum on a rational cubic (ellipse) extrusion.
+fn grid_hint(s: &NurbsSurface<Vector4>, q: Point3) -> (f64, f64) {
+    let ((u0, u1), (v0, v1)) = s.range_tuple();
+    let mut best = (f64::INFINITY, (u0, v0));
+    for i in 0..=16 {
+        for j in 0..=16 {
+            let (u, v) = (
+                u0 + (u1 - u0) * i as f64 / 16.0,
+                v0 + (v1 - v0) * j as f64 / 16.0,
+            );
+            let d = s.subs(u, v).distance2(q);
+            if d < best.0 {
+                best = (d, (u, v));
+            }
+        }
+    }
+    best.1
+}
+
 /// Exact replacement for one intersection edge from vertex `p0` to vertex `p1` (in the
 /// edge's absolute direction), or an error when the case is unsupported or the
 /// rebuilt curve fails verification.
@@ -199,7 +220,7 @@ pub(crate) fn exact_edge(
         let q = sub.subs(s0 + (s1 - s0) * k as f64 / 8.0);
         let on_plane = (q - o).dot(n).abs() < REBUILD_TOL;
         let on_surface = ns
-            .search_nearest_parameter(q, None, 100)
+            .search_nearest_parameter(q, Some(grid_hint(ns, q)), 100)
             .is_some_and(|(u, v)| ns.subs(u, v).distance(q) < REBUILD_TOL);
         if !(on_plane && on_surface) {
             return Err(unsupported("rebuilt edge does not lie on both surfaces"));

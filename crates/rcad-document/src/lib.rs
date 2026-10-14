@@ -82,8 +82,46 @@ pub enum DocError {
         pieces: usize,
         assigned: usize,
     },
+    /// The regeneration was cancelled ([`request_cancel`]) between features;
+    /// the edit is not committed and the model is unchanged.
+    #[error("cancelled: the regeneration was stopped before {0}; the model is unchanged")]
+    Cancelled(FeatureId),
+    /// A file import was cancelled while it was read ([`request_cancel`]);
+    /// nothing was imported and the model is unchanged.
+    #[error("cancelled: the import of {0} was stopped; nothing was imported")]
+    ImportCancelled(String),
     #[error("file error: {0}")]
     File(String),
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;
+
+/// Cooperative cancellation of the command in progress (`rcad_cancel`; the
+/// flag is process-wide, one document worker per process): the UI thread sets
+/// it, regeneration checks it before each feature (and between pattern
+/// instances) and fails with [`DocError::Cancelled`], and the file readers poll
+/// it in their loops (an import then fails with [`DocError::ImportCancelled`]),
+/// so the transaction is not committed. The command engine clears it before
+/// each command. A single kernel operation without a poll is not interrupted.
+pub fn request_cancel() {
+    rcad_cancel::request();
+}
+
+/// Clear a cancellation request (before starting a new command).
+pub fn clear_cancel() {
+    rcad_cancel::clear();
+}
+
+/// Whether cancellation was requested.
+pub fn cancel_requested() -> bool {
+    rcad_cancel::requested()
+}
+
+/// [`DocError::Cancelled`] if cancellation was requested.
+pub(crate) fn check_cancel(next: FeatureId) -> Result<()> {
+    if rcad_cancel::requested() {
+        Err(DocError::Cancelled(next))
+    } else {
+        Ok(())
+    }
+}

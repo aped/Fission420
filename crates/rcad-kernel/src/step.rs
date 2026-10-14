@@ -17,9 +17,12 @@ use truck_topology::compress::CompressedSolid;
 pub fn export_step(body: &Body, organization_system: &str) -> Result<String> {
     guarded("export_step", || -> Result<String> {
         let cs = canonical_compressed(exact_compressed(body)?);
-        let text =
+        let text = if body.is_open_shell() {
+            surface_text(&cs, organization_system)?
+        } else {
             out::CompleteStepDisplay::new(out::StepModel::from(&cs), header(organization_system))
-                .to_string();
+                .to_string()
+        };
         check_unique_ids(&text)?;
         Ok(round_reals(&fix_file_name(&text)))
     })?
@@ -46,6 +49,14 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
         ));
     }
     guarded("export_step_bodies", || -> Result<String> {
+        let open = bodies.iter().filter(|(_, b)| b.is_open_shell()).count();
+        if open > 0 && open < bodies.len() {
+            return Err(KernelError::InvalidInput(format!(
+                "STEP export of solids and surface bodies in one file is not supported ({open} \
+                 surface bodies among {} bodies); export the surface bodies separately",
+                bodies.len()
+            )));
+        }
         let solids = bodies
             .iter()
             .enumerate()
@@ -60,8 +71,15 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
                     })
             })
             .collect::<Result<Vec<_>>>()?;
-        let models: out::StepModels<_, _, _> = solids.iter().collect();
-        let text = out::CompleteStepDisplay::new(models, header(organization_system)).to_string();
+        let text = if open > 0 {
+            // Surface bodies: one SHELL_BASED_SURFACE_MODEL (OPEN_SHELL) each.
+            let shells: Vec<_> = solids.iter().map(one_shell).collect::<Result<_>>()?;
+            let models: out::StepModels<_, _, _> = shells.iter().collect();
+            out::CompleteStepDisplay::new(models, header(organization_system)).to_string()
+        } else {
+            let models: out::StepModels<_, _, _> = solids.iter().collect();
+            out::CompleteStepDisplay::new(models, header(organization_system)).to_string()
+        };
         check_unique_ids(&text)?;
         let names: Vec<&str> = bodies.iter().map(|(n, _)| *n).collect();
         label_solids(&round_reals(&fix_file_name(&text)), &names)
@@ -71,13 +89,9 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
 /// Compressed copy of `body` with every `IntersectionCurve` edge replaced by its
 /// verified exact curve; refuses (InvalidInput) when an edge cannot be rebuilt.
 fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surface>> {
-    // An open surface body is not a solid; writing it as a
-    // MANIFOLD_SOLID_BREP would be a malformed file.
-    if body.is_open_shell() {
-        return Err(KernelError::InvalidInput(
-            "the body is an open surface (no solid): STEP export of surface bodies is not supported; stitch, fill or thicken it first".into(),
-        ));
-    }
+    // An open surface body (one open shell) is written by the callers as a
+    // SHELL_BASED_SURFACE_MODEL, never as a MANIFOLD_SOLID_BREP; its edges and
+    // faces get the same exact-curve and generatrix treatment.
     let mut cs = body.solid.compress();
     for shell in &mut cs.boundaries {
         let verts = shell.vertices.clone();
@@ -106,6 +120,31 @@ fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surfac
         }
     }
     Ok(cs)
+}
+
+/// The single shell of a compressed surface body.
+fn one_shell(
+    cs: &CompressedSolid<Point3, Curve, Surface>,
+) -> Result<truck_topology::compress::CompressedShell<Point3, Curve, Surface>> {
+    match &cs.boundaries[..] {
+        [sh] => Ok(sh.clone()),
+        other => Err(KernelError::InvalidInput(format!(
+            "a surface body for STEP export must have exactly one shell, found {}",
+            other.len()
+        ))),
+    }
+}
+
+/// STEP text of one surface body (SHELL_BASED_SURFACE_MODEL with an OPEN_SHELL).
+fn surface_text(
+    cs: &CompressedSolid<Point3, Curve, Surface>,
+    organization_system: &str,
+) -> Result<String> {
+    let sh = one_shell(cs)?;
+    Ok(
+        out::CompleteStepDisplay::new(out::StepModel::from(&sh), header(organization_system))
+            .to_string(),
+    )
 }
 
 /// Points sampled per boundary edge to bound a revolution's generatrix.
@@ -453,7 +492,11 @@ fn check_unique_ids(text: &str) -> Result<()> {
 /// Replace the empty label of the i-th solid entity line (in file order, which is
 /// input order) with `names[i]`. The number of solid entities must equal `names.len()`.
 fn label_solids(text: &str, names: &[&str]) -> Result<String> {
-    const SOLIDS: [&str; 2] = ["MANIFOLD_SOLID_BREP('',", "BREP_WITH_VOIDS('',"];
+    const SOLIDS: [&str; 3] = [
+        "MANIFOLD_SOLID_BREP('',",
+        "BREP_WITH_VOIDS('',",
+        "SHELL_BASED_SURFACE_MODEL('',",
+    ];
     let mut out =
         String::with_capacity(text.len() + names.iter().map(|n| n.len() + 8).sum::<usize>());
     let mut next = 0usize;

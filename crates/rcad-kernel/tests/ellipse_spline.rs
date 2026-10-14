@@ -185,3 +185,68 @@ fn spline_span_profile_extrudes_and_sweep_refuses() {
     );
     assert!(matches!(r, Err(KernelError::InvalidInput(m)) if m.contains("spline")));
 }
+
+/// Writes artifacts/step_curves/*.step for tools/check_step_curves.sh
+/// (FreeCAD / OpenCascade reads them independently).
+#[test]
+#[ignore = "writes artifacts/ for the external FreeCAD check; run via tools/check_step_curves.sh"]
+fn write_curve_step_artifacts() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/step_curves");
+    std::fs::create_dir_all(&dir).unwrap();
+    let prism = extrude(&ellipse([0.0, 0.0], 20.0, 10.0), &Frame::XY, 15.0).unwrap();
+    let block = extrude(&rect(-30.0, -20.0, 30.0, 20.0), &Frame::XY, 10.0).unwrap();
+    let cut = cut_prism(
+        &block,
+        &ellipse([0.0, 0.0], 12.0, 6.0),
+        &Frame::XY.offset(-2.0),
+        14.0,
+    )
+    .unwrap();
+    let (w, h) = (30.0, 20.0);
+    let d = Profile::Loop(vec![
+        LoopSegment::Line { start: [0.0, 0.0] },
+        LoopSegment::Cubic {
+            start: [w, 0.0],
+            c1: [w, h],
+            c2: [0.0, h],
+            w: [1.0, 1.0],
+        },
+    ]);
+    let spline = extrude(&d, &Frame::XY, 5.0).unwrap();
+    for (name, b) in [
+        ("ellipse_prism", &prism),
+        ("ellipse_cut_block", &cut),
+        ("spline_d_prism", &spline),
+    ] {
+        std::fs::write(
+            dir.join(format!("{name}.step")),
+            export_step(b, "test").unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+/// Cuts by elliptical prisms get explicit exact intersection edges (the
+/// cap plane meets the extruded rational cubic surface in the translated
+/// span, rebuilt and verified by `exact.rs`), so later measurement does not
+/// evaluate implicit curves: four sequential cuts, each volume closed-form.
+#[test]
+fn elliptical_cuts_get_exact_intersection_edges() {
+    let mut b = extrude(&rect(-40.0, -20.0, 40.0, 20.0), &Frame::XY, 10.0).unwrap();
+    let hole = PI * 6.0 * 4.0 * 10.0;
+    for (i, x) in [-25.0, -10.0, 5.0, 25.0].into_iter().enumerate() {
+        let e = ellipse([x, 0.0], 6.0, 4.0);
+        let start = Frame::XY.offset(-2.0);
+        let nb = cut_prism(&b, &e, &start, 14.0).unwrap();
+        assert!(!has_implicit_edges(&nb), "cut {i} kept implicit edges");
+        let prism = Prism {
+            profile: &e,
+            holes: &[],
+            start: &start,
+            length: 14.0,
+        };
+        verify_prism_boolean(&b, &nb, PrismOp::Cut, &prism, (0.0, 14.0)).unwrap();
+        assert_volume(&nb, 32_000.0 - (i + 1) as f64 * hole);
+        b = nb;
+    }
+}

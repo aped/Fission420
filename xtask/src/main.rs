@@ -333,6 +333,66 @@ fn main() -> ExitCode {
                 "examples/organizer_tray_finished_workflow.json",
             ],
         ),
+        (
+            "everyday enclosure example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/everyday_enclosure_workflow.json",
+            ],
+        ),
+        (
+            "everyday tray example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/everyday_tray_workflow.json",
+            ],
+        ),
+        (
+            "everyday knob example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/everyday_knob_workflow.json",
+            ],
+        ),
+        (
+            "threaded pair example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/threaded_pair_workflow.json",
+            ],
+        ),
+        (
+            "split bar example",
+            &[
+                "run",
+                "--release",
+                "-p",
+                "rcad-cli",
+                "--",
+                "run",
+                "examples/split_bar_workflow.json",
+            ],
+        ),
     ];
     for (name, args) in stages {
         if !run(name, args) {

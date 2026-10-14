@@ -702,6 +702,9 @@ impl Sketch {
             .filter(|c| {
                 !matches!(c, Constraint::PatternRotate { dim, .. } if !dim.name.is_empty() && !seen.insert(dim.name.clone()))
             })
+            // An unnamed ellipse radius pins a projected ellipse (driven by
+            // its projection link, not a user dimension).
+            .filter(|c| !matches!(c, Constraint::EllipseRadius { dim, .. } if dim.name.is_empty()))
             .filter_map(Constraint::dimension)
             .map(|d| (d.name.clone(), d.value))
             .collect()

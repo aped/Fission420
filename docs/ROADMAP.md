@@ -1,41 +1,41 @@
 # Roadmap
 
 What exists is described in docs/COMMANDS.md and docs/FORMAT_SUPPORT.md. Items below are not
-implemented; listing them here is not a claim of support. Ordered roughly by value per effort.
+implemented (or only partly); listing them here is not a claim of support. Ordered roughly by
+value per effort. Autodesk Fusion is the behavioural reference where behaviour is open.
 
 ## Modeling
-- Booleans with tools that have inner loops (Join/Cut of a region with holes). Truck 0.6
-  `shapeops` fails for such tools (measured); options: upstream fix, or decompose into
-  per-loop operations where that is provably equivalent.
-- Region picking inside a sketch (choose which closed region(s) to extrude; islands inside holes;
-  several outer loops in one feature producing several bodies).
-- Patterns and mirrors of New Body extrusions, whole bodies and sketches
-  (today: linear/circular patterns and mirrors of Extrude Join/Cut features only), and referenceable faces
-  on pattern/mirror instances.
-- General reference repair: re-attach with preview for every reference kind, and topological
-  naming that survives face splits/merges (today: deterministic refusal + explicit re-attach).
-- Sketches on curved faces; construction planes (offset, angled, through edges).
-- Fillet: not feasible through Truck 0.6 booleans — a tool whose arc is tangent to both faces
-  returns no result at every tolerance (spike: `rcad-kernel` `ops::tests::spike_fillet_tangent_arc_tool`,
-  ignored, run with `--ignored`). Needs direct B-rep face construction (replace the edge by a
-  cylindrical face and trim the neighbours) or a kernel with fillets. Chamfers of straight convex
-  edges exist (docs/COMMANDS.md `chamfer`); vertex blends and chamfer chains do not.
-- Shell, draft, loft, sweep.
-- Exact operations on mesh bodies via mesh-to-B-rep reconstruction (explicitly out of scope so
-  far).
+- Fillets: corner blends of arbitrary edge sets and variable radii (today: single straight
+  prismatic edges, and whole edge loops of a cap face with tori, sphere corners and mitred
+  corners, docs/FILLETS.md); shell of a body whose loop is already filleted (today: shell first,
+  then the loop fillet).
+- Exact helical threads and a coil feature (today: faceted threads within 0.01 mm, ADR 0011).
+- Draft of existing faces (today: taper at extrusion time only); direct replace-face on
+  imported bodies.
+- Cuts that leave an enclosed void (one body with a cavity); pieces from tapered, multi-region,
+  pattern/mirror, combine, revolve and hole cuts (today: single-region straight cuts and Split
+  Body make one body per piece, ADR 0003).
+- Patterns of New Body extrusions, whole bodies, sketches and fillet features; referenceable
+  faces on pattern/mirror instances.
+- Revolve of sections meeting the axis at a point or at an angle (cone tips, poles), and partial
+  turns of axis-touching sections.
+- Sketches on curved faces; 3D sketches; loft guide rails; helical sweeps.
+- Faster curved booleans (seconds to tens of seconds today; Truck's implicit intersection curves
+  dominate where no exact replacement exists, `crates/rcad-kernel/src/exact.rs`).
+- Exact operations on mesh bodies via mesh-to-B-rep reconstruction (out of scope so far).
 
 ## Interchange
-- STEP: wider entity coverage (`BREP_WITH_VOIDS`, `MAPPED_ITEM` placements, shells/surfaces,
-  colours/names round trip), AP242 specifics, assemblies as components (today: flattened
-  placements of supported representations only, see docs/formats/step.md).
-- 3MF: colours/materials kept on bodies, UI dialogs (today: command/CLI import/export of mesh
-  objects with units).
-- SVG: Bézier curves (exact as sketch splines once the sketcher has them), elliptical arcs,
-  `use` expansion, text to outlines (today: lines/rects/circles/circular arcs, docs/formats/svg.md).
-- DXF: SPLINE/ELLIPSE, blocks/INSERT with transforms, dimension import as constraints.
+- STEP: colours/names round trip, AP242 specifics, solids and surface bodies in one file.
+- 3MF: colours/materials kept on bodies.
+- SVG: Bézier curves, elliptical arcs, `use` expansion, text to outlines.
+- DXF: non-uniform/rational SPLINEs and elliptical arcs, R2000+ export of ellipses/splines,
+  blocks/INSERT with transforms, dimension import as constraints.
+- Cancellation of long imports (today: bounded by size and entity limits).
 - IGES, OBJ: possible later; DWG and F3D/F3Z: no plan (closed formats).
 
 ## Product
-- Components and assembly constraints; drawings (2D projections with dimensions); later
-  manufacturing workflows (CAM setup, toolpaths).
+- Drawings: radius/angular/chain dimensions, GD&T, broken and auxiliary views.
+- Sheet metal: closed/rolled hems, flanges on flanges or arcs, miters, K-factor tables.
+- Manufacturing workflows (CAM setup, toolpaths), simulation, cloud collaboration: separate
+  programs, not planned here.
 - Persistent undo history; project/workspace management; preferences.

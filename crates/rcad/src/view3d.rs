@@ -369,6 +369,41 @@ impl RcadApp {
             .map(|(_, r)| *r)
     }
 
+    /// Display-mesh face under a screen position and the picked point
+    /// (world, from the display mesh: only a pick hint, never geometry).
+    pub fn face_hit(&self, p: Pos2) -> Option<(u32, [f64; 3])> {
+        let rect = self.view_rect?;
+        let ray = self.ray_at(rect, p)?;
+        let (t, _, g) = self.scene.mesh.pick_section(&ray, self.section_plane())?;
+        let q = |i: usize| f64::from(ray.origin[i] + ray.dir[i] * t);
+        Some((g, [q(0), q(1), q(2)]))
+    }
+
+    /// Edge pick mode click: project the edge of the clicked planar face
+    /// nearest to the click into sketch `sk` (the command refuses with the
+    /// reason when the face cannot be referenced or the pick is ambiguous).
+    fn project_edge_click(&mut self, sk: FeatureId, p: Pos2) {
+        // A click on empty space or a face without a semantic reference
+        // (curved, mesh) ends the pick mode without a change.
+        let Some((g, at)) = self.face_hit(p) else {
+            return;
+        };
+        let Some(face) = self
+            .faces
+            .iter()
+            .find(|f| f.group == g)
+            .and_then(|f| f.reference)
+        else {
+            return;
+        };
+        self.request(Command::Project {
+            sketch: sk,
+            source: rcad_document::ProjectSource::Edge(face),
+            construction: false,
+            at: Some(at),
+        });
+    }
+
     /// Display-mesh face under a screen position.
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
@@ -496,6 +531,10 @@ impl RcadApp {
     /// the selected sketch → inline edit; otherwise select the face under the
     /// cursor (or clear the selection on empty space).
     pub fn view_click(&mut self, p: Pos2) {
+        if let Some(sk) = self.edge_pick_for.take() {
+            self.project_edge_click(sk, p);
+            return;
+        }
         // Extrude dialog open: a click inside a sketch region picks it.
         if self.extrude_region_click(p) {
             return;
@@ -754,16 +793,16 @@ impl RcadApp {
             frame: s.frame,
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // Snap step: the finest 1-2-5 step at least SNAP_CELL_PX apart on
-        // screen, finer than the drawn grid (cells >= MIN_CELL_PX), so a
-        // feature smaller than one drawn cell (a 4 mm slot when zoomed out)
-        // can still be drawn without its corners snapping together.
+        // Snap step: a power of ten (1, 10, 0.1 mm, ...) at least
+        // SNAP_CELL_PX / 2 apart on screen, so a feature smaller than one
+        // drawn grid cell (a 4 mm slot when zoomed out) can still be drawn,
+        // and round values (25, 40) stay exactly reachable: a 2 mm or 5 mm
+        // step would round 25 to 26 or 40 to 40 but 22 to 20.
         let grid = {
-            let ppm = rcad_viewport::pixels_per_mm(&cam, rect.height());
-            Some(f64::from(rcad_viewport::adaptive_grid_spacing(
-                ppm,
-                crate::sketch_edit::SNAP_CELL_PX,
-            )))
+            let ppm = f64::from(rcad_viewport::pixels_per_mm(&cam, rect.height()));
+            let need = f64::from(crate::sketch_edit::SNAP_CELL_PX) / 2.0 / ppm.max(1e-9);
+            let step = 10f64.powf(need.log10().ceil());
+            (step.is_finite() && step > 0.0).then_some(step)
         };
         let view_at = |p: [f64; 2]| View {
             px_per_mm: pr.px_per_mm(p),

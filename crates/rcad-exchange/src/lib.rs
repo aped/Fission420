@@ -94,6 +94,10 @@ pub enum ExchangeError {
     /// Nothing importable was found.
     #[error("{format}: no supported geometry: {message}")]
     Empty { format: String, message: String },
+    /// The read was stopped by a cancellation request (`rcad_cancel`); nothing
+    /// was produced.
+    #[error("{format}: import cancelled")]
+    Cancelled { format: String },
     /// An option value is invalid (non-finite scale, negative tolerance, ...).
     #[error("invalid option: {0}")]
     InvalidOption(String),
@@ -104,6 +108,20 @@ pub enum ExchangeError {
 }
 
 pub type Result<T> = std::result::Result<T, ExchangeError>;
+
+/// Items between two polls of the cancellation flag in reader loops.
+pub(crate) const CANCEL_POLL: u32 = 16_384;
+
+/// Poll `p`; `Err(Cancelled)` when cancellation was requested.
+pub(crate) fn poll_cancel(p: &mut rcad_cancel::Poll, format: &str) -> Result<()> {
+    if p.tick() {
+        Err(ExchangeError::Cancelled {
+            format: format.into(),
+        })
+    } else {
+        Ok(())
+    }
+}
 
 /// Finite and strictly positive.
 pub(crate) fn check_scale(name: &str, v: f64) -> Result<()> {

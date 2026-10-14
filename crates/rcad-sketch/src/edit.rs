@@ -378,10 +378,14 @@ impl Sketch {
         )
     }
 
-    /// Drag a circle's radius toward `radius` (mm, finite and > 0). A missing
-    /// circle or invalid radius is `Blocked` with an empty `blocked_by`.
+    /// Drag a circle's radius (or an ellipse's minor radius) toward `radius`
+    /// (mm, finite and > 0). A missing circle or invalid radius is `Blocked`
+    /// with an empty `blocked_by`.
     pub fn drag_radius(&mut self, circle: EntityId, radius: f64) -> DragResult {
-        let is_circle = matches!(self.entity(circle), Some(Entity::Circle { .. }));
+        let is_circle = matches!(
+            self.entity(circle),
+            Some(Entity::Circle { .. } | Entity::Ellipse { .. })
+        );
         if !is_circle || !radius.is_finite() || radius <= 0.0 {
             return self.blocked(vec![]);
         }
@@ -391,7 +395,7 @@ impl Sketch {
         }];
         let mut moved = self.clone();
         for e in &mut moved.entities {
-            if let Entity::Circle { id, radius: r, .. } = e
+            if let Entity::Circle { id, radius: r, .. } | Entity::Ellipse { id, minor: r, .. } = e
                 && *id == circle
             {
                 *r = radius;

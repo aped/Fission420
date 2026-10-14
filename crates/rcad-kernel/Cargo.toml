@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rcad-cancel = { version = "0.1.0", path = "../rcad-cancel" }
 i_overlay = "8.1.2"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"

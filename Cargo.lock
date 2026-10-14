@@ -2491,6 +2491,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcad-cancel"
+version = "0.1.0"
+
+[[package]]
 name = "rcad-cli"
 version = "0.1.0"
 dependencies = [
@@ -2516,6 +2520,7 @@ dependencies = [
 name = "rcad-document"
 version = "0.1.0"
 dependencies = [
+ "rcad-cancel",
  "rcad-exchange",
  "rcad-kernel",
  "rcad-sketch",
@@ -2532,6 +2537,7 @@ dependencies = [
  "crc32fast",
  "miniz_oxide 0.8.9",
  "quick-xml 0.41.0",
+ "rcad-cancel",
  "rcad-sketch",
  "serde",
  "serde_json",
@@ -2543,6 +2549,7 @@ name = "rcad-kernel"
 version = "0.1.0"
 dependencies = [
  "i_overlay",
+ "rcad-cancel",
  "serde",
  "thiserror 2.0.21",
  "truck-meshalgo",

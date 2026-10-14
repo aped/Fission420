@@ -207,7 +207,8 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
             return closed_curve_profile(s, closed[0], tol);
         }
         return Err(SketchError::UnsupportedProfile(format!(
-            "expected one closed loop; found {} ellipse(s)/closed spline(s) with {} other curves              and {} circles",
+            "expected one closed loop; found {} ellipse(s)/closed spline(s) with {} other curves \
+             and {} circles",
             closed.len(),
             curves.len(),
             circles.len()

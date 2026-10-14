@@ -183,7 +183,9 @@ decimation with measured deviation, as history features.
 ## DXF
 
 Import: LINE, ARC, CIRCLE, LWPOLYLINE and 2D POLYLINE (bulges become exact arcs); WCS XY
-plane only (OCS (0,0,−1) handled); layers selectable; unsupported entities (SPLINE, ELLIPSE,
+plane only (OCS (0,0,−1) handled); full ELLIPSEs and exactly representable SPLINEs (open,
+non-rational, cubic, clamped uniform) become sketch ellipses/splines; unsupported entities
+(other SPLINEs, elliptical arcs,
 INSERT/blocks, TEXT, DIMENSION, HATCH, 3D entities, paper space, …) refuse the file with
 type/count/line unless `allow_partial`, which skips and lists them. Endpoints within 1e-6 mm
 are joined; no constraints are inferred, so the sketch reports `UnderConstrained`.
@@ -205,7 +207,7 @@ wins over a 1 mm override); unitless `notch_freecad_r12.dxf` refused without a u
 imported at 1 mm/unit and extruded: V = 3(800 − 12.5π). A DXF contour imported onto an
 imported STEP face cuts the imported body (`imports.rs`).
 
-**Known losses**: splines/ellipses/text/dimensions/hatches/blocks, widths, thickness,
+**Known losses**: non-uniform/rational splines, elliptical arcs, text/dimensions/hatches/blocks, widths, thickness,
 linetype and colour; design intent (constraints); sketch placement on export.
 
 ## 3MF
@@ -234,7 +236,7 @@ the Python reader (`check_3mf.py`) instead.
 
 `rcad_exchange::svg` ([`formats/svg.md`](formats/svg.md)), commands `import_svg` (new
 unconstrained sketch on a plane or planar face) and `export_svg` (one sketch). Import:
-`line`, `rect` (not rounded), `circle`/`ellipse` with `rx ≈ ry`, `polyline`/`polygon`, `path`
+`line`, `rect` (not rounded), `circle`/`ellipse` (`rx ≠ ry`: exact sketch ellipse), `polyline`/`polygon`, `path`
 `M L H V Z` and circular `A`; `g` transforms. Accepted to 1e-5 relative: `rx`/`ry` that differ
 by rounding (mean radius) and near-similarity transforms on circles/arcs. Units: root
 `width`/`height` (> 0, `mm cm in pt pc`, exponents such as `1e2mm`) with `viewBox`;
@@ -328,6 +330,38 @@ fixture, five frozen v2 documents
 re-saved as v3 whenever their workflows replay, e.g. in `cargo xtask check`), and every
 committed example, checks the analytic volume, re-saves as v3 and reopens to an identical
 document. Size limit 256 MiB per file, 128 MiB per import source.
+
+## Qualification scenario: external exchange
+
+`crates/rcad-commands/tests/exchange_qualification.rs` (6 tests, typed command API), on files
+made by another implementation (FreeCAD 1.1.4, `tools/fixtures/corpus/`) or hand-written from
+the specifications:
+
+| step | files | checked |
+|---|---|---|
+| foreign exact solid | `p8_fillet_block_mm.step`, `p12_rotated_cylinder_inch.step` | one body; volume within 1e-4 mm³ and bounds within 1e-5 mm of FreeCAD's read-back; the reply states the unit (`1` / `25.4 mm per unit, declared in file`) |
+| foreign assembly | `a5_nested_transforms_mm.step` (two nested levels, each rotated + translated), `a4_assembly_inch.step` | flattened `import_step`: body count, total volume and bounds against FreeCAD (transforms composed); `import_step_assembly`: one placed occurrence per solid, total occurrence volume, components kept; unit stated |
+| mesh repair | `tools/fixtures/stl/broken_cube.stl` | open before; repair → closed, 8000 mm³ (analytic); unrepaired export refused, repaired export re-read closed at 8000 |
+| sketches with holes and counters | `h7_counters_mm.dxf`, `h8_counters_mm.svg` | whole-profile extrusion refused naming the island; every even-depth region extruded: `5·(4800 − 100π)` and `5·(1600 + 25π)` mm³ |
+| reported losses | `c1_coloured_blocks_mm.step`, `h4_spline_unsupported.dxf` | "colours/styles ignored: 2 STYLED_ITEM …"; SPLINE refused by name, partial import names it |
+| malformed / unsupported / oversized | `x1`–`x11` (STEP, STL ×3, 3MF ×4, DXF ×2, SVG) and sparse files just over the import limit (STL, STEP, 3MF) | refused with a bounded message naming the format or cause, into a document holding a body: document and revision unchanged, within 30 s |
+
+**Bounded and cancellable.** An import is bounded before and while it is read: files above
+`MAX_FILE_BYTES / 2` (128 MiB) are refused before reading (tested above), and the readers
+enforce entity / triangle limits (STEP 2 M entities, STL 10 M triangles, 3MF limits in
+`ThreeMfLimits`). It is also cancellable (`rcad_cancel`, one process-wide cooperative flag):
+the STL, 3MF, DXF and SVG readers poll it every 16 384 items (and on their first item), the
+STEP import in its pre-scan, before and after the third-party parser (which itself cannot be
+interrupted) and per solid while building topology, and regeneration before each feature. A
+cancelled import fails with `DocError::ImportCancelled` and nothing is committed. In the app
+the Import dialog's Cancel cancels its own import by request token (`Engine::cancel`: still
+queued, it is answered as cancelled without running; running, the flag is set), and the
+toolbar Cancel stops whatever is running. Evidence: `crates/rcad-exchange/tests/cancel.rs`
+(every reader stops), `crates/rcad-commands/tests/import_cancel.rs` (every import command
+refused with the document unchanged; a 2 000 000-triangle STL cancelled from another thread
+mid-read), `crates/rcad/tests/import_cancel_ui.rs` (the dialog's Cancel during that read:
+no feature, no body, revision unchanged; the next import works), `stale_state.rs` (a
+cancelled queued import never commits; late replies still never resolve a newer form).
 
 ## Evidence
 

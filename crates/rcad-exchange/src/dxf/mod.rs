@@ -3,7 +3,11 @@
 //!
 //! # Import geometry rules
 //! * Supported entities: `LINE`, `ARC`, `CIRCLE`, `LWPOLYLINE` and 2D `POLYLINE`/`VERTEX`/
-//!   `SEQEND` (straight segments and bulge arcs; `bulge = tan(sweep / 4)`, positive = CCW).
+//!   `SEQEND` (straight segments and bulge arcs; `bulge = tan(sweep / 4)`, positive = CCW);
+//!   full `ELLIPSE`s (sketch ellipses) and `SPLINE`s that are exactly sketch splines (open,
+//!   non-rational, degree 3, clamped uniform knots, control points given). Elliptical arcs
+//!   and other splines are unsupported (refused, or skipped and listed with
+//!   `allow_partial`), never approximated.
 //! * Planarity: only entities in the WCS XY plane. `LINE` endpoints (WCS) must have
 //!   `|z| <= PLANAR_REL_TOL × max(1, |coordinates|)`; OCS entities (`ARC`, `CIRCLE`,
 //!   polylines) must have extrusion `(0,0,±1)` (normalised; x/y components within the same
@@ -153,7 +157,7 @@ pub fn insunits_to_mm(code: i64) -> Option<(&'static str, f64)> {
 }
 
 /// 2D curve in WCS drawing units, before scaling.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Curve {
     Line {
         a: [f64; 2],
@@ -168,6 +172,16 @@ enum Curve {
     Circle {
         center: [f64; 2],
         radius: f64,
+    },
+    /// Full ellipse: centre, absolute end point of the major axis, minor/major ratio.
+    Ellipse {
+        center: [f64; 2],
+        major: [f64; 2],
+        ratio: f64,
+    },
+    /// Uniform clamped non-rational cubic B-spline (control points).
+    Spline {
+        ctrl: Vec<[f64; 2]>,
     },
 }
 
@@ -297,7 +311,122 @@ fn mirror_curve(c: Curve, mirrored: bool) -> Curve {
             center: ocs_to_wcs(center, true),
             radius,
         },
+        // WCS entities: never mirrored.
+        c @ (Curve::Ellipse { .. } | Curve::Spline { .. }) => c,
     }
+}
+
+/// Relative tolerance for "full ellipse" parameters and uniform knot spacing.
+const CURVE_PARAM_TOL: f64 = 1e-9;
+
+/// A DXF ELLIPSE (WCS centre and major axis vector): only full ellipses
+/// (parameters 0 to 2π) in the XY plane are imported.
+fn classify_ellipse(e: &RawEntity) -> Result<std::result::Result<Curve, &'static str>> {
+    if ocs_mirrored(e)?.is_none() {
+        return Ok(Err(R_EXTRUSION));
+    }
+    let (cx, cy, cz) = (e.f_req(10)?, e.f_req(20)?, e.f_or(30, 0.0)?);
+    let (mx, my, mz) = (e.f_req(11)?, e.f_req(21)?, e.f_or(31, 0.0)?);
+    let ratio = e.f_req(40)?;
+    let (t0, t1) = (e.f_or(41, 0.0)?, e.f_or(42, std::f64::consts::TAU)?);
+    let tol = planar_tol(&[cx, cy, mx, my]);
+    if cz.abs() > tol || mz.abs() > tol {
+        return Ok(Err(R_NOT_XY));
+    }
+    if ((t1 - t0) - std::f64::consts::TAU).abs() > CURVE_PARAM_TOL * std::f64::consts::TAU {
+        return Ok(Err(
+            "elliptical arcs are not supported (full ellipses only)",
+        ));
+    }
+    Ok(Ok(Curve::Ellipse {
+        center: [cx, cy],
+        major: [cx + mx, cy + my],
+        ratio,
+    }))
+}
+
+/// A DXF SPLINE: imported only when it is exactly a sketch spline, i.e. an
+/// open, non-rational degree-3 B-spline with a clamped uniform knot vector
+/// (any affine knot scaling) and control points in the XY plane. Fit-point
+/// splines, other degrees, rational, periodic or non-uniform splines are
+/// refused (they are not representable exactly).
+fn classify_spline(e: &RawEntity) -> Result<std::result::Result<Curve, &'static str>> {
+    let flags = e.int(70)?.unwrap_or(0);
+    if e.int(71)?.unwrap_or(0) != 3 {
+        return Ok(Err(
+            "spline degree is not 3 (only cubic splines are imported)",
+        ));
+    }
+    if flags & 2 != 0 {
+        return Ok(Err("periodic splines are not supported"));
+    }
+    if flags & 1 != 0 {
+        return Ok(Err("closed splines are not supported (open splines only)"));
+    }
+    let mut knots = Vec::new();
+    let mut weights = Vec::new();
+    let mut ctrl: Vec<[f64; 3]> = Vec::new();
+    for p in &e.pairs {
+        match p.code {
+            40 => knots.push(reader::parse_f64(p)?),
+            41 => weights.push(reader::parse_f64(p)?),
+            10 => ctrl.push([reader::parse_f64(p)?, f64::NAN, 0.0]),
+            20 | 30 => {
+                let Some(last) = ctrl.last_mut() else {
+                    return Err(malformed(p.line, "SPLINE coordinate before its x value"));
+                };
+                last[if p.code == 20 { 1 } else { 2 }] = reader::parse_f64(p)?;
+            }
+            _ => {}
+        }
+    }
+    if ctrl.is_empty() {
+        return Ok(Err(
+            "fit-point splines are not supported (control points required)",
+        ));
+    }
+    if ctrl.iter().any(|c| c[1].is_nan()) {
+        return Err(malformed(e.line, "SPLINE control point without a y value"));
+    }
+    let n = ctrl.len();
+    if !(4..=rcad_sketch::curves::MAX_SPLINE_POINTS).contains(&n) {
+        return Ok(Err("spline control point count outside 4..=256"));
+    }
+    if weights.iter().any(|w| (w - 1.0).abs() > CURVE_PARAM_TOL) {
+        return Ok(Err(
+            "rational splines (weights other than 1) are not supported",
+        ));
+    }
+    if knots.len() != n + 4 {
+        return Ok(Err("spline knot count does not match its control points"));
+    }
+    // Clamped uniform: 4 equal knots at each end, equal interior steps.
+    let (k0, k1) = (knots[0], knots[n + 3]);
+    let step = (k1 - k0) / (n - 3) as f64;
+    let ok = step > 0.0
+        && knots.iter().enumerate().all(|(i, k)| {
+            let want = k0 + step * (i as f64 - 3.0).clamp(0.0, (n - 3) as f64);
+            (k - want).abs() <= CURVE_PARAM_TOL * (k1 - k0).abs().max(1.0)
+        });
+    if !ok {
+        return Ok(Err(
+            "non-uniform or unclamped spline knots are not supported (uniform clamped only)",
+        ));
+    }
+    let coords: Vec<f64> = ctrl.iter().flat_map(|c| [c[0], c[1]]).collect();
+    if ctrl.iter().any(|c| c[2].abs() > planar_tol(&coords)) {
+        return Ok(Err(R_NOT_XY));
+    }
+    let (f, l) = (ctrl[0], ctrl[n - 1]);
+    if (f[0] - l[0]).hypot(f[1] - l[1]) <= planar_tol(&coords) {
+        return Ok(Err(
+            "the spline's first and last control points coincide (a closed spline; open \
+             splines only)",
+        ));
+    }
+    Ok(Ok(Curve::Spline {
+        ctrl: ctrl.iter().map(|c| [c[0], c[1]]).collect(),
+    }))
 }
 
 fn classify(e: &RawEntity, vertices: &[RawEntity]) -> Result<Classified> {
@@ -429,8 +558,14 @@ fn classify(e: &RawEntity, vertices: &[RawEntity]) -> Result<Classified> {
                     .collect(),
             ))
         }
-        "SPLINE" => Ok(U("spline curves are not supported")),
-        "ELLIPSE" => Ok(U("ellipses are not supported")),
+        "SPLINE" => Ok(match classify_spline(e)? {
+            Ok(c) => Classified::Curves(vec![c]),
+            Err(why) => U(why),
+        }),
+        "ELLIPSE" => Ok(match classify_ellipse(e)? {
+            Ok(c) => Classified::Curves(vec![c]),
+            Err(why) => U(why),
+        }),
         "INSERT" => Ok(U("block references are not expanded")),
         "TEXT" | "MTEXT" | "ATTDEF" | "ATTRIB" => Ok(U("text/annotation is not geometry")),
         "DIMENSION" | "LEADER" | "MLEADER" | "MULTILEADER" | "TOLERANCE" => {
@@ -835,6 +970,54 @@ pub fn import(bytes: &[u8], opts: &DxfImportOptions) -> Result<DxfImport> {
                     id,
                     center: pc,
                     radius: r,
+                });
+            }
+            Curve::Ellipse {
+                center,
+                major,
+                ratio,
+            } => {
+                let (c, m) = (finite(sc(center), line)?, finite(sc(major), line)?);
+                let a = (m[0] - c[0]).hypot(m[1] - c[1]);
+                let b = a * ratio;
+                if !(a > degenerate_tol && b.is_finite() && b > degenerate_tol) {
+                    degenerate(kind, "zero or negative ellipse radius", line, &mut warnings);
+                    continue;
+                }
+                let (pc, pm) = (push_point(&mut sketch, c), push_point(&mut sketch, m));
+                let id = sketch.next_entity_id_fast();
+                sketch.entities.push(Entity::Ellipse {
+                    id,
+                    center: pc,
+                    major: pm,
+                    minor: b,
+                });
+            }
+            Curve::Spline { ctrl } => {
+                let n = ctrl.len();
+                let mut ids = Vec::with_capacity(n);
+                for (i, p) in ctrl.iter().enumerate() {
+                    let q = finite(sc(*p), line)?;
+                    // The ends join other curves; interior control points stay separate.
+                    ids.push(if i == 0 || i + 1 == n {
+                        merger.point(&mut sketch, q)?
+                    } else {
+                        push_point(&mut sketch, q)
+                    });
+                }
+                let mut seen = std::collections::HashSet::new();
+                if !ids.iter().all(|p| seen.insert(*p)) {
+                    // Never drop an outline silently: refuse the file.
+                    return Err(ExchangeError::Sketch(format!(
+                        "line {line}: the SPLINE's ends meet within the join tolerance (a closed \
+                         spline); closed DXF splines are not supported"
+                    )));
+                }
+                let id = sketch.next_entity_id_fast();
+                sketch.entities.push(Entity::Spline {
+                    id,
+                    points: ids,
+                    closed: false,
                 });
             }
         }

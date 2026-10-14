@@ -1,6 +1,6 @@
 //! Stale asynchronous state. Import replies carry a request
 //! token, so a reply from a cancelled or replaced import form never resolves a
-//! newer one; Undo/Redo close dialogs holding ids that may now name other
+//! newer one (and a cancelled import commits nothing); Undo/Redo close dialogs holding ids that may now name other
 //! objects; a dialog whose ids vanish is closed instead of acting on them.
 //! Runs on the threaded engine with slow regenerations queued first, so the
 //! imports really are pending when the forms are cancelled/reopened.
@@ -146,9 +146,10 @@ fn import_reply_after_cancel_does_not_resolve_the_reopened_form() {
         .expect("second import summarized");
     assert_eq!(summary.file, "two_boxes_compound_mm.step");
     assert_eq!(summary.bodies.len(), 2, "{:?}", summary.bodies);
-    // Both imports ran (Cancel closes the form only): plate + 1 + 2 bodies.
+    // The cancelled import never commits (still queued behind the plate:
+    // answered as cancelled without running): plate + the second import's 2.
     let s = h.state().summary();
-    assert_eq!(s.bodies.len(), 4, "{:?}", s.bodies);
+    assert_eq!(s.bodies.len(), 3, "{:?}", s.bodies);
     let created = summary.feature.unwrap();
     let f = s.features.iter().find(|f| f.id == created).unwrap();
     assert_eq!(

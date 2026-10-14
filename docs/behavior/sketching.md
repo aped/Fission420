@@ -27,13 +27,15 @@ compete. Opening another document while a sketch is open discards the session wi
 
 | tool | gesture |
 |---|---|
-| Select (S) | click selects (Shift adds/removes); drag a vertex or a circle rim to move it; click an already-selected dimension (or double-click it) to edit; Del deletes the selection |
+| Select (S) | click selects (Shift adds/removes); drag a vertex or a circle rim to move it (an ellipse rim drags its minor radius); click an already-selected dimension (or double-click it) to edit; Del deletes the selection |
 | Line (L) | click points to draw connected lines; clicking the chain's first point closes the loop; Enter or right-click ends the chain |
 | Center Rect (R) | click the centre (snap to the origin for a centred rectangle), then a corner. Creates 4 lines with Horizontal/Vertical constraints and a symmetry constraint about the centre point |
 | 2-Point Rect (Shift+R) | opposite corners; Horizontal/Vertical constraints |
 | Circle (C) | centre, then a rim point |
 | 3-Point Arc (A) | start point, end point, then a point the arc passes through (counter-clockwise storage; orientation follows the third point). Collinear points are refused |
-| Dimension (D) | click a line (horizontal line → `width`, vertical → `height`, other → aligned `length`), a circle (`diameter`), an arc (`radius`), or two points (horizontal or vertical distance, whichever is larger). The inline editor opens immediately |
+| Ellipse (toolbar) | centre, then the end of one axis, then a point whose distance from that axis is the other radius. See [Ellipses and splines](#ellipses-and-splines) |
+| Spline (toolbar) | click control points; Enter or right-click finishes an open spline (≥ 4 points), clicking the first point again closes it (≥ 3). Nothing is added before it is finished |
+| Dimension (D) | click a line (horizontal line → `width`, vertical → `height`, other → aligned `length`), a circle (`diameter`), an arc (`radius`), an ellipse (first `major_radius`, then `minor_radius`), or two points (horizontal or vertical distance, whichever is larger). The inline editor opens immediately |
 
 Constraint buttons act on the selection and are disabled with the reason as hover text:
 Horizontal / Vertical (lines, glyph `H`/`V`), Parallel / Perpendicular (two lines, `//` / `90`),
@@ -196,6 +198,49 @@ geometry (`crates/rcad-sketch/src/shapes.rs`).
   (centre and rotation). Areas (N/2)R² sin(2π/N) and N a² tan(π/N) are checked in the tests.
 * Center rectangle already existed (Center Rect tool).
 
+## Ellipses and splines
+
+Free-form sketch curves (`crates/rcad-sketch/src/curves.rs`). Both are exact: the profile
+carries rational cubic Bézier spans (`LoopSegment::Cubic`), the kernel builds each span as a
+single-span NURBS edge, and STEP writes the rational / polynomial B-spline curves and the
+extruded B-spline surfaces (checked by FreeCAD/OpenCascade: `tools/check_step_curves.sh`).
+No polyline ever stands in for the geometry.
+
+* **Ellipse** (`Entity::Ellipse`): centre point, axis end point (its distance from the centre is
+  that semi-axis, its direction the orientation) and the other semi-axis `minor` (a solver
+  unknown like a circle radius): 5 DOF. Dimensions: `EllipseRadius` (`major`: |axis end −
+  centre|; otherwise `minor`). A full ellipse is a closed loop of its own (four exact quarter
+  spans, so an extruded ellipse has four side faces where Fusion shows one). Area πab.
+* **Spline** (`Entity::Spline`): uniform cubic B-spline whose control points are ordinary sketch
+  points (2 DOF each; fix, dimension or constrain them like any point). Open: clamped, ≥ 4 control
+  points, passes through the first and last, which join lines/arcs (shared or coincident
+  points) into a closed loop. Closed: periodic, ≥ 3 control points, a loop of its own. Fusion's
+  fit-point splines (through points) are not available; this is the control-point spline.
+* **Regions**: ellipses and closed splines nest like circles (an elliptical hole in a rectangle
+  is a region with one hole). Self-intersection, contact and containment tests use a polyline
+  within δ = max(1e-6 mm, 1e-5 × sketch scale) of the exact curve (convex-hull subdivision
+  bound); contact counts within tolerance + δ, so curves closer than δ are refused, never
+  silently accepted.
+* **Templates**: `centered_ellipse` (`major_radius`, `minor_radius`, `center?`; the major axis is a
+  horizontal construction line) and `spline` (`points`, `closed?`), see docs/COMMANDS.md.
+* **Refused by name**: point-on-curve, tangent and equal constraints on ellipses/splines;
+  Trim / Extend in a sketch that has an ellipse or spline (their intersections are not
+  computed); offsetting them; patterning ellipses (splines pattern); projecting them; sheet-metal
+  bases with them; sweeping or lofting their profiles; the exact prismatic (slab) boolean (Join /
+  Cut use Truck's boolean with the independent result check instead, ADR 0005); side-face
+  references to their curved faces; R12 DXF export (no ELLIPSE/SPLINE entity in R12; SVG export
+  writes exact paths).
+* **Volume**: extrusions use the exact boundary integral (πab·h to ~1e-9 relative); a revolved
+  ellipse falls back to the tessellation estimate with its stated error.
+* **Import**: DXF full `ELLIPSE` and `SPLINE`s that are exactly sketch splines (open,
+  non-rational, degree 3, clamped uniform knots); SVG `<ellipse>` with rx ≠ ry under similarity
+  transforms. Everything else stays refused (docs/formats/dxf.md, svg.md).
+* Format: sketches with ellipses / splines are written as native format v8.
+
+Tests: `crates/rcad-sketch/src/tests_curves.rs`, `crates/rcad-kernel/tests/ellipse_spline.rs`,
+`crates/rcad-commands/tests/ellipse_spline.rs`, `crates/rcad-exchange/tests/curve_import.rs`,
+`crates/rcad/tests/sketch_curves_ui.rs`.
+
 ## Sketch patterns (Pattern… action)
 
 Select curves (lines, arcs, circles) and press **Pattern…** in the sketch toolbar: *Rectangular*
@@ -283,6 +328,25 @@ of the arc, or the refusal reason), Enter. One undo step.
   oblique corner t·r − (π − θ)r²/2; full constraint kept; width and radius edits; refusals),
   `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
+
+## Projected edges and sections (Project edge / Intersect)
+
+Sketch inspector, **Project geometry into this sketch** (commands: docs/COMMANDS.md `project`):
+
+* **Project edge (pick in view)**, then click a planar face next to the edge: the face edge whose
+  projection passes nearest to the click is projected along the sketch normal and stays
+  associative. Parallel faces: lines, arcs and circles exactly (a hole rim made of arcs projects as
+  one circle). Oblique faces: lines stay lines, a full circle becomes the exact ellipse (its major
+  axis along the planes' intersection direction, semi-axes r and r·|cos φ|); an arc there would be
+  an elliptical arc and is refused, as is a circle on a face perpendicular to the sketch. An
+  upstream edit moves the curve. An edge of an extrusion cap keeps its identity (the profile entity
+  that generates it), however far it moves; other edges follow only when one edge is clearly the
+  nearest. A vanished, split or ambiguous edge is a broken reference naming the projection.
+* **Intersect ‹body›**: the section of the body by the sketch plane at that point of history
+  (outline and holes as lines, arcs and circles), associative like face projections. A closed loop
+  cut obliquely through a cylinder becomes the exact ellipse; sections that need other curves
+  (elliptical arcs, free-form faces) are refused by name, as are planes that hold a face of the body (project that face) or miss it.
+* **Unlink** freezes either kind where the last regeneration put it. Format v8.
 
 ## Offset construction planes
 

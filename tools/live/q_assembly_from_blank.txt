@@ -1,0 +1,118 @@
+# An assembly from a blank document through real pointer/keyboard input: a
+# dimensioned 40 x 20 x 5 base and a second body drawn beside it (New Body),
+# each made a component, a revolute joint between their occurrences (value
+# inside the limits accepted, outside refused), an assembly drawing with its
+# BOM exported to PDF, save, close, reopen.
+clickw New
+wait_idle
+clickw New Sketch on XY
+wait_idle
+clickw 2-Point Rect
+sclick 0.3 0.2
+sclick 40 30
+expect editing.entities 4
+key d
+sclick 20 0
+type 40
+key Return
+key f
+wait_idle
+sclick 40 10
+type 20
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 5
+key Return
+wait_idle
+expect body_volume.B1 4000 0.01
+# A second body beside it (New Body; the sketch is not on the first body).
+clickw Create Sketch
+wait_idle
+clickw 2-Point Rect
+key f
+wait_idle
+sclick 50 0
+sclick 60 20
+expect editing.entities 4
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+clickw New Body
+typew Extrude distance (mm) | 5
+key Return
+wait_idle
+expect body_volume.B2 1000 0.01
+shot
+# Components from the bodies.
+clickw Body1
+typew Component name | Base
+clickw Create component from selected body
+wait_idle
+expect last_reply.ok true
+clickw Body2
+typew Component name | Arm
+clickw Create component from selected body
+wait_idle
+expect last_reply.ok true
+expect occurrences 2
+shot
+# A revolute joint Base -> Arm, limits 0..90.
+clickw Occurrence Base#1
+clickw Joint from Base#1
+# The joint form opens below the tree: scroll the browser to it.
+scroll 180 500 10
+sleep 1000
+clickw Joint child
+clickw Joint child option Arm#1
+typew Lower limit | 0
+typew Upper limit | 90
+clickw Create joint
+wait_idle
+expect last_reply.ok true
+expect joints.J1 0
+clickw Edit Joint1
+typew Joint value | 30
+clickw Set value
+wait_idle
+expect joints.J1 30
+typew Joint value | 100
+clickw Set value
+wait_idle
+expect last_reply.ok false
+expect joints.J1 30
+shot
+# Assembly drawing with balloons and BOM, exported.
+scroll 180 500 -10
+sleep 1000
+clickw Drawings header
+clickw New assembly drawing
+wait_idle
+expect last_reply.ok true
+expect drawings 1
+typew Drawing export path | @OUT@/assembly.pdf
+clickw Export Drawing1
+wait_idle
+expect last_reply.ok true
+expect drawing_issues 0
+shot
+clickw Drawings header
+# Save, close, reopen.
+key ctrl+shift+s
+typew File path | @OUT@/two_part_assembly.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/two_part_assembly.rcad.json
+key Return
+wait_idle
+expect occurrences 2
+expect joints.J1 30
+expect drawings 1
+shot
+# File checked afterwards: pdftotext @OUT@/assembly.pdf lists the BOM rows
+# "1 - Base 1" and "2 - Arm 1".

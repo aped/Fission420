@@ -224,3 +224,31 @@ fn an_enclosed_void_is_still_refused_unchanged() {
     tray::ok(&mut s, &json!({"cmd": "undo"}));
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+/// A sketch on the block's top face, then an upstream edit that makes the
+/// slot split the block: the top face now lies on both pieces, so the
+/// reference is ambiguous and the edit is refused (document unchanged),
+/// instead of the sketch silently staying on the first piece's fragment.
+#[test]
+fn a_face_divided_between_pieces_is_ambiguous() {
+    let mut s = Session::new();
+    slotted_block(&mut s, 20.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch",
+                "plane": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}},
+                "template": "centered_circle", "diameter": 4.0, "center": [32.0, 15.0]}),
+    );
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "height", "value": 32.0}),
+    );
+    assert!(!r.ok, "a sketch on a face divided between pieces was kept");
+    assert!(
+        format!("{:?}", r.error).contains("ambiguous"),
+        "{:?}",
+        r.error
+    );
+    assert_eq!(s.model().unwrap().document(), &before);
+}

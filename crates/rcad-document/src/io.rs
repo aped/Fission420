@@ -37,7 +37,7 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v7: the additions listed in [`v7_feature`] (nested
 /// assemblies, more joint types, drawing annotations, sheet-metal rules,
 /// surfaces, ...). Written only when used (otherwise v6 or older as before).
-/// v8: the additions listed in [`v8_feature`] (extra bodies of cuts that
+/// v8: the additions listed in [`v8_feature`] (sketch ellipses and splines, extra bodies of cuts that
 /// split a body, ...). Written only when used (otherwise v7 or older as before).
 pub const FORMAT_VERSION: u32 = 8;
 /// Oldest version this build reads.
@@ -354,6 +354,15 @@ pub fn v8_feature(doc: &Document) -> Option<&'static str> {
 /// misleading message).
 fn sketch_v8_feature(doc: &Document) -> Option<&'static str> {
     use rcad_sketch::{Constraint, Entity};
+    let new_sources = doc.features.iter().any(|f| {
+        matches!(&f.kind, crate::FeatureKind::Sketch { links, .. } if links.iter().any(|l| matches!(
+            l.source,
+            crate::ProjectSource::Edge(_) | crate::ProjectSource::Section { .. }
+        )))
+    });
+    if new_sources {
+        return Some("projected edges and body sections in sketches");
+    }
     doc.features
         .iter()
         .filter_map(|f| match &f.kind {
