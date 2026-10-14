@@ -126,6 +126,12 @@ makes one body per piece, as Autodesk Fusion does, instead of being refused:
   existing cut split the body, is one undo step. Ids left unused when an edit rejoins the pieces
   produce no body; a later feature that targets such a body fails with an explicit error and the
   edit is refused.
+* Piece identity is positional (the bounding-box order above). When an upstream edit changes
+  how many pieces a cut makes, or their order, the extra ids follow the new positions; a
+  feature downstream that targets a piece body may then act on another piece (it is still
+  checked like any edit). Faces that a cut divides between pieces are reported ambiguous
+  (`BrokenReference`), never silently bound to one fragment. Matching pieces to ids by overlap
+  with the previous evaluation is future work.
 * Faces of the extra pieces made by earlier features are not referencable by role (they resolve
   only on the target body), like a copied body's faces; references that now land on another
   piece report `BrokenReference`.

@@ -30,7 +30,7 @@ value per effort. Autodesk Fusion is the behavioural reference where behaviour i
 - SVG: Bézier curves, elliptical arcs, `use` expansion, text to outlines.
 - DXF: non-uniform/rational SPLINEs and elliptical arcs, R2000+ export of ellipses/splines,
   blocks/INSERT with transforms, dimension import as constraints.
-- Cancellation of long imports (today: bounded by size and entity limits).
+- Piece identity of split bodies by geometric overlap (today positional, ADR 0003).
 - IGES, OBJ: possible later; DWG and F3D/F3Z: no plan (closed formats).
 
 ## Product
