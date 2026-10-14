@@ -125,7 +125,19 @@ where
     })?;
     negative_wires.into_iter().try_for_each(|chunk| {
         let pt = chunk.poly.front();
-        let op = pre_faces.iter_mut().find(|face| face[0].poly.include(pt))?;
+        // R-CAD fork: the smallest containing outer loop, not the first. With nested intersection loops
+        // (two coaxial circles on one plane) the first match is often the face's outer boundary, which
+        // gave overlapping pieces and an open result shell.
+        // The test point lies on the hole's own curve, so the outer loop running the same curve the
+        // other way (the piece on the other side) also "includes" it; a container must be larger.
+        let hole_area = -chunk.poly.area();
+        let op = pre_faces
+            .iter_mut()
+            .filter(|face| {
+                let area = face[0].poly.area();
+                area > hole_area * (1.0 + 1.0e-6) && face[0].poly.include(pt)
+            })
+            .min_by(|a, b| a[0].poly.area().total_cmp(&b[0].poly.area()))?;
         op.push(chunk);
         Some(())
     })?;

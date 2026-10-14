@@ -32,3 +32,10 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   revolution could return v = 2π where the walk was at v = 0, so the loop self-crossed. Its area
   sign flipped, and `divide_faces` returned `None` for every revolved Join/Cut that crossed a seam.
   Test: `groove_cut_by_a_revolved_ring`, which uses 4 seam angles and fails on the previous code.
+- `src/transversal/divide_face`: each inner (negative) loop becomes a hole of the smallest outer
+  loop that contains it. That loop must be strictly larger than the hole, because the test point
+  lies on the hole's own curve, which the loop on the other side also runs along. Upstream took the
+  first containing loop. With nested intersection loops, such as two coaxial circles in one plane,
+  that was often the face's outer boundary, so pieces overlapped and `Solid::new` panicked ("This
+  shell is not oriented and closed"). Test: `ring_boss_through_a_face_nests_loops`, which fails on
+  the previous code.

@@ -112,3 +112,32 @@ fn groove_cut_by_a_revolved_ring() {
         assert!(((volume(&res) - want) / want).abs() < 1e-3, "seam {seam}: {}", volume(&res));
     }
 }
+
+/// R-CAD fork: a ring boss joined through a block's top face cuts two concentric circles into that
+/// face. Each inner loop must become a hole of the smallest loop containing it; taking the first
+/// containing loop (the face's outer boundary) gave overlapping pieces and an open shell (panic in
+/// `Solid::new`).
+#[test]
+fn ring_boss_through_a_face_nests_loops() {
+    use std::f64::consts::PI;
+    let v: Vec<Vertex> = [(-20.0, -20.0), (20.0, -20.0), (20.0, 20.0), (-20.0, 20.0)]
+        .iter()
+        .map(|&(x, y)| builder::vertex(Point3::new(x, y, 0.0)))
+        .collect();
+    let w: Wire = (0..4).map(|i| builder::line(&v[i], &v[(i + 1) % 4])).collect();
+    let block = builder::tsweep(&builder::try_attach_plane(&[w]).unwrap(), Vector3::unit_z() * 30.0);
+    let v: Vec<Vertex> = [(8.0, 28.0), (12.0, 28.0), (12.0, 34.0), (8.0, 34.0)]
+        .iter()
+        .map(|&(x, z)| builder::vertex(Point3::new(x, 0.0, z)))
+        .collect();
+    let w: Wire = (0..4).map(|i| builder::line(&v[i], &v[(i + 1) % 4])).collect();
+    let face = builder::try_attach_plane(&[w]).unwrap();
+    let mut ring = builder::rsweep(&face, Point3::origin(), Vector3::unit_z(), Rad(2.0 * PI));
+    if volume(&ring) < 0.0 {
+        ring.not();
+    }
+    let res = crate::or(&block, &ring, 0.05).expect("union");
+    assert_eq!(res.boundaries().len(), 1);
+    let want = 48000.0 + 320.0 * PI;
+    assert!(((volume(&res) - want) / want).abs() < 1e-3, "{}", volume(&res));
+}
