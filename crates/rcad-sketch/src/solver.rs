@@ -853,9 +853,10 @@ impl System {
                     c: c + axis.min(1),
                     v: value,
                 }),
-                Pin::Radius { circle, value } => {
-                    circles.get(&circle).map(|&c| Eq::Fix { c, v: value })
-                }
+                Pin::Radius { circle, value } => circles
+                    .get(&circle)
+                    .or_else(|| ellipses.get(&circle).map(|(_, _, r)| r))
+                    .map(|&c| Eq::Fix { c, v: value }),
             };
             if let Some(e) = e {
                 eqs.push(e);

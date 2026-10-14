@@ -27,7 +27,7 @@ compete. Opening another document while a sketch is open discards the session wi
 
 | tool | gesture |
 |---|---|
-| Select (S) | click selects (Shift adds/removes); drag a vertex or a circle rim to move it; click an already-selected dimension (or double-click it) to edit; Del deletes the selection |
+| Select (S) | click selects (Shift adds/removes); drag a vertex or a circle rim to move it (an ellipse rim drags its minor radius); click an already-selected dimension (or double-click it) to edit; Del deletes the selection |
 | Line (L) | click points to draw connected lines; clicking the chain's first point closes the loop; Enter or right-click ends the chain |
 | Center Rect (R) | click the centre (snap to the origin for a centred rectangle), then a corner. Creates 4 lines with Horizontal/Vertical constraints and a symmetry constraint about the centre point |
 | 2-Point Rect (Shift+R) | opposite corners; Horizontal/Vertical constraints |

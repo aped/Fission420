@@ -1189,13 +1189,24 @@ impl SketchEditor {
                 self.sketch.drag_point(*p, s.pos)
             }
             DragItem::Radius(c) => {
-                let Some(Entity::Circle { center, .. }) = self.sketch.entity(*c).cloned() else {
-                    return;
+                let r = match self.sketch.entity(*c).cloned() {
+                    Some(Entity::Circle { center, .. }) => {
+                        let Some(cxy) = self.sketch.point_xy(center) else {
+                            return;
+                        };
+                        dist(pos, cxy)
+                    }
+                    // Ellipse rim: the minor radius is the distance from the axis.
+                    Some(Entity::Ellipse { center, major, .. }) => {
+                        let (Some(cxy), Some(mxy)) =
+                            (self.sketch.point_xy(center), self.sketch.point_xy(major))
+                        else {
+                            return;
+                        };
+                        line_distance(pos, cxy, mxy)
+                    }
+                    _ => return,
                 };
-                let Some(cxy) = self.sketch.point_xy(center) else {
-                    return;
-                };
-                let r = dist(pos, cxy);
                 if r <= view.mm(1.0) {
                     return;
                 }
@@ -1228,7 +1239,7 @@ impl SketchEditor {
         let item = match self.pick(pos, screen, view) {
             Some(Item::Point(p)) => DragItem::Point(p),
             Some(Item::Entity(e)) => match self.sketch.entity(e) {
-                Some(Entity::Circle { .. }) => DragItem::Radius(e),
+                Some(Entity::Circle { .. } | Entity::Ellipse { .. }) => DragItem::Radius(e),
                 _ => return,
             },
             _ => return,
