@@ -1249,6 +1249,8 @@ impl RcadApp {
                         spacing: "10".into(),
                         along_y: false,
                         reverse: false,
+                        count2: "1".into(),
+                        spacing2: "10".into(),
                         angle: "60".into(),
                         center_x: "0".into(),
                         center_y: "0".into(),
@@ -2177,6 +2179,8 @@ impl RcadApp {
                         spacing,
                         along_y,
                         reverse,
+                        count2,
+                        spacing2,
                         angle,
                         center_x,
                         center_y,
@@ -2201,7 +2205,9 @@ impl RcadApp {
                                     ui.radio_value(along_y, true, "Sketch Y");
                                     ui.checkbox(reverse, "Reverse");
                                 });
-                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances act on the same target. Count and spacing stay editable parameters.");
+                                num_field(ui, "Second direction count", count2);
+                                num_field(ui, "Second direction spacing (mm)", spacing2);
+                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; a second direction count above 1 makes a rectangular grid along the other sketch axis. Instances act on the same target. Counts and spacings stay editable parameters.");
                             }
                             PatternKind::Circular => {
                                 num_field(ui, "Pattern count", count);

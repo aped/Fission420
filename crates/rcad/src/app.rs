@@ -123,6 +123,10 @@ pub(crate) enum Dialog {
         spacing: String,
         along_y: bool,
         reverse: bool,
+        /// Linear: instances along the other sketch axis (1 = one row) and
+        /// their spacing (a rectangular pattern).
+        count2: String,
+        spacing2: String,
         /// Circular: degrees between instances and the centre (sketch mm).
         angle: String,
         center_x: String,
@@ -2601,6 +2605,8 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             spacing,
             along_y,
             reverse,
+            count2,
+            spacing2,
             angle,
             center_x,
             center_y,
@@ -2626,6 +2632,24 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
                         count: count()?,
                         spacing: parse_num("spacing", spacing)?,
                         direction: if *along_y { [0.0, s] } else { [s, 0.0] },
+                        second: {
+                            let n2 = parse_num("count in the second direction", count2)?;
+                            if !(n2.is_finite() && n2 >= 1.0 && n2.fract() == 0.0 && n2 <= 100.0) {
+                                return Err(format!(
+                                    "count in the second direction must be a whole number from \
+                                     1 to 100, got {n2}"
+                                ));
+                            }
+                            (n2 > 1.0)
+                                .then(|| -> Result<_, String> {
+                                    Ok(rcad_document::PatternDirection {
+                                        count: n2 as u32,
+                                        spacing: parse_num("second spacing", spacing2)?,
+                                        direction: if *along_y { [1.0, 0.0] } else { [0.0, 1.0] },
+                                    })
+                                })
+                                .transpose()?
+                        },
                     }
                 }
                 PatternKind::Circular => Command::CircularPattern {

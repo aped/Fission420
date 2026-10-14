@@ -968,9 +968,10 @@ fn regen_impl(
                 count,
                 spacing,
                 direction,
+                second,
             } => {
                 r.body = Some(linear_pattern(
-                    &mut st, id, *seed, *count, *spacing, *direction,
+                    &mut st, id, *seed, *count, *spacing, *direction, *second,
                 )?);
             }
             FeatureKind::CircularPattern {
@@ -3778,6 +3779,7 @@ fn linear_pattern(
     count: u32,
     spacing: f64,
     direction: [f64; 2],
+    second: Option<crate::PatternDirection>,
 ) -> Result<BodyId> {
     let tools = copy_seed(st, id, seed)?;
     let e = tools[0].clone();
@@ -3792,30 +3794,75 @@ fn linear_pattern(
             "{id}.spacing: must be > 0 mm, got {spacing}"
         )));
     }
-    let len = direction[0].hypot(direction[1]);
-    if !len.is_finite() || len <= 0.0 {
-        return Err(DocError::Validation(format!(
-            "{id}: pattern direction must be a non-zero vector"
-        )));
-    }
     let f = e.start;
-    let d = [direction[0] / len, direction[1] / len];
-    let world = [
-        f.x[0] * d[0] + f.y[0] * d[1],
-        f.x[1] * d[0] + f.y[1] * d[1],
-        f.x[2] * d[0] + f.y[2] * d[1],
-    ];
+    let world_dir = |direction: [f64; 2]| -> Result<[f64; 3]> {
+        let len = direction[0].hypot(direction[1]);
+        if !len.is_finite() || len <= 0.0 {
+            return Err(DocError::Validation(format!(
+                "{id}: pattern direction must be a non-zero vector"
+            )));
+        }
+        let d = [direction[0] / len, direction[1] / len];
+        Ok([
+            f.x[0] * d[0] + f.y[0] * d[1],
+            f.x[1] * d[0] + f.y[1] * d[1],
+            f.x[2] * d[0] + f.y[2] * d[1],
+        ])
+    };
+    let world = world_dir(direction)?;
+    let (count2, spacing2, world2) = match second {
+        None => (1, 0.0, [0.0; 3]),
+        Some(s) => {
+            if !(1..=crate::MAX_PATTERN_COUNT).contains(&s.count) {
+                return Err(DocError::Validation(format!(
+                    "{id}.count2: must be in 1..={}, got {}",
+                    crate::MAX_PATTERN_COUNT,
+                    s.count
+                )));
+            }
+            if !s.spacing.is_finite() || s.spacing <= 0.0 {
+                return Err(DocError::Validation(format!(
+                    "{id}.spacing2: must be > 0 mm, got {}",
+                    s.spacing
+                )));
+            }
+            let w2 = world_dir(s.direction)?;
+            let c = world[0] * w2[1] - world[1] * w2[0];
+            let c = [
+                world[1] * w2[2] - world[2] * w2[1],
+                world[2] * w2[0] - world[0] * w2[2],
+                c,
+            ];
+            if (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt() < 1e-6 {
+                return Err(DocError::Validation(format!(
+                    "{id}: the second pattern direction is parallel to the first"
+                )));
+            }
+            if u64::from(count) * u64::from(s.count) > u64::from(crate::MAX_PATTERN_COUNT) {
+                return Err(DocError::Validation(format!(
+                    "{id}: {count} x {} = {} instances; at most {} in one pattern",
+                    s.count,
+                    u64::from(count) * u64::from(s.count),
+                    crate::MAX_PATTERN_COUNT
+                )));
+            }
+            (s.count, s.spacing, w2)
+        }
+    };
+    let total = count * count2;
     let before = brep_target(st, id, e.body)?;
     let mut body = before.clone();
     let mut applied = Vec::new();
     let mut copies = Vec::new();
-    for i in 1..count {
+    for k in 1..total {
+        let (i, j) = (k % count, k / count);
         let t = spacing * f64::from(i);
+        let t2 = spacing2 * f64::from(j);
         let frame = Frame {
             origin: [
-                f.origin[0] + world[0] * t,
-                f.origin[1] + world[1] * t,
-                f.origin[2] + world[2] * t,
+                f.origin[0] + world[0] * t + world2[0] * t2,
+                f.origin[1] + world[1] * t + world2[1] * t2,
+                f.origin[2] + world[2] * t + world2[2] * t2,
             ],
             ..f
         };
@@ -3824,13 +3871,13 @@ fn linear_pattern(
                 &body,
                 tool,
                 &frame,
-                Some(&format!("instance {} of {count}", i + 1)),
+                Some(&format!("instance {} of {total}", k + 1)),
                 id,
                 Some(&mut applied),
             )?
             .0;
             copies.push((
-                i,
+                k,
                 ti as u32,
                 ExtrudeOut {
                     start: frame,

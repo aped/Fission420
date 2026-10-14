@@ -380,6 +380,9 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
         crate::FeatureKind::SplitBody { pieces, .. } if !pieces.is_empty() => {
             Some("split bodies with several pieces per side")
         }
+        crate::FeatureKind::LinearPattern {
+            second: Some(_), ..
+        } => Some("rectangular patterns (a second direction)"),
         _ => None,
     })
 }

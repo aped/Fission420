@@ -561,6 +561,7 @@ pub fn bracket_workflow(doc: &Path) -> Vec<Step> {
             count: 2,
             spacing: 30.0,
             direction: [1.0, 0.0],
+            second: None,
         }),
         bind(BASE_HOLES, "spacing", "hole_spacing"),
         bind(BASE_HOLES, "count", "hole_count"),
@@ -593,6 +594,7 @@ pub fn bracket_workflow(doc: &Path) -> Vec<Step> {
             count: 2,
             spacing: 30.0,
             direction: [1.0, 0.0],
+            second: None,
         }),
         bind(UPRIGHT_HOLES, "spacing", "hole_spacing"),
         bind(UPRIGHT_HOLES, "count", "hole_count"),
@@ -873,6 +875,7 @@ pub fn tray_workflow(doc: &Path, finished: bool) -> Vec<Step> {
             count: t.dividers + 1,
             spacing: cw + t.divider_thickness,
             direction: [1.0, 0.0],
+            second: None,
         }),
         bind(COMPARTMENTS, "count", "compartment_count"),
         bind(

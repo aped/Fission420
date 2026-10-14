@@ -191,6 +191,9 @@ pub enum Command {
         count: u32,
         spacing: f64,
         direction: [f64; 2],
+        /// A second direction: a rectangular grid (format v8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second: Option<rcad_document::PatternDirection>,
     },
     /// Repeat an Extrude Join/Cut `count - 1` more times, each rotated a further
     /// `angle_deg` counter-clockwise about the seed sketch's normal through
@@ -2132,9 +2135,16 @@ impl Session {
                 count,
                 spacing,
                 direction,
+                second,
             } => {
-                let (name, seed, count, spacing, direction) =
-                    (name.clone(), *feature, *count, *spacing, *direction);
+                let (name, seed, count, spacing, direction, second) = (
+                    name.clone(),
+                    *feature,
+                    *count,
+                    *spacing,
+                    *direction,
+                    *second,
+                );
                 let id = self.model_mut()?.transact("Pattern", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Pattern"));
                     Ok(d.push(
@@ -2144,6 +2154,7 @@ impl Session {
                             count,
                             spacing,
                             direction,
+                            second,
                         },
                     ))
                 })?;

@@ -135,6 +135,7 @@ impl Tray {
                 count: self.n + 1,
                 spacing: cw + self.div,
                 direction: [1.0, 0.0],
+                second: None,
             },
         );
         // Front side face (the rectangle's first edge, y = corner y): its
