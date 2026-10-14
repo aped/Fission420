@@ -5125,8 +5125,16 @@ fn project_oblique(
                         minor: r * l2.sqrt(),
                     }
                 }
+                k::Curve2::Ellipse { c, major, minor } if parallel => k::Curve2::Ellipse {
+                    c: to2(c),
+                    major: to2(major),
+                    minor,
+                },
                 k::Curve2::Ellipse { .. } => {
-                    return Err(refuse("an ellipse edge cannot be projected"));
+                    return Err(refuse(
+                        "an ellipse on a face oblique to the sketch is not projected (only \
+                         parallel ellipses are)",
+                    ));
                 }
             };
             ol.push((c, e));

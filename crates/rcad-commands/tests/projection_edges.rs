@@ -285,3 +285,54 @@ fn section_of_the_body_is_associative_and_unlink_freezes_it() {
     );
     assert_eq!(p.model().unwrap().document(), &before);
 }
+
+#[test]
+fn face_with_an_elliptical_hole_projects_the_exact_ellipse() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 40.0, "height": 30.0}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_ellipse",
+                   "major_radius": 8.0, "minor_radius": 5.0, "center": [-5.0, 0.0]}),
+            json!({"cmd": "extrude", "sketch": 3, "op": "cut", "target": 1, "through_all": true}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+            json!({"cmd": "project", "sketch": 5,
+                   "source": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}}}),
+        ],
+    );
+    let area = |s: &Session| {
+        solved(s, 4)
+            .regions()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.area)
+            .fold(0.0, f64::max)
+    };
+    assert!(
+        (area(&s) - (1200.0 - 40.0 * PI)).abs() < 1e-6,
+        "{}",
+        area(&s)
+    );
+    assert!(
+        solved(&s, 4)
+            .entities
+            .iter()
+            .any(|e| matches!(e, Entity::Ellipse { .. }))
+    );
+    // Upstream edit of the hole's minor radius: the projection follows.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "minor_radius", "value": 4.0}),
+    );
+    assert!(
+        (area(&s) - (1200.0 - 32.0 * PI)).abs() < 1e-6,
+        "{}",
+        area(&s)
+    );
+}
