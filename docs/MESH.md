@@ -119,6 +119,15 @@ self-intersection removal.
   parameters → save v8 / reopen; B-rep and unknown bodies refused.
 * `crates/rcad/tests/mesh_edit_ui.rs`: inspection, self-intersection check, plane cut
   preview/apply and the inch preset through the inspector widgets.
+* External, edits: `tools/validate_mesh_edit.sh <rcad-cli>` replays
+  `tools/fixtures/mesh_edit_workflow.json` on FreeCAD's ASCII sphere (corpus `m2`): two-sided
+  cut at z = 2, decimation within 0.05 mm, scale (2, 1, 0.5) + 30° about Z + 10 mm X.
+  `tools/check_mesh_edit.py` (stdlib Python, brute-force exact distances): halves watertight,
+  1436.829 + 659.741 = 2096.570 mm³ (source), cut planes at z = 2; decimated 760 → 440
+  triangles, measured deviation 0.0497 / 0.0497 mm (source→result / result→source) ≤ 0.05;
+  transformed volume equal to the source, bounds equal to the source transformed in Python.
+  FreeCAD 1.1.4 Mesh: all four solid, manifold, **no self-intersections**. ALL OK
+  (`artifacts/mesh_edit_validation/`).
 * External: `tools/validate_mesh_repair.sh <rcad-cli>` on `tools/fixtures/stl/broken_cube.stl`:
   unrepaired export refused; repaired STL checked by `tools/check_stl.py` (watertight,
   8000 mm³) and FreeCAD Mesh (isSolid, 12 facets, 8000 mm³, manifold, no self-intersections,
