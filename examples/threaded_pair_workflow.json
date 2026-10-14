@@ -1,0 +1,26 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "body_name": "Rod M20x2",
+    "cmd": "thread",
+    "diameter": 20.0,
+    "length": 12.0,
+    "pitch": 2.0,
+    "plane": "WorldXY"
+  },
+  {
+    "body_name": "Nut M20x2",
+    "cmd": "thread",
+    "diameter": 20.0,
+    "length": 12.0,
+    "nut_width": 30.0,
+    "pitch": 2.0,
+    "plane": "WorldXY"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/threaded_pair.rcad.json"
+  }
+]

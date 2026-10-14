@@ -1,0 +1,478 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "center": [
+      60.0,
+      40.0
+    ],
+    "cmd": "create_sketch",
+    "height": 80.0,
+    "name": "Tray outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 120.0
+  },
+  {
+    "body_name": "Tray",
+    "cmd": "extrude",
+    "distance": 25.0,
+    "sketch": 1
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 5.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 5.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 5.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 5.0
+  },
+  {
+    "cmd": "chamfer_loop",
+    "distance": 1.0,
+    "face": {
+      "feature": 2,
+      "role": "ExtrudeEndCap"
+    }
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Compartment",
+    "plane": {
+      "Offset": {
+        "base": "WorldXY",
+        "distance": 2.0
+      }
+    },
+    "sketch": {
+      "constraints": [
+        {
+          "FixedPoint": {
+            "p": 0,
+            "x": 2.0,
+            "y": 2.0
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 1
+          }
+        },
+        {
+          "Horizontal": {
+            "line": 3
+          }
+        },
+        {
+          "Vertical": {
+            "line": 2
+          }
+        },
+        {
+          "Vertical": {
+            "line": 4
+          }
+        },
+        {
+          "HorizontalDistance": {
+            "a": 0,
+            "b": 1,
+            "dim": {
+              "name": "w",
+              "value": 37.333333333333336
+            }
+          }
+        },
+        {
+          "VerticalDistance": {
+            "a": 1,
+            "b": 2,
+            "dim": {
+              "name": "h",
+              "value": 37.0
+            }
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 1,
+            "point": 0
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 4,
+            "point": 0
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 5,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 5,
+            "line": 4
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "r",
+              "value": 4.0
+            },
+            "entity": 5
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 1,
+            "point": 1
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 2,
+            "point": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 1
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 6,
+            "line": 2
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "rx",
+              "value": 4.0
+            },
+            "entity": 6
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 2,
+            "point": 2
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 3,
+            "point": 2
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 7,
+            "line": 2
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 7,
+            "line": 3
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "rx2",
+              "value": 4.0
+            },
+            "entity": 7
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 3,
+            "point": 3
+          }
+        },
+        {
+          "PointOnLine": {
+            "line": 4,
+            "point": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 8,
+            "line": 3
+          }
+        },
+        {
+          "Tangent": {
+            "arc": 8,
+            "line": 4
+          }
+        },
+        {
+          "Radius": {
+            "dim": {
+              "name": "rx3",
+              "value": 4.0
+            },
+            "entity": 8
+          }
+        }
+      ],
+      "entities": [
+        {
+          "Line": {
+            "a": 4,
+            "b": 7,
+            "id": 1
+          }
+        },
+        {
+          "Line": {
+            "a": 8,
+            "b": 10,
+            "id": 2
+          }
+        },
+        {
+          "Line": {
+            "a": 11,
+            "b": 13,
+            "id": 3
+          }
+        },
+        {
+          "Line": {
+            "a": 14,
+            "b": 5,
+            "id": 4
+          }
+        },
+        {
+          "Arc": {
+            "center": 6,
+            "end": 4,
+            "id": 5,
+            "start": 5
+          }
+        },
+        {
+          "Arc": {
+            "center": 9,
+            "end": 8,
+            "id": 6,
+            "start": 7
+          }
+        },
+        {
+          "Arc": {
+            "center": 12,
+            "end": 11,
+            "id": 7,
+            "start": 10
+          }
+        },
+        {
+          "Arc": {
+            "center": 15,
+            "end": 14,
+            "id": 8,
+            "start": 13
+          }
+        }
+      ],
+      "points": [
+        {
+          "id": 0,
+          "x": 2.0,
+          "y": 2.0
+        },
+        {
+          "id": 1,
+          "x": 39.333333333333336,
+          "y": 2.0
+        },
+        {
+          "id": 2,
+          "x": 39.333333333333336,
+          "y": 39.0
+        },
+        {
+          "id": 3,
+          "x": 2.0,
+          "y": 39.0
+        },
+        {
+          "id": 4,
+          "x": 6.000000000000001,
+          "y": 2.0
+        },
+        {
+          "id": 5,
+          "x": 2.0,
+          "y": 6.000000000000001
+        },
+        {
+          "id": 6,
+          "x": 6.0,
+          "y": 6.0
+        },
+        {
+          "id": 7,
+          "x": 35.333333333333336,
+          "y": 2.0
+        },
+        {
+          "id": 8,
+          "x": 39.333333333333336,
+          "y": 6.000000000000001
+        },
+        {
+          "id": 9,
+          "x": 35.333333333333336,
+          "y": 6.0
+        },
+        {
+          "id": 10,
+          "x": 39.333333333333336,
+          "y": 35.0
+        },
+        {
+          "id": 11,
+          "x": 35.333333333333336,
+          "y": 39.0
+        },
+        {
+          "id": 12,
+          "x": 35.333333333333336,
+          "y": 35.0
+        },
+        {
+          "id": 13,
+          "x": 6.000000000000001,
+          "y": 39.0
+        },
+        {
+          "id": 14,
+          "x": 2.0,
+          "y": 35.0
+        },
+        {
+          "id": 15,
+          "x": 6.0,
+          "y": 35.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 24.0,
+    "op": "cut",
+    "sketch": 8,
+    "target": 1
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 3,
+    "direction": [
+      1.0,
+      0.0
+    ],
+    "feature": 9,
+    "second": {
+      "count": 2,
+      "direction": [
+        0.0,
+        1.0
+      ],
+      "spacing": 39.0
+    },
+    "spacing": 39.333333333333336
+  },
+  {
+    "cmd": "save",
+    "path": "examples/everyday_tray.rcad.json"
+  }
+]
