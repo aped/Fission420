@@ -303,59 +303,83 @@ fn import_parsed(
     let tol = consistency_tol(&geo)?;
     let mut solids = Vec::new();
     for brep in breps {
-        let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
-        // OpenCascade labels every solid "Open CASCADE STEP translator <ver> <n>";
-        // that is not a user name, so it is ignored.
-        let label = p
-            .opt_s(0)
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"));
-        let shell_id = p.r(1)?;
-        let built = topo::build_shell(&geo, shell_id, tol, false)
-            .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-        let instances = placements.instances_of_item(brep)?;
-        if solids.len() + instances.len() > MAX_INSTANCES {
-            return Err(fail(format!("more than {MAX_INSTANCES} solid instances")));
-        }
-        let name = placements
-            .product_name_of_item(brep)
-            .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
-            .or_else(|| label.map(String::from));
-        let split = built.shell.faces.len() - count_step_faces(&idx, shell_id)?;
-        if split > 0 {
-            warnings.push(format!(
-                "MANIFOLD_SOLID_BREP #{brep}: {split} face(s) added by splitting faces on periodic surfaces (exact; see docs/formats/step.md)"
-            ));
-        }
-        stats.step_faces += count_step_faces(&idx, shell_id)? * instances.len();
-        for t in &built.surface_types {
-            *stats.surfaces.entry(t.clone()).or_default() += instances.len();
-        }
-        for c in &built.curve_types {
-            *stats.curves.entry(c.clone()).or_default() += instances.len();
-        }
-        for m in instances {
-            let mut shell = built.shell.clone();
-            if let Some(m) = m {
-                transform_shell(&mut shell, m)?;
-            }
-            let solid = Solid::extract(CompressedSolid {
-                boundaries: vec![shell],
-            })
-            .map_err(|e| {
-                fail(format!(
-                    "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
-                ))
-            })?;
-            let body = orient_outward(Body { solid }, brep)?;
-            let planar_faces = planar_faces(&body)
+        // Review run 7 #47: one solid is built into local copies of the
+        // stats and warnings, committed only when it succeeds, so a solid
+        // that fails while surfaces were asked for is skipped cleanly.
+        let mut st = stats.clone();
+        let mut w = Vec::new();
+        let mut got = Vec::new();
+        let mut limit = false;
+        let r = (|| -> std::result::Result<(), StepError> {
+            let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
+            // OpenCascade labels every solid "Open CASCADE STEP translator <ver> <n>";
+            // that is not a user name, so it is ignored.
+            let label = p
+                .opt_s(0)
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"));
+            let shell_id = p.r(1)?;
+            let built = topo::build_shell(&geo, shell_id, tol, false)
                 .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-            stats.faces += body.solid.face_iter().count();
-            solids.push(ImportedSolid {
-                name: name.clone(),
-                body,
-                planar_faces,
-            });
+            let instances = placements.instances_of_item(brep)?;
+            if solids.len() + instances.len() > MAX_INSTANCES {
+                limit = true;
+                return Err(fail(format!("more than {MAX_INSTANCES} solid instances")));
+            }
+            let name = placements
+                .product_name_of_item(brep)
+                .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
+                .or_else(|| label.map(String::from));
+            let split = built.shell.faces.len() - count_step_faces(&idx, shell_id)?;
+            if split > 0 {
+                w.push(format!(
+                    "MANIFOLD_SOLID_BREP #{brep}: {split} face(s) added by splitting faces on periodic surfaces (exact; see docs/formats/step.md)"
+                ));
+            }
+            st.step_faces += count_step_faces(&idx, shell_id)? * instances.len();
+            for t in &built.surface_types {
+                *st.surfaces.entry(t.clone()).or_default() += instances.len();
+            }
+            for c in &built.curve_types {
+                *st.curves.entry(c.clone()).or_default() += instances.len();
+            }
+            for m in instances {
+                let mut shell = built.shell.clone();
+                if let Some(m) = m {
+                    transform_shell(&mut shell, m)?;
+                }
+                let solid = Solid::extract(CompressedSolid {
+                    boundaries: vec![shell],
+                })
+                .map_err(|e| {
+                    fail(format!(
+                        "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
+                    ))
+                })?;
+                let body = orient_outward(Body { solid }, brep)?;
+                let planar_faces = planar_faces(&body)
+                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+                st.faces += body.solid.face_iter().count();
+                got.push(ImportedSolid {
+                    name: name.clone(),
+                    body,
+                    planar_faces,
+                });
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => {
+                stats = st;
+                warnings.extend(w);
+                solids.extend(got);
+            }
+            // Surfaces asked for: a bad solid does not fail the surface
+            // import (the converse of review #2).
+            Err(e) if opts.surfaces && !limit => {
+                warnings.push(format!("{} (solid skipped: importing surfaces)", e.0))
+            }
+            Err(e) => return Err(e),
         }
     }
     stats.solids = solids.len();

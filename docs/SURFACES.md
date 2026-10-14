@@ -14,8 +14,10 @@ shells) as a surface body"): every shell of every `SHELL_BASED_SURFACE_MODEL` of
 assembly placements) becomes one shell of a single surface body (`ImportSurfaces` feature, file
 embedded). `import_step` on a file with only surface models is refused with a pointer to
 `import_surfaces`; a file with solids and surface models imports the solids and notes the
-surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside a
-`MANIFOLD_SOLID_BREP` stays an error (that is a malformed solid).
+surfaces in the import report (nothing is dropped silently); a bad surface model does not fail
+that solid import. Conversely, `import_surfaces` skips a `MANIFOLD_SOLID_BREP` that cannot be
+built, with a warning naming it, instead of failing the surface import. `OPEN_SHELL` inside a
+`MANIFOLD_SOLID_BREP` stays an error for `import_step` (that is a malformed solid).
 
 ## Surfaces from sketches
 
