@@ -91,9 +91,14 @@ Change counts in the report: `vertices_moved`, `triangles_cut`, `triangles_remov
 `triangles_added` (cap), `cut_loops`, `capped_loops`, `collapses`, `refused_topology`,
 `refused_normal`, `refused_deviation`; the summary line repeats them.
 
-Not done: viewport geometry preview of an edit (preview is the report), arbitrary plane
-picking in the UI (axis-aligned planes; the command takes any plane), remeshing, mirroring,
-self-intersection removal.
+Viewport preview (`RcadApp::mesh_edit_preview`): while the "Mesh edit" panel is shown, a
+plane cut's plane is drawn across the body's bounds with an arrow towards the kept side; after
+**Preview edit** the bounds of each result are drawn as boxes. The result meshes themselves are
+not drawn before Apply.
+
+Not done: drawing the previewed result meshes, arbitrary plane picking in the UI
+(axis-aligned planes; the command takes any plane), remeshing, mirroring, self-intersection
+removal.
 
 ## Evidence
 

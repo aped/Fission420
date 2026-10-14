@@ -7,6 +7,9 @@
 //!   triangles, maximum deviation) with **Preview** (counts only, nothing
 //!   changes) and **Apply as new body** (one undo step; the source is kept,
 //!   hidden).
+//! * Viewport preview ([`RcadApp::mesh_edit_preview`]): while the panel is shown, the
+//!   plane of a plane cut is drawn across the body (keep side shaded), and after
+//!   **Preview** the bounds of each result are drawn as boxes.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 use eframe::egui::{self, Color32, RichText};
@@ -43,6 +46,23 @@ pub struct MeshEditUi {
     /// (doc_id, revision, inspection) of the last self-intersection check.
     pub inspection: Option<(u64, u64, MeshInspection)>,
     pending: Option<(BodyId, bool)>,
+    /// (body, egui pass) where the panel was last shown: the viewport preview
+    /// follows the open panel only.
+    shown: Option<(BodyId, u64)>,
+    /// Latest egui pass seen by the viewport painter.
+    pass: std::cell::Cell<u64>,
+}
+
+/// World-space viewport preview of a mesh edit (mm).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshEditPreview {
+    pub body: BodyId,
+    /// Plane cut: the plane clipped to the body's bounds (+5 %), 4 corners.
+    pub plane: Option<[[f64; 3]; 4]>,
+    /// Plane cut: unit vector towards the kept side (None: both kept).
+    pub keep_dir: Option<[f64; 3]>,
+    /// After **Preview**: bounds `(min, max)` of each result.
+    pub result_bounds: Vec<([f64; 3], [f64; 3])>,
 }
 
 impl Default for MeshEditUi {
@@ -60,6 +80,8 @@ impl Default for MeshEditUi {
             report: None,
             inspection: None,
             pending: None,
+            shown: None,
+            pass: std::cell::Cell::new(0),
         }
     }
 }
@@ -242,6 +264,7 @@ impl RcadApp {
             .id_salt(("mesh_edit", body.0))
             .show(ui, |ui| {
                 let st = &mut self.mesh_edit;
+                st.shown = Some((body, ui.ctx().cumulative_pass_nr()));
                 ui.horizontal_wrapped(|ui| {
                     for (k, label) in [
                         (EditKind::Transform, "Transform"),
@@ -368,6 +391,136 @@ impl RcadApp {
         header.header_response.probe("Mesh edit");
         if let Some(c) = send {
             self.request(c);
+        }
+    }
+}
+
+impl RcadApp {
+    /// The viewport preview of the mesh edit panel (None when it is not shown).
+    pub fn mesh_edit_preview(&self) -> Option<MeshEditPreview> {
+        let st = &self.mesh_edit;
+        let (body, pass) = st.shown?;
+        if self.ctx_pass().saturating_sub(pass) > 2 {
+            return None;
+        }
+        let (lo, hi) = self
+            .summary
+            .bodies
+            .iter()
+            .find(|b| b.id == body)?
+            .mesh
+            .as_ref()?
+            .bounds?;
+        let mut pv = MeshEditPreview {
+            body,
+            plane: None,
+            keep_dir: None,
+            result_bounds: vec![],
+        };
+        if st.kind == EditKind::PlaneCut
+            && let Ok(MeshEditOp::PlaneCut(c)) = st.op()
+        {
+            let k = st.cut_axis;
+            let (u, v) = ((k + 1) % 3, (k + 2) % 3);
+            let pad = |a: f64, b: f64| (a - 0.05 * (b - a).max(1.0), b + 0.05 * (b - a).max(1.0));
+            let (u0, u1) = pad(lo[u], hi[u]);
+            let (v0, v1) = pad(lo[v], hi[v]);
+            let corner = |a: f64, b: f64| {
+                let mut p = [0.0; 3];
+                p[k] = c.offset;
+                p[u] = a;
+                p[v] = b;
+                p
+            };
+            pv.plane = Some([
+                corner(u0, v0),
+                corner(u1, v0),
+                corner(u1, v1),
+                corner(u0, v1),
+            ]);
+            pv.keep_dir = match c.keep {
+                CutKeep::Below => Some(unit(k).map(|x| -x)),
+                CutKeep::Above => Some(unit(k)),
+                CutKeep::Both => None,
+            };
+        }
+        if let Some((d, r, b, true, rep)) = &st.report
+            && *d == self.summary.doc_id
+            && *r == self.summary.revision
+            && *b == body
+        {
+            pv.result_bounds = rep.after.iter().filter_map(|a| a.bounds).collect();
+        }
+        Some(pv)
+    }
+
+    fn ctx_pass(&self) -> u64 {
+        self.mesh_edit.pass.get()
+    }
+
+    /// Draw [`RcadApp::mesh_edit_preview`] over the 3D view.
+    pub(crate) fn paint_mesh_edit_preview(&self, painter: &egui::Painter) {
+        self.mesh_edit.pass.set(painter.ctx().cumulative_pass_nr());
+        let Some(pv) = self.mesh_edit_preview() else {
+            return;
+        };
+        let to = |p: [f64; 3]| self.world_to_screen(p);
+        if let Some(q) = pv.plane
+            && let Some(pts) = q.iter().map(|p| to(*p)).collect::<Option<Vec<_>>>()
+        {
+            painter.add(egui::Shape::convex_polygon(
+                pts.clone(),
+                Color32::from_rgba_unmultiplied(255, 170, 60, 50),
+                egui::Stroke::new(1.5, Color32::from_rgb(255, 170, 60)),
+            ));
+            if let Some(dir) = pv.keep_dir {
+                // Arrow from the plane centre towards the kept side.
+                let c: [f64; 3] =
+                    std::array::from_fn(|i| q.iter().map(|p| p[i]).sum::<f64>() / 4.0);
+                let span = (0..3)
+                    .map(|i| (q[2][i] - q[0][i]).abs())
+                    .fold(0.0, f64::max);
+                let tip: [f64; 3] = std::array::from_fn(|i| c[i] + dir[i] * 0.25 * span);
+                if let (Some(a), Some(b)) = (to(c), to(tip)) {
+                    painter.arrow(
+                        a,
+                        b - a,
+                        egui::Stroke::new(2.0, Color32::from_rgb(255, 170, 60)),
+                    );
+                }
+            }
+            let r = egui::Rect::from_points(&pts);
+            crate::probe::note("Mesh cut plane preview", r);
+        }
+        for (lo, hi) in &pv.result_bounds {
+            let c = |i: usize| {
+                [
+                    if i & 1 == 0 { lo[0] } else { hi[0] },
+                    if i & 2 == 0 { lo[1] } else { hi[1] },
+                    if i & 4 == 0 { lo[2] } else { hi[2] },
+                ]
+            };
+            for (a, b) in [
+                (0, 1),
+                (2, 3),
+                (4, 5),
+                (6, 7),
+                (0, 2),
+                (1, 3),
+                (4, 6),
+                (5, 7),
+                (0, 4),
+                (1, 5),
+                (2, 6),
+                (3, 7),
+            ] {
+                if let (Some(p), Some(q)) = (to(c(a)), to(c(b))) {
+                    painter.line_segment(
+                        [p, q],
+                        egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)),
+                    );
+                }
+            }
         }
     }
 }

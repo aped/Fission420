@@ -137,6 +137,15 @@ fn inspect_cut_and_transform_a_mesh_body_from_the_inspector() {
     );
     assert_eq!(h.state().summary().bodies.len(), 1);
     h.get_by_label_contains("2 cut loops (2 capped");
+    // Viewport preview: the cut plane at z = 5 across the body, and the two
+    // result boxes split at z = 5.
+    let pv = h.state().mesh_edit_preview().expect("viewport preview");
+    let plane = pv.plane.expect("plane drawn");
+    assert!(plane.iter().all(|p| p[2] == 5.0), "{plane:?}");
+    assert!(pv.keep_dir.is_none(), "both sides kept");
+    assert_eq!(pv.result_bounds.len(), 2);
+    assert_eq!(pv.result_bounds[0].1[2], 5.0);
+    assert_eq!(pv.result_bounds[1].0[2], 5.0);
     click(&mut h, "Apply as new body");
     assert_eq!(h.state().summary().bodies.len(), 3);
     assert!(
