@@ -434,3 +434,67 @@ fn edges_projected_one_by_one_join_into_a_profile() {
         body_vol(&s, 2)
     );
 }
+
+/// A face oblique to the sketch with an arc edge: its straight edges still
+/// project (lines stay lines); only picking the arc itself is refused.
+#[test]
+fn oblique_face_with_an_arc_projects_its_straight_edges() {
+    let th = 30f64.to_radians();
+    let profile = json!({
+        "points": [
+            {"id": 1, "x": -20.0, "y": -15.0}, {"id": 2, "x": 20.0, "y": -15.0},
+            {"id": 3, "x": 20.0, "y": 15.0}, {"id": 4, "x": -20.0, "y": 15.0},
+            {"id": 5, "x": 20.0, "y": 0.0}
+        ],
+        "entities": [
+            {"Line": {"id": 1, "a": 1, "b": 2}},
+            {"Arc": {"id": 2, "center": 5, "start": 2, "end": 3}},
+            {"Line": {"id": 3, "a": 3, "b": 4}},
+            {"Line": {"id": 4, "a": 4, "b": 1}}
+        ],
+        "constraints": []
+    });
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "custom",
+                   "sketch": profile}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 0.0, "angle": th}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+        ],
+    );
+    let edge = |at: [f64; 3]| {
+        json!({"cmd": "project", "sketch": 3,
+               "source": {"Edge": {"feature": 2, "role": "ExtrudeEndCap"}}, "at": at})
+    };
+    // The left edge x = -20 (local y' = y cos θ + 10 sin θ).
+    tray::ok(&mut s, &edge([-19.5, 0.0, 10.0]));
+    let sk = solved(&s, 2);
+    let l: Vec<_> = lines(&sk)
+        .into_iter()
+        .filter(|(a, _)| a[0] < 50.0)
+        .collect();
+    assert_eq!(l.len(), 1, "{l:?}");
+    let ys = [
+        15.0 * th.cos() + 10.0 * th.sin(),
+        -15.0 * th.cos() + 10.0 * th.sin(),
+    ];
+    for p in [l[0].0, l[0].1] {
+        assert!((p[0] + 20.0).abs() < 1e-9, "{p:?}");
+        assert!(ys.iter().any(|y| (p[1] - y).abs() < 1e-9), "{p:?}");
+    }
+    // Picking the arc: refused by name, nothing changes.
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(&mut s, &edge([34.5, 0.0, 10.0]));
+    assert!(!r.ok);
+    assert!(
+        format!("{:?}", r.error).contains("elliptical arc"),
+        "{:?}",
+        r.error
+    );
+    assert_eq!(s.model().unwrap().document(), &before);
+}

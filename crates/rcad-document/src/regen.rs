@@ -4902,6 +4902,11 @@ fn moved_back(t: &k::Rigid, frame: &Frame) -> Frame {
 /// Projection source curves, loop by loop, each with its source entity.
 pub type SourceCurves = Vec<Vec<(k::Curve2, Option<EntityId>)>>;
 
+/// Tag of an edge of an oblique face that cannot be projected exactly (an
+/// arc: its projection is an elliptical arc). It stands in the source list
+/// as its chord so a pick near it is refused by name, and it is never bound.
+pub const UNPROJECTABLE: EntityId = EntityId(u32::MAX);
+
 /// Source curves of a projection into the sketch on `frame` (2-D sketch
 /// coordinates), loop by loop, each with its source entity (sketch sources).
 /// The source plane must be parallel to the sketch plane (projection along
@@ -5218,11 +5223,16 @@ fn project_oblique(
                     ccw: ccw != flip,
                 },
                 k::Curve2::Circle { c, r } if parallel => k::Curve2::Circle { c: to2(c), r },
-                k::Curve2::Arc { .. } => {
-                    return Err(refuse(
-                        "an arc on a face oblique to the sketch projects to an elliptical arc \
-                         (not supported; full circles project to ellipses)",
+                // Refused only when picked or bound (see `UNPROJECTABLE`).
+                k::Curve2::Arc { a, b, .. } => {
+                    ol.push((
+                        k::Curve2::Line {
+                            a: to2(a),
+                            b: to2(b),
+                        },
+                        Some(UNPROJECTABLE),
                     ));
+                    continue;
                 }
                 k::Curve2::Circle { c, r } => {
                     // M = r [ax ay]; M Mᵀ = r² [[p, q], [q, t]].
@@ -5371,7 +5381,7 @@ fn bind_link(
                 let same: Vec<&(k::Curve2, Option<EntityId>)> = curves
                     .iter()
                     .flatten()
-                    .filter(|(c, _)| curve_kind(c) == kind)
+                    .filter(|(c, e)| curve_kind(c) == kind && *e != Some(UNPROJECTABLE))
                     .collect();
                 let pin_dist = |c: &k::Curve2| -> f64 {
                     curve_points(c)
