@@ -462,6 +462,7 @@ mod tests {
             suppressed: false,
             rolled_back: false,
             projections: vec![],
+            sheet_relief: None,
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

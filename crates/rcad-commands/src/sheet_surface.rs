@@ -333,6 +333,7 @@ impl Session {
                     let body = sheet_base(d, a.base)?;
                     let n = a.name.clone().unwrap_or_else(|| d.default_name("Flange"));
                     let flat = flat_of(d, a.base).map(|(f, _)| f);
+                    let marker = d.rollback;
                     let id = d.push(
                         n,
                         FeatureKind::SheetFlange {
@@ -348,8 +349,20 @@ impl Session {
                     );
                     // Review #5: the flat pattern must include every flange of
                     // its body, so a new flange goes before an existing flat.
-                    if let Some(f) = flat {
+                    // `push` inserted it just after the timeline marker and
+                    // moved the marker onto it. If the flat lies after that
+                    // point (rolled back) the flange is already before it.
+                    // Otherwise the flat is active, the flange moves before
+                    // it, and the marker goes back where it was (review
+                    // run 7 #4): the features that were active stay active,
+                    // the rolled-back ones stay rolled back, and the new
+                    // flange (now before the old marker) is active.
+                    let pos = |d: &Document, x| d.features.iter().position(|g| g.id == x);
+                    if let Some(f) = flat
+                        && pos(d, f) < pos(d, id)
+                    {
                         d.move_feature(id, Some(f))?;
+                        d.rollback = marker;
                     }
                     Ok(id)
                 })?;

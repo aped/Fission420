@@ -1473,6 +1473,10 @@ pub struct FeatureSummary {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projections: Vec<rcad_document::ProjectSource>,
+    /// Sheet bases: the rule's relief shape (review run 7 #49; the numeric
+    /// rule values are in `parameters`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_relief: Option<rcad_document::sheet::ReliefShape>,
 }
 
 /// A named user parameter with its evaluated value and relationships.
@@ -4258,6 +4262,10 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 projections: match &f.kind {
                     FeatureKind::Sketch { links, .. } => links.iter().map(|l| l.source).collect(),
                     _ => vec![],
+                },
+                sheet_relief: match &f.kind {
+                    FeatureKind::SheetBase { rule, .. } => Some(rule.relief),
+                    _ => None,
                 },
             }
         })

@@ -46,8 +46,9 @@ pub struct SheetSurfaceForm {
     pub tolerance: String,
     pub thickness: String,
     pub reverse: bool,
-    /// Surface extrusion distance (sketch inspector).
+    /// Surface extrusion distance and direction (sketch inspector).
     pub surface_distance: String,
+    pub surface_reverse: bool,
     /// (doc_id, revision, body, report) of the last analysis reply.
     pub analysis: Option<(u64, u64, BodyId, rcad_kernel::ShellAnalysis)>,
 }
@@ -69,6 +70,7 @@ impl Default for SheetSurfaceForm {
             thickness: "2".into(),
             reverse: false,
             surface_distance: "10".into(),
+            surface_reverse: false,
             analysis: None,
         }
     }
@@ -107,7 +109,7 @@ fn relief_combo(
     id: impl std::hash::Hash + std::fmt::Debug,
     r: &mut ReliefShape,
 ) {
-    egui::ComboBox::from_id_salt(id)
+    egui::ComboBox::new(id, "Relief shape")
         .selected_text(match r {
             ReliefShape::Rectangular => "Rectangular relief",
             ReliefShape::Obround => "Obround relief",
@@ -209,11 +211,16 @@ impl RcadApp {
                             name: None,
                             sketch: f.id,
                             distance: d.unwrap_or(10.0),
-                            reverse: false,
+                            reverse: form.surface_reverse,
                             body_name: None,
                         }));
                     }
                 });
+                // Review run 7 #44: the side of the sketch plane (the
+                // normal does not change; docs/SURFACES.md).
+                ui.checkbox(&mut form.surface_reverse, "Reverse (below the sketch plane)")
+                    .probe("Surface reverse")
+                    .on_hover_text("Sweep against the sketch normal; the surface's facing side stays the same");
             });
         header.header_response.probe("Surface from sketch");
         if let Some(c) = send {
@@ -271,12 +278,9 @@ impl RcadApp {
         let form = &mut self.sheet_surface;
         if form.rule_for != Some((base, rev)) {
             form.rule_for = Some((base, rev));
-            // Review S8: the relief shape of this base (from its rule note).
-            form.loaded_relief = if bf.notes.iter().any(|n| n.contains("Obround relief")) {
-                ReliefShape::Obround
-            } else {
-                ReliefShape::Rectangular
-            };
+            // Review S8 / run 7 #49: the relief shape of this base, from
+            // its rule in the summary (not from note text).
+            form.loaded_relief = bf.sheet_relief.unwrap_or_default();
             form.edit_relief = form.loaded_relief;
             for (i, n) in [
                 "thickness",
