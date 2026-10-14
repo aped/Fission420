@@ -30,6 +30,9 @@ pub const PICK_PX: f64 = 8.0;
 pub const SNAP_PX: f64 = 10.0;
 /// Horizontal / vertical alignment capture band, screen pixels.
 pub const ALIGN_PX: f64 = 8.0;
+/// Smallest on-screen spacing (px) of the sketch snapping step (a 1-2-5
+/// step in mm, finer than the drawn grid).
+pub const SNAP_CELL_PX: f32 = 5.0;
 /// Local undo depth inside one edit session.
 const MAX_LOCAL_UNDO: usize = 200;
 

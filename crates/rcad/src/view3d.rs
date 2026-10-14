@@ -741,7 +741,6 @@ impl RcadApp {
     fn sketch_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         let (cam, _) = self.view_camera();
         let rect = resp.rect;
-        let grid_mm = self.viewport.as_ref().map(|v| v.grid_spacing());
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
@@ -754,13 +753,17 @@ impl RcadApp {
             frame: s.frame,
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        let grid = grid_mm.map(f64::from).or_else(|| {
+        // Snap step: the finest 1-2-5 step at least SNAP_CELL_PX apart on
+        // screen, finer than the drawn grid (cells >= MIN_CELL_PX), so a
+        // feature smaller than one drawn cell (a 4 mm slot when zoomed out)
+        // can still be drawn without its corners snapping together.
+        let grid = {
             let ppm = rcad_viewport::pixels_per_mm(&cam, rect.height());
             Some(f64::from(rcad_viewport::adaptive_grid_spacing(
                 ppm,
-                rcad_viewport::MIN_CELL_PX,
+                crate::sketch_edit::SNAP_CELL_PX,
             )))
-        });
+        };
         let view_at = |p: [f64; 2]| View {
             px_per_mm: pr.px_per_mm(p),
             grid,
