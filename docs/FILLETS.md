@@ -23,7 +23,15 @@ With r < R, the corners are tori of major radius R - r. With r = R, they are sph
 top-edge cylinders meet in an exact miter (a quarter ellipse in the bisector plane), and
 the vertical edge stays sharp.
 
-Supported:
+Supported bodies:
+- a straight prism under the face, which is rebuilt whole;
+- any closed body whose outer walls run straight down from the face to a common depth as
+  four-sided faces, with nothing else within r of both the face and the loop. Examples are
+  an open enclosure (rim loop or base loop, with the cavity kept) and a plate pocketed from
+  the other side. Only the face and those walls are rebuilt; the other faces are kept as
+  they are. Arcs of the loop may sweep at most 120° on such bodies.
+
+Supported loops:
 - loops of lines and circular arcs whose junctions are tangent, or are sharp corners
   between two straight edges (convex or concave);
 - convex arcs with R >= r, and concave arcs of any radius;
@@ -36,8 +44,11 @@ Refused with the reason:
 - walls closer than r to the inset loop (the fillet bands would overlap);
 - a hole within r of the loop;
 - r at least as large as the body depth;
-- a body that is not a straight prism under the face. This includes filleting the same
-  loop twice, or a cap face whose body has an edge-filleted top edge.
+- a body whose walls under the loop are not clean full-depth walls. This includes
+  filleting the same loop twice, a cap face whose body has an edge-filleted top edge, or a
+  cut through a wall;
+- another feature within r of both the face and the loop (e.g. a cavity floor thinner
+  than r under a base fillet).
 
 ### Volume oracle
 The removed cross-section is the spandrel between two perpendicular walls and the

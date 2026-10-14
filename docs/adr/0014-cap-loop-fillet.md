@@ -40,8 +40,11 @@ area and first moment, Pappus for arcs, miter setbacks).
   whose volume matches the closed form to about 1e-9 relative (`tools/check_cap_fillet.sh`).
 - The construction rebuilds the whole body, so all faces are new objects. Downstream
   semantic references resolve by plane and footprint as before.
-- Only prisms are in scope. A cap loop on a body with other blends, drafts or steps under
-  the cap is refused. A general rolling-ball blend remains future work.
+- Non-prismatic bodies (an enclosure with a cavity, a back-side pocket) are handled by
+  local replacement. Only the cap face and the outer walls are rebuilt, and every other face
+  is kept as the same B-rep object. This needs each wall to be four-sided down to a common
+  depth, with nothing else inside the blend band; anything else is refused. A general
+  rolling-ball blend remains future work.
 - The existing exact boundary integrals do not cover tori about different axes or spheres.
   A general method was therefore added: `BrepBoundaryIntegralParametric`, Green's theorem in
   each face's own parameters (`measure/parametric.rs`). It gives these bodies an exact

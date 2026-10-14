@@ -76,4 +76,14 @@ check cap_fillet_hexagon.step "$H*8 - A(2)*120 + 12*M(2)*math.tan(pi/6)" \
 check cap_chamfer_rounded_rect.step \
   "(1200 - (4-pi)*25)*12 - 2*(2*30+2*20) - 2*pi*2*(5 - 2/3)" "[0,0,0,40,30,12]" \
   "[[20,15,6],[20,0.02,11.99]]" "[True, False]"
+# Open enclosure 60x40x25 (R 5), walls and floor 2 (cavity corner R 3); rim, base and both
+# outer loops filleted r 1.5; the cavity is kept.
+SHELL_V="((2400 - (4-pi)*25)*25 - (56*36 - (4-pi)*9)*23)"
+RM="(A(1.5)*(2*50+2*30) + 2*pi*(A(1.5)*5 - M(1.5)))"
+check cap_fillet_enclosure_rim.step "$SHELL_V - $RM" "[0,0,0,60,40,25]" \
+  "[[30,20,10],[30,20,1],[1,20,24.9],[0.05,20,24.95]]" "[False, True, True, False]"
+check cap_fillet_enclosure_base.step "$SHELL_V - $RM" "[0,0,0,60,40,25]" \
+  "[[30,20,10],[30,20,1],[0.05,20,0.05]]" "[False, True, False]"
+check cap_fillet_enclosure_both.step "$SHELL_V - 2*$RM" "[0,0,0,60,40,25]" \
+  "[[30,20,10],[30,20,1],[0.05,20,0.05],[0.05,20,24.95]]" "[False, True, False, False]"
 exit $status

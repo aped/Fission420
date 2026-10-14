@@ -355,3 +355,72 @@ fn single_edge_blends_meeting_at_a_corner_are_refused_by_name() {
     let e = r.error.unwrap().to_string();
     assert!(e.contains("fillet_loop"), "{e}");
 }
+
+#[test]
+fn shelled_enclosure_rim_and_base_loops() {
+    // 40 × 30 × 20 box, vertical edges R 5, shell from the top face (walls
+    // and floor 2: cavity 36 × 26 with corner radius 3, 18 deep); then the
+    // outer rim loop and the base loop rounded r 1.5. The cavity is kept.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 40.0, "height": 30.0, "center": [20.0, 15.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 20.0}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    for (a, b) in [(1, 2), (2, 3), (3, 4), (4, 1)] {
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "fillet", "a": side(a), "b": side(b), "radius": 5.0}),
+        );
+    }
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "shell_face", "face": top(), "thickness": 2.0}),
+    );
+    let rr = |l: f64, w: f64, r: f64| l * w - (4.0 - PI) * r * r;
+    let shell = |t: f64| {
+        rr(40.0, 30.0, 5.0) * 20.0 - rr(40.0 - 2.0 * t, 30.0 - 2.0 * t, 5.0 - t) * (20.0 - t)
+    };
+    let removed = |r: f64| {
+        let (a, m) = (r * r * (1.0 - PI / 4.0), r.powi(3) * (5.0 / 6.0 - PI / 4.0));
+        a * (2.0 * 30.0 + 2.0 * 20.0) + 2.0 * PI * (a * 5.0 - m)
+    };
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "fillet_loop", "face": top(), "radius": 1.5}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "fillet_loop", "face": {"feature": 2, "role": "ExtrudeStartCap"},
+                "radius": 1.5}),
+    );
+    let want = shell(2.0) - 2.0 * removed(1.5);
+    assert!(
+        (exact_volume(&s) - want).abs() < 1e-9 * want,
+        "{} vs {want}",
+        exact_volume(&s)
+    );
+    assert_eq!(
+        tray::probe(
+            &s,
+            &[[20.0, 15.0, 10.0], [20.0, 15.0, 1.0], [0.05, 15.0, 19.95]]
+        ),
+        vec![Some(false), Some(true), Some(false)]
+    );
+    // Upstream edit: thicker walls; both loops follow.
+    assert!(set(&mut s, 7, "thickness", 2.5).ok);
+    let want = shell(2.5) - 2.0 * removed(1.5);
+    assert!(
+        (exact_volume(&s) - want).abs() < 1e-9 * want,
+        "{} vs {want}",
+        exact_volume(&s)
+    );
+    // Thinner than the rim radius: refused (the cavity is a hole within
+    // reach of the rim loop), document unchanged.
+    let before = s.model().unwrap().document().clone();
+    assert!(!set(&mut s, 7, "thickness", 1.2).ok);
+    assert_eq!(s.model().unwrap().document(), &before);
+}
