@@ -587,32 +587,10 @@ pub fn arc_distance(g: &rcad_sketch::ArcGeometry, p: [f64; 2]) -> f64 {
     dist(p, at(g.start_angle)).min(dist(p, at(g.start_angle + g.sweep)))
 }
 
-/// Exact area of a closed line/arc loop: shoelace over the chords plus the
-/// signed circular segments of the arcs.
+/// Exact area of a closed loop (lines, arcs and ellipse / spline spans):
+/// see [`rcad_sketch::loop_area`].
 pub fn loop_area(segs: &[rcad_sketch::LoopSegment]) -> f64 {
-    use rcad_sketch::LoopSegment;
-    let n = segs.len();
-    let mut area = 0.0;
-    for i in 0..n {
-        let a = segs[i].start();
-        let b = segs[(i + 1) % n].start();
-        area += 0.5 * (a[0] * b[1] - b[0] * a[1]);
-        if let LoopSegment::Arc { center, ccw, .. } = &segs[i] {
-            let r = dist(a, *center);
-            let (a0, a1) = (
-                (a[1] - center[1]).atan2(a[0] - center[0]),
-                (b[1] - center[1]).atan2(b[0] - center[0]),
-            );
-            let sweep = if *ccw {
-                (a1 - a0).rem_euclid(std::f64::consts::TAU)
-            } else {
-                (a0 - a1).rem_euclid(std::f64::consts::TAU)
-            };
-            let seg = 0.5 * r * r * (sweep - sweep.sin());
-            area += if *ccw { seg } else { -seg };
-        }
-    }
-    area
+    rcad_sketch::loop_area(segs)
 }
 
 impl SketchEditor {

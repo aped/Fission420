@@ -339,12 +339,13 @@ Sketch inspector, **Project geometry into this sketch** (commands: docs/COMMANDS
   one circle). Oblique faces: lines stay lines, a full circle becomes the exact ellipse (its major
   axis along the planes' intersection direction, semi-axes r and r·|cos φ|); an arc there would be
   an elliptical arc and is refused, as is a circle on a face perpendicular to the sketch. An
-  upstream edit moves the curve; when the face no longer has a matching edge, or two edges match
-  equally well, the sketch reports a broken reference naming the projection.
+  upstream edit moves the curve. An edge of an extrusion cap keeps its identity (the profile entity
+  that generates it), however far it moves; other edges follow only when one edge is clearly the
+  nearest. A vanished, split or ambiguous edge is a broken reference naming the projection.
 * **Intersect ‹body›**: the section of the body by the sketch plane at that point of history
-  (outline and holes as lines, arcs and circles), associative like face projections. Sections
-  that need other curves (an ellipse from a cylinder oblique to the plane, free-form faces) are
-  refused by name, as are planes that hold a face of the body (project that face) or miss it.
+  (outline and holes as lines, arcs and circles), associative like face projections. A closed loop
+  cut obliquely through a cylinder becomes the exact ellipse; sections that need other curves
+  (elliptical arcs, free-form faces) are refused by name, as are planes that hold a face of the body (project that face) or miss it.
 * **Unlink** freezes either kind where the last regeneration put it. Format v8.
 
 ## Offset construction planes

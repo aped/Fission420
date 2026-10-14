@@ -1,6 +1,7 @@
 //! Plane sections of bodies (`section_curves`): exact lines, arcs and circles
 //! where the plane crosses planar faces, cylinders about its normal and
-//! cylinders parallel to it; refusals by name otherwise. Expected curves are
+//! cylinders parallel to it, exact ellipses where it cuts a cylinder obliquely;
+//! refusals by name otherwise. Expected curves are
 //! closed-form.
 use rcad_kernel::*;
 
@@ -77,13 +78,57 @@ fn section_of_a_cylinder_parallel_to_the_plane_is_two_lines_wide() {
 }
 
 #[test]
+fn section_through_an_oblique_hole_is_the_exact_ellipse() {
+    // Ø8 hole whose axis is tilted 30° from Z (about the x axis) through
+    // the block centre (20, 15, 5); the plane z = 5 cuts its wall in an
+    // ellipse with semi-axes 4 (along x) and 4 / cos 30° (along y).
+    let b = extrude(
+        &Profile::Polygon(vec![[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]]),
+        &Frame::XY,
+        10.0,
+    )
+    .unwrap();
+    let t = 30f64.to_radians();
+    let tilted = Frame {
+        origin: [20.0, 15.0, 5.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, t.cos(), t.sin()],
+        z: [0.0, -t.sin(), t.cos()],
+    };
+    let holed = cut_prism(
+        &b,
+        &Profile::Circle {
+            center: [0.0, 0.0],
+            radius: 4.0,
+        },
+        &tilted.offset(-15.0),
+        30.0,
+    )
+    .unwrap();
+    let loops = section_curves(&holed, &Frame::XY.offset(5.0)).unwrap();
+    assert_eq!(loops.len(), 2, "{loops:?}");
+    let [Curve2::Ellipse { c, major, minor }] = loops[1].as_slice() else {
+        panic!("{:?}", loops[1])
+    };
+    assert!(
+        (c[0] - 20.0).abs() < 1e-6 && (c[1] - 15.0).abs() < 1e-6,
+        "{c:?}"
+    );
+    let a = (major[0] - c[0]).hypot(major[1] - c[1]);
+    assert!((a - 4.0 / t.cos()).abs() < 1e-6, "{a}");
+    assert!((minor - 4.0).abs() < 1e-6, "{minor}");
+    assert!((major[0] - c[0]).abs() < 1e-6, "major axis along y");
+}
+
+#[test]
 fn refusals_name_the_reason() {
     let b = block_with_hole();
     let e = section_curves(&b, &Frame::XY.offset(10.0)).unwrap_err();
     assert!(e.to_string().contains("contains a face"), "{e}");
     let e = section_curves(&b, &Frame::XY.offset(25.0)).unwrap_err();
     assert!(e.to_string().contains("does not cross"), "{e}");
-    // A tilted plane through the hole wall: its section is an ellipse.
+    // A tilted plane through the hole wall: the hole's section is an exact
+    // ellipse (semi-axes 4 / cos 0.4 and 4).
     let tilt = 0.4f64;
     let f = Frame {
         origin: [20.0, 15.0, 5.0],
@@ -91,9 +136,19 @@ fn refusals_name_the_reason() {
         y: [0.0, 1.0, 0.0],
         z: [-tilt.sin(), 0.0, tilt.cos()],
     };
-    let e = section_curves(&b, &f).unwrap_err();
+    let loops = section_curves(&b, &f).unwrap();
+    let el = loops
+        .iter()
+        .flatten()
+        .find_map(|c| match c {
+            Curve2::Ellipse { c, major, minor } => {
+                Some(((major[0] - c[0]).hypot(major[1] - c[1]), *minor))
+            }
+            _ => None,
+        })
+        .expect("ellipse");
     assert!(
-        e.to_string().contains("neither a line nor a circular arc"),
-        "{e}"
+        (el.0 - 4.0 / tilt.cos()).abs() < 1e-6 && (el.1 - 4.0).abs() < 1e-6,
+        "{el:?}"
     );
 }

@@ -285,3 +285,107 @@ fn section_of_the_body_is_associative_and_unlink_freezes_it() {
     );
     assert_eq!(p.model().unwrap().document(), &before);
 }
+
+#[test]
+fn face_with_an_elliptical_hole_projects_the_exact_ellipse() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 40.0, "height": 30.0}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_ellipse",
+                   "major_radius": 8.0, "minor_radius": 5.0, "center": [-5.0, 0.0]}),
+            json!({"cmd": "extrude", "sketch": 3, "op": "cut", "target": 1, "through_all": true}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+            json!({"cmd": "project", "sketch": 5,
+                   "source": {"Face": {"feature": 2, "role": "ExtrudeEndCap"}}}),
+        ],
+    );
+    let area = |s: &Session| {
+        solved(s, 4)
+            .regions()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.area)
+            .fold(0.0, f64::max)
+    };
+    assert!(
+        (area(&s) - (1200.0 - 40.0 * PI)).abs() < 1e-6,
+        "{}",
+        area(&s)
+    );
+    assert!(
+        solved(&s, 4)
+            .entities
+            .iter()
+            .any(|e| matches!(e, Entity::Ellipse { .. }))
+    );
+    // Upstream edit of the hole's minor radius: the projection follows.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "minor_radius", "value": 4.0}),
+    );
+    assert!(
+        (area(&s) - (1200.0 - 32.0 * PI)).abs() < 1e-6,
+        "{}",
+        area(&s)
+    );
+}
+
+/// Regression: a projected top edge must stay the top edge when a large
+/// upstream edit moves it farther than another edge's distance to the old
+/// pins (here the right edge would be nearer). The edge keeps its identity
+/// (the generating sketch line), so it is the new top edge, y = 30.
+#[test]
+fn projected_edge_keeps_its_identity_under_large_edits() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 20.0, "height": 10.0, "center": [10.0, 5.0]}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 5.0}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+            json!({"cmd": "project", "sketch": 3,
+                   "source": {"Edge": {"feature": 2, "role": "ExtrudeEndCap"}},
+                   "at": [10.0, 9.5, 5.0]}),
+        ],
+    );
+    let top = |s: &Session| {
+        let sk = solved(s, 2);
+        lines(&sk)
+            .into_iter()
+            .filter(|(a, _)| a[0] < 50.0)
+            .collect::<Vec<_>>()
+    };
+    let l = top(&s);
+    assert_eq!(l.len(), 1);
+    assert!(
+        (l[0].0[1] - 10.0).abs() < 1e-9 && (l[0].1[1] - 10.0).abs() < 1e-9,
+        "{l:?}"
+    );
+    // 0..10 → 0..30: the top edge moves 20 mm; the right edge's ends would be
+    // nearer to the old pins.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "height", "value": 30.0}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "center_y", "value": 15.0}),
+    );
+    let l = top(&s);
+    assert_eq!(l.len(), 1);
+    assert!(
+        (l[0].0[1] - 30.0).abs() < 1e-9 && (l[0].1[1] - 30.0).abs() < 1e-9,
+        "the projection must follow the top edge: {l:?}"
+    );
+}
