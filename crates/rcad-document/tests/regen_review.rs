@@ -196,6 +196,7 @@ fn deferred_measurement_after_pattern_is_not_reused_on_undo() {
                 count: 2,
                 spacing: 10.0,
                 direction: [1.0, 0.0],
+                second: None,
             },
         );
     });
@@ -250,6 +251,7 @@ fn adopted_measurement_is_reused_on_redo() {
                 count: 2,
                 spacing: 10.0,
                 direction: [1.0, 0.0],
+                second: None,
             },
         ))
     })
@@ -475,6 +477,7 @@ fn plate_with_boss_and_pattern(spacing: f64) -> Result<Evaluation> {
             count: 2,
             spacing,
             direction: [1.0, 0.0],
+            second: None,
         },
     );
     regenerate(&d)

@@ -18,6 +18,7 @@ pub mod extrude;
 pub mod face_measure;
 pub mod file_pick;
 pub mod joint_ui;
+pub mod mesh_edit_ui;
 pub mod mesh_repair_ui;
 pub mod panels;
 pub mod params_ui;

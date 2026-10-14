@@ -191,6 +191,40 @@ impl RcadApp {
                     a.select_body(Some(BodyId(1)));
                 }),
             ],
+            // Mesh inspection + edit panels on FreeCAD's sphere STL: a plane cut
+            // at z = 2 previewed (plane and result boxes in the viewport).
+            "mesh_edit" => vec![
+                Cmd(Command::NewDocument),
+                Cmd(Command::ImportStl {
+                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../tools/fixtures/corpus/m2_sphere_ascii.stl"),
+                    units_to_mm: Some(1.0),
+                }),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    a.select_body(Some(BodyId(1)));
+                    a.mesh_edit.kind = crate::mesh_edit_ui::EditKind::PlaneCut;
+                    a.mesh_edit.cut_offset = "2".into();
+                    a.mesh_edit.keep = rcad_exchange::mesh_edit::CutKeep::Both;
+                    a.mesh_edit.open_panels = true;
+                    a.mesh_edit.pending = Some((BodyId(1), true));
+                }),
+                Cmd(Command::EditMesh(rcad_commands::mesh_edit::EditMeshArgs {
+                    body: BodyId(1),
+                    op: rcad_exchange::mesh_edit::MeshEditOp::PlaneCut(
+                        rcad_exchange::mesh_edit::PlaneCut {
+                            origin: [0.0; 3],
+                            normal: [0.0, 0.0, 1.0],
+                            offset: 2.0,
+                            keep: rcad_exchange::mesh_edit::CutKeep::Both,
+                            cap: true,
+                        },
+                    ),
+                    preview: true,
+                    body_name: None,
+                    hide_source: false,
+                })),
+            ],
             // The rounded labelled enclosure (committed example).
             "rounded_enclosure" => vec![
                 Cmd(Command::Open {

@@ -192,6 +192,12 @@ pub fn contour_flange(
                 center,
                 ccw: !ccw,
             }),
+            LoopSegment::Cubic { c1, c2, w, .. } => segs.push(LoopSegment::Cubic {
+                start: to,
+                c1: c2,
+                c2: c1,
+                w: [w[1], w[0]],
+            }),
         }
     }
     // Start cap: from the far start back to pts[0] (closes the loop).
@@ -268,6 +274,12 @@ fn orient_ccw(segs: Vec<LoopSegment>) -> Vec<LoopSegment> {
                 start: to,
                 center,
                 ccw: !ccw,
+            },
+            LoopSegment::Cubic { c1, c2, w, .. } => LoopSegment::Cubic {
+                start: to,
+                c1: c2,
+                c2: c1,
+                w: [w[1], w[0]],
             },
         });
     }
@@ -426,6 +438,11 @@ fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::R
                         center: c,
                         ccw,
                     } => arc_dist(*center, *start, e, *c, *ccw),
+                    LoopSegment::Cubic { .. } => {
+                        return Err("sheet outlines with ellipse or spline edges are not \
+                                    supported"
+                            .into());
+                    }
                 };
                 if d <= radius + eps {
                     let q = s.start();
@@ -777,6 +794,7 @@ fn to_sk(segs: &[KSeg]) -> Vec<LoopSegment> {
         .map(|s| match *s {
             KSeg::Line { start } => LoopSegment::Line { start },
             KSeg::Arc { start, center, ccw } => LoopSegment::Arc { start, center, ccw },
+            KSeg::Cubic { start, c1, c2, w } => LoopSegment::Cubic { start, c1, c2, w },
         })
         .collect()
 }
@@ -796,10 +814,14 @@ pub fn base_outline(
         rcad_sketch::Profile::Loop(l) => l
             .iter()
             .map(|s| match *s {
-                LoopSegment::Line { start } => KSeg::Line { start },
-                LoopSegment::Arc { start, center, ccw } => KSeg::Arc { start, center, ccw },
+                LoopSegment::Line { start } => Ok(KSeg::Line { start }),
+                LoopSegment::Arc { start, center, ccw } => Ok(KSeg::Arc { start, center, ccw }),
+                LoopSegment::Cubic { .. } => Err(DocError::Validation(format!(
+                    "{id}: sheet base: ellipse and spline edges are not supported (lines and \
+                     arcs only)"
+                ))),
             })
-            .collect(),
+            .collect::<Result<_>>()?,
         rcad_sketch::Profile::Circle { .. } => {
             return Err(DocError::Validation(format!(
                 "{id}: sheet base: a circle has no straight edge (use a profile with lines)"
@@ -830,15 +852,21 @@ pub fn base_outline(
                     })
                     .map(|l| l.0)
             }
-            KSeg::Arc { .. } => None,
+            KSeg::Arc { .. } | KSeg::Cubic { .. } => None,
         };
         out.push((segs[i].clone(), ent));
     }
-    let holes = region
+    let holes: Vec<kk::Profile> = region
         .holes
         .iter()
         .map(|(p, _)| crate::hole::to_kernel(p))
         .collect();
+    if holes.iter().any(kk::Profile::has_cubic) {
+        return Err(DocError::Validation(format!(
+            "{id}: sheet base: elliptical or spline holes are not supported (lines, arcs and \
+             circles only)"
+        )));
+    }
     Ok((out, holes))
 }
 
@@ -889,6 +917,12 @@ fn flange_section(rule: &SheetRule, f: &FlangeDef) -> (Vec<KSeg>, f64, f64) {
                     center: m(center),
                     ccw: !ccw,
                 },
+                KSeg::Cubic { start, c1, c2, w } => KSeg::Cubic {
+                    start: m(start),
+                    c1: m(c1),
+                    c2: m(c2),
+                    w,
+                },
             })
             .collect();
         let n = segs.len();
@@ -903,6 +937,12 @@ fn flange_section(rule: &SheetRule, f: &FlangeDef) -> (Vec<KSeg>, f64, f64) {
                         start: to,
                         center,
                         ccw: !ccw,
+                    },
+                    KSeg::Cubic { c1, c2, w, .. } => KSeg::Cubic {
+                        start: to,
+                        c1: c2,
+                        c2: c1,
+                        w: [w[1], w[0]],
                     },
                 }
             })
@@ -1080,6 +1120,7 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
                 let r = sub(m.outline[k].0.start(), center);
                 if ccw { [-r[1], r[0]] } else { [r[1], -r[0]] }
             }
+            KSeg::Cubic { c2, .. } => sub(m.outline[k].0.start(), c2),
         };
         let tout = match m.outline[k].0 {
             KSeg::Line { start } => sub(m.outline[(k + 1) % n_out].0.start(), start),
@@ -1087,6 +1128,7 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
                 let r = sub(start, center);
                 if ccw { [-r[1], r[0]] } else { [r[1], -r[0]] }
             }
+            KSeg::Cubic { start, c1, .. } => sub(c1, start),
         };
         cross(tin, tout)
     };
@@ -1480,6 +1522,9 @@ pub fn flat_dxf(b: &SheetBuild) -> String {
                     w(11, &f(e[0]));
                     w(21, &f(e[1]));
                     w(31, "0.0");
+                }
+                KSeg::Cubic { .. } => {
+                    unreachable!("sheet bases refuse ellipse and spline edges and holes")
                 }
                 KSeg::Arc { center, ccw, .. } => {
                     // DXF arcs run counter-clockwise from start to end angle.

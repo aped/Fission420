@@ -69,7 +69,10 @@ T-junctions; every edge must be used twice in opposite directions; one connected
   export refuses them), the slab result replaces it if it passes the result check on its own;
 * Join/Cut tools with inner loops: only the slab construction (over the nominal span); the
   result check's `Prism` carries the holes, so a hole's interior is never probed as tool
-  material. Not applicable: `ProductLimit` naming the inner loops and the reason;
+  material. Not applicable (a countersink cone, a hole across the tool axis, ...): Truck's
+  boolean with the holed prism (our truck-shapeops fork builds such tools; Truck 0.6
+  panicked), placed with the single-loop margins and checked the same way; if that fails too,
+  `ProductLimit` naming the inner loops, the slab reason and the boolean's failure;
 * a Join sketched on a face that its profile leaves: slab construction, else the
   product limit with the slab reason appended;
 * `regen.rs::legacy_cut` (legacy Cut Through All / Pocket): the same fallback and check;

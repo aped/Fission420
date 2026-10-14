@@ -1262,6 +1262,8 @@ impl RcadApp {
                         spacing: "10".into(),
                         along_y: false,
                         reverse: false,
+                        count2: "1".into(),
+                        spacing2: "10".into(),
                         angle: "60".into(),
                         center_x: "0".into(),
                         center_y: "0".into(),
@@ -1619,6 +1621,29 @@ impl RcadApp {
                             None => format!("Arc A{}", e.0),
                         }
                     }
+                    Some(rcad_sketch::Entity::Ellipse {
+                        center,
+                        major,
+                        minor,
+                        ..
+                    }) => {
+                        let (c, m) = (
+                            s.editor.sketch.point_xy(*center).unwrap_or_default(),
+                            s.editor.sketch.point_xy(*major).unwrap_or_default(),
+                        );
+                        format!(
+                            "Ellipse El{} radii {} × {} mm",
+                            e.0,
+                            rcad_sketch::fmt_mm((m[0] - c[0]).hypot(m[1] - c[1])),
+                            rcad_sketch::fmt_mm(*minor)
+                        )
+                    }
+                    Some(rcad_sketch::Entity::Spline { points, closed, .. }) => format!(
+                        "Spline Sp{} ({} control points, {})",
+                        e.0,
+                        points.len(),
+                        if *closed { "closed" } else { "open" }
+                    ),
                     None => continue,
                 },
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),
@@ -2175,6 +2200,8 @@ impl RcadApp {
                         spacing,
                         along_y,
                         reverse,
+                        count2,
+                        spacing2,
                         angle,
                         center_x,
                         center_y,
@@ -2199,7 +2226,9 @@ impl RcadApp {
                                     ui.radio_value(along_y, true, "Sketch Y");
                                     ui.checkbox(reverse, "Reverse");
                                 });
-                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances act on the same target. Count and spacing stay editable parameters.");
+                                num_field(ui, "Second direction count", count2);
+                                num_field(ui, "Second direction spacing (mm)", spacing2);
+                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; a second direction count above 1 makes a rectangular grid along the other sketch axis. Instances act on the same target. Counts and spacings stay editable parameters.");
                             }
                             PatternKind::Circular => {
                                 num_field(ui, "Pattern count", count);

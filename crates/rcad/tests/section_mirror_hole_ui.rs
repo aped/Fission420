@@ -343,6 +343,7 @@ fn suppress_and_restore_from_the_inspector() {
             count: 2,
             spacing: 30.0,
             direction: [-1.0, 0.0],
+            second: None,
         },
     );
     let slot_sk = rect(&mut h, top, 4.0, 20.0, [0.0, 0.0]);

@@ -27,6 +27,9 @@ pub(crate) fn to_kernel(p: &SketchProfile) -> k::Profile {
                     LoopSegment::Arc { start, center, ccw } => {
                         k::LoopSegment::Arc { start, center, ccw }
                     }
+                    LoopSegment::Cubic { start, c1, c2, w } => {
+                        k::LoopSegment::Cubic { start, c1, c2, w }
+                    }
                 })
                 .collect(),
         ),
@@ -67,6 +70,15 @@ pub(crate) fn check_hole_inside(hole: &SketchProfile, host: &SketchProfile) -> R
             }
             Ok(())
         }
+        SketchProfile::Loop(segs)
+            if segs.iter().any(|s| matches!(s, LoopSegment::Cubic { .. })) =>
+        {
+            Err(DocError::ProductLimit(
+                "a circular cut on a face bounded by an ellipse or spline is not supported \
+                 (initial product limit)"
+                    .into(),
+            ))
+        }
         SketchProfile::Loop(segs) => {
             let n = segs.len();
             let mut nearest = f64::INFINITY;
@@ -75,6 +87,7 @@ pub(crate) fn check_hole_inside(hole: &SketchProfile, host: &SketchProfile) -> R
                 let d = match segs[i] {
                     LoopSegment::Line { .. } => dist_to_segment(*center, p, q),
                     LoopSegment::Arc { center: c, ccw, .. } => dist_to_arc(*center, p, q, c, ccw),
+                    LoopSegment::Cubic { .. } => unreachable!("refused above"),
                 };
                 nearest = nearest.min(d);
             }

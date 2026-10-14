@@ -9,6 +9,7 @@ pub mod assembly;
 pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
+pub mod mesh_edit;
 pub mod mesh_repair;
 
 /// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
@@ -58,6 +59,23 @@ pub enum SketchTemplate {
     /// Closed polygon of lines through `vertices` (sketch-plane mm), sharing
     /// endpoints, with no other constraints (vertices stay editable).
     Polygon { vertices: Vec<[f64; 2]> },
+    /// Full ellipse centred on `center` (default: sketch origin), major axis
+    /// along the sketch x axis. Parameters: "major_radius", "minor_radius",
+    /// "center_x", "center_y" (see docs/behavior/sketching.md).
+    CenteredEllipse {
+        major_radius: f64,
+        minor_radius: f64,
+        #[serde(default)]
+        center: Option<[f64; 2]>,
+    },
+    /// Cubic B-spline through the control points `points` (sketch-plane
+    /// mm; open: at least 4, clamped to its end points; `closed`: periodic,
+    /// at least 3), with no constraints (control points stay editable).
+    Spline {
+        points: Vec<[f64; 2]>,
+        #[serde(default)]
+        closed: bool,
+    },
     /// A complete sketch as produced by the interactive editor.
     Custom { sketch: Sketch },
 }
@@ -174,6 +192,9 @@ pub enum Command {
         count: u32,
         spacing: f64,
         direction: [f64; 2],
+        /// A second direction: a rectangular grid (format v8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second: Option<rcad_document::PatternDirection>,
     },
     /// Repeat an Extrude Join/Cut `count - 1` more times, each rotated a further
     /// `angle_deg` counter-clockwise about the seed sketch's normal through
@@ -1015,6 +1036,14 @@ pub enum Command {
     /// kept. `Response.mesh_repair` reports every change and the diagnosis
     /// before/after. `preview`: nothing changes.
     RepairMesh(mesh_repair::RepairMeshArgs),
+    /// Mesh edit (docs/MESH.md): preview or apply a transform, plane cut or
+    /// decimation of a mesh body as new mesh body/bodies; the source is kept.
+    /// `Response.mesh_edit` reports the change counts, the diagnosis after and
+    /// (decimation) the measured deviation. `preview`: nothing changes.
+    EditMesh(mesh_edit::EditMeshArgs),
+    /// Read-only mesh inspection: the body's diagnosis plus the bounded
+    /// self-intersection check (`Response.mesh_inspection`).
+    InspectMesh(mesh_edit::InspectMeshArgs),
     DeleteFeature {
         feature: FeatureId,
     },
@@ -1272,6 +1301,8 @@ impl Command {
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::RepairMesh(_) => "repair_mesh",
+            Command::EditMesh(_) => "edit_mesh",
+            Command::InspectMesh(_) => "inspect_mesh",
             Command::SheetBase(_) => "sheet_base",
             Command::SheetFlange(_) => "sheet_flange",
             Command::EditSheetRule(_) => "edit_sheet_rule",
@@ -1618,6 +1649,12 @@ pub struct Response {
     /// `repair_mesh`: what the repair changes / changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_repair: Option<rcad_exchange::mesh_repair::RepairReport>,
+    /// `edit_mesh`: what the edit changes / changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_edit: Option<rcad_exchange::mesh_edit::MeshEditReport>,
+    /// `inspect_mesh`: diagnosis and self-intersection check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_inspection: Option<mesh_edit::MeshInspection>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1793,7 +1830,7 @@ impl Session {
         if self.run_sheet_surface(cmd, r)? {
             return Ok(());
         }
-        if self.run_mesh(cmd, r)? {
+        if self.run_mesh(cmd, r)? || self.run_mesh_edit(cmd, r)? {
             return Ok(());
         }
         match cmd {
@@ -1822,6 +1859,17 @@ impl Session {
                     }
                     SketchTemplate::Polygon { vertices } => {
                         (solved(v(polygon_sketch(vertices))?)?, None)
+                    }
+                    SketchTemplate::CenteredEllipse {
+                        major_radius,
+                        minor_radius,
+                        center,
+                    } => (
+                        v(Sketch::centered_ellipse(*major_radius, *minor_radius))?,
+                        *center,
+                    ),
+                    SketchTemplate::Spline { points, closed } => {
+                        (solved(v(spline_sketch(points, *closed))?)?, None)
                     }
                     SketchTemplate::Custom { sketch } => (solved(sketch.clone())?, None),
                 };
@@ -2115,9 +2163,16 @@ impl Session {
                 count,
                 spacing,
                 direction,
+                second,
             } => {
-                let (name, seed, count, spacing, direction) =
-                    (name.clone(), *feature, *count, *spacing, *direction);
+                let (name, seed, count, spacing, direction, second) = (
+                    name.clone(),
+                    *feature,
+                    *count,
+                    *spacing,
+                    *direction,
+                    *second,
+                );
                 let id = self.model_mut()?.transact("Pattern", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Pattern"));
                     Ok(d.push(
@@ -2127,6 +2182,7 @@ impl Session {
                             count,
                             spacing,
                             direction,
+                            second,
                         },
                     ))
                 })?;
@@ -3366,7 +3422,7 @@ impl Session {
                 r.feature = Some(id);
             }
             // Handled by `run_mesh` before this match.
-            Command::RepairMesh(_) => {}
+            Command::RepairMesh(_) | Command::EditMesh(_) | Command::InspectMesh(_) => {}
             // Handled by `run_sheet_surface` before this match.
             Command::SheetBase(_)
             | Command::SheetFlange(_)
@@ -4273,6 +4329,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SurfacePatch { .. } => ("surface_patch", None),
                 FeatureKind::SurfaceExtrude { .. } => ("surface_extrude", None),
                 FeatureKind::MeshRepair { .. } => ("mesh_repair", None),
+                FeatureKind::MeshEdit { .. } => ("mesh_edit", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::AlignBody { .. } => ("align_body", None),
@@ -4583,6 +4640,19 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
     for i in 0..ids.len() {
         s.add_line(ids[i], ids[(i + 1) % ids.len()]);
     }
+    s.validate()?;
+    Ok(s)
+}
+
+/// Editor-style sketch with one cubic B-spline through `points` (see
+/// [`SketchTemplate::Spline`]).
+pub fn spline_sketch(
+    points: &[[f64; 2]],
+    closed: bool,
+) -> Result<Sketch, rcad_sketch::SketchError> {
+    let mut s = Sketch::default();
+    s.ensure_origin();
+    s.add_spline(points, closed)?;
     s.validate()?;
     Ok(s)
 }

@@ -1,0 +1,13 @@
+[
+  {"cmd": "new_document"},
+  {"cmd": "import_stl", "path": "tools/fixtures/corpus/m2_sphere_ascii.stl", "units_to_mm": 1.0},
+  {"cmd": "inspect_mesh", "body": 1},
+  {"cmd": "edit_mesh", "body": 1, "op": {"op": "plane_cut", "origin": [0, 0, 2], "normal": [0, 0, 1], "keep": "both", "cap": true}, "body_name": "Sphere lower"},
+  {"cmd": "edit_mesh", "body": 1, "op": {"op": "decimate", "target_triangles": 0, "max_deviation": 0.05}, "body_name": "Sphere decimated"},
+  {"cmd": "edit_mesh", "body": 1, "op": {"op": "transform", "scale": [2, 1, 0.5], "axis": [0, 0, 1], "angle_deg": 30, "translate": [10, 0, 0]}, "body_name": "Sphere transformed"},
+  {"cmd": "export_stl", "path": "artifacts/mesh_edit_lower.stl", "bodies": [2]},
+  {"cmd": "export_stl", "path": "artifacts/mesh_edit_upper.stl", "bodies": [3]},
+  {"cmd": "export_stl", "path": "artifacts/mesh_edit_decimated.stl", "bodies": [4]},
+  {"cmd": "export_stl", "path": "artifacts/mesh_edit_transformed.stl", "bodies": [5]},
+  {"cmd": "save", "path": "artifacts/mesh_edit.rcad.json"}
+]

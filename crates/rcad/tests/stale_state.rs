@@ -116,6 +116,7 @@ fn queue_slow_edits(h: &mut Harness<'_, RcadApp>) {
         count: 40,
         spacing: 7.0,
         direction: [1.0, 0.0],
+        second: None,
     });
     let _ = h.try_run();
 }

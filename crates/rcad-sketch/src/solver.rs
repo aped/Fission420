@@ -459,6 +459,7 @@ impl System {
         let mut lines = HashMap::new();
         let mut circles = HashMap::new();
         let mut arcs = HashMap::new();
+        let mut ellipses = HashMap::new();
         for (ei, e) in s.entities.iter().enumerate() {
             match e {
                 Entity::Line { id, a, b } => {
@@ -477,6 +478,18 @@ impl System {
                 } => {
                     arcs.insert(*id, (point_col[center], point_col[start], point_col[end]));
                 }
+                Entity::Ellipse {
+                    id,
+                    center,
+                    major,
+                    minor,
+                } => {
+                    ellipses.insert(*id, (point_col[center], point_col[major], initial.len()));
+                    radius_col.push((ei, initial.len()));
+                    initial.push(*minor);
+                }
+                // Control points are ordinary points; a spline adds no equation.
+                Entity::Spline { .. } => {}
             }
         }
         let entity = |id: &crate::EntityId| s.entities.iter().find(|e| e.id() == *id);
@@ -566,6 +579,23 @@ impl System {
                         });
                     } else if let Some(&c) = circles.get(entity) {
                         push(Eq::Fix { c, v: dim.value });
+                    }
+                }
+                Constraint::EllipseRadius {
+                    ellipse,
+                    major,
+                    dim,
+                } => {
+                    if let Some(&(c, m, r)) = ellipses.get(ellipse) {
+                        push(if *major {
+                            Eq::Dist {
+                                a: c,
+                                b: m,
+                                v: dim.value,
+                            }
+                        } else {
+                            Eq::Fix { c: r, v: dim.value }
+                        });
                     }
                 }
                 Constraint::EqualRadius { a, b } => {
@@ -1048,7 +1078,9 @@ pub(crate) fn solve_with(sketch: &mut Sketch, pins: &[Pin]) -> SolveReport {
             p.y = lm.x[c + 1];
         }
         for &(ei, col) in &sys.radius_col {
-            if let Some(Entity::Circle { radius, .. }) = sketch.entities.get_mut(ei) {
+            if let Some(Entity::Circle { radius, .. } | Entity::Ellipse { minor: radius, .. }) =
+                sketch.entities.get_mut(ei)
+            {
                 *radius = lm.x[col];
             }
         }

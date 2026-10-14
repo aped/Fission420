@@ -151,6 +151,7 @@ fn patterned_counterbored_holes_and_parameters() {
         count: 3,
         spacing: 10.0,
         direction: [1.0, 0.0],
+        second: None,
     });
     assert!(
         matches!(r.error, Some(DocError::GeometryCheck { .. })),
@@ -167,6 +168,7 @@ fn patterned_counterbored_holes_and_parameters() {
             count: 3,
             spacing: 12.0,
             direction: [1.0, 0.0],
+            second: None,
         },
     );
     assert!(
@@ -347,4 +349,49 @@ fn coupled_hole_depths_change_together() {
     );
     let want = 40.0 * 30.0 * 40.0 - PI * 2.75 * 2.75 * 30.0 - PI * (25.0 - 2.75 * 2.75) * 10.0;
     assert!((vol(&s) - want).abs() < 1e-6, "{} vs {want}", vol(&s));
+}
+
+/// Two through holes in a 5 mm wall (x 0..5, y -20..0, z 0..40) along X,
+/// in both orders. The second hole's top point lay exactly where a large
+/// triangle of the target's wall face had its centroid; the result check
+/// classified that probe against the tool wall without the tessellation's
+/// chord tolerance and refused a correct cut. Both orders must give the
+/// closed-form volume 4000 - 2·π·2.5²·5.
+#[test]
+fn second_hole_through_a_thin_wall_is_accepted_in_either_order() {
+    let want = 4000.0 - 2.0 * PI * 6.25 * 5.0;
+    for order in [[15.0, 30.0], [30.0, 15.0]] {
+        let mut s = Session::new();
+        ok(&mut s, Command::NewDocument);
+        let sk = ok(
+            &mut s,
+            Command::CreateSketch {
+                name: None,
+                plane: SketchPlane::WorldXZ,
+                template: SketchTemplate::CenteredRectangle {
+                    width: 5.0,
+                    height: 40.0,
+                    center: Some([2.5, 20.0]),
+                },
+            },
+        )
+        .feature
+        .unwrap();
+        ok(&mut s, Command::extrude(None, sk, 20.0));
+        for z in order {
+            ok(
+                &mut s,
+                Command::Hole {
+                    name: None,
+                    plane: SketchPlane::WorldYZ,
+                    center: [-10.0, z],
+                    diameter: 5.0,
+                    depth: None,
+                    counterbore: None,
+                    target: Some(rcad_document::BodyId(1)),
+                },
+            );
+        }
+        assert!((vol(&s) - want).abs() < 1e-6, "{order:?}: {}", vol(&s));
+    }
 }

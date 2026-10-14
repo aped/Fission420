@@ -108,6 +108,12 @@ pub enum BodySource {
     RepairedMesh {
         source: BodyId,
     },
+    /// An edited copy of mesh body `source` (FeatureKind::MeshEdit);
+    /// `operation`: "transform", "plane cut" or "decimate".
+    EditedMesh {
+        source: BodyId,
+        operation: String,
+    },
 }
 
 /// One evaluated body.
@@ -968,9 +974,10 @@ fn regen_impl(
                 count,
                 spacing,
                 direction,
+                second,
             } => {
                 r.body = Some(linear_pattern(
-                    &mut st, id, *seed, *count, *spacing, *direction,
+                    &mut st, id, *seed, *count, *spacing, *direction, *second,
                 )?);
             }
             FeatureKind::CircularPattern {
@@ -1268,6 +1275,51 @@ fn regen_impl(
                     BodyGeometry::Brep(geom),
                     BodySource::Modeled,
                 )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::MeshEdit {
+                source,
+                op,
+                body,
+                second_body,
+            } => {
+                let bs = st
+                    .bodies
+                    .get(source)
+                    .ok_or_else(|| DocError::BrokenReference {
+                        from: id,
+                        detail: format!("mesh edit source {source} is not in the model"),
+                    })?;
+                let BodyGeometry::Mesh(m) = &bs.geometry else {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: {source} is an exact (B-rep) body; mesh edits apply to mesh \
+                         bodies (STL/3MF imports)"
+                    )));
+                };
+                let (meshes, notes) = crate::mesh_edit::edited(m, op)?;
+                if meshes.len() != 1 + usize::from(second_body.is_some()) {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the mesh edit made {} meshes for {} bodies",
+                        meshes.len(),
+                        1 + usize::from(second_body.is_some())
+                    )));
+                }
+                r.notes = notes;
+                for (mesh, b) in meshes
+                    .into_iter()
+                    .zip(std::iter::once(*body).chain(*second_body))
+                {
+                    create_body(
+                        &mut st,
+                        id,
+                        b,
+                        BodyGeometry::Mesh(Arc::new(mesh)),
+                        BodySource::EditedMesh {
+                            source: *source,
+                            operation: op.name().into(),
+                        },
+                    )?;
+                }
                 r.body = Some(*body);
             }
             FeatureKind::MeshRepair {
@@ -2492,6 +2544,12 @@ fn curves_to_profile(l: &[k::Curve2]) -> std::result::Result<SketchProfile, Stri
                 center,
                 ccw: !ccw,
             },
+            rcad_sketch::LoopSegment::Cubic { c1, c2, w, .. } => rcad_sketch::LoopSegment::Cubic {
+                start: to,
+                c1: c2,
+                c2: c1,
+                w: [w[1], w[0]],
+            },
         });
     }
     Ok(SketchProfile::Loop(out))
@@ -3071,12 +3129,18 @@ fn apply_tool(
             (k::prismatic::SlabOp::Join, k::PrismOp::Join, e.nominal)
         };
         if let Some(why) = k::prismatic::not_applicable(body, &kp, frame) {
-            return Err(DocError::ProductLimit(format!(
-                "{id}: {prefix}the sketch region has {} inner loop(s); a Join or Cut with inner \
-                 loops is built only by the exact slab construction, which does not apply here \
-                 ({why}). Use New Body, or cut each loop separately",
-                khole.len()
-            )));
+            // Not prismatic (a countersink cone, a revolved or filleted
+            // body): Truck's boolean with the holed tool (our truck-shapeops
+            // fork builds such tools), placed as for a single loop and checked
+            // against the holed nominal tool.
+            return holed_truck(body, e, frame, &kp, &khole, &mut check).map_err(|t| {
+                DocError::ProductLimit(format!(
+                    "{id}: {prefix}the sketch region has {} inner loop(s); the exact slab \
+                         construction does not apply here ({why}) and the general boolean \
+                         failed ({t}). Use New Body, or cut each loop separately",
+                    khole.len()
+                ))
+            });
         }
         let region_boolean = if e.pieces && e.removes {
             k::prismatic::prism_region_boolean_pieces
@@ -3223,6 +3287,77 @@ fn apply_tool(
             out
         }
     };
+    Ok((out, span))
+}
+
+/// The per-application result check of [`apply_tool`]: (result, operation,
+/// nominal span, span used).
+type ResultCheck<'a> = dyn FnMut(&Body, k::PrismOp, (f64, f64), (f64, f64)) -> Result<()> + 'a;
+
+/// Join/Cut of a region with inner loops on a target where the exact slab
+/// construction does not apply: Truck's boolean of the holed prism. The span
+/// is placed as for a single loop: a Join from a face starts a little inside
+/// the support (no deeper than half the clear material under the outer
+/// loop), a cut gets the same margins as a blind/through cut. Checked against
+/// the nominal holed tool by `check`. Returns the failure text otherwise.
+#[allow(clippy::too_many_arguments)]
+fn holed_truck(
+    body: &Body,
+    e: &ExtrudeOut,
+    frame: &Frame,
+    kp: &k::Profile,
+    khole: &[k::Profile],
+    check: &mut ResultCheck<'_>,
+) -> std::result::Result<(Body, (f64, f64)), String> {
+    let text = |x: k::KernelError| x.to_string();
+    if e.removes {
+        let margin = k::through_all_margin(body).map_err(text)?;
+        let (nominal, span) = if e.extent == Extent::ThroughAll {
+            let (lo, hi) = k::extent_along(body, frame).map_err(text)?;
+            let span = (lo - margin, hi + margin);
+            (span, span)
+        } else {
+            let (span, _) =
+                blind_cut_span(body, frame, kp, e.nominal, e.dir, e.side, margin).map_err(text)?;
+            (e.nominal, span)
+        };
+        let (start, len) = (frame.offset(span.0), span.1 - span.0);
+        let out = if e.pieces {
+            k::cut_region_pieces(body, kp, khole, &start, len)
+        } else {
+            k::cut_region(body, kp, khole, &start, len)
+        }
+        .map_err(text)?;
+        check(&out, k::PrismOp::Cut, nominal, span).map_err(|x| x.to_string())?;
+        return Ok((out, span));
+    }
+    let (a, b) = e.nominal;
+    let on_face = (e.dir > 0.0 && a == 0.0) || (e.dir < 0.0 && b == 0.0);
+    let span = match e.side {
+        Some(side) if on_face => {
+            let face = Frame {
+                z: [side * frame.z[0], side * frame.z[1], side * frame.z[2]],
+                ..*frame
+            };
+            let clear = k::clear_depth(body, &face, kp, 2.0 * JOIN_OVERLAP).map_err(text)?;
+            if clear < 2.0 * k::tol::MIN_LENGTH {
+                return Err(format!(
+                    "the material under the profile is only {clear:.4} mm deep before another \
+                     surface"
+                ));
+            }
+            let delta = JOIN_OVERLAP.min((b - a) / 2.0).min(clear / 2.0);
+            if e.dir > 0.0 {
+                (-side * delta, b)
+            } else {
+                (a, -side * delta)
+            }
+        }
+        _ => (a, b),
+    };
+    let out =
+        k::join_region(body, kp, khole, &frame.offset(span.0), span.1 - span.0).map_err(text)?;
+    check(&out, k::PrismOp::Join, (a, b), span).map_err(|x| x.to_string())?;
     Ok((out, span))
 }
 
@@ -3702,6 +3837,7 @@ fn linear_pattern(
     count: u32,
     spacing: f64,
     direction: [f64; 2],
+    second: Option<crate::PatternDirection>,
 ) -> Result<BodyId> {
     let tools = copy_seed(st, id, seed)?;
     let e = tools[0].clone();
@@ -3716,30 +3852,75 @@ fn linear_pattern(
             "{id}.spacing: must be > 0 mm, got {spacing}"
         )));
     }
-    let len = direction[0].hypot(direction[1]);
-    if !len.is_finite() || len <= 0.0 {
-        return Err(DocError::Validation(format!(
-            "{id}: pattern direction must be a non-zero vector"
-        )));
-    }
     let f = e.start;
-    let d = [direction[0] / len, direction[1] / len];
-    let world = [
-        f.x[0] * d[0] + f.y[0] * d[1],
-        f.x[1] * d[0] + f.y[1] * d[1],
-        f.x[2] * d[0] + f.y[2] * d[1],
-    ];
+    let world_dir = |direction: [f64; 2]| -> Result<[f64; 3]> {
+        let len = direction[0].hypot(direction[1]);
+        if !len.is_finite() || len <= 0.0 {
+            return Err(DocError::Validation(format!(
+                "{id}: pattern direction must be a non-zero vector"
+            )));
+        }
+        let d = [direction[0] / len, direction[1] / len];
+        Ok([
+            f.x[0] * d[0] + f.y[0] * d[1],
+            f.x[1] * d[0] + f.y[1] * d[1],
+            f.x[2] * d[0] + f.y[2] * d[1],
+        ])
+    };
+    let world = world_dir(direction)?;
+    let (count2, spacing2, world2) = match second {
+        None => (1, 0.0, [0.0; 3]),
+        Some(s) => {
+            if !(1..=crate::MAX_PATTERN_COUNT).contains(&s.count) {
+                return Err(DocError::Validation(format!(
+                    "{id}.count2: must be in 1..={}, got {}",
+                    crate::MAX_PATTERN_COUNT,
+                    s.count
+                )));
+            }
+            if !s.spacing.is_finite() || s.spacing <= 0.0 {
+                return Err(DocError::Validation(format!(
+                    "{id}.spacing2: must be > 0 mm, got {}",
+                    s.spacing
+                )));
+            }
+            let w2 = world_dir(s.direction)?;
+            let c = world[0] * w2[1] - world[1] * w2[0];
+            let c = [
+                world[1] * w2[2] - world[2] * w2[1],
+                world[2] * w2[0] - world[0] * w2[2],
+                c,
+            ];
+            if (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt() < 1e-6 {
+                return Err(DocError::Validation(format!(
+                    "{id}: the second pattern direction is parallel to the first"
+                )));
+            }
+            if u64::from(count) * u64::from(s.count) > u64::from(crate::MAX_PATTERN_COUNT) {
+                return Err(DocError::Validation(format!(
+                    "{id}: {count} x {} = {} instances; at most {} in one pattern",
+                    s.count,
+                    u64::from(count) * u64::from(s.count),
+                    crate::MAX_PATTERN_COUNT
+                )));
+            }
+            (s.count, s.spacing, w2)
+        }
+    };
+    let total = count * count2;
     let before = brep_target(st, id, e.body)?;
     let mut body = before.clone();
     let mut applied = Vec::new();
     let mut copies = Vec::new();
-    for i in 1..count {
+    for k in 1..total {
+        let (i, j) = (k % count, k / count);
         let t = spacing * f64::from(i);
+        let t2 = spacing2 * f64::from(j);
         let frame = Frame {
             origin: [
-                f.origin[0] + world[0] * t,
-                f.origin[1] + world[1] * t,
-                f.origin[2] + world[2] * t,
+                f.origin[0] + world[0] * t + world2[0] * t2,
+                f.origin[1] + world[1] * t + world2[1] * t2,
+                f.origin[2] + world[2] * t + world2[2] * t2,
             ],
             ..f
         };
@@ -3748,13 +3929,13 @@ fn linear_pattern(
                 &body,
                 tool,
                 &frame,
-                Some(&format!("instance {} of {count}", i + 1)),
+                Some(&format!("instance {} of {total}", k + 1)),
                 id,
                 Some(&mut applied),
             )?
             .0;
             copies.push((
-                i,
+                k,
                 ti as u32,
                 ExtrudeOut {
                     start: frame,
@@ -4228,6 +4409,12 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
                             "sketch entity {entity} is an arc; its side face is curved"
                         )));
                     }
+                    rcad_sketch::LoopSegment::Cubic { .. } => {
+                        return Err(broken(format!(
+                            "sketch entity {entity} is an ellipse or spline; its side face is \
+                             curved"
+                        )));
+                    }
                 },
                 SketchProfile::Circle { .. } => {
                     return Err(broken("a circle's side face is curved".into()));
@@ -4280,6 +4467,9 @@ fn path_segments(
             Entity::Line { a, b, .. } => Ok((*a, *b)),
             Entity::Arc { start, end, .. } => Ok((*start, *end)),
             Entity::Circle { .. } => Err("a circle cannot be a sweep path".to_string()),
+            Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                Err("an ellipse or spline cannot be a sweep path (lines and arcs only)".to_string())
+            }
         }
     };
     let mut degree: HashMap<rcad_sketch::PointId, usize> = HashMap::new();
@@ -4325,7 +4515,9 @@ fn path_segments(
                 center: world(*center)?,
                 end: world(next)?,
             },
-            Entity::Circle { .. } => unreachable!("refused above"),
+            Entity::Circle { .. } | Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                unreachable!("refused above")
+            }
         });
         at = next;
     }
@@ -4378,7 +4570,8 @@ fn footprint(e: &ExtrudeOut, role: FaceRole, frame: &Frame) -> (Vec<[f64; 3]>, b
                             rcad_sketch::LoopSegment::Line { start } => {
                                 Some((start, segs[(i + 1) % segs.len()].start()))
                             }
-                            rcad_sketch::LoopSegment::Arc { .. } => None,
+                            rcad_sketch::LoopSegment::Arc { .. }
+                            | rcad_sketch::LoopSegment::Cubic { .. } => None,
                         },
                         SketchProfile::Circle { .. } => None,
                     }
@@ -4540,13 +4733,16 @@ fn revolve_about(
             let v = side(*q);
             (l.min(v), h.max(v))
         });
-    let s = if lo > 0.0 {
+    // Touching the axis (within the kernel tolerance) is allowed: the kernel
+    // revolves such profiles when they meet the axis along a straight edge.
+    let eps = k::tol::KERNEL_LINEAR;
+    let s = if lo > -eps && hi > eps {
         1.0
-    } else if hi < 0.0 {
+    } else if hi < eps && lo < -eps {
         -1.0
     } else {
         return Err(invalid(
-            "the profile crosses or touches the axis; it must lie on one side of it".into(),
+            "the profile crosses the axis; it must lie on one side of it".into(),
         ));
     };
     // New 2-D frame: x' = s·(d.y, −d.x) (toward the profile), y' = s·d: a
@@ -4640,6 +4836,14 @@ fn map_profile(profile: &SketchProfile, f: &dyn Fn([f64; 2]) -> [f64; 2]) -> Ske
                             ccw,
                         }
                     }
+                    rcad_sketch::LoopSegment::Cubic { start, c1, c2, w } => {
+                        rcad_sketch::LoopSegment::Cubic {
+                            start: f(start),
+                            c1: f(c1),
+                            c2: f(c2),
+                            w,
+                        }
+                    }
                 })
                 .collect(),
         ),
@@ -4730,6 +4934,12 @@ fn link_curves(
                         c: pt(*center)?,
                         r: *radius,
                     },
+                    rcad_sketch::Entity::Ellipse { .. } | rcad_sketch::Entity::Spline { .. } => {
+                        return Err(DocError::ProductLimit(format!(
+                            "{id}: projecting sketch ellipses and splines is not supported \
+                             (lines, arcs and circles only)"
+                        )));
+                    }
                 };
                 out.push((c, Some(e.id())));
             }
@@ -4863,6 +5073,8 @@ fn bind_link(
                 Some(rcad_sketch::Entity::Line { .. }) => Some(0u8),
                 Some(rcad_sketch::Entity::Arc { .. }) => Some(1),
                 Some(rcad_sketch::Entity::Circle { .. }) => Some(2),
+                Some(rcad_sketch::Entity::Ellipse { .. }) => Some(3),
+                Some(rcad_sketch::Entity::Spline { .. }) => Some(4),
                 None => None,
             };
             for ll in &link.loops {

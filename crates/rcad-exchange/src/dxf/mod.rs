@@ -910,20 +910,13 @@ pub fn import(bytes: &[u8], opts: &DxfImportOptions) -> Result<DxfImport> {
     })
 }
 
-/// Line/arc endpoints used by exactly one curve.
+/// Line/arc/open-spline endpoints used by exactly one curve.
 pub(crate) fn open_endpoints(s: &Sketch) -> usize {
     let mut deg: HashMap<PointId, usize> = HashMap::new();
     for e in &s.entities {
-        match e {
-            Entity::Line { a, b, .. } => {
-                *deg.entry(*a).or_default() += 1;
-                *deg.entry(*b).or_default() += 1;
-            }
-            Entity::Arc { start, end, .. } => {
-                *deg.entry(*start).or_default() += 1;
-                *deg.entry(*end).or_default() += 1;
-            }
-            Entity::Circle { .. } => {}
+        if let Some((a, b)) = e.ends() {
+            *deg.entry(a).or_default() += 1;
+            *deg.entry(b).or_default() += 1;
         }
     }
     deg.values().filter(|&&d| d == 1).count()

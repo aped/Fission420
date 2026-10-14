@@ -135,6 +135,7 @@ fn geometry_probe() {
                         count: n,
                         spacing: 10.0,
                         direction: [1.0, 0.0],
+                        second: None,
                     }
                 } else {
                     Command::Mirror {

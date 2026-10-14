@@ -220,6 +220,38 @@ fn weld(positions: &[[f64; 3]], triangles: &[[u32; 3]]) -> (Vec<[f64; 3]>, Vec<[
 /// A 3MF package with one object (and build item) per mesh. Positions are mm
 /// and are written in `unit`.
 pub fn write(objects: &[MeshObject], unit: ThreeMfUnit) -> Result<Vec<u8>> {
+    write_items(objects, &[], unit)
+}
+
+/// Build-item transform in the 3MF core convention (row vectors, `p' = [x y z 1] · M`):
+/// rows 0..3 the linear part, row 3 the translation in **mm** (converted to the file
+/// unit when written).
+pub type ItemTransform = [[f64; 3]; 4];
+
+/// [`write`] with a transform per build item: object `i`'s mesh is written as given (its
+/// own coordinates) and `items[i]` (when `Some`) becomes the `transform` attribute of its
+/// `<item>`, so a reader places it. `items` may be shorter than `objects` (missing = no
+/// transform). The transform must be finite with a non-singular, non-mirroring linear part.
+pub fn write_items(
+    objects: &[MeshObject],
+    items: &[Option<ItemTransform>],
+    unit: ThreeMfUnit,
+) -> Result<Vec<u8>> {
+    if items.len() > objects.len() {
+        return Err(ExchangeError::InvalidOption(
+            "3MF export: more item transforms than objects".into(),
+        ));
+    }
+    for (i, m) in items.iter().enumerate() {
+        if let Some(m) = m
+            && (m.iter().flatten().any(|v| !v.is_finite()) || det(m) <= 0.0)
+        {
+            return Err(ExchangeError::InvalidOption(format!(
+                "3MF export: item {} transform must be finite with a positive determinant",
+                i + 1
+            )));
+        }
+    }
     // Coordinates are written to a fixed 1e-9 mm resolution in the file's unit
     // (9 decimals in mm, 11 in inch, 12 in m, 6 in micron): far below printing
     // resolution and fine enough that unit round trips stay exact to ~1e-9 mm,
@@ -320,7 +352,26 @@ pub fn write(objects: &[MeshObject], unit: ThreeMfUnit) -> Result<Vec<u8>> {
     }
     let _ = writeln!(x, " </resources>\n <build>");
     for i in 0..objects.len() {
-        let _ = writeln!(x, r#"  <item objectid="{}"/>"#, i + 1);
+        match items.get(i).copied().flatten() {
+            None => {
+                let _ = writeln!(x, r#"  <item objectid="{}"/>"#, i + 1);
+            }
+            Some(m) => {
+                let mut v: Vec<String> = Vec::with_capacity(12);
+                for (r, row) in m.iter().enumerate() {
+                    for c in row {
+                        let c = if r == 3 { c * scale } else { *c };
+                        v.push(fixed(c, if r == 3 { decimals } else { 12 }));
+                    }
+                }
+                let _ = writeln!(
+                    x,
+                    r#"  <item objectid="{}" transform="{}"/>"#,
+                    i + 1,
+                    v.join(" ")
+                );
+            }
+        }
     }
     let _ = writeln!(x, " </build>\n</model>");
 

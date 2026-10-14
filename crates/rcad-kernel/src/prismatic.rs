@@ -95,6 +95,9 @@ pub fn not_applicable(body: &Body, profile: &Profile, frame: &Frame) -> Option<S
     if let Err(e) = profile.validate() {
         return Some(e.to_string());
     }
+    if profile.has_cubic() {
+        return Some(CUBIC_REFUSAL.into());
+    }
     let (frame, _) = right_handed(frame);
     classify_faces(body, &frame, &mut CircleSet::default()).err()
 }
@@ -162,6 +165,9 @@ fn region_boolean(
     for h in holes {
         h.validate()?;
     }
+    if outer.has_cubic() || holes.iter().any(Profile::has_cubic) {
+        return Err(KernelError::InvalidInput(CUBIC_REFUSAL.into()));
+    }
     let (frame, mirrored) = right_handed(start);
     let refuse = |m: String| KernelError::InvalidInput(format!("prismatic boolean: {m}"));
     let mut set = CircleSet::default();
@@ -223,8 +229,12 @@ fn right_handed(frame: &Frame) -> (Frame, bool) {
     }
 }
 
+/// Why the exact slab boolean refuses ellipse / spline spans.
+const CUBIC_REFUSAL: &str = "prismatic boolean: ellipse and spline spans are not supported \
+                             (lines, arcs and circles only)";
+
 /// Exact loop of a tool profile (y negated and arcs reversed in a mirrored
-/// frame).
+/// frame). Cubic spans are refused before this is called.
 fn tool_loop(p: &Profile, mirrored: bool, set: &mut CircleSet) -> ELoop {
     let m = |q: [f64; 2]| if mirrored { [q[0], -q[1]] } else { q };
     match p {
@@ -256,6 +266,8 @@ fn tool_loop(p: &Profile, mirrored: bool, set: &mut CircleSet) -> ELoop {
                         ),
                         ccw: *ccw != mirrored,
                     },
+                    // Refused by `region_boolean` (CUBIC_REFUSAL) before this.
+                    LoopSegment::Cubic { .. } => Kind::Line,
                 });
             }
             ELoop { pts, kind }

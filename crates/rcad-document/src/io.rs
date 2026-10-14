@@ -346,6 +346,29 @@ pub fn v8_feature(doc: &Document) -> Option<&'static str> {
     part_v8_feature(doc)
         .or_else(|| finish_v8_feature(doc))
         .or_else(|| mesh_v8_feature(doc))
+        .or_else(|| sketch_v8_feature(doc))
+}
+
+/// v8 sketch additions: ellipse and spline entities and ellipse radius
+/// dimensions (a v7 build would refuse the unknown variants with a
+/// misleading message).
+fn sketch_v8_feature(doc: &Document) -> Option<&'static str> {
+    use rcad_sketch::{Constraint, Entity};
+    doc.features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            crate::FeatureKind::Sketch { sketch, .. } => Some(sketch),
+            _ => None,
+        })
+        .any(|s| {
+            s.entities
+                .iter()
+                .any(|e| matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. }))
+                || s.constraints
+                    .iter()
+                    .any(|c| matches!(c, Constraint::EllipseRadius { .. }))
+        })
+        .then_some("sketch ellipses and splines")
 }
 
 /// v8 part-modeling additions (bodies split off by cuts, ...).
@@ -357,6 +380,9 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
         crate::FeatureKind::SplitBody { pieces, .. } if !pieces.is_empty() => {
             Some("split bodies with several pieces per side")
         }
+        crate::FeatureKind::LinearPattern {
+            second: Some(_), ..
+        } => Some("rectangular patterns (a second direction)"),
         _ => None,
     })
 }
@@ -376,8 +402,10 @@ fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
 
 /// v8 mesh and print additions.
 fn mesh_v8_feature(doc: &Document) -> Option<&'static str> {
-    let _ = doc;
-    None
+    doc.features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::MeshEdit { .. }))
+        .then_some("mesh edits (transform, plane cut, decimation)")
 }
 
 /// v6 sketch additions: sketch text (`Sketch::texts`) and

@@ -186,3 +186,61 @@ fn countersink_refusals() {
         r.error
     );
 }
+
+/// A frame-shaped boss (outer 16 x 20, opening 8 x 12) joined to the top of
+/// a plate whose countersink cone makes it non-prismatic: the exact slab
+/// construction does not apply, so the holed tool goes through the general
+/// boolean and the result check; the frame adds exactly (320 − 96) · 2. A
+/// frame cut 1 mm deep removes (320 − 96) · 1.
+#[test]
+fn holed_region_join_and_cut_on_a_countersunk_plate() {
+    let mut s = Session::new();
+    let hole = plate_with_hole(&mut s, None, None);
+    ok(&mut s, csink(hole, 12.0, 90.0));
+    let base = 24000.0 - PI * 9.0 * 10.0 - removed(3.0, 6.0, 90.0);
+    assert_volume(&s, base);
+    let frame = |s: &mut Session| {
+        let mut sk = rcad_sketch::Sketch::default();
+        for (x0, y0, x1, y1) in [(40.0, 10.0, 56.0, 30.0), (44.0, 14.0, 52.0, 26.0)] {
+            let p: Vec<_> = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+                .iter()
+                .map(|q| sk.add_point(q[0], q[1]))
+                .collect();
+            for i in 0..4 {
+                sk.add_line(p[i], p[(i + 1) % 4]);
+            }
+        }
+        ok(
+            s,
+            Command::CreateSketch {
+                name: None,
+                plane: SketchPlane::Face(FaceRef {
+                    feature: FeatureId(2),
+                    role: FaceRole::ExtrudeEndCap,
+                }),
+                template: SketchTemplate::Custom { sketch: sk },
+            },
+        )
+        .feature
+        .unwrap()
+    };
+    let sk = frame(&mut s);
+    let join = |sk, distance, op| Command::Extrude {
+        name: None,
+        sketch: sk,
+        distance,
+        op,
+        target: Some(rcad_document::BodyId(1)),
+        through_all: false,
+        reverse: false,
+        body_name: None,
+        region: None,
+        options: Default::default(),
+    };
+    ok(&mut s, join(sk, 2.0, rcad_commands::ExtrudeOp::Join));
+    assert_volume(&s, base + 224.0 * 2.0);
+    ok(&mut s, Command::Undo);
+    let r = s.execute(&join(sk, 1.0, rcad_commands::ExtrudeOp::Cut));
+    assert!(r.ok, "{:?}", r.error);
+    assert_volume(&s, base - 224.0);
+}

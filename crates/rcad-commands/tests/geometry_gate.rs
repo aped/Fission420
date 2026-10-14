@@ -232,6 +232,7 @@ fn linear_pattern_join_over_flange_is_exact() {
             count: 3,
             spacing: 10.0,
             direction: [1.0, 0.0],
+            second: None,
         },
     );
     assert!(

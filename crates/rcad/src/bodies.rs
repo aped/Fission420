@@ -159,6 +159,9 @@ pub fn provenance(b: &BodySummary) -> String {
         BodySource::RepairedMesh { source } => {
             format!("Repaired copy of mesh {source} — triangle mesh (mesh repair feature)")
         }
+        BodySource::EditedMesh { source, operation } => {
+            format!("Mesh {operation} of {source} — triangle mesh (mesh edit feature)")
+        }
     }
 }
 
@@ -345,10 +348,12 @@ impl RcadApp {
             self.combine_ui(ui, b.id);
         }
         if b.kind == "mesh" {
+            self.mesh_inspect_ui(ui, b.id);
             self.mesh_repair_ui(ui, b.id);
+            self.mesh_edit_ui(ui, b.id);
             ui.colored_label(
                 Color32::from_rgb(255, 200, 120),
-                "mesh: exact operations unavailable (no sketching on its faces, no join/cut, no STEP export). Display, hide/show, save and STL export only.",
+                "mesh: exact operations unavailable (no sketching on its faces, no join/cut, no STEP export). Display, hide/show, mesh repair/edit, save and STL/3MF export only.",
             );
         } else if !matches!(b.source, BodySource::Modeled) {
             ui.small("Supported edits: sketch on its planar faces, then Extrude New Body / Join / Cut with this body as the target; export STEP/STL.");

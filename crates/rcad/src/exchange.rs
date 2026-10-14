@@ -347,6 +347,11 @@ impl RcadApp {
                         ui.selectable_value(&mut form.unit, i, *n);
                     }
                 });
+            if fmt == Some(Format::Stl) {
+                let (n, f) = UNITS.get(form.unit).copied().unwrap_or(("mm", 1.0));
+                ui.label(format!("Interpreted as {n}: 1 file unit = {f} mm"))
+                    .probe("STL unit interpretation");
+            }
             ui.small(if fmt == Some(Format::Stl) {
                 "STL files carry no units: choose what one file unit means. The mesh is scaled to mm."
             } else {
@@ -636,6 +641,8 @@ pub struct PrintForm {
     /// STL only: one file per body.
     pub separate_files: bool,
     pub allow_open_meshes: bool,
+    /// 3MF: placement as build-item transforms (objects kept as modeled).
+    pub item_transforms: bool,
     /// Request token of the export this form waits for.
     pub pending: Option<u64>,
     /// Report of the last successful export from this dialog.
@@ -661,6 +668,7 @@ impl PrintForm {
             bed_size: ["256".into(), "256".into(), "250".into()],
             separate_files: false,
             allow_open_meshes: false,
+            item_transforms: false,
             pending: None,
             report: None,
             error: None,
@@ -736,6 +744,7 @@ impl PrintForm {
             bed,
             separate_files: self.stl && self.separate_files,
             allow_open_meshes: self.allow_open_meshes,
+            item_transforms: !self.stl && self.place && self.item_transforms,
         })
     }
 
@@ -997,10 +1006,20 @@ impl RcadApp {
         if form.stl {
             ui.checkbox(&mut form.separate_files, "One STL file per body")
                 .probe("One STL file per body");
+        } else if form.place {
+            ui.checkbox(
+                &mut form.item_transforms,
+                "Placement as 3MF item transforms",
+            )
+            .probe("Placement as 3MF item transforms")
+            .on_hover_text(
+                "Write each object as modeled and its placement (rotation + translation) as \
+                 the build item's transform, so the slicer can still move it as a unit.",
+            );
         }
         ui.checkbox(&mut form.allow_open_meshes, "Allow open reference meshes")
             .probe("Allow open reference meshes");
-        ui.small("Off: every body must export as a closed, manifold, outward solid mesh, or nothing is written. Self-intersection is not checked.");
+        ui.small("Off: every body must export as a closed, manifold, outward solid mesh, or nothing is written. Self-intersection is checked (bounded) and only warned about.");
         if !form.allow_open_meshes
             && chosen
                 .iter()
@@ -1062,7 +1081,14 @@ fn print_report_ui(ui: &mut egui::Ui, r: &ExportReport) {
                     yes(c.nonmanifold_vertices == 0 && c.nonmanifold_edges == 0),
                     yes(c.orientation_consistent && c.outward),
                     c.mesh_volume,
-                    c.self_intersection
+                    match &b.self_intersection {
+                        Some(si) => match (si.intersecting_pairs, si.complete) {
+                            (0, true) => "none found (bounded check, not a proof)".to_string(),
+                            (0, false) => "none found in a partial check".to_string(),
+                            (n, _) => format!("{n} crossing pairs"),
+                        },
+                        None => c.self_intersection.clone(),
+                    }
                 ));
                 ui.label(b.fit.as_ref().map_or("-", |f| f.detail.as_str()));
                 ui.end_row();

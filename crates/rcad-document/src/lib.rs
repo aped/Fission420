@@ -13,6 +13,7 @@ mod hole;
 pub mod import;
 mod io;
 pub mod material;
+pub mod mesh_edit;
 mod model;
 pub mod params;
 mod regen;

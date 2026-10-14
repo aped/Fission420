@@ -4,7 +4,11 @@
 //! undo history are untouched). A successful Save, or deliberately leaving the
 //! document (New/Open/Close after the unsaved-changes prompt, Quit), removes
 //! the copy; a crash leaves it, and the next start offers to open it as an
-//! unsaved document (`open_copy`) or discard it.
+//! unsaved document (`open_copy`) or discard it. A side file
+//! (`<copy>.origin`) names the saved document the copy came from; when that
+//! file was written after the copy (saved later, e.g. by another instance),
+//! the offer says the copy is older and offers the saved document instead.
+//! Opening a copy never writes to the saved document.
 //!
 //! Directory: `RCAD_RECOVERY_DIR`, else `$XDG_STATE_HOME/r-cad/recovery`,
 //! else `~/.local/state/r-cad/recovery`. Interval: `RCAD_AUTOSAVE_SECS`
@@ -121,6 +125,36 @@ pub fn find_copies(dir: &Path) -> Vec<PathBuf> {
     v.into_iter().map(|(_, p)| p).collect()
 }
 
+/// Side file next to a recovery copy naming the saved document it was
+/// copied from (absent for an untitled document).
+const ORIGIN_SUFFIX: &str = ".origin";
+
+fn origin_file(copy: &Path) -> PathBuf {
+    let mut s = copy.as_os_str().to_owned();
+    s.push(ORIGIN_SUFFIX);
+    PathBuf::from(s)
+}
+
+/// The saved document a recovery copy was made from, if recorded.
+pub fn copy_origin(copy: &Path) -> Option<PathBuf> {
+    let t = std::fs::read_to_string(origin_file(copy)).ok()?;
+    let t = t.trim();
+    (!t.is_empty()).then(|| PathBuf::from(t))
+}
+
+/// Whether the saved document `origin` was written after the recovery copy
+/// (then the copy holds older state than the file on disk).
+pub fn origin_is_newer(copy: &Path, origin: &Path) -> bool {
+    let m = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    matches!((m(copy), m(origin)), (Some(c), Some(o)) if o > c)
+}
+
+/// Remove a recovery copy and its side file.
+pub fn remove_copy(copy: &Path) {
+    let _ = std::fs::remove_file(copy);
+    let _ = std::fs::remove_file(origin_file(copy));
+}
+
 fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -219,6 +253,15 @@ impl RcadApp {
         self.autosave.last = Some((key.0, key.1, path.clone()));
         self.autosave.last_time = Some(Instant::now());
         self.autosave.dropped.retain(|d| *d != path);
+        match &self.summary.path {
+            Some(p) => {
+                let p = p.canonicalize().unwrap_or_else(|_| p.clone());
+                let _ = std::fs::write(origin_file(&path), p.display().to_string());
+            }
+            None => {
+                let _ = std::fs::remove_file(origin_file(&path));
+            }
+        }
         self.request(Command::SaveCopy { path });
     }
 
@@ -226,7 +269,7 @@ impl RcadApp {
     /// deliberately discarded): remove it.
     pub(crate) fn drop_autosave(&mut self) {
         if let Some((_, _, p)) = self.autosave.last.take() {
-            let _ = std::fs::remove_file(&p);
+            remove_copy(&p);
             if !self.autosave.dropped.contains(&p) {
                 self.autosave.dropped.push(p);
             }
@@ -237,7 +280,7 @@ impl RcadApp {
     /// A `SaveCopy` reply: a copy written after it was dropped is stale.
     pub(crate) fn autosave_written(&mut self, path: &std::path::Path) {
         if let Some(i) = self.autosave.dropped.iter().position(|d| d == path) {
-            let _ = std::fs::remove_file(path);
+            remove_copy(path);
             self.autosave.dropped.remove(i);
         }
     }
@@ -257,7 +300,7 @@ impl RcadApp {
             self.handle_reply(r);
         }
         for p in std::mem::take(&mut self.autosave.dropped) {
-            let _ = std::fs::remove_file(p);
+            remove_copy(&p);
         }
     }
 
@@ -268,6 +311,7 @@ impl RcadApp {
         }
         let mut open = None;
         let mut discard = None;
+        let mut open_saved = None;
         egui::Window::new("Recover unsaved work")
             .collapsible(false)
             .show(ctx, |ui| {
@@ -293,12 +337,42 @@ impl RcadApp {
                             discard = Some(p.clone());
                         }
                     });
+                    // The saved file changed after this copy was written (saved
+                    // later, possibly by another instance): say so, and offer
+                    // the saved file. Opening the copy never replaces it.
+                    if let Some(origin) = copy_origin(&p) {
+                        if origin_is_newer(&p, &origin) {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 200, 120),
+                                    format!(
+                                        "Newer save: {} was saved after this copy; the copy holds older work.",
+                                        origin.display()
+                                    ),
+                                );
+                                if ui
+                                    .button("Open saved document")
+                                    .probe("Open saved document")
+                                    .clicked()
+                                {
+                                    open_saved = Some((p.clone(), origin.clone()));
+                                }
+                            });
+                        } else {
+                            ui.weak(format!("Copy of {}", origin.display()));
+                        }
+                    }
                 }
                 ui.small("Open copy opens it as an unsaved document (Save asks for a path); the copy file stays until you save or discard.");
             });
         if let Some(p) = discard {
-            let _ = std::fs::remove_file(&p);
+            remove_copy(&p);
             self.autosave.offered.retain(|x| *x != p);
+        }
+        if let Some((p, origin)) = open_saved {
+            // The copy stays on disk (and on offer next start) until discarded.
+            self.autosave.offered.retain(|x| *x != p);
+            self.guarded(crate::app::Guarded::Open(origin));
         }
         if let Some(p) = open {
             self.autosave.offered.retain(|x| *x != p);

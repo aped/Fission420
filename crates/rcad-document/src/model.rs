@@ -403,6 +403,13 @@ pub enum FeatureKind {
         count: u32,
         spacing: f64,
         direction: [f64; 2],
+        /// A second direction (format v8): a rectangular `count` x
+        /// `second.count` grid, as Fusion's rectangular pattern. Instance
+        /// `i + j·count` sits at `i·spacing` along `direction` and
+        /// `j·second.spacing` along `second.direction`; the seed is (0, 0).
+        /// Parameters "count2", "spacing2".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second: Option<PatternDirection>,
     },
     /// Apply the reflection of `seed`'s tool (an Extrude Join or Cut) across
     /// `plane` (a world plane through the origin or a planar face) to the seed's
@@ -688,6 +695,17 @@ pub enum FeatureKind {
         options: rcad_exchange::mesh_repair::RepairOptions,
         body: BodyId,
     },
+    /// Mesh edit (format v8; docs/MESH.md): transform, plane cut or
+    /// decimation of mesh body `source` (`rcad_exchange::mesh_edit`) as new
+    /// body `body` (and `second_body`: the upper half of a two-sided cut);
+    /// the source is kept. Parameters depend on the operation.
+    MeshEdit {
+        source: BodyId,
+        op: rcad_exchange::mesh_edit::MeshEditOp,
+        body: BodyId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second_body: Option<BodyId>,
+    },
     /// Stitch (format v7) the faces of surface body `source` within
     /// healing `tolerance` mm into new body `body` (closed: a solid); the
     /// source body is kept. Parameter "tolerance".
@@ -866,6 +884,14 @@ pub enum DirectOp {
     ReplaceFace { distance: f64, angle: f64 },
 }
 
+/// Second direction of a rectangular [`FeatureKind::LinearPattern`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PatternDirection {
+    pub count: u32,
+    pub spacing: f64,
+    pub direction: [f64; 2],
+}
+
 /// Counterbore of a [`FeatureKind::Hole`]: a coaxial larger blind cut.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Counterbore {
@@ -969,7 +995,8 @@ impl Feature {
             | FeatureKind::SurfaceStitch { .. }
             | FeatureKind::SurfaceFill { .. }
             | FeatureKind::Thicken { .. }
-            | FeatureKind::MeshRepair { .. } => vec![],
+            | FeatureKind::MeshRepair { .. }
+            | FeatureKind::MeshEdit { .. } => vec![],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::ScaleBody { .. } => vec![],
             FeatureKind::AlignBody { from, to, .. } => vec![from.feature, to.feature],
@@ -1017,6 +1044,9 @@ impl Feature {
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
+            FeatureKind::MeshEdit {
+                body, second_body, ..
+            } => std::iter::once(*body).chain(*second_body).collect(),
             FeatureKind::Extrude { pieces, .. } => pieces.clone(),
             _ => vec![],
         };
@@ -1033,7 +1063,8 @@ impl Feature {
             FeatureKind::SurfaceStitch { source, body, .. }
             | FeatureKind::SurfaceFill { source, body, .. }
             | FeatureKind::Thicken { source, body, .. }
-            | FeatureKind::MeshRepair { source, body, .. } => Some((*source, *body)),
+            | FeatureKind::MeshRepair { source, body, .. }
+            | FeatureKind::MeshEdit { source, body, .. } => Some((*source, *body)),
             _ => None,
         }
     }
@@ -1085,7 +1116,8 @@ impl Feature {
             FeatureKind::SurfaceStitch { source, .. }
             | FeatureKind::SurfaceFill { source, .. }
             | FeatureKind::Thicken { source, .. }
-            | FeatureKind::MeshRepair { source, .. } => vec![*source],
+            | FeatureKind::MeshRepair { source, .. }
+            | FeatureKind::MeshEdit { source, .. } => vec![*source],
             _ => vec![],
         }
     }
@@ -1259,6 +1291,7 @@ impl Feature {
             FeatureKind::MeshRepair { options, .. } => {
                 vec![("weld_tolerance".into(), options.weld_tolerance)]
             }
+            FeatureKind::MeshEdit { op, .. } => crate::mesh_edit::parameters(op),
             FeatureKind::SheetFlat { .. } | FeatureKind::ImportSurfaces { .. } => vec![],
             FeatureKind::MoveBody {
                 translate, angle, ..
@@ -1304,10 +1337,22 @@ impl Feature {
                 }
                 v
             }
-            FeatureKind::LinearPattern { count, spacing, .. } => vec![
-                ("count".into(), f64::from(*count)),
-                ("spacing".into(), *spacing),
-            ],
+            FeatureKind::LinearPattern {
+                count,
+                spacing,
+                second,
+                ..
+            } => {
+                let mut v = vec![
+                    ("count".into(), f64::from(*count)),
+                    ("spacing".into(), *spacing),
+                ];
+                if let Some(s) = second {
+                    v.push(("count2".into(), f64::from(s.count)));
+                    v.push(("spacing2".into(), s.spacing));
+                }
+                v
+            }
             FeatureKind::CircularPattern { count, angle, .. } => vec![
                 ("count".into(), f64::from(*count)),
                 ("angle_deg".into(), angle.to_degrees()),
@@ -1679,6 +1724,9 @@ impl Feature {
                 }
                 Ok(())
             }
+            FeatureKind::MeshEdit { op, .. } => {
+                crate::mesh_edit::set_parameter(id, op, name, value)
+            }
             FeatureKind::MeshRepair { options, .. } if name == "weld_tolerance" => {
                 let mut o = *options;
                 o.weld_tolerance = value;
@@ -1751,6 +1799,29 @@ impl Feature {
                     )));
                 }
                 *thickness = value;
+                Ok(())
+            }
+            FeatureKind::LinearPattern {
+                second: Some(s), ..
+            } if name == "count2" => {
+                if value.fract() != 0.0 || !(1.0..=MAX_PATTERN_COUNT as f64).contains(&value) {
+                    return Err(DocError::Validation(format!(
+                        "{id}.count2: pattern count must be an integer in 1..={MAX_PATTERN_COUNT}, \
+                         got {value}"
+                    )));
+                }
+                s.count = value as u32;
+                Ok(())
+            }
+            FeatureKind::LinearPattern {
+                second: Some(s), ..
+            } if name == "spacing2" => {
+                if value <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "{id}.spacing2: pattern spacing must be > 0 mm, got {value}"
+                    )));
+                }
+                s.spacing = value;
                 Ok(())
             }
             FeatureKind::LinearPattern { spacing, .. } if name == "spacing" => {
