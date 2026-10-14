@@ -45,12 +45,14 @@ pub struct MeshEditUi {
     pub report: Option<(u64, u64, BodyId, bool, MeshEditReport)>,
     /// (doc_id, revision, inspection) of the last self-intersection check.
     pub inspection: Option<(u64, u64, MeshInspection)>,
-    pending: Option<(BodyId, bool)>,
+    pub(crate) pending: Option<(BodyId, bool)>,
     /// (body, egui pass) where the panel was last shown: the viewport preview
     /// follows the open panel only.
     shown: Option<(BodyId, u64)>,
     /// Latest egui pass seen by the viewport painter.
     pass: std::cell::Cell<u64>,
+    /// Open the inspection and edit panels on their next draw (scripted scenes).
+    pub open_panels: bool,
 }
 
 /// World-space viewport preview of a mesh edit (mm).
@@ -82,6 +84,7 @@ impl Default for MeshEditUi {
             pending: None,
             shown: None,
             pass: std::cell::Cell::new(0),
+            open_panels: false,
         }
     }
 }
@@ -187,6 +190,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Mesh inspection")
             .id_salt(("mesh_inspect", body.0))
+            .open(self.mesh_edit.open_panels.then_some(true))
             .show(ui, |ui| {
                 if let Some(d) = &diag {
                     ui.label(format!(
@@ -260,8 +264,10 @@ impl RcadApp {
     pub(crate) fn mesh_edit_ui(&mut self, ui: &mut egui::Ui, body: BodyId) {
         let (doc, rev) = (self.summary.doc_id, self.summary.revision);
         let mut send = None;
+        let force = std::mem::take(&mut self.mesh_edit.open_panels);
         let header = egui::CollapsingHeader::new("Mesh edit")
             .id_salt(("mesh_edit", body.0))
+            .open(force.then_some(true))
             .show(ui, |ui| {
                 let st = &mut self.mesh_edit;
                 st.shown = Some((body, ui.ctx().cumulative_pass_nr()));

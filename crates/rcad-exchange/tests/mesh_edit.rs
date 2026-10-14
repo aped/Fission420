@@ -245,7 +245,19 @@ fn plane_cut_caps_closed_meshes() {
     let out = cut(&m, [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], CutKeep::Below, true).unwrap();
     assert!((vol(&out[0]) - 4.0).abs() < 1e-12);
     // Oblique cut through the cube's diagonal: two halves of 4 each.
-    let out = cut(&m, [1.0, 1.0, 1.0], [1.0, 1.0, 0.3], CutKeep::Both, true).unwrap();
+    let (out, rep) = edit(
+        &m.0,
+        &m.1,
+        &MeshEditOp::PlaneCut(PlaneCut {
+            origin: [1.0, 1.0, 1.0],
+            normal: [1.0, 1.0, 0.3],
+            offset: 0.0,
+            keep: CutKeep::Both,
+            cap: true,
+        }),
+    )
+    .unwrap();
+    assert_eq!(rep.triangles_removed, 0, "both sides keep everything");
     let (a, b) = (vol(&out[0]), vol(&out[1]));
     assert!((a - 4.0).abs() < 1e-9 && (b - 4.0).abs() < 1e-9, "{a} {b}");
     // A generic plane: halves sum to the whole; each half's bounds end at the plane.
@@ -271,6 +283,8 @@ fn plane_cut_caps_closed_meshes() {
     assert!((vol(&out[0]) - 8.0 * 0.6).abs() < 1e-9);
     assert_eq!(rep.cut_loops, 2);
     assert_eq!(rep.capped_loops, 2);
+    // Keep above: the 8 bottom-face cells (16 triangles) are dropped whole.
+    assert_eq!(rep.triangles_removed, 16);
     assert!(rep.triangles_cut > 0 && rep.triangles_added > 0);
 
     // Two components cut at once.

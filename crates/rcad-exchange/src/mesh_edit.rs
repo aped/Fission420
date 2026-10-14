@@ -463,6 +463,12 @@ fn plane_cut(
         }
         out.push((p2, t2));
     }
+    if c.keep == CutKeep::Both {
+        // Every source triangle lands (whole or clipped) on one side or the
+        // other (an in-plane triangle on the side it faces away from): none is
+        // discarded.
+        report.triangles_removed = 0;
+    }
     Ok(out)
 }
 
