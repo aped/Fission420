@@ -536,3 +536,18 @@ fn ellipse_minor_radius_drags_unless_dimensioned() {
     assert_eq!(r.outcome, DragOutcome::Blocked);
     assert_eq!(s, before);
 }
+
+#[test]
+fn a_thin_ellipse_far_from_the_origin_keeps_a_tight_polyline_bound() {
+    // A long construction-free line makes the sketch scale 5000 mm; the
+    // ellipse (a 10, b 0.02) must still be a valid region on its own.
+    let mut s = Sketch::default();
+    let a = s.add_point(0.0, 0.0);
+    let b = s.add_point(5000.0, 0.0);
+    s.add_line(a, b);
+    s.construction.insert(EntityId(1));
+    s.add_ellipse([100.0, 50.0], [110.0, 50.0], 0.02).unwrap();
+    let r = s.regions().unwrap();
+    assert_eq!(r.len(), 1);
+    assert!((r[0].area - PI * 10.0 * 0.02).abs() < 1e-9, "{}", r[0].area);
+}

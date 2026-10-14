@@ -218,7 +218,7 @@ No polyline ever stands in for the geometry.
   fit-point splines (through points) are not available; this is the control-point spline.
 * **Regions**: ellipses and closed splines nest like circles (an elliptical hole in a rectangle
   is a region with one hole). Self-intersection, contact and containment tests use a polyline
-  within δ = max(1e-6 mm, 1e-5 × sketch scale) of the exact curve (convex-hull subdivision
+  within δ = max(1e-6 mm, 1e-5 × the loop's own size) of the exact curve (convex-hull subdivision
   bound); contact counts within tolerance + δ, so curves closer than δ are refused, never
   silently accepted.
 * **Templates**: `centered_ellipse` (`major_radius`, `minor_radius`, `center?`; the major axis is a
