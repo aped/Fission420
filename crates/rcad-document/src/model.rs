@@ -422,6 +422,13 @@ pub enum FeatureKind {
     /// the edge (planar faces parallel/perpendicular to it), end faces
     /// perpendicular; refused otherwise with the reason. Parameter "radius".
     Fillet { a: FaceRef, b: FaceRef, radius: f64 },
+    /// Exact solid fillet of every edge of the outer boundary loop of the
+    /// planar face `face`, `radius` mm (cylinders along lines, tori along
+    /// arcs, sphere corners where an arc radius equals `radius`, mitered
+    /// sharp line corners). Scope (`rcad_kernel::fillet_cap_loop`, ADR
+    /// 0014): the body is a straight prism under the face; refused otherwise
+    /// with the reason. Parameter "radius".
+    FilletLoop { face: FaceRef, radius: f64 },
     /// Exact loft (ADR 0008) between the closed profiles of sketches
     /// `a` and `b` on parallel planes, as new body `body`: equal-count
     /// polygons whose corresponding edges are parallel (planar sides; vertex
@@ -918,6 +925,7 @@ impl Feature {
                 }
                 v
             }
+            FeatureKind::FilletLoop { face, .. } => vec![face.feature],
             FeatureKind::Hole { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
@@ -1158,7 +1166,9 @@ impl Feature {
             }
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
             FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
-            FeatureKind::Fillet { radius, .. } => vec![("radius".into(), *radius)],
+            FeatureKind::Fillet { radius, .. } | FeatureKind::FilletLoop { radius, .. } => {
+                vec![("radius".into(), *radius)]
+            }
             FeatureKind::Shell { thickness, .. } => vec![("thickness".into(), *thickness)],
             FeatureKind::Combine { .. } => vec![],
             FeatureKind::Countersink {
@@ -1888,7 +1898,9 @@ impl Feature {
                 *diameter = value;
                 Ok(())
             }
-            FeatureKind::Fillet { radius, .. } if name == "radius" => {
+            FeatureKind::Fillet { radius, .. } | FeatureKind::FilletLoop { radius, .. }
+                if name == "radius" =>
+            {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.radius: fillet radius must be > 0 mm, got {value}"
@@ -2250,7 +2262,9 @@ impl Document {
             | FeatureKind::Mirror { seed, .. } => {
                 self.feature(*seed).ok().and_then(Feature::target_body)
             }
-            FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => self.face_body(a),
+            FeatureKind::Chamfer { a, .. }
+            | FeatureKind::Fillet { a, .. }
+            | FeatureKind::FilletLoop { face: a, .. } => self.face_body(a),
             FeatureKind::ShellFace { face, .. } | FeatureKind::AlignBody { from: face, .. } => {
                 self.face_body(face)
             }
@@ -2284,7 +2298,9 @@ impl Document {
                     | FeatureKind::Mirror { seed, .. } => {
                         return self.feature(*seed).ok()?.target_body();
                     }
-                    FeatureKind::Chamfer { a, .. } | FeatureKind::Fillet { a, .. } => {
+                    FeatureKind::Chamfer { a, .. }
+                    | FeatureKind::Fillet { a, .. }
+                    | FeatureKind::FilletLoop { face: a, .. } => {
                         return self.face_body_depth(a, depth + 1);
                     }
                     _ => {}
