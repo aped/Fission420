@@ -1,7 +1,7 @@
 [
  {"file": "p1_bracket_holes_mm.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 1, "closed": true, "volume": 22683.672678, "vol_tol": 0.0001, "bbox": [0, 0, 0, 60, 40, 10], "bbox_tol": 1e-06}, "why": "closed form 24000 - 2*pi*16*10 - pi*(49-16)*3; FreeCAD 22683.672678"},
  {"file": "p2_plate_inch.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 1, "closed": true, "volume": 11485.899877, "vol_tol": 0.0001, "bbox": [0, 0, 0, 50.8, 38.1, 6.35], "bbox_tol": 1e-06}, "why": "inch file: (0.75 - pi*0.0625*0.25) in^3 * 25.4^3; FreeCAD 11485.899877"},
- {"file": "p3_curved_multi_mm.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 3, "closed": true, "volume": 8771.067025, "vol_tol": 0.001, "bbox": [-10, -15, -10, 95, 15, 15], "bbox_tol": 1e-05}, "why": "4/3 pi 1000 + 780 pi + 216 pi^2; bbox closed form (FreeCAD's loose torus box not used)"},
+ {"file": "p3_curved_multi_mm.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 3, "closed": true, "volume": 8771.067025, "vol_tol": 0.001, "bbox": [-10, -15, -10, 95, 15, 15], "bbox_tol": 1e-05, "method": "estimate", "vol_err_max": 5.0}, "why": "4/3 pi 1000 + 780 pi + 216 pi^2; bbox closed form (FreeCAD's loose torus box not used); the sphere volume is a labelled tessellation estimate (stated error about 3.15), cone and torus exact"},
  {"file": "p4_rotated_box_mm.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 1, "closed": true, "volume": 6000, "vol_tol": 1e-06, "bbox": [100.0, 46.464466, 14.393398, 132.865661, 70.669873, 40.731322], "bbox_tol": 1e-05}, "why": "30x20x10 box; bbox = FreeCAD (vertices only)"},
  {"file": "p5_stepped_shaft_mm.step", "import": {"cmd": "import_step"}, "expect": {"bodies": 1, "closed": true, "volume": 11686.724671, "vol_tol": 0.0001, "bbox": [-10, -10, 0, 10, 10, 50], "bbox_tol": 1e-06}, "why": "pi*(100*30 + 36*20)"},
  {"file": "p6_open_shell_mm.step", "import": {"cmd": "import_step"}, "expect": {"error": "import_surfaces"}, "why": "surface model only: not a solid"},
@@ -23,9 +23,9 @@
  {"file": "h4_spline_unsupported.dxf", "import": {"cmd": "import_dxf", "plane": "WorldXY"}, "expect": {"error": "SPLINE"}, "why": "unsupported entity refused, nothing imported"},
  {"file": "h4_spline_unsupported.dxf", "import": {"cmd": "import_dxf", "plane": "WorldXY", "allow_partial": true}, "expect": {"sketch_entities": 1}, "why": "partial import keeps the line and reports the SPLINE"},
  {"file": "h5_shapes_mm.svg", "import": {"cmd": "import_svg", "plane": "WorldXY"}, "expect": {"sketch_entities": 7, "sketch_max": [90, 0]}, "why": "rect (4) + circle + path line + arc; 100 x 50 mm viewBox; sketch = (x, -y) so all geometry has y <= -5 and the max y is the sketch origin point (0, 0); max x = path end 90"},
- {"file": "x1_truncated.step", "import": {"cmd": "import_step"}, "expect": {"error": ""}, "why": "truncated"},
- {"file": "x2_bad_count.stl", "import": {"cmd": "import_stl", "units_to_mm": 1.0}, "expect": {"error": ""}, "why": "triangle count beyond the data"},
- {"file": "x3_truncated.3mf", "import": {"cmd": "import_3mf"}, "expect": {"error": ""}, "why": "truncated zip"},
- {"file": "x4_garbage.dxf", "import": {"cmd": "import_dxf", "plane": "WorldXY"}, "expect": {"error": ""}, "why": "non-numeric coordinate"},
- {"file": "x5_unclosed.svg", "import": {"cmd": "import_svg", "plane": "WorldXY"}, "expect": {"error": ""}, "why": "unclosed XML"}
+ {"file": "x1_truncated.step", "import": {"cmd": "import_step"}, "expect": {"error": "syntax error"}, "why": "truncated"},
+ {"file": "x2_bad_count.stl", "import": {"cmd": "import_stl", "units_to_mm": 1.0}, "expect": {"error": "truncated input"}, "why": "triangle count beyond the data"},
+ {"file": "x3_truncated.3mf", "import": {"cmd": "import_3mf"}, "expect": {"error": "truncated input"}, "why": "truncated zip"},
+ {"file": "x4_garbage.dxf", "import": {"cmd": "import_dxf", "plane": "WorldXY", "units_to_mm": 1.0}, "expect": {"error": "malformed input"}, "why": "non-numeric coordinate"},
+ {"file": "x5_unclosed.svg", "import": {"cmd": "import_svg", "plane": "WorldXY", "units_to_mm": 1.0}, "expect": {"error": "malformed input"}, "why": "unclosed XML"}
 ]

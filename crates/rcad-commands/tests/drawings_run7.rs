@@ -825,13 +825,8 @@ fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
     assert!(r.drawing_report.as_ref().unwrap().issues.is_empty());
     // Roll back to after the plate: the screw's body is not evaluated.
     let r0 = s.execute(&json(serde_json::json!({"cmd": "set_rollback", "at": 2})));
-    if !r0.ok {
-        eprintln!("rollback refused: {:?}", r0.error);
-        // The assembly refuses the rollback outright: equally safe (nothing
-        // silently disappears).
-        assert!(format!("{:?}", r0.error).contains("B2"), "{:?}", r0.error);
-        return;
-    }
+    // Review round 2 #51(a): the precondition must hold (no early pass).
+    assert!(r0.ok, "rollback refused: {:?}", r0.error);
     let (r, _) = export(&mut s, d, "rollback_1.svg");
     let issues = &r.drawing_report.as_ref().unwrap().issues;
     assert!(

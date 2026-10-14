@@ -509,4 +509,35 @@ fn ray_crossing_winding_matches_the_exact_sum() {
         }
     }
     assert!(fast > 3000 && agree > 3000, "fast {fast}, compared {agree}");
+    // Review round 2 #51(e): rays through mesh vertices and edge midpoints
+    // (probes on the vertex's y/z line, 1 mm before it in x) must fall back
+    // or agree.
+    let (mut agreed, mut fell_back) = (0, 0);
+    for t in m.triangles.iter().step_by(7) {
+        let [a, b, _] = t.map(|i| m.positions[i as usize]);
+        for q in [
+            a,
+            [
+                (a[0] + b[0]) / 2.0,
+                (a[1] + b[1]) / 2.0,
+                (a[2] + b[2]) / 2.0,
+            ],
+        ] {
+            let p = [q[0] - 1.0, q[1], q[2]];
+            let exact = w.brute(p);
+            if !((exact - 1.0).abs() < 0.1 || exact.abs() < 0.1) {
+                continue; // not decisive (p on a surface)
+            }
+            let Some(g) = &w.grid else { continue };
+            match w.crossings(g, p) {
+                Some(c) => {
+                    assert_eq!(c, exact.round(), "vertex-aimed probe {p:?}");
+                    agreed += 1;
+                }
+                None => fell_back += 1,
+            }
+        }
+    }
+    // Rays through vertices/edges are detected and use the exact sum.
+    assert!(fell_back > 0, "no grazing ray detected ({agreed} agreed)");
 }
