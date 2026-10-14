@@ -79,3 +79,10 @@ and validating with the same boolean is not independent.
   direction), so the nominal tool never includes material behind the face.
 * Pocket/flush cases that Truck cannot build (cutter walls coplanar with outer walls) remain
   refusals (`ProductLimit` / kernel error), never wrong geometry.
+
+### Amendment: target-face probes near curved tool walls
+The probes on target faces near the tools (checked against the result's own winding number)
+are not classified within `h_curved` (three times the check chord) of a tool wall: the result's
+mesh of a curved tool wall is only chord-accurate, so a probe closer than that could disagree
+with the exact tool test without any defect. Seen on a second through hole whose top point lay
+on a large target triangle's centroid (test `second_hole_through_a_thin_wall_is_accepted_in_either_order`).

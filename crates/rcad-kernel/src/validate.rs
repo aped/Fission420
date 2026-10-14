@@ -782,10 +782,10 @@ fn check_faces(
     };
     // Union of the tools: inside any → inside; ambiguous near one and not
     // inside another → unclassified.
-    let in_tools = |p: [f64; 3]| -> Option<bool> {
+    let in_tools_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
         let mut unknown = false;
         for t in &tests {
-            match t.classify(p, eps_tool) {
+            match t.classify(p, eps) {
                 Some(true) => return Some(true),
                 Some(false) => {}
                 None => unknown = true,
@@ -793,14 +793,15 @@ fn check_faces(
         }
         (!unknown).then_some(false)
     };
-    let expected = |p: [f64; 3]| -> Option<bool> {
-        let in_tool = in_tools(p)?;
+    let expected_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
+        let in_tool = in_tools_eps(p, eps)?;
         match (op, in_tool) {
             (PrismOp::Join, true) => Some(true),
             (PrismOp::Cut, true) => Some(false),
             _ => wind.classify(p),
         }
     };
+    let expected = |p: [f64; 3]| expected_eps(p, eps_tool);
     // Per face: the triangles (largest first) to probe.
     let nfaces = planar.len();
     let mut by_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); nfaces];
@@ -933,7 +934,11 @@ fn check_faces(
                     centroid[1] + sgn * h * n[1],
                     centroid[2] + sgn * h * n[2],
                 ];
-                match (expected(p), rwind.classify(p)) {
+                // A target face may cross the tool's wall: probes within the
+                // tessellation's chord error of a curved tool wall (h_curved)
+                // are not classified, as the result's mesh of that wall is
+                // only that accurate.
+                match (expected_eps(p, eps_tool.max(h_curved)), rwind.classify(p)) {
                     (Some(e), Some(r)) if e != r => {
                         return Err(KernelError::InvalidResult(format!(
                             "result check: beside a face of the target near {} the result has {} \
