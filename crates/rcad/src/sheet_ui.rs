@@ -109,7 +109,7 @@ fn relief_combo(
     id: impl std::hash::Hash + std::fmt::Debug,
     r: &mut ReliefShape,
 ) {
-    egui::ComboBox::from_id_salt(id)
+    egui::ComboBox::new(id, "Relief shape")
         .selected_text(match r {
             ReliefShape::Rectangular => "Rectangular relief",
             ReliefShape::Obround => "Obround relief",
@@ -278,12 +278,9 @@ impl RcadApp {
         let form = &mut self.sheet_surface;
         if form.rule_for != Some((base, rev)) {
             form.rule_for = Some((base, rev));
-            // Review S8: the relief shape of this base (from its rule note).
-            form.loaded_relief = if bf.notes.iter().any(|n| n.contains("Obround relief")) {
-                ReliefShape::Obround
-            } else {
-                ReliefShape::Rectangular
-            };
+            // Review S8 / run 7 #49: the relief shape of this base, from
+            // its rule in the summary (not from note text).
+            form.loaded_relief = bf.sheet_relief.unwrap_or_default();
             form.edit_relief = form.loaded_relief;
             for (i, n) in [
                 "thickness",

@@ -328,3 +328,68 @@ fn extrude_surface_reverse_from_the_sketch_inspector() {
         "{bb:?}"
     );
 }
+
+/// Review run 7 #49: the rule editor loads the base's relief shape from the
+/// summary, not from its regeneration note. A rolled-back base has no notes;
+/// switching its Obround relief to Rectangular must still be sent.
+#[test]
+fn rule_editor_loads_the_relief_without_notes() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 60.0,
+            height: 40.0,
+            center: Some([30.0, 20.0]),
+        },
+    });
+    settle(&mut h);
+    let sk = h.state().summary().features[0].id;
+    h.state_mut().request(Command::SheetBase(
+        rcad_commands::sheet_surface::SheetBaseArgs {
+            name: None,
+            sketch: sk,
+            thickness: 1.0,
+            radius: 1.0,
+            k_factor: 0.44,
+            relief: rcad_document::sheet::ReliefShape::Obround,
+            relief_width: Some(2.0),
+            relief_depth: Some(2.0),
+            flip: false,
+            body_name: None,
+        },
+    ));
+    settle(&mut h);
+    h.state_mut().request(Command::SetRollback { at: Some(sk) });
+    settle(&mut h);
+    let relief = |h: &Harness<'_, RcadApp>| {
+        let f = h
+            .state()
+            .summary()
+            .features
+            .iter()
+            .find(|f| f.kind == "sheet_base")
+            .unwrap()
+            .clone();
+        assert!(
+            f.rolled_back && !f.notes.iter().any(|n| n.contains("relief")),
+            "{:?}",
+            f.notes
+        );
+        f.sheet_relief
+    };
+    assert_eq!(relief(&h), Some(rcad_document::sheet::ReliefShape::Obround));
+    let base = feature_name(&h, "sheet_base");
+    click(&mut h, &base);
+    h.get_by_role_and_label(Role::ComboBox, "Relief shape")
+        .click();
+    settle(&mut h);
+    click(&mut h, "Rectangular relief");
+    click(&mut h, "Apply rule");
+    assert_eq!(
+        relief(&h),
+        Some(rcad_document::sheet::ReliefShape::Rectangular)
+    );
+}
