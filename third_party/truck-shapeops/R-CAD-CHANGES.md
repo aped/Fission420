@@ -15,3 +15,14 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
 - `src/lib.rs`: `#![cfg_attr(not(debug_assertions), deny(warnings))]` and `clippy::all` removed from
   the deny list, `dead_code` allowed. Registry dependencies build with capped lints; a path
   dependency does not, and rustc 1.99 reports the unused `Alternative` enum. No code change.
+- `Cargo.toml`: empty `[workspace]` so `cargo test` inside the crate does not attach to an enclosing
+  workspace.
+- `src/transversal/integrate`: ricosjp/truck PR #134 (open, unmerged), ported to 0.4.0. Faces untouched
+  by intersection curves are classified against orientation-applied polygons, with threshold 0 for an
+  inverted (difference) operand and a 3-ray majority. Its two tests are included. On 0.4 the test
+  helper asserts closedness on the topology, because 0.4's tessellation does not weld every seam
+  (`Oriented` mesh for a correct closed solid). Fixes: a revolved ring cut entirely inside a block
+  panicked ("This shell is not oriented and closed"). It now gives the block plus a void shell, with
+  volume within 1.3e-6 of 48000 - 160π.
+- Known pre-existing failure: `healing::tests::step_import` reads a fixture that is not in the
+  crates.io package (fails identically on the verbatim crate).

@@ -76,3 +76,6 @@ step-test = ["truck-stepio"]
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies.getrandom]
 version = "0.2.15"
 features = ["js"]
+
+# R-CAD fork: standalone root, so `cargo test` here does not attach to an enclosing workspace.
+[workspace]
