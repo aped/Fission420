@@ -1036,6 +1036,13 @@ fn regen_impl(
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
+            FeatureKind::FilletLoop { face, radius } => {
+                let fa = resolve_face(id, face, &st)?;
+                let body = brep_target(&st, id, fa.body)?;
+                let out = k::fillet_cap_loop(&body, &fa.frame, *radius).map_err(kernel(id))?;
+                replace_body(&mut st, id, fa.body, out);
+                r.body = Some(fa.body);
+            }
             FeatureKind::Hole {
                 plane,
                 center,

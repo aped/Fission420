@@ -159,6 +159,11 @@ pub(crate) enum Dialog {
         /// An exact solid fillet of the edge (`distance` = radius).
         fillet: bool,
     },
+    /// Exact solid fillet of every edge of the face's outer loop.
+    FilletLoop {
+        face: rcad_document::FaceRef,
+        radius: String,
+    },
     /// Start a sketch on an offset construction plane (world plane or the
     /// face selected when the dialog opened, moved along its normal).
     OffsetPlane {
@@ -211,6 +216,7 @@ impl Dialog {
             Dialog::Pattern { .. } => "Pattern / mirror",
             Dialog::Chamfer { fillet: true, .. } => "Fillet edge",
             Dialog::Chamfer { .. } => "Chamfer edge",
+            Dialog::FilletLoop { .. } => "Fillet edge loop",
             Dialog::Hole { .. } => "Hole",
             Dialog::Shell { .. } => "Shell (scoped)",
             Dialog::OffsetPlane { .. } => "Sketch on offset plane",
@@ -1372,7 +1378,9 @@ impl RcadApp {
             Dialog::CircleOnFace { extrude, .. } => (extrude.iter().copied().collect(), vec![]),
             Dialog::ExportDxf { sketch, .. } => (sketch.iter().copied().collect(), vec![]),
             Dialog::Pattern { feature, .. } => (vec![*feature], vec![]),
-            Dialog::Hole { face, .. } => (vec![face.feature], vec![]),
+            Dialog::Hole { face, .. } | Dialog::FilletLoop { face, .. } => {
+                (vec![face.feature], vec![])
+            }
             Dialog::DirectEdit(f) => (f.refs(), vec![]),
             Dialog::Shell { extrude, .. } => (vec![*extrude], vec![]),
             Dialog::OffsetPlane { face, .. } => {
@@ -2515,6 +2523,11 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             a: *a,
             b: b.ok_or_else(|| "choose the second face of the edge".to_string())?,
             radius: parse_num("radius", distance)?,
+        },
+        Dialog::FilletLoop { face, radius } => Command::FilletLoop {
+            name: None,
+            face: *face,
+            radius: parse_num("radius", radius)?,
         },
         Dialog::Chamfer { a, b, distance, .. } => Command::Chamfer {
             name: None,

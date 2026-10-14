@@ -14,6 +14,9 @@
 //! faces, and the cut must remove exactly the corner region along the edge
 //! (no other feature within reach). The result also passes the independent
 //! result check (ADR 0005).
+mod cap;
+pub use cap::fillet_cap_loop;
+
 use crate::chamfer::{ConvexEdge, on_face, straight_edge};
 use crate::ops::through_all_margin;
 use crate::prismatic::{SlabOp, not_applicable, prism_boolean};

@@ -214,6 +214,18 @@ pub enum Command {
         b: FaceRef,
         radius: f64,
     },
+    /// Exact solid fillet of every edge of the outer boundary loop of the
+    /// planar face `face` (semantic reference), `radius` mm: cylinders along
+    /// lines, tori along arcs, sphere corners where an arc radius equals
+    /// the radius, mitered sharp line corners. The body must be a straight
+    /// prism under the face (ADR 0014); refused otherwise with the reason.
+    /// Parameter `radius`.
+    FilletLoop {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        radius: f64,
+    },
     /// Direct edit (ADR 0010) of an imported STEP body at imported face
     /// `face` (`FaceRole::Imported`, stable import index; see
     /// [`Command::ImportedFaces`]): offset a planar face, resize or remove the
@@ -1214,6 +1226,7 @@ impl Command {
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
+            Command::FilletLoop { .. } => "fillet_loop",
             Command::DirectEdit { .. } => "direct_edit",
             Command::Countersink { .. } => "countersink",
             Command::Thread { .. } => "thread",
@@ -2176,6 +2189,19 @@ impl Session {
                 let id = self.model_mut()?.transact("Fillet", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Fillet"));
                     Ok(d.push(n, FeatureKind::Fillet { a, b, radius }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::FilletLoop { name, face, radius } => {
+                let (name, face, radius) = (name.clone(), *face, *radius);
+                if !radius.is_finite() || radius <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "fillet radius must be > 0 mm, got {radius}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Fillet loop", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Fillet"));
+                    Ok(d.push(n, FeatureKind::FilletLoop { face, radius }))
                 })?;
                 r.feature = Some(id);
             }
@@ -4201,6 +4227,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
                 FeatureKind::Fillet { .. } => ("fillet", None),
+                FeatureKind::FilletLoop { .. } => ("fillet_loop", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),

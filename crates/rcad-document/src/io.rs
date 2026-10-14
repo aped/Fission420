@@ -363,8 +363,10 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
 
 /// v8 edge-finishing additions (fillets, ...).
 fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
-    let _ = doc;
-    None
+    doc.features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::FilletLoop { .. }))
+        .then_some("face edge-loop fillets")
 }
 
 /// v8 mesh and print additions.

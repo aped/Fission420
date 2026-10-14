@@ -993,6 +993,17 @@ impl RcadApp {
                             fillet: true,
                         });
                     }
+                    if ui
+                        .button("Fillet edge loop…")
+                        .probe("Fillet edge loop…")
+                        .on_hover_text("Round every edge around this face's outer boundary (e.g. the top edge of a box or rounded rectangle) with exact cylinders, tori and sphere corners")
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::FilletLoop {
+                            face: r,
+                            radius: "2".into(),
+                        });
+                    }
                 }
                 (None, Some(why)) => {
                     ui.add_enabled(false, egui::Button::new("Create Sketch on this face"))
@@ -2131,6 +2142,10 @@ impl RcadApp {
                             num_field(ui, "Chamfer distance (mm)", distance);
                             ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
                         }
+                    }
+                    Dialog::FilletLoop { radius, .. } => {
+                        num_field(ui, "Fillet radius (mm)", radius);
+                        ui.small("Exact solid fillet of every edge of this face's outer boundary: cylinders along straight edges, tori along arcs, a sphere corner where a rounded corner's radius equals this radius, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (radius larger than a rounded corner, a hole within reach, the loop already filleted).");
                     }
                     Dialog::Pattern {
                         feature,
