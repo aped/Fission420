@@ -1444,9 +1444,12 @@ impl RcadApp {
                     matches!(c, rcad_sketch::Constraint::Angle { dim, .. } if dim.name == pname)
                 })
                 });
+            let mesh_edit = fsum.as_ref().is_some_and(|f| f.kind == "mesh_edit");
             if angle_dim || pname.ends_with("_deg") {
                 "deg"
-            } else if pname == "count" {
+            } else if mesh_edit && matches!(pname, "sx" | "sy" | "sz") {
+                "ratio"
+            } else if pname == "count" || (mesh_edit && pname == "target_triangles") {
                 "count"
             } else if pname == "k_factor" {
                 "ratio"

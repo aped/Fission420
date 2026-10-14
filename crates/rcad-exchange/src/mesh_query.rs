@@ -13,6 +13,10 @@ use std::collections::HashMap;
 
 /// Upper bound on grid cells (memory bound for [`TriGrid`]).
 pub const MAX_GRID_CELLS: usize = 4_000_000;
+/// Upper bound on (triangle, cell) registrations: a mix of tiny and huge
+/// triangles coarsens the grid instead of registering a huge triangle in
+/// millions of cells.
+pub const MAX_GRID_REGISTRATIONS: u64 = 64_000_000;
 
 pub(crate) fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -110,9 +114,26 @@ impl TriGrid {
             .sum::<f64>()
             / tris.len() as f64;
         let mut cell = mean.max(diag * 1e-6);
+        // Registrations of every triangle's bounding box for a cell size.
+        let registrations = |cell: f64| -> u64 {
+            tris.iter()
+                .map(|t| {
+                    let [a, b, c] = t.map(|i| pos[i as usize]);
+                    (0..3)
+                        .map(|k| {
+                            let lo_c = ((a[k].min(b[k]).min(c[k]) - lo[k]) / cell).floor();
+                            let hi_c = ((a[k].max(b[k]).max(c[k]) - lo[k]) / cell).floor();
+                            (hi_c - lo_c).max(0.0) as u64 + 1
+                        })
+                        .fold(1u64, |p, n| p.saturating_mul(n))
+                })
+                .fold(0u64, |s, n| s.saturating_add(n))
+        };
         loop {
             let d = ext.map(|e| ((e / cell).floor() as usize + 1).max(1));
-            if d[0].saturating_mul(d[1]).saturating_mul(d[2]) <= MAX_GRID_CELLS {
+            if d[0].saturating_mul(d[1]).saturating_mul(d[2]) <= MAX_GRID_CELLS
+                && registrations(cell) <= MAX_GRID_REGISTRATIONS
+            {
                 break;
             }
             cell *= 1.5;
@@ -457,6 +478,31 @@ mod tests {
         // Coplanar, sharing only an edge.
         let z = [[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [2.0, 2.0, 0.0]];
         assert!(!triangles_cross(t, z, 1e-9));
+    }
+
+    #[test]
+    fn grid_registrations_are_bounded() {
+        // 216 000 tiny triangles filling a 10 mm cube make the cells small;
+        // 300 sloped triangles each span the whole cube. Unbounded, each
+        // would be registered in every one of ~4 M cells (~1.2 G entries).
+        let mut pos = vec![];
+        let mut tris = vec![];
+        for i in 0..216_000u32 {
+            let (x, y, z) = (i % 60, (i / 60) % 60, i / 3600);
+            let p = [f64::from(x), f64::from(y), f64::from(z)].map(|v| v / 6.0);
+            let b = pos.len() as u32;
+            pos.extend([p, [p[0] + 0.01, p[1], p[2]], [p[0], p[1] + 0.01, p[2]]]);
+            tris.push([b, b + 1, b + 2]);
+        }
+        for k in 0..300 {
+            let b = pos.len() as u32;
+            let e = 1e-3 * f64::from(k);
+            pos.extend([[0.0, 0.0, e], [10.0, 0.0, 10.0], [0.0, 10.0, 10.0 - e]]);
+            tris.push([b, b + 1, b + 2]);
+        }
+        let g = TriGrid::new(&pos, &tris).unwrap();
+        assert!((g.items.len() as u64) <= MAX_GRID_REGISTRATIONS);
+        assert!(g.cell_count() <= MAX_GRID_CELLS);
     }
 
     #[test]

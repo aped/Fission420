@@ -446,3 +446,38 @@ fn self_intersection_budget_counts_skipped_pairs() {
     assert!(r.pairs_tested <= r.pairs_visited);
     assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
 }
+
+/// An inside-out closed mesh is refused for a capped cut with a clear reason
+/// (not "orientation is inconsistent"); a two-sided cut counts each clipped
+/// triangle once.
+#[test]
+fn capped_cut_refuses_inside_out_meshes_and_counts_once() {
+    let (p, t) = voxels(&block(2, 2, 2));
+    let inv: Vec<[u32; 3]> = t.iter().map(|f| [f[0], f[2], f[1]]).collect();
+    let e = cut(
+        &(p.clone(), inv),
+        [0.0, 0.0, 0.5],
+        [0.0, 0.0, 1.0],
+        CutKeep::Below,
+        true,
+    )
+    .unwrap_err();
+    assert!(e.contains("inside out"), "{e}");
+    let one = |keep| {
+        edit(
+            &p,
+            &t,
+            &MeshEditOp::PlaneCut(PlaneCut {
+                origin: [0.0, 0.0, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                offset: 0.0,
+                keep,
+                cap: true,
+            }),
+        )
+        .unwrap()
+        .1
+        .triangles_cut
+    };
+    assert_eq!(one(CutKeep::Both), one(CutKeep::Below));
+}

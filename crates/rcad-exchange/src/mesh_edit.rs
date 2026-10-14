@@ -416,6 +416,13 @@ fn plane_cut(
             "the plane does not cut the mesh (every vertex is on one side or on the plane)".into(),
         );
     }
+    if c.cap && closed && report.before.signed_volume.is_some_and(|v| v < 0.0) {
+        return Err(
+            "the mesh is inside out (negative enclosed volume): orient it outward first (mesh \
+             repair) before a capped cut"
+                .into(),
+        );
+    }
     if c.cap && !closed {
         report
             .notes
@@ -427,9 +434,12 @@ fn plane_cut(
         CutKeep::Both => vec![1.0, -1.0],
     };
     let mut out = vec![];
-    for s in sides {
+    for (k, s) in sides.into_iter().enumerate() {
         let (mut p2, mut t2, on_plane, cut, dropped) = clip(pos, tris, &d, s, n);
-        report.triangles_cut += cut;
+        // A source triangle clipped on both sides is one clipped triangle.
+        if k == 0 {
+            report.triangles_cut += cut;
+        }
         report.triangles_removed += dropped;
         let (loops, open_off_plane) = cut_loops(&t2, &on_plane);
         report.cut_loops += loops.len();
@@ -827,21 +837,15 @@ fn ear_clip(poly: &[u32], p2: &impl Fn(u32) -> [f64; 2]) -> Result<Vec<[u32; 3]>
             break;
         }
         if !clipped {
-            // Remove a collinear vertex (zero-area ear) if any, else fail.
-            let m = idx.len();
-            let flat = (0..m).find(|&k| {
-                orient2(p2(idx[(k + m - 1) % m]), p2(idx[k]), p2(idx[(k + 1) % m])) == 0.0
-            });
-            match flat {
-                Some(k) => {
-                    idx.remove(k);
-                }
-                None => return Err("no ear found while capping (self-touching outline)".into()),
-            }
+            // Dropping a vertex here would leave a T-junction (the cap would
+            // not close the mesh): refuse instead.
+            return Err("no ear found while capping (degenerate or self-touching outline)".into());
         }
     }
     if orient2(p2(idx[0]), p2(idx[1]), p2(idx[2])) > 0.0 {
         out.push([idx[0], idx[1], idx[2]]);
+    } else {
+        return Err("the cap's last triangle is degenerate (collinear outline)".into());
     }
     Ok(out)
 }
