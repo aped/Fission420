@@ -1047,17 +1047,35 @@ fn regen_impl(
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
-            FeatureKind::FilletLoop { face, radius } => {
+            FeatureKind::FilletLoop {
+                face,
+                radius,
+                holes,
+            } => {
                 let fa = resolve_face(id, face, &st)?;
                 let body = brep_target(&st, id, fa.body)?;
-                let out = k::fillet_cap_loop(&body, &fa.frame, *radius).map_err(kernel(id))?;
+                let out = if *holes {
+                    k::fillet_cap_face_edges(&body, &fa.frame, *radius)
+                } else {
+                    k::fillet_cap_loop(&body, &fa.frame, *radius)
+                }
+                .map_err(kernel(id))?;
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
-            FeatureKind::ChamferLoop { face, distance } => {
+            FeatureKind::ChamferLoop {
+                face,
+                distance,
+                holes,
+            } => {
                 let fa = resolve_face(id, face, &st)?;
                 let body = brep_target(&st, id, fa.body)?;
-                let out = k::chamfer_cap_loop(&body, &fa.frame, *distance).map_err(kernel(id))?;
+                let out = if *holes {
+                    k::chamfer_cap_face_edges(&body, &fa.frame, *distance)
+                } else {
+                    k::chamfer_cap_loop(&body, &fa.frame, *distance)
+                }
+                .map_err(kernel(id))?;
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }

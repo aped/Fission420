@@ -424,3 +424,54 @@ fn shelled_enclosure_rim_and_base_loops() {
     assert!(!set(&mut s, 7, "thickness", 1.2).ok);
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+#[test]
+fn face_edges_with_holes_through_the_command_path() {
+    // 40 × 30 × 10 plate with a centred Ø10 through hole; chamfer every edge
+    // of the top face (d 1): the box loop and a countersink-like ring at the
+    // hole, 2π (R + d/3) d²/2 (Pappus). Then switch it to a fillet r 1.5.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 40.0, "height": 30.0, "center": [20.0, 15.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+        json!({"cmd": "create_sketch", "plane": {"Face": top()},
+               "template": "centered_circle", "diameter": 10.0, "center": [20.0, 15.0]}),
+        json!({"cmd": "cut_through_all", "sketch": 3}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let plate = 12000.0 - PI * 25.0 * 10.0;
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "chamfer_loop", "face": top(), "distance": 1.0, "holes": true}),
+    );
+    let want = plate - (0.5 * 140.0 - 8.0 / 6.0) - 2.0 * PI * (5.0 + 1.0 / 3.0) * 0.5;
+    assert!(
+        (exact_volume(&s) - want).abs() < 1e-9 * want,
+        "{} vs {want}",
+        exact_volume(&s)
+    );
+    // Saved with the option; reopened identically.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("holes.rcad.json");
+    tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\"holes\": true") || text.contains("\"holes\":true"));
+    let mut s2 = Session::new();
+    tray::ok(&mut s2, &json!({"cmd": "open", "path": path}));
+    assert_eq!(
+        s2.model().unwrap().document(),
+        s.model().unwrap().document()
+    );
+    // Upstream: a larger hole (Ø12); the ring follows.
+    assert!(set(&mut s, 3, "diameter", 12.0).ok);
+    let plate = 12000.0 - PI * 36.0 * 10.0;
+    let want = plate - (0.5 * 140.0 - 8.0 / 6.0) - 2.0 * PI * (6.0 + 1.0 / 3.0) * 0.5;
+    assert!(
+        (exact_volume(&s) - want).abs() < 1e-9 * want,
+        "{} vs {want}",
+        exact_volume(&s)
+    );
+}

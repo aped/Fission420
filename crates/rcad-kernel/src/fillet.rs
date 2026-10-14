@@ -15,7 +15,7 @@
 //! (no other feature within reach). The result also passes the independent
 //! result check (ADR 0005).
 mod cap;
-pub use cap::{chamfer_cap_loop, fillet_cap_loop};
+pub use cap::{chamfer_cap_face_edges, chamfer_cap_loop, fillet_cap_face_edges, fillet_cap_loop};
 
 use crate::chamfer::{ConvexEdge, on_face, straight_edge};
 use crate::ops::through_all_margin;

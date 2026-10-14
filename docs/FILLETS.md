@@ -29,7 +29,7 @@ Supported bodies:
   four-sided faces, with nothing else within r of both the face and the loop. Examples are
   an open enclosure (rim loop or base loop, with the cavity kept) and a plate pocketed from
   the other side. Only the face and those walls are rebuilt; the other faces are kept as
-  they are. Arcs of the loop may sweep at most 120° on such bodies.
+  they are.
 
 Supported loops:
 - loops of lines and circular arcs whose junctions are tangent, or are sharp corners
@@ -80,3 +80,13 @@ The result's faces include tori about several axes, spheres and cones, so the vo
 mass properties are computed by the parametric boundary integral
 (`BrepBoundaryIntegralParametric`, docs/TOLERANCES.md). It matches the closed forms
 to 1e-9 relative.
+
+### Hole edges
+With `holes: true` ("Include hole edges" in the dialog), the loop of every hole in the face
+is blended too, so every edge of the face is rounded or chamfered, as when a face is selected
+in Fusion. A hole's rim is traversed with the material on its left, which makes its arcs
+concave: they get tori of major radius R + r, or for a chamfer a countersink-like cone. The
+removed volume around a round hole of radius R is 2π (A R + M). Hole walls must run straight
+down like the outer walls, and bands of different loops must stay at least 2r apart.
+Kept walls of a general body are trimmed on their own surface, so a cut hole whose wall
+faces span more than 120° (e.g. two half-cylinders) is supported.

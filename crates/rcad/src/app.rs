@@ -169,6 +169,8 @@ pub(crate) enum Dialog {
         face: rcad_document::FaceRef,
         radius: String,
         chamfer: bool,
+        /// Also the edges of the face's holes.
+        holes: bool,
     },
     /// Start a sketch on an offset construction plane (world plane or the
     /// face selected when the dialog opened, moved along its normal).
@@ -2586,15 +2588,23 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             face,
             radius,
             chamfer: true,
+            holes,
         } => Command::ChamferLoop {
             name: None,
             face: *face,
             distance: parse_num("distance", radius)?,
+            holes: *holes,
         },
-        Dialog::FilletLoop { face, radius, .. } => Command::FilletLoop {
+        Dialog::FilletLoop {
+            face,
+            radius,
+            holes,
+            ..
+        } => Command::FilletLoop {
             name: None,
             face: *face,
             radius: parse_num("radius", radius)?,
+            holes: *holes,
         },
         Dialog::Chamfer { a, b, distance, .. } => Command::Chamfer {
             name: None,

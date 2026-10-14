@@ -444,14 +444,25 @@ pub enum FeatureKind {
     /// arcs, sphere corners where an arc radius equals `radius`, mitered
     /// sharp line corners). Scope (`rcad_kernel::fillet_cap_loop`, ADR
     /// 0014): the body is a straight prism under the face; refused otherwise
-    /// with the reason. Parameter "radius".
-    FilletLoop { face: FaceRef, radius: f64 },
+    /// with the reason. Parameter "radius". With `holes`, the loops of the
+    /// face's holes are rounded too (every edge of the face).
+    FilletLoop {
+        face: FaceRef,
+        radius: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        holes: bool,
+    },
     /// Equal-distance chamfer (`distance` mm along both faces) of every edge
     /// of the outer boundary loop of the planar face `face`: 45° planes along
     /// lines, cones along arcs, straight miters at sharp corners
     /// (`rcad_kernel::chamfer_cap_loop`, ADR 0014; same scope as
     /// [`FeatureKind::FilletLoop`]). Parameter "distance".
-    ChamferLoop { face: FaceRef, distance: f64 },
+    ChamferLoop {
+        face: FaceRef,
+        distance: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        holes: bool,
+    },
     /// Exact loft (ADR 0008) between the closed profiles of sketches
     /// `a` and `b` on parallel planes, as new body `body`: equal-count
     /// polygons whose corresponding edges are parallel (planar sides; vertex

@@ -1019,6 +1019,7 @@ impl RcadApp {
                             face: r,
                             radius: "2".into(),
                             chamfer: false,
+                            holes: false,
                         });
                     }
                     if ui
@@ -1031,6 +1032,7 @@ impl RcadApp {
                             face: r,
                             radius: "1".into(),
                             chamfer: true,
+                            holes: false,
                         });
                     }
                 }
@@ -2200,13 +2202,18 @@ impl RcadApp {
                     Dialog::FilletLoop {
                         radius,
                         chamfer: true,
+                        holes,
                         ..
                     } => {
                         num_field(ui, "Chamfer distance (mm)", radius);
+                        ui.checkbox(holes, "Include hole edges")
+                            .probe("Include hole edges");
                         ui.small("Equal-distance chamfer of every edge of this face's outer boundary: 45° planes along straight edges, cones along arcs, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (distance not smaller than a rounded corner's radius, a hole within reach, the loop already finished).");
                     }
-                    Dialog::FilletLoop { radius, .. } => {
+                    Dialog::FilletLoop { radius, holes, .. } => {
                         num_field(ui, "Fillet radius (mm)", radius);
+                        ui.checkbox(holes, "Include hole edges")
+                            .probe("Include hole edges");
                         ui.small("Exact solid fillet of every edge of this face's outer boundary: cylinders along straight edges, tori along arcs, a sphere corner where a rounded corner's radius equals this radius, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (radius larger than a rounded corner, a hole within reach, the loop already filleted).");
                     }
                     Dialog::Pattern {
