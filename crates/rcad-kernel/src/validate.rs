@@ -594,7 +594,27 @@ pub fn verify_prisms_boolean(
     op: PrismOp,
     tools: &[(&Prism, (f64, f64))],
 ) -> Result<BooleanCheck> {
-    verify_impl(target, result, op, tools, 0.0)
+    verify_impl(target, result, op, tools, 0.0, None).map(|(c, _)| c)
+}
+
+/// The check tessellation of a body (chord, closed mesh), reusable as the
+/// target mesh of the next check on the same, unchanged body.
+pub type CheckMesh = std::sync::Arc<(f64, crate::TriMesh)>;
+
+/// [`verify_prism_boolean`] that reuses `target_mesh` (the check tessellation
+/// of exactly this `target`, e.g. returned by the previous check whose result
+/// is this target) when its chord matches, and returns the result's check
+/// tessellation for the next one. Same verdict as [`verify_prism_boolean`]:
+/// the tessellation is a deterministic function of the body and the chord.
+pub fn verify_prism_boolean_reusing(
+    target: &Body,
+    target_mesh: Option<&CheckMesh>,
+    result: &Body,
+    op: PrismOp,
+    prism: &Prism,
+    used: (f64, f64),
+) -> Result<(BooleanCheck, CheckMesh)> {
+    verify_impl(target, result, op, &[(prism, used)], 0.0, target_mesh)
 }
 
 /// [`verify_prism_boolean`] for a drafted tool (run 6, `crate::taper`): the
@@ -619,7 +639,7 @@ pub fn verify_tapered_boolean(
             "result check: tapered line/arc loops are not supported".into(),
         ));
     }
-    verify_impl(target, result, op, &[(prism, used)], taper.tan())
+    verify_impl(target, result, op, &[(prism, used)], taper.tan(), None).map(|(c, _)| c)
 }
 
 fn verify_impl(
@@ -628,7 +648,8 @@ fn verify_impl(
     op: PrismOp,
     tools: &[(&Prism, (f64, f64))],
     taper_tan: f64,
-) -> Result<BooleanCheck> {
+    target_mesh: Option<&CheckMesh>,
+) -> Result<(BooleanCheck, CheckMesh)> {
     if tools.is_empty() {
         return Err(KernelError::InvalidInput("result check: no tools".into()));
     }
@@ -636,9 +657,17 @@ fn verify_impl(
     let rb = crate::measure::raw_bounds(&result.solid)?;
     let diag = diag_of(&tb).max(diag_of(&rb));
     let chord = check_chord(diag);
-    let tmesh = tessellate(target, chord)?;
+    let reused = target_mesh.filter(|m| m.0 == chord);
+    let owned;
+    let tmesh = match reused {
+        Some(m) => &m.1,
+        None => {
+            owned = tessellate(target, chord)?;
+            &owned
+        }
+    };
     let rmesh = tessellate(result, chord)?;
-    let tcheck = crate::check_mesh(&tmesh);
+    let tcheck = crate::check_mesh(tmesh);
     let rcheck = crate::check_mesh(&rmesh);
     if !rcheck.watertight {
         return Err(KernelError::InvalidResult(format!(
@@ -653,11 +682,12 @@ fn verify_impl(
             "result check: the target's tessellation is not closed; cannot verify".into(),
         ));
     }
-    guarded("result check", || {
+    let c = guarded("result check", || {
         check_faces(
-            target, result, op, tools, taper_tan, &tmesh, &rmesh, chord, diag,
+            target, result, op, tools, taper_tan, tmesh, &rmesh, chord, diag,
         )
-    })?
+    })??;
+    Ok((c, std::sync::Arc::new((chord, rmesh))))
 }
 
 #[allow(clippy::too_many_arguments)]

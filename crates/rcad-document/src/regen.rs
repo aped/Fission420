@@ -350,6 +350,10 @@ struct BodyState {
     created_by: FeatureId,
     last_feature: FeatureId,
     source: BodySource,
+    /// Check tessellation of exactly this geometry, left by the result check
+    /// that produced it (reused as the next check's target mesh). Cleared by
+    /// every other geometry change (`replace_body`).
+    check_mesh: Option<k::CheckMesh>,
 }
 
 /// Regeneration state after a history prefix (cached by [`RegenCache`]).
@@ -1838,6 +1842,7 @@ fn create_body(
             created_by: id,
             last_feature: id,
             source,
+            check_mesh: None,
         },
     );
     st.created.push(body);
@@ -1845,9 +1850,21 @@ fn create_body(
 }
 
 fn replace_body(st: &mut Snapshot, id: FeatureId, body: BodyId, b: Body) {
+    replace_body_checked(st, id, body, b, None);
+}
+
+/// [`replace_body`] keeping the check tessellation of the new geometry.
+fn replace_body_checked(
+    st: &mut Snapshot,
+    id: FeatureId,
+    body: BodyId,
+    b: Body,
+    mesh: Option<k::CheckMesh>,
+) {
     if let Some(s) = st.bodies.get_mut(&body) {
         s.geometry = BodyGeometry::Brep(b);
         s.last_feature = id;
+        s.check_mesh = mesh;
     }
 }
 
@@ -3852,10 +3869,13 @@ fn legacy_cut(
         }
     };
     let start = s.frame.offset(nominal.0);
+    // Run 7: the target's check tessellation from the check that produced it.
+    let target_mesh = st.bodies.get(&target).and_then(|b| b.check_mesh.clone());
     // Independent check against the nominal cut (ADR 0005).
     let verify = |b: &Body, used: (f64, f64)| {
-        k::verify_prism_boolean(
+        k::verify_prism_boolean_reusing(
             &t,
+            target_mesh.as_ref(),
             b,
             k::PrismOp::Cut,
             &k::Prism {
@@ -3885,17 +3905,17 @@ fn legacy_cut(
     .map_err(kernel(id));
     trace_regen(id, "truck_cut", t0);
     let t0 = std::time::Instant::now();
-    let truck = truck.and_then(|b| verify(&b, used).map(|_| b));
+    let truck = truck.and_then(|b| verify(&b, used).map(|(_, m)| (b, m)));
     trace_regen(id, "verify", t0);
     // As for Extrude Cut (ADR 0006/0007): when Truck fails or its result fails
     // the check on a prismatic target, the exact slab construction over the
     // nominal span, checked the same way.
-    let b = match truck {
-        Ok(b) => b,
+    let (b, mesh) = match truck {
+        Ok(x) => x,
         Err(e) => {
             let b = slab_fallback(&t, &kp, &s.frame, nominal, k::prismatic::SlabOp::Cut, e)?;
-            verify(&b, nominal).map_err(slab_checked)?;
-            b
+            let (_, m) = verify(&b, nominal).map_err(slab_checked)?;
+            (b, m)
         }
     };
     // A cut that removes material always adds faces; containment (checked
@@ -3909,7 +3929,7 @@ fn legacy_cut(
             ),
         });
     }
-    replace_body(st, id, target, b);
+    replace_body_checked(st, id, target, b, Some(mesh));
     Ok(())
 }
 
