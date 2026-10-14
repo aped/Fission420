@@ -56,6 +56,12 @@ no objects, an object without triangles, out-of-range indices, non-finite coordi
 Output meshes are not repaired: a non-manifold input stays non-manifold (the caller decides
 whether to export it).
 
+`threemf::write_items(&[MeshObject], &[Option<ItemTransform>], unit)`: the same, with an
+optional `transform` per build item (row-vector `ST_Matrix3D`; rotation rows written to 12
+decimals, translation converted to the file unit; refused when non-finite or with a
+determinant <= 0). Used by `export_3mf` with `item_transforms` (docs/PRINT_EXPORT.md): objects
+in modeled coordinates, the export placement as each item's transform.
+
 ## Known losses
 Units on import are converted to mm (the source unit is reported); per-triangle colours,
 textures, colour groups, material names, thumbnails, print tickets, slice data, beam

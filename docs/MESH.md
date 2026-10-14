@@ -100,6 +100,10 @@ Not done: drawing the previewed result meshes, arbitrary plane picking in the UI
 (axis-aligned planes; the command takes any plane), remeshing, mirroring, self-intersection
 removal.
 
+Performance (release build, one 159 200-triangle UV sphere r 50): self-intersection check
+83 ms (1.9 M pair tests); decimation at 0.05 mm 1.7 s → 4 492 triangles, measured deviation
+0.049998 mm; two-sided oblique cut with caps 46 ms.
+
 ## Evidence
 
 * `rcad-exchange` unit tests (`mesh_repair::tests`): clean cube only welds; flipped,
