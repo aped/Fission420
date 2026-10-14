@@ -376,7 +376,7 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
     }
     let k = segs.len();
     check_cubic_spans(&segs, tol)?;
-    let delta = crate::curves::flatten_tolerance(s.scale());
+    let delta = crate::curves::loop_flatten_tolerance(&segs);
     let geo: Vec<Prim> = loop_prims(&segs, delta);
     let ctol = if has_cubic(&segs) { tol + delta } else { tol };
     for g in &geo {
@@ -494,7 +494,7 @@ fn closed_curve_profile(
     }
     let mut segs = crate::curves::closed_segments(s, e);
     check_cubic_spans(&segs, tol)?;
-    let delta = crate::curves::flatten_tolerance(s.scale());
+    let delta = crate::curves::loop_flatten_tolerance(&segs);
     let geo = loop_prims(&segs, delta);
     if loop_self_intersects(&geo, tol + delta) {
         return Err(SketchError::UnsupportedProfile(

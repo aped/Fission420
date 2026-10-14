@@ -79,7 +79,7 @@ Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware
 
 | name | value | kind | meaning |
 |---|---|---|---|
-| `rcad_sketch::curves::flatten_tolerance` | max(`FLATTEN_ABS` 1e-6 mm, `FLATTEN_REL` 1e-5 × sketch scale) | geometric (checks only) | polyline bound δ for self-intersection, loop contact and containment tests on ellipse/spline spans (convex-hull subdivision: every curve point within δ of the polyline); contact tolerance becomes solve tolerance + δ |
+| `rcad_sketch::curves::loop_flatten_tolerance` | max(`FLATTEN_ABS` 1e-6 mm, `FLATTEN_REL` 1e-5 × the loop's own size (control-point box diagonal)) | geometric (checks only) | polyline bound δ for self-intersection, loop contact and containment tests on ellipse/spline spans (convex-hull subdivision: every curve point within δ of the polyline); contact tolerance of two loops becomes solve tolerance + the larger δ |
 | ellipse / spline span area | 16-point Gauss–Legendre × 8 pieces | numerical | exact for polynomial (spline) spans; rational ellipse spans far below the solve tolerance |
 | `validate.rs` profile polygon of a cubic span | 1e-6 × span control-polygon size | geometric | same bound as arcs for the result-check probes |
 | revolve axis check of a cubic span | control-point minimum | conservative | the convex hull bounds the curve; may refuse a profile closer than its hull to the axis |

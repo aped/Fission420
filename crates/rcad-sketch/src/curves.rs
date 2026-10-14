@@ -28,8 +28,8 @@
 //! positive weights the span lies in the convex hull of its control points,
 //! and that hull lies within `δ` of the chord, so every point of the curve is
 //! within `δ` of the polyline (and the polyline's vertices are on the curve).
-//! `δ` = [`FLATTEN_REL`] × sketch scale (at least [`FLATTEN_ABS`]); the checks
-//! widen their contact tolerance by `δ`, so they may refuse curves closer than
+//! `δ` = [`FLATTEN_REL`] × the loop's own size (at least [`FLATTEN_ABS`],
+//! [`loop_flatten_tolerance`]); the checks widen their contact tolerance by `δ`, so they may refuse curves closer than
 //! `δ` but never accept curves that touch.
 
 use crate::profile::LoopSegment;
@@ -44,9 +44,30 @@ pub const MAX_SPLINE_POINTS: usize = 256;
 /// Subdivision depth cap of [`flatten`] (2^16 pieces per span at most).
 const MAX_FLATTEN_DEPTH: u32 = 16;
 
-/// Polyline tolerance (mm) for a sketch of characteristic size `scale`.
+/// Polyline tolerance (mm) for curves of characteristic size `scale`.
 pub fn flatten_tolerance(scale: f64) -> f64 {
     FLATTEN_ABS.max(FLATTEN_REL * scale)
+}
+
+/// Polyline tolerance of one loop: [`flatten_tolerance`] of the diagonal of
+/// its control points' box (the loop's own size, not the sketch's: a small
+/// thin ellipse far from the origin keeps a tight bound).
+pub fn loop_flatten_tolerance(segs: &[LoopSegment]) -> f64 {
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for s in segs {
+        let pts: Vec<[f64; 2]> = match *s {
+            LoopSegment::Cubic { start, c1, c2, .. } => vec![start, c1, c2],
+            ref other => vec![other.start()],
+        };
+        for p in pts {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+    }
+    let d = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+    flatten_tolerance(if d.is_finite() { d } else { 0.0 })
 }
 
 /// Structural rules of a spline's control point list.

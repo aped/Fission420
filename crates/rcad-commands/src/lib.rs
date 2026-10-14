@@ -3012,12 +3012,35 @@ impl Session {
                 }
                 let name = m.document().feature(sk_id)?.name.clone();
                 let n = curves.iter().map(Vec::len).sum::<usize>();
+                // Where the last regeneration put this sketch's points: new
+                // projected curves share the end points of earlier projected
+                // ones they meet (Fusion's projected edges are connected).
+                let solved_pts: std::collections::HashMap<rcad_sketch::PointId, [f64; 2]> = m
+                    .evaluation()
+                    .features
+                    .iter()
+                    .find(|f| f.id == sk_id)
+                    .and_then(|f| f.solved_sketch.as_ref())
+                    .map(|sv| sv.points.iter().map(|p| (p.id, [p.x, p.y])).collect())
+                    .unwrap_or_default();
                 m.transact(&format!("Project into {name}"), |d| {
                     let FeatureKind::Sketch { sketch, links, .. } = &mut d.feature_mut(sk_id)?.kind
                     else {
                         return Err(DocError::Validation(format!("{sk_id} is not a sketch")));
                     };
-                    let mut made: Vec<([f64; 2], rcad_sketch::PointId)> = Vec::new();
+                    // Earlier projected points pinned by a FixedPoint, at their
+                    // current positions.
+                    let mut made: Vec<([f64; 2], rcad_sketch::PointId)> = links
+                        .iter()
+                        .flat_map(|l| l.loops.iter().flatten())
+                        .flat_map(|c| c.points.iter().copied())
+                        .filter(|q| {
+                            sketch.constraints.iter().any(|c| {
+                                matches!(c, rcad_sketch::Constraint::FixedPoint { p, .. } if p == q)
+                            })
+                        })
+                        .filter_map(|q| solved_pts.get(&q).map(|xy| (*xy, q)))
+                        .collect();
                     let mut point = |sk: &mut rcad_sketch::Sketch, p: [f64; 2]| {
                         if let Some((_, id)) = made
                             .iter()

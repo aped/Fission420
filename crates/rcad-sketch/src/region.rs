@@ -84,6 +84,14 @@ fn groups(s: &Sketch) -> Vec<Vec<EntityId>> {
     out
 }
 
+/// Polyline bound of a loop's cubic spans (0 for loops without them).
+fn loop_delta(p: &Profile) -> f64 {
+    match p {
+        Profile::Loop(v) if has_cubic(v) => crate::curves::loop_flatten_tolerance(v),
+        _ => 0.0,
+    }
+}
+
 /// Boundary primitives of a loop (a circle as two half arcs, cubic spans as
 /// a polyline within `delta`, see [`crate::curves`]).
 fn prims(p: &Profile, delta: f64) -> Vec<Prim> {
@@ -287,13 +295,16 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
         ));
         loops.push((Profile::Polygon(t.polygon), t.edges));
     }
-    let delta = crate::curves::flatten_tolerance(s.scale());
-    let geo: Vec<Vec<Prim>> = loops.iter().map(|(p, _)| prims(p, delta)).collect();
-    // Polylines stand for cubic spans: widen the contact test by their bound.
-    let curved = loops
+    // Polylines stand for cubic spans (each loop's own bound): widen the
+    // contact test of two loops by the larger of their bounds.
+    let deltas: Vec<f64> = loops.iter().map(|(p, _)| loop_delta(p)).collect();
+    let geo: Vec<Vec<Prim>> = loops
         .iter()
-        .any(|(p, _)| matches!(p, Profile::Loop(v) if has_cubic(v)));
-    let tol = if curved { tol + delta } else { tol };
+        .zip(&deltas)
+        .map(|((p, _), d)| prims(p, *d))
+        .collect();
+    let base = tol;
+    let tol = base + deltas.iter().copied().fold(0.0, f64::max);
     // Bounding boxes (widened by tol): disjoint boxes cannot touch, and a loop
     // can only contain loops whose box lies inside its own.
     let boxes: Vec<[f64; 4]> = geo.iter().map(|g| bbox(g, tol)).collect();
@@ -303,10 +314,8 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
             if a[0] > b[2] || b[0] > a[2] || a[1] > b[3] || b[1] > a[3] {
                 continue;
             }
-            if geo[i]
-                .iter()
-                .any(|x| geo[j].iter().any(|y| touch(x, y, tol)))
-            {
+            let t = base + deltas[i].max(deltas[j]);
+            if geo[i].iter().any(|x| geo[j].iter().any(|y| touch(x, y, t))) {
                 return Err(SketchError::UnsupportedProfile(format!(
                     "{} and {} touch or cross; loops of one profile must be disjoint",
                     names[i], names[j]
@@ -469,18 +478,19 @@ pub(crate) fn region_by_ref(s: &Sketch, id: &RegionRef) -> Result<Option<Region>
 /// `None` outside every loop or exactly on a boundary (within tolerance).
 pub(crate) fn region_at(s: &Sketch, p: [f64; 2]) -> Result<Option<RegionRef>, SketchError> {
     let rs = regions(s)?;
-    let delta = crate::curves::flatten_tolerance(s.scale());
-    let tol = solve_tolerance(s.scale()) + delta;
-    let on_boundary = |g: &[Prim]| g.iter().any(|x| prim_distance(x, p) <= tol);
+    let base = solve_tolerance(s.scale());
+    let on_boundary = |g: &[Prim], d: f64| g.iter().any(|x| prim_distance(x, p) <= base + d);
     let mut best: Option<&SketchRegion> = None;
     for r in &rs {
-        let og = prims(&r.region.outer, delta);
-        if on_boundary(&og) || !inside(p, &og) {
+        let d = loop_delta(&r.region.outer);
+        let og = prims(&r.region.outer, d);
+        if on_boundary(&og, d) || !inside(p, &og) {
             continue;
         }
         let in_hole = r.region.holes.iter().any(|(h, _)| {
-            let hg = prims(h, delta);
-            on_boundary(&hg) || inside(p, &hg)
+            let d = loop_delta(h);
+            let hg = prims(h, d);
+            on_boundary(&hg, d) || inside(p, &hg)
         });
         if !in_hole && best.is_none_or(|b| r.depth > b.depth) {
             best = Some(r);

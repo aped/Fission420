@@ -461,6 +461,17 @@ fn loop_min_x(segs: &[LoopSegment]) -> f64 {
 pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
     frame.validate()?;
     profile.validate()?;
+    if profile.has_cubic() {
+        // Truck builds the revolved rational cubic faces, but its mesher fails
+        // on many of them (size- and chord-dependent), so such a body could
+        // not be displayed or exported: refuse instead of returning it.
+        return Err(KernelError::InvalidInput(
+            "revolving ellipse or spline profiles is not supported (their revolved faces \
+             cannot be tessellated reliably for display and export); extrude them, or revolve a \
+             profile of lines and arcs"
+                .into(),
+        ));
+    }
     if !angle.is_finite() || angle < tol::MIN_ANGLE || angle > 2.0 * std::f64::consts::PI + 1e-12 {
         return Err(KernelError::InvalidInput(format!(
             "revolve angle must be in [{}, 2*pi] rad, got {angle}",

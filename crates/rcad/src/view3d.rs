@@ -384,8 +384,15 @@ impl RcadApp {
     /// reason when the face cannot be referenced or the pick is ambiguous).
     fn project_edge_click(&mut self, sk: FeatureId, p: Pos2) {
         // A click on empty space or a face without a semantic reference
-        // (curved, mesh) ends the pick mode without a change.
+        // (curved, mesh) ends the pick mode without a change, with the reason.
         let Some((g, at)) = self.face_hit(p) else {
+            self.diag(
+                true,
+                "Validation",
+                "Project edge: no face under the cursor; choose Project edge again and click a \
+                 planar face next to the edge"
+                    .into(),
+            );
             return;
         };
         let Some(face) = self
@@ -394,6 +401,20 @@ impl RcadApp {
             .find(|f| f.group == g)
             .and_then(|f| f.reference)
         else {
+            let why = self
+                .faces
+                .iter()
+                .find(|f| f.group == g)
+                .and_then(|f| f.sketch_blocker())
+                .unwrap_or("this face cannot be referenced");
+            self.diag(
+                true,
+                "Validation",
+                format!(
+                    "Project edge: {why}. Click a planar face that borders the edge (its edges are \
+                     projected; curved faces have no edge reference)"
+                ),
+            );
             return;
         };
         self.request(Command::Project {

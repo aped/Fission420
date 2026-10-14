@@ -218,7 +218,7 @@ No polyline ever stands in for the geometry.
   fit-point splines (through points) are not available; this is the control-point spline.
 * **Regions**: ellipses and closed splines nest like circles (an elliptical hole in a rectangle
   is a region with one hole). Self-intersection, contact and containment tests use a polyline
-  within δ = max(1e-6 mm, 1e-5 × sketch scale) of the exact curve (convex-hull subdivision
+  within δ = max(1e-6 mm, 1e-5 × the loop's own size) of the exact curve (convex-hull subdivision
   bound); contact counts within tolerance + δ, so curves closer than δ are refused, never
   silently accepted.
 * **Templates**: `centered_ellipse` (`major_radius`, `minor_radius`, `center?`; the major axis is a
@@ -230,8 +230,9 @@ No polyline ever stands in for the geometry.
   Cut use Truck's boolean with the independent result check instead, ADR 0005); side-face
   references to their curved faces; R12 DXF export (no ELLIPSE/SPLINE entity in R12; SVG export
   writes exact paths).
-* **Volume**: extrusions use the exact boundary integral (πab·h to ~1e-9 relative); a revolved
-  ellipse falls back to the tessellation estimate with its stated error.
+* **Volume**: extrusions use the exact boundary integral (πab·h to ~1e-9 relative).
+* **Revolve** of an ellipse or spline profile is refused by name: Truck's mesher fails on many
+  revolved rational cubic faces, so the body could not be displayed or exported.
 * **Import**: DXF full `ELLIPSE` and `SPLINE`s that are exactly sketch splines (open,
   non-rational, degree 3, clamped uniform knots); SVG `<ellipse>` with rx ≠ ry under similarity
   transforms. Everything else stays refused (docs/formats/dxf.md, svg.md).

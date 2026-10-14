@@ -120,28 +120,15 @@ fn elliptical_boss_joined_on_a_block() {
     verify_prism_boolean(&block, &joined, PrismOp::Join, &prism, (0.0, 6.0)).unwrap();
 }
 
+/// Revolving ellipse/spline profiles is refused by name: Truck's mesher
+/// fails on many revolved rational cubic faces (e.g. a 10 x 5 ellipse at
+/// x = 60 at every chord), so the body could not be displayed or exported.
 #[test]
-fn revolved_ellipse_matches_pappus() {
-    // Ellipse centred at x = 30 in the XZ plane, revolved a full turn about Z
-    // (the frame's local y axis): V = 2π · 30 · πab.
-    let (a, b) = (8.0, 5.0);
-    let body = revolve(&ellipse([30.0, 0.0], a, b), &Frame::XZ, 2.0 * PI).unwrap();
-    let (v, est, method) = volume(&body);
-    let want = 2.0 * PI * 30.0 * PI * a * b;
-    // The exact parametric boundary integral covers the revolved rational
-    // face; a tessellation estimate would have to cover its error.
-    match method {
-        VolumeMethod::BrepBoundaryIntegralParametric => {
-            assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}")
-        }
-        VolumeMethod::TessellationEstimate => {
-            assert!((v - want).abs() <= est, "{v} vs {want} (estimate {est:e})");
-            assert!(est <= 2e-3 * want, "{est:e}");
-        }
-        m => panic!("unexpected volume method {m:?}"),
+fn revolving_an_ellipse_is_refused_by_name() {
+    for (a, b, x) in [(8.0, 5.0, 30.0), (10.0, 5.0, 60.0)] {
+        let e = revolve(&ellipse([x, 0.0], a, b), &Frame::XZ, 2.0 * PI).unwrap_err();
+        assert!(e.to_string().contains("revolving ellipse or spline"), "{e}");
     }
-    // Profiles touching the axis are refused (convex-hull bound).
-    assert!(revolve(&ellipse([7.9, 0.0], a, b), &Frame::XZ, PI).is_err());
 }
 
 #[test]

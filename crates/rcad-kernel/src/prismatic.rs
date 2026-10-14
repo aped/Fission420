@@ -230,8 +230,12 @@ fn right_handed(frame: &Frame) -> (Frame, bool) {
 }
 
 /// Why the exact slab boolean refuses ellipse / spline spans.
-const CUBIC_REFUSAL: &str = "prismatic boolean: ellipse and spline spans are not supported \
-                             (lines, arcs and circles only)";
+const CUBIC_REFUSAL: &str = "the exact slab construction handles lines, arcs and circles only, \
+                             not ellipse or spline spans; those tools go through the general \
+                             boolean alone, which fails when the curve runs along or touches the \
+                             body's outline or faces: keep the ellipse/spline clear of the outline \
+                             (cut fully inside or fully across it), or extrude a New Body and \
+                             combine it";
 
 /// Exact loop of a tool profile (y negated and arcs reversed in a mirrored
 /// frame). Cubic spans are refused before this is called.

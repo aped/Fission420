@@ -132,6 +132,22 @@ fn project_edge_by_pick_and_intersect_body() {
     click(&mut h, &name);
     click(&mut h, "Project geometry into this sketch");
     click(&mut h, "Project edge (pick in view)");
+    // A click on empty space ends the pick with the reason, nothing changes.
+    let corner = h
+        .state()
+        .view_rect()
+        .map(|r| r.min + egui::vec2(5.0, 5.0))
+        .unwrap();
+    pointer_click(&mut h, corner);
+    assert!(
+        h.state()
+            .diagnostics()
+            .iter()
+            .any(|d| d.text.contains("Project edge: no face under the cursor")),
+        "{:?}",
+        h.state().diagnostics()
+    );
+    click(&mut h, "Project edge (pick in view)");
     // Click the top face just outside the hole rim.
     let p = h.state().world_to_screen([14.6, 0.0, 10.0]).unwrap();
     pointer_click(&mut h, p);
