@@ -402,6 +402,11 @@ pub struct RcadApp {
     pub(crate) mesh_triangles: usize,
     /// Last display scene: all visible bodies (face analysis, picking; display only).
     pub(crate) scene: DisplayScene,
+    /// Display isolation (Fusion's Isolate; view state only, not in the
+    /// document or undo): only this body is drawn and picked. `full_scene`
+    /// keeps every visible body to restore.
+    pub(crate) isolated: Option<rcad_document::BodyId>,
+    pub(crate) full_scene: Option<DisplayScene>,
     /// Body selected in the browser (or owning the picked face).
     pub(crate) selected_body: Option<BodyId>,
     pub(crate) faces: Vec<FaceInfo>,
@@ -522,6 +527,8 @@ impl RcadApp {
             section: None,
             mesh_triangles: 0,
             scene: DisplayScene::default(),
+            isolated: None,
+            full_scene: None,
             selected_body: None,
             faces: vec![],
             fitted: false,
@@ -993,6 +1000,16 @@ impl RcadApp {
                 format!("not displayed: {e} (the model is unchanged; export and measurements use the exact solid)"),
             );
         }
+        // Display isolation: keep the full scene, draw only the isolated
+        // body (cleared when that body is no longer displayed).
+        self.full_scene = Some(scene.clone());
+        let scene = match self.isolated.and_then(|b| scene.isolated(b)) {
+            Some(s) => s,
+            None => {
+                self.isolated = None;
+                scene
+            }
+        };
         // Assembly highlight / inactive dimming (assembly_ui::tints).
         let hl = self.assembly_ui.highlight_paths(&self.summary);
         match upload(&scene.mesh, &crate::assembly_ui::tints(&scene, &hl)) {
@@ -1549,6 +1566,33 @@ impl RcadApp {
     /// Selected body (browser selection or the body of the picked face).
     pub fn selected_body(&self) -> Option<BodyId> {
         self.selected_body
+    }
+
+    /// Isolate body `b` (or show every visible body again with `None`):
+    /// view state only; re-uploads the display from the last full scene.
+    pub fn set_isolation(&mut self, b: Option<rcad_document::BodyId>) {
+        self.isolated = b;
+        let Some(full) = self.full_scene.clone() else {
+            return;
+        };
+        let mut viewport = self.viewport.take();
+        self.accept_scene(full, |m, tints| match viewport.as_mut() {
+            Some(vp) => {
+                vp.set_mesh(m).map_err(|e| e.to_string())?;
+                vp.set_group_tints(tints);
+                if m.triangle_count() > 0 {
+                    vp.fit();
+                }
+                Ok(())
+            }
+            None => Ok(()),
+        });
+        self.viewport = viewport;
+    }
+
+    /// Body isolated in the view, if any.
+    pub fn isolated(&self) -> Option<rcad_document::BodyId> {
+        self.isolated
     }
 
     /// Display scene (all visible bodies) as last reported by the engine.

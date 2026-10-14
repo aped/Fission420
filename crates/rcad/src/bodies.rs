@@ -182,6 +182,23 @@ impl RcadApp {
         let mut start_rename = None;
         let mut commit_rename = None;
         let mut cancel_rename = false;
+        // Some(Some(b)): isolate b; Some(None): show all again.
+        let mut isolate: Option<Option<rcad_document::BodyId>> = None;
+        if let Some(iso) = self.isolated
+            && let Some(name) = bodies.iter().find(|b| b.id == iso).map(|b| b.name.clone())
+        {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("Isolated: {name}")).strong());
+                if ui
+                    .small_button("Show all")
+                    .on_hover_text("End isolation: draw every visible body again")
+                    .named("Show all bodies")
+                    .clicked()
+                {
+                    isolate = Some(None);
+                }
+            });
+        }
         for b in &bodies {
             let sel = self.selected_body == Some(b.id);
             ui.horizontal(|ui| {
@@ -257,6 +274,16 @@ impl RcadApp {
                             toggle = Some((b.id, !b.visible));
                             ui.close();
                         }
+                        if b.visible
+                            && ui
+                                .button("Isolate")
+                                .on_hover_text("Show only this body (view only; not saved, not an undo step)")
+                                .named("Isolate body")
+                                .clicked()
+                        {
+                            isolate = Some(Some(b.id));
+                            ui.close();
+                        }
                     });
                 }
                 let (badge, col) = match (&b.source, b.kind.as_str()) {
@@ -276,6 +303,9 @@ impl RcadApp {
             && self.sketch.is_none()
         {
             self.select_body(Some(id));
+        }
+        if let Some(b) = isolate {
+            self.set_isolation(b);
         }
         if let Some((body, visible)) = toggle {
             self.request(Command::SetBodyVisible { body, visible });
