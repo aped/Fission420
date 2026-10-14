@@ -1,6 +1,6 @@
 # Print export (STL / 3MF)
 
-Status: run 4. Command API (`export_stl`, `export_3mf` with optional print fields), kernel mesh
+Status: command API (`export_stl`, `export_3mf` with optional print fields), kernel mesh
 checks, independent validators, Bambu Studio slicing and the desktop Export STL / Export 3MF
 dialogs (see "Desktop dialogs") are implemented and tested. Nothing here has been
 physically printed: "sliced" means Bambu Studio produced G-code whose toolpaths were checked.
@@ -36,14 +36,14 @@ session executes commands sequentially, so geometry, checks and report come from
 
 * `chord` (mm, default 0.01 = `tol::MESH_CHORD`): Truck's chordal tolerance. Measured on an
   exported Ø20 × 10 cylinder (independent reader, `print_export.rs::cylinder_tessellation_accuracy_from_exported_bytes`,
-  numbers in `artifacts/run4/print/tests/cylinder/accuracy.json`):
+  numbers in `artifacts/print/tests/cylinder/accuracy.json`):
 
   | chord | segments (min for sagitta) | max sagitta (Python checker) | volume (exact 3141.593) | triangles | STL bytes |
   |---|---|---|---|---|---|
   | 0.02 | 84 (50) | 0.01749 | 3138.161 | 5354 | 267 784 |
   | 0.005 | 168 (100) | 0.004495 | 3140.734 | 21452 | 1 072 684 |
 
-  (sagitta and volume from `artifacts/run4/print/validation/mesh_check.txt` /
+  (sagitta and volume from `artifacts/print/validation/mesh_check.txt` /
   `exports/workflow.jsonl`; the Rust test asserts the same bounds on its own export.)
 
   Vertices lie on the circle within f32 rounding (≤ 2e-5 mm); every lateral edge's sagitta is
@@ -118,7 +118,7 @@ memory or marketing material:
 | bed_exclude_area `0x0,18x0,18x28,0x28` | `Bambu Lab P1S 0.4 nozzle.json` |
 
 Flatpak location: `/var/lib/flatpak/app/com.bambulab.BambuStudio/x86_64/stable/68a634d4d733ce7acf79009095db6f7ca76625f0eb810eef1e92dc7adeba7852/files`.
-Full chain and per-key provenance: `artifacts/run4/print/slicer/profiles.md`,
+Full chain and per-key provenance: `artifacts/print/slicer/profiles.md`,
 `tools/print/bbl_profile_flatten.py`.
 
 Per body, `fit.fits_size` compares the exported dimensions with the printable volume;
@@ -182,14 +182,14 @@ policy, placement and units.
   counters.
 * `tools/print/validate_print_exports.sh <rcad-cli>`: runs
   `tools/print/enclosure_print_workflow.json` (an export fixture built with plain commands,
-  baseline and SESSION_4 B variant sizes entered as numbers, not the named-parameter example),
+  baseline and variant sizes entered as numbers, not the named-parameter example),
   then all of the above with `tools/print/enclosure_spec.json` and
   `tools/print/probes/{baseline,variant}_plate.json`.
 
-### Results (2026-10-11, commit of this doc; `artifacts/run4/print/validate.log`)
+### Results (2026-10-11, commit of this doc; `artifacts/print/validate.log`)
 
-Exports from `enclosure_print_workflow.json` (built from the worktree with `--release`,
-binary copied to `artifacts/run4/print/bin/rcad-cli`):
+Exports from `enclosure_print_workflow.json` (built with `--release`,
+binary copied to `artifacts/print/bin/rcad-cli`):
 
 * Python checker: 91 PASS, 0 FAIL (`validation/mesh_check.txt`): unit `millimeter`, 2 named
   objects per 3MF, all objects closed/manifold/outward, volumes 19592 / 9404 (baseline) and
@@ -214,7 +214,7 @@ binary copied to `artifacts/run4/print/bin/rcad-cli`):
 parameters), exports placed STLs, multi-object 3MFs (lid face down on its plate top, lip up;
 base on its floor; X layout, gap 10, P1S bed) and per-body STEP, and writes the expected
 values from the analytic formulas (never from the export report). Results
-(`artifacts/run4/print/examples/SUMMARY.txt`):
+(`artifacts/print/examples/SUMMARY.txt`):
 
 * Python: 124 PASS, 0 FAIL. Mesh volumes: base 19592.000000 / lid 9404.000000 (baseline),
   36823.296000 / 15148.480000 (variant), coupon plate 5053.577 (range 5053.64 ± 2.16 from the
@@ -236,7 +236,7 @@ values from the analytic formulas (never from the export report). Results
   the slicer's output varies on identical input; the message is a symptom of that, not of the
   input geometry.
   `analyze_gcode.py` classifies exactly this message as benign; other `ZFiller` messages
-  remain findings. Evidence: the run-4 addendum (2026-10-12; local run records).
+  remain findings.
 
 This is CAD/mesh/slicer validation only: nothing has been physically printed, and slicing
 says nothing about fit, strength or print quality.

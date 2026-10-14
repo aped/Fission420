@@ -1,6 +1,6 @@
 # Plate-with-hole workflow: behaviour spec
 
-Labels: **[spec]** from GOAL.md; **[assumed]** our product decision; **[observed]** measured in this repo.
+Labels: **[spec]** from the product requirements; **[assumed]** our product decision; **[observed]** measured in this repo.
 No reference application was used (Fusion not available) → reference validation pending.
 
 ## Feature model

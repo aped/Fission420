@@ -1,4 +1,4 @@
-//! Chamfer of edges whose end faces are slanted (run 5, SESSION_5 §6).
+//! Chamfer of edges whose end faces are slanted.
 //! Expected volumes: the removed solid is the right triangle T (legs d along
 //! each face) swept between the end planes; the axial length is linear over T,
 //! so its integral is (d²/2) · length at T's centroid, with the length read

@@ -1,4 +1,4 @@
-//! Trim on circles through the real sketch UI (review run 3 app #2, #15):
+//! Trim on circles through the real sketch UI:
 //! a rectangle with a circle centred on its right edge; trimming the edge
 //! inside the circle holds the new ends on the circle, trimming the circle
 //! inside the rectangle shares them, so the line/arc profile closes and

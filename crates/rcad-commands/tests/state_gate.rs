@@ -1,4 +1,4 @@
-//! SESSION_4 §2 / §6.C: transaction and identity behaviour through the
+//! Transaction and identity behaviour through the
 //! public command path — re-attachment ordering, ambiguous face references,
 //! sketch-entity ids never reused, and body creation undo/redo with ids,
 //! dependencies and geometry checked at every step.
@@ -61,9 +61,8 @@ fn vol(s: &Session, b: BodyId) -> f64 {
 }
 
 /// Re-attaching a sketch to a face of a *later* feature of the same body
-/// would reorder that body's modifiers silently (run-3 review regen, the
-/// unverified `model.rs` note). It is now a dependency cycle, refused with
-/// the document unchanged.
+/// would reorder that body's modifiers silently. It is a dependency cycle,
+/// refused with the document unchanged.
 #[test]
 fn reattach_to_a_later_feature_of_the_same_body_is_refused() {
     let mut s = Session::new();
@@ -229,7 +228,7 @@ fn deleted_sketch_entity_ids_are_not_reused() {
     assert_eq!(s.summary().revision, rev);
 }
 
-/// Run-3 scenario A gap: body creation and modification undone and redone
+/// Scenario A: body creation and modification undone and redone
 /// one step at a time; ids, dependencies and volumes checked at each step.
 #[test]
 fn body_creation_undo_redo_each_step() {
@@ -440,7 +439,7 @@ fn parameters_drive_a_cut_in_an_imported_step_body_and_survive_reopen() {
     assert!((vol(&t, BodyId(1)) - (12000.0 - PI * 6.25 * 10.0)).abs() < 1e-3);
 }
 
-/// Review run 4 #16: editing a bound dimension in the sketch is refused with
+/// Editing a bound dimension in the sketch is refused with
 /// the expression named (it would otherwise be reverted silently).
 #[test]
 fn editing_a_bound_dimension_in_the_sketch_is_refused() {

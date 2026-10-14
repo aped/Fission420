@@ -1,12 +1,12 @@
 # Mesh bodies: diagnosis and repair
 
-Status: run 7 (pull-forward of Run-8 §2 / coverage ME01, first slice). Code:
+Status: first slice. Code:
 `crates/rcad-exchange/src/mesh.rs` (diagnosis), `crates/rcad-exchange/src/mesh_repair.rs`
 (repair), `FeatureKind::MeshRepair` (`crates/rcad-document`), `repair_mesh`
 (`crates/rcad-commands/src/mesh_repair.rs`), UI `crates/rcad/src/mesh_repair_ui.rs`
 (body inspector, "Mesh check / repair").
 
-## Diagnosis (unchanged from run 4, shown in the inspector)
+## Diagnosis (shown in the inspector)
 
 Triangles, components, boundary / non-manifold / inconsistently oriented edges, degenerate
 triangles, closed or not, signed volume only when closed (`MeshDiagnostics`; definitions in

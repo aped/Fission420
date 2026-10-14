@@ -1,9 +1,9 @@
-//! Browser "Drawings" section (run 6, docs/DRAWINGS.md): create a drawing
+//! Browser "Drawings" section (docs/DRAWINGS.md): create a drawing
 //! from the selected body (Front base view + the views from above and from
 //! the right), add an iso view, switch the projection convention, export to
 //! PDF/SVG and read the last export's report (flagged views and dangling
 //! callouts in red). Everything goes through the shared commands.
-//! Run 7: assembly drawings (placed occurrences, BOM table, balloons),
+//! Assembly drawings (placed occurrences, BOM table, balloons),
 //! driven dimensions between semantic references with tolerances, notes.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
@@ -21,7 +21,7 @@ pub struct DrawingUi {
     pub path: String,
     /// (doc_id, revision, report) of the last export.
     pub report: Option<(u64, u64, DrawingReport)>,
-    /// Run 7 annotation editor: target view, references, tolerance, note text.
+    /// Annotation editor: target view, references, tolerance, note text.
     pub dim_view: Option<ViewId>,
     pub dim_a: Option<DimRef>,
     pub dim_b: Option<DimRef>,

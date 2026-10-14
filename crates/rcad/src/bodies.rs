@@ -1,6 +1,6 @@
 //! Bodies in the browser and the body inspector.
 //!
-//! Run 6: the inspector also sets a body's physical material (catalog or a
+//! The inspector also sets a body's physical material (catalog or a
 //! user density, `SetBodyMaterial`) and shows its mass properties
 //! (`MassProperties`: volume, mass, centre of mass, inertia; world frame,
 //! mm / g / g·mm²; exact or a labelled estimate).
@@ -26,7 +26,7 @@ use rcad_kernel::VolumeResult;
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 
-/// Edit buffers of the body Move / Copy form (run 6).
+/// Edit buffers of the body Move / Copy form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveForm {
     pub t: [String; 3],
@@ -47,7 +47,7 @@ impl Default for MoveForm {
     }
 }
 
-/// Material form and the last mass-properties report (run 6).
+/// Material form and the last mass-properties report.
 #[derive(Debug, Clone, Default)]
 pub struct BodyProps {
     /// Body the form was filled for (reset when another body is shown).
@@ -59,7 +59,7 @@ pub struct BodyProps {
     pub unit: DensityUnit,
     /// (doc_id, revision, report) of the last `MassProperties` reply.
     pub report: Option<(u64, u64, MassReport)>,
-    /// Combine form (run 6): tool body, operation (0 join, 1 cut, 2 intersect),
+    /// Combine form: tool body, operation (0 join, 1 cut, 2 intersect),
     /// keep the tool.
     pub combine_tool: Option<BodyId>,
     pub combine_op: usize,
@@ -169,7 +169,7 @@ impl RcadApp {
         ui.label(RichText::new(format!("Bodies ({})", bodies.len())).strong());
         if bodies.is_empty() {
             ui.weak("No bodies yet. Extrude a sketch or File › Import….");
-            // Run 7: empty components and external components can be made
+            // Empty components and external components can be made
             // in an empty document (an assembly file).
             self.components_browser(ui);
             return;
@@ -465,7 +465,7 @@ impl RcadApp {
         self.material_ui(ui, &b);
     }
 
-    /// Material assignment and mass properties of body `b` (run 6).
+    /// Material assignment and mass properties of body `b`.
     fn material_ui(&mut self, ui: &mut egui::Ui, b: &BodySummary) {
         if self.body_props.body != Some(b.id) {
             self.body_props.reset_for(b);
@@ -618,7 +618,7 @@ impl RcadApp {
 }
 
 impl RcadApp {
-    /// Combine this body with another one (run 6, `Command::Combine`).
+    /// Combine this body with another one (`Command::Combine`).
     fn combine_ui(&mut self, ui: &mut egui::Ui, target: BodyId) {
         let others: Vec<(BodyId, String)> = self
             .summary
@@ -687,7 +687,7 @@ impl RcadApp {
         }
     }
 
-    /// Move / Copy a body (run 6): rotation about a world axis through the
+    /// Move / Copy a body: rotation about a world axis through the
     /// origin, then a translation; one undo step; a feature in History whose
     /// values stay editable parameters (tx, ty, tz, angle_deg).
     fn move_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
@@ -766,7 +766,7 @@ impl RcadApp {
 }
 
 impl RcadApp {
-    /// Split a body by a world plane moved along its normal (run 6). The body
+    /// Split a body by a world plane moved along its normal. The body
     /// keeps the part behind the plane; a new body gets the part in front.
     fn split_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
         let mut send = None;

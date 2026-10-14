@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate the run-8 qualification corpus (tools/fixtures/corpus/): FreeCAD-made
+# Regenerate the qualification corpus (tools/fixtures/corpus/): FreeCAD-made
 # parts/assemblies/meshes (gen_freecad.py, FreeCAD flatpak 1.1.4 / OCC 7.8.1; its
 # read-back measurements go to freecad_reference.json) and hand-authored edge cases
 # (gen_handwritten.py, plain python3).

@@ -4,7 +4,7 @@ use rcad_document::{DocError, FORMAT_NAME, Model, load_file, save_file};
 use std::path::PathBuf;
 
 fn frozen_v4() -> PathBuf {
-    // A frozen run-4 document, written by a pre-rename build (contents never rewritten).
+    // A frozen v4 document, written by a pre-rename build (contents never rewritten).
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../rcad-commands/tests/fixtures/native_v4/enclosure.rcad.json")
 }

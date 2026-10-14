@@ -1,7 +1,6 @@
 # Format support
 
-Status: run 3, 2026-10-11, branch `work/run-3` (checked against the code at `e703fbe`). This
-page claims only what a test or an independent validation listed under
+This page claims only what a test or an independent validation listed under
 **Evidence** proves. A file extension in a dialog is not evidence. Per-format details:
 [`formats/step.md`](formats/step.md), [`formats/stl.md`](formats/stl.md),
 [`formats/dxf.md`](formats/dxf.md), [`formats/threemf.md`](formats/threemf.md),
@@ -12,9 +11,8 @@ ADR 0004 (format adapters).
 
 | Format | Import | Export | Geometry type | Units | Reachable through |
 |---|---|---|---|---|---|
-| Native `.rcad.json` v1 | **yes** (migrated to v3 on load) | no (always saves v3) | parametric history | mm | `Open` |
-| Native v2 (run 2) | **yes** (migrated) | no | parametric history | mm | `Open` |
-| Native v3 (run 3) | **yes** | **yes** | history + bodies + embedded import sources | mm | `Open` / `Save` |
+| Native `.rcad.json` v1, v2 | **yes** (migrated on load) | no | parametric history | mm | `Open` |
+| Native v3 to v7 | **yes** | **yes** (v4 or the lowest later version that holds the document) | history + bodies + embedded import sources | mm | `Open` / `Save` |
 | STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step`; UI Import…, Export STEP… |
 | STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required; export writes mm | `import_stl`, `export_stl` (print options: docs/PRINT_EXPORT.md); UI Import…, Export STL… |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf`; UI Import…, Export DXF (sketch)… |
@@ -35,18 +33,18 @@ Not supported, by design: renaming a file to another extension, a hidden externa
 (FreeCAD/OpenCascade is used only as an independent validator, never at runtime), mesh to
 B-rep reconstruction, recovered feature history from STEP.
 
-## Direction matrix (run 7)
+## Direction matrix
 
-Checked against the code at run 7; "no" means the information is not read or not written
+"No" means the information is not read or not written
 (dropped, never invented). Native-history fidelity is never claimed for foreign files: STEP
 interchange does not carry another application's feature history.
 
 | Format | Direction | Entities | Units | Hierarchy | Names / colours | Fidelity | Known losses |
 |---|---|---|---|---|---|---|---|
 | STEP | import (`import_step`) | exact B-rep subset (planes, cylinders, cones, spheres, tori, B-splines per formats/step.md); open shells as surface bodies on request | declared unit honoured; override only when none | **flattened** (one body per placed solid; reported) | solid names kept; colours no | exact surfaces; volumes exact or labelled estimates | assembly structure (use `import_step_assembly`), colours, PMI |
-| STEP | import (`import_step_assembly`, run 7) | as above | as above | **products and usages preserved** as components and linked occurrences | product names kept; colours no | as above | colours, PMI, external references |
+| STEP | import (`import_step_assembly`) | as above | as above | **products and usages preserved** as components and linked occurrences | product names kept; colours no | as above | colours, PMI, external references |
 | STEP | export (`export_step`) | one solid per exact body | mm | none (flat bodies) | body names; colours no | exact B-rep | mesh bodies and open surface bodies refused |
-| STEP | export (`export_assembly` `step_assembly`, run 7) | per occurrence | mm | PRODUCT per component, NAUO + CDSR per occurrence (FreeCAD-checked) | names; colours no | exact | suppressed occurrences omitted (by design) |
+| STEP | export (`export_assembly` `step_assembly`) | per occurrence | mm | PRODUCT per component, NAUO + CDSR per occurrence (FreeCAD-checked) | names; colours no | exact | suppressed occurrences omitted (by design) |
 | STL | import | triangles (ASCII, binary) | none in file: unit choice required | none | no / no | mesh as stored (f32 exact) | everything but triangles |
 | STL | export | triangles (B-rep tessellated at chord) | mm | none | no / no | tessellation (stated chord) | exactness, units, names |
 | 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit | flattened | object names; object-level colour only | mesh as stored | per-triangle colours, textures, production extension (refused) |
@@ -56,7 +54,7 @@ interchange does not carry another application's feature history.
 | SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
 | SVG / PDF | export (sketch, drawings) | lines/arcs (PDF: Béziers ≤ 2.8e-4·r) | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
 
-Qualification corpus (run 7, Run-8 §3 first slice): `tools/fixtures/corpus/` (29 manifest entries:
+Qualification corpus: `tools/fixtures/corpus/` (29 manifest entries:
 12 STEP parts (mm and inch, rotated placements, holes, counterbore, chamfer, fillet, cone,
 sphere, torus, tube, open shell), 3 STEP assemblies (nested, repeated links, rotated parts),
 2 STL meshes, hand-authored 3MF/DXF/SVG/STL cases and malformed STEP/STL/3MF/DXF/SVG files;
@@ -80,7 +78,7 @@ figure differs by 2e-6 relative from float accumulation).
 
 STEP header: truck-stepio 0.3 writes `FILE_NAME` author/organization as nested lists
 (`((''))`), which OpenCascade reports as "StepReaderData: Unresolved Reference: Fails Count: 2"
-(FreeCAD 1.1.4; the solids still load). Since run 6 the exporter writes the
+(FreeCAD 1.1.4; the solids still load). The exporter writes the
 ISO 10303-21 `LIST OF STRING` form `('')`; the shipped `examples/print/*.step` headers were
 corrected the same way (geometry unchanged).
 
@@ -163,12 +161,12 @@ malformed/NaN/truncated/unterminated files are refused with the document unchang
 export and Cut of a mesh body are refused and nothing is written; the mesh body exports as a
 684-byte binary STL validated by a Python reader and FreeCAD (V 1000, solid).
 
-**Run 4 print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
+**Print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
 manifold vertices, orientation, positive volume; self-intersection not checked), `angle_deg`,
 export-only placement/layout, P1S/manual bed fit, `separate_files`, `allow_open_meshes`,
 per-body report. Evidence: `crates/rcad-commands/tests/print_export.rs`,
 `crates/rcad-kernel/tests/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,
-FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/run4/print/validation/`).
+FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/print/validation/`).
 
 **Known losses**: no units, colour, topology or exact geometry; binary STL is f32
 (~7 significant digits); ASCII export exists in the crate but is not a command option.
@@ -203,10 +201,10 @@ linetype and colour; design intent (constraints); sketch placement on export.
 
 ## 3MF
 
-`rcad_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)), wired by
-the coordinator as `import_3mf` (base feature `Import3mf`, source embedded, one mesh body per
+`rcad_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)), exposed
+as `import_3mf` (base feature `Import3mf`, source embedded, one mesh body per
 build item, display/export only) and `export_3mf` (`bodies` default all visible, `unit`,
-`chord`, run-4 print options: [`PRINT_EXPORT.md`](PRINT_EXPORT.md); geometry only, no slicer settings). Command-level evidence: `crates/rcad-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
+`chord`, print options: [`PRINT_EXPORT.md`](PRINT_EXPORT.md); geometry only, no slicer settings). Command-level evidence: `crates/rcad-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
 (FreeCAD two-box fixture imported; three-body export in inch re-imported with exact
 volumes). UI: Import… and Export 3MF… (`exchange_ui.rs::threemf_import_export_and_svg_sketch`
 imports the FreeCAD two-box fixture without a unit prompt and exports all visible bodies).
@@ -244,7 +242,7 @@ local sketch coordinates, mm, y negated; construction geometry and constraints a
 written.
 
 Evidence: `crates/rcad-exchange/tests/svg_fixtures.rs` (15 tests: hand-written `plate_mm.svg`,
-FreeCAD-generated `freecad_plate.svg`, the review fixes above); acceptance 3S (FreeCAD SVG →
+FreeCAD-generated `freecad_plate.svg`, the edge cases above); acceptance 3S (FreeCAD SVG →
 sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_scenario_steps.sh`
 (FreeCAD validates the 3S STEP and reads the exported SVG with `importSVG`: total edge length
 220 + 20π, 60 × 40); UI import in `exchange_ui.rs::threemf_import_export_and_svg_sketch`.
@@ -254,47 +252,47 @@ stroke only), design intent (constraints); sketch placement on export.
 
 ## Native format
 
-**v5 (run 5)** = v4 plus feature suppression (`"suppressed": true`), face references to
+**v5** = v4 plus feature suppression (`"suppressed": true`), face references to
 pattern/mirror occurrences and chamfer faces (`FaceRole::Copy`, `FaceRole::Chamfer`), the
 `TangentArcs` sketch constraint (line–arc sketch fillets), solid `Fillet`, `Loft` and `Sweep`
 features, angled construction planes (`Offset.angle`), patterns of count 1 and bound
 `plane_offset` on mirrors/holes. All additive. A document is written as
-v5 only when it uses one of them; otherwise it stays v4, byte for byte as a run-4 save, so run-4
-builds keep reading it, and they refuse a v5 file instead of evaluating suppressed features or
+v5 only when it uses one of them; otherwise it stays v4, byte for byte as a v4 save, so builds that
+only know v4 keep reading it, and they refuse a v5 file instead of evaluating suppressed features or
 misreading references. A file labelled v4 that contains a v5 feature is refused. Frozen v4
 documents (the examples at 8f2b797) are in `crates/rcad-commands/tests/fixtures/native_v4/`
 (`suppression.rs::frozen_v4_fixtures_load_unchanged`: load, regenerate to the cached volume,
 re-save as an identical v4 document).
 
-**v6 (run 6)** = v5 plus extrusion options (`"options"` on an `Extrude`: symmetric, two
+**v6** = v5 plus extrusion options (`"options"` on an `Extrude`: symmetric, two
 sides, start offset, up to a plane, thin, taper, further regions) and the `Intersect`
-operation (`rcad_document::io::v6_feature` lists every run-6 addition). Written only when used,
+operation (`rcad_document::io::v6_feature` lists every v6 addition). Written only when used,
 otherwise v5/v4 as before; a file labelled v5 or older that contains a v6 feature is refused
-(a run-5 build would silently ignore the unknown fields and build a different solid). Frozen
-v5 documents (saved by run-6's build before the change, with run-5 features only) are in
-`crates/rcad-commands/tests/fixtures/native_v5/` (`native_formats.rs::v5_run5_documents`:
+(a v5 build would silently ignore the unknown fields and build a different solid). Frozen
+v5 documents (saved as v5, with v5 features only) are in
+`crates/rcad-commands/tests/fixtures/native_v5/` (`native_formats.rs::v5_documents`:
 open, analytic volume, re-save as an identical v5 document).
-**v6 (run 6)** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
+**v6** adds `DirectEdit` features (direct edits of imported STEP bodies, ADR 0010),
 written only when present (`io::v6_feature`); otherwise the file stays v5/v4 as before.
 Imported bodies edited this way regenerate from the embedded STEP bytes plus the edit list.
-**v6 (run 6)** = v5 plus sketch text (`Sketch.texts`: string, font request, placement and the
+**v6** = v5 plus sketch text (`Sketch.texts`: string, font request, placement and the
 resolved glyph outlines with the font's file name and FNV-1a 64 content hash) and sketch pattern
 constraints (`PatternStep`, `PatternRotate`). Written only when a sketch uses one of them
 (`io.rs::sketch_v6_feature`, folded into `v6_feature`); a file labelled v5 or older that contains them is refused. Loading and regenerating never needs the font (the stored outlines are
 authoritative); only changing a text's string or font does.
 
-**v6 (run 6)** = v5 plus body materials (`bodies[].material`: `{name, density (g/cm³),
+**v6** = v5 plus body materials (`bodies[].material`: `{name, density (g/cm³),
 catalog?}`, docs/MATERIALS.md); written only when a body has one (`io::v6_feature`, "body
-materials"), so a run-5 build refuses the file instead of dropping the material. An invalid
+materials"), so a v5 build refuses the file instead of dropping the material. An invalid
 density in a file is refused on load.
 
-**v6 (run 6)** = v5 plus `Combine` features (`{"Combine": {"target", "tools", "op", "keep_tools"}}`),
+**v6** = v5 plus `Combine` features (`{"Combine": {"target", "tools", "op", "keep_tools"}}`),
 written only when present (`io::v6_feature`, "body combines").
 
-**v6 (run 6)** = v5 plus `document.assembly` (components, occurrences, joints;
+**v6** = v5 plus `document.assembly` (components, occurrences, joints;
 docs/ASSEMBLIES.md), written only when non-empty (`io::v6_feature`, "components, occurrences
 and joints"). Loading validates ownership, ids, joint trees and limits.
-**v6 (run 6)** = v5 plus drawings (`document.drawings`: sheet, projection convention, title
+**v6** = v5 plus drawings (`document.drawings`: sheet, projection convention, title
 block fields, views referencing bodies by id and hole callouts referencing features by id;
 docs/DRAWINGS.md). Written only when a document has a drawing (`io::v6_feature`,
 "drawings"). No geometry is stored: drawings are rendered from the regenerated model at export.
@@ -306,9 +304,9 @@ never checked. Evidence: `crates/rcad-document/tests/legacy_name.rs`, plus every
 fixture under `crates/rcad-commands/tests/fixtures/native_v*/`, whose contents predate the
 rename. See docs/RENAME.md.
 
-**v4 (run 4)** = v3 plus named user parameters and feature expression bindings
-(docs/PARAMETERS.md); v3 files load unchanged (frozen copies of the run-3 documents in
-`crates/rcad-commands/tests/fixtures/native_v3/`, `native_formats.rs::v3_run3_examples`), saves
+**v4** = v3 plus named user parameters and feature expression bindings
+(docs/PARAMETERS.md); v3 files load unchanged (frozen v3 documents in
+`crates/rcad-commands/tests/fixtures/native_v3/`, `native_formats.rs::v3_examples`), saves
 write v4, and an older build refuses a v4 file instead of dropping expressions.
 
 v3 stores features, bodies (id, name, visibility, source) and the bytes of every imported
@@ -316,7 +314,7 @@ file as base64 blobs, so a document reopens after the source file is moved or de
 (scenario C.3, D.6, D.11 delete the sources before reopening and compare the whole document
 and every body). v1 and v2 files migrate on load (first solid feature gets body B1; feature
 ids unchanged); newer versions are refused. Evidence: `native_formats.rs` opens the v1
-fixture, frozen copies of the five run-2 v2 documents
+fixture, five frozen v2 documents
 (`crates/rcad-commands/tests/fixtures/native_v2/`; the committed `examples/*.rcad.json` are
 re-saved as v3 whenever their workflows replay, e.g. in `cargo xtask check`), and every
 committed example, checks the analytic volume, re-saves as v3 and reopens to an identical
@@ -329,7 +327,7 @@ Reproduce (from the repository root):
 ```sh
 cargo run --release -p rcad-cli -- acceptance --out artifacts/acceptance   # scenarios C and D are the "C." / "D." steps
 tools/external_validation.sh artifacts/acceptance                          # FreeCAD checks incl. tools/check_formats.sh
-tools/check_scenario_steps.sh                                                  # run-3 STEP exports incl. 3S + exported SVG via FreeCAD
+tools/check_scenario_steps.sh                                                  # scenario STEP exports incl. 3S + exported SVG via FreeCAD
 cargo test --release -p rcad-commands --test imports --test native_formats --test bodies
 cargo test --release -p rcad-kernel --test step_import --test step_export_multi
 cargo test --release -p rcad-exchange
@@ -338,19 +336,19 @@ tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures
 tools/fixtures/threemf/validate_writer.sh
 ```
 
-Test results below are from `cargo xtask check` (log `artifacts/run3/verify/xtask.log`).
+Test results below are from `cargo xtask check` (log `artifacts/verify/xtask.log`).
 
 | Evidence | Where | Result (2026-10-11) |
 |---|---|---|
-| Acceptance C.1-C.8, D.1-D.11, 3S | `crates/rcad-commands/src/acceptance/formats.rs`, `bodies.rs` (`scenario_svg`); reports `artifacts/acceptance/acceptance_report.json` (written by `cargo xtask check`) and `artifacts/run3/acceptance/acceptance_report.json` (a separate run, same results) | all checks PASS (855 total, all scenarios; C 120, D 90, 3S 10) |
-| FreeCAD validation of C/D exports | `tools/check_formats.sh` (called by `tools/external_validation.sh`); per-file results `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`; log `artifacts/run3/verify/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
-| FreeCAD validation of 3S (SVG) | `tools/check_scenario_steps.sh`; log `artifacts/run3/verify/check_scenario_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
+| Acceptance C.1-C.8, D.1-D.11, 3S | `crates/rcad-commands/src/acceptance/formats.rs`, `bodies.rs` (`scenario_svg`); reports `artifacts/acceptance/acceptance_report.json` (written by `cargo xtask check`) | all checks PASS (855 total, all scenarios; C 120, D 90, 3S 10) |
+| FreeCAD validation of C/D exports | `tools/check_formats.sh` (called by `tools/external_validation.sh`); per-file results `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`; log `artifacts/verify/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
+| FreeCAD validation of 3S (SVG) | `tools/check_scenario_steps.sh`; log `artifacts/verify/check_scenario_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
 | Command-level import edge cases | `crates/rcad-commands/tests/imports.rs`; 3MF: `bodies.rs::threemf_import_and_multi_body_export_round_trip` | 12 + 8 pass |
 | UI import/export dialogs | `crates/rcad/tests/exchange_ui.rs` | 6 pass |
 | Native v1/v2/v3 | `crates/rcad-commands/tests/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |
 | Kernel STEP import/export | `crates/rcad-kernel/tests/step_import.rs`, `step_export_multi.rs` | 13 + 4 pass (1 ignored: artifact writer for `tools/check_step_multi.sh`) |
-| STL/DXF adapters | `crates/rcad-exchange/tests/stl_fixtures.rs`, `dxf_fixtures.rs`, `dxf_scale.rs` + unit tests in `src/{stl,mesh,dxf}`; validators `tools/fixtures/stl/validate_writer.sh`, `tools/fixtures/dxf/validate_export.sh`, logs `artifacts/run3/verify/stl_validate.log`, `artifacts/run3/verify/dxf_validate.log` | 7 + 13 + 2 pass |
-| 3MF adapter | `crates/rcad-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/run3/verify/threemf_validate.log` | 9 + 6 pass; writer checked by the Python stdlib reader and FreeCAD |
+| STL/DXF adapters | `crates/rcad-exchange/tests/stl_fixtures.rs`, `dxf_fixtures.rs`, `dxf_scale.rs` + unit tests in `src/{stl,mesh,dxf}`; validators `tools/fixtures/stl/validate_writer.sh`, `tools/fixtures/dxf/validate_export.sh`, logs `artifacts/verify/stl_validate.log`, `artifacts/verify/dxf_validate.log` | 7 + 13 + 2 pass |
+| 3MF adapter | `crates/rcad-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/verify/threemf_validate.log` | 9 + 6 pass; writer checked by the Python stdlib reader and FreeCAD |
 | SVG adapter | `crates/rcad-exchange/tests/svg_fixtures.rs` | 15 pass |
 | Replayable workflows | `examples/imported_step_hole_workflow.json`, `examples/dxf_stl_import_workflow.json` (`rcad-cli run`, from the repository root) with saved documents `examples/*.rcad.json` | replayed by `imports.rs` |
 
@@ -358,7 +356,7 @@ Test results below are from `cargo xtask check` (log `artifacts/run3/verify/xtas
 
 ## Known issues found by these checks
 
-* Fixed after these checks (coordinator, run 3): `ExportStep` without `bodies` now writes the
+* Fixed after these checks: `ExportStep` without `bodies` now writes the
   visible B-rep bodies and names skipped mesh bodies in its message
   (`imports.rs::export_step_default_skips_mesh_bodies_as_documented`); a blind cut sketched on
   a face now goes into the material by default and a reversed one is refused with "points away

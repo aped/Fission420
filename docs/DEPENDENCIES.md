@@ -12,7 +12,7 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 
 (Updated as crates are added; see section below for the GUI stack.)
 
-## Added during run 1
+## Core and GUI stack
 
 | crate | version | license | used by |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 | bytemuck | 1.25 | Zlib OR Apache-2.0 OR MIT | rcad-viewport |
 | image | 0.25.10 (`png`) | MIT OR Apache-2.0 | rcad (screenshots) |
 
-## Added during run 6
+## Sketch text
 
 | crate | version | license | source | used by |
 |---|---|---|---|---|
@@ -51,7 +51,7 @@ for crates without licence files); see docs/CI.md.
 | egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | rcad UI interaction tests |
 | kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | rcad UI interaction tests |
 
-## rcad-exchange (run 3, STL/DXF adapters)
+## rcad-exchange (STL/DXF adapters)
 
 No new third-party crates: `rcad-exchange` depends only on `rcad-sketch`, `serde` 1.0.229 and
 `thiserror` 2.0.21 (both already listed), plus `serde_json` 1.0.151 as a dev-dependency.
@@ -59,7 +59,7 @@ External tools used only to generate/validate fixtures (not linked, not shipped,
 dependency): FreeCAD 1.1.4 flatpak (LGPL-2.1, `Mesh`, `Import.writeDXFShape`/`readDXF`) and
 ezdxf 1.4.2 (MIT, https://github.com/mozman/ezdxf) in a throwaway venv under `artifacts/venv`.
 
-## STEP import / multi-body export (run 3)
+## STEP import / multi-body export
 
 No new crates. STEP import (`rcad-kernel/src/step_in/`) uses the ruststep parser through
 truck-stepio's re-export (`truck_stepio::r#in::ruststep`), so there is no direct dependency.
@@ -74,7 +74,7 @@ Test fixtures under `crates/rcad-kernel/tests/fixtures/step/` were generated wit
 (LGPL-2.1, external tool, not linked) from primitives in our own script
 (`tools/fixtures/step/generate.py`); they contain no third-party design data.
 
-## 3MF adapter (run 3, `rcad-exchange::threemf`)
+## 3MF adapter (`rcad-exchange::threemf`)
 
 New *direct* dependencies of `rcad-exchange`; all three were already in `Cargo.lock`
 (transitively via `image`/`png` and `wayland-scanner`), so no new crate enters the build.
@@ -88,7 +88,7 @@ New *direct* dependencies of `rcad-exchange`; all three were already in `Cargo.l
 The ZIP container code (`rcad-exchange/src/zip.rs`) and the 3MF model handling are our own.
 Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tools/fixtures/threemf/`.
 
-## Added 2026-10-12 (after run 4)
+## Prismatic booleans (added 2026-10-12)
 
 | crate | version | license | used by |
 |---|---|---|---|

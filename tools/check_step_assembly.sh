@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Independent check of the hierarchical STEP assembly export (export_assembly
-# format "step_assembly", run 7) with FreeCAD 1.1 flatpak (OpenCascade), not the
+# format "step_assembly") with FreeCAD 1.1 flatpak (OpenCascade), not the
 # Rust writer/reader.
 # usage: tools/check_step_assembly.sh
 # Replays examples/hinge_assembly_workflow.json (hinge at 90 deg; screw height 8),

@@ -1,7 +1,7 @@
-//! Rigid transforms of bodies and frames (run 6: body Move/Copy, SESSION_6
-//! §B "Move/Copy/Align"). Rotation about an axis through a point, then a
-//! translation; exact for every surface the kernel builds (planes, cylinders,
-//! cones, tori, B-splines are mapped by their control points).
+//! Rigid transforms of bodies and frames (body Move/Copy/Align). Rotation
+//! about an axis through a point, then a translation; exact for every
+//! surface the kernel builds (planes, cylinders, cones, tori, B-splines are
+//! mapped by their control points).
 use crate::{Body, Frame, KernelError, Result, guarded};
 use truck_modeling::*;
 
@@ -61,7 +61,7 @@ impl Rigid {
         Ok(Rigid { r, t })
     }
 
-    /// Uniform scaling by `factor` (> 0) about `center` (run 6: body Scale).
+    /// Uniform scaling by `factor` (> 0) about `center` (body Scale).
     /// The matrix is then `factor · I`; [`Rigid::frame`] keeps frame axes unit.
     pub fn scaling(center: [f64; 3], factor: f64) -> Result<Rigid> {
         if !(factor.is_finite() && factor > 0.0) || !center.iter().all(|v| v.is_finite()) {

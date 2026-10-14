@@ -1,4 +1,4 @@
-//! Exact solid edge fillet (run 5, `FeatureKind::Fillet` over
+//! Exact solid edge fillet (`FeatureKind::Fillet` over
 //! `rcad_kernel::fillet_edge`): a right-angle edge of radius r removes
 //! (r² − πr²/4) per unit length; the fillet follows upstream edits, undo/redo
 //! and save/reopen (format v5); refusals leave the document unchanged; the

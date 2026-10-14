@@ -1,5 +1,4 @@
-//! Sheet metal, bounded subset (run 6 pull-forward of SESSION_7 §5, coverage
-//! SM01): a contour flange from an open chain of sketch lines.
+//! Sheet metal, bounded subset: a contour flange from an open chain of sketch lines.
 //!
 //! Convention (documented in docs/SHEET_METAL.md): the sketch chain is one
 //! surface of the sheet (the "sketch side"); the material lies on the right
@@ -276,7 +275,7 @@ fn orient_ccw(segs: Vec<LoopSegment>) -> Vec<LoopSegment> {
 }
 
 /// No two edges of the polygonized loop intersect or touch, other than
-/// neighbours at their shared vertex (review S1: collinear overlaps, an end
+/// neighbours at their shared vertex (collinear overlaps, an end
 /// point on another edge and a spike back along the previous edge count).
 fn check_simple(segs: &[LoopSegment]) -> std::result::Result<(), String> {
     let p = polyline(segs);
@@ -401,7 +400,7 @@ fn arc_dist(q: P, s: P, e: P, c: P, ccw: bool) -> f64 {
     }
 }
 
-/// Review S4: every hole stays strictly inside the (relief-cut) outline.
+/// Every hole stays strictly inside the (relief-cut) outline.
 fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::Result<(), String> {
     let p = polyline(outline);
     let scale = p
@@ -409,7 +408,7 @@ fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::R
         .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
     let eps = 1e-9 * scale;
     for (k, h) in holes.iter().enumerate() {
-        // Review run 7 #48: a circle is checked exactly (distance from its
+        // A circle is checked exactly (distance from its
         // centre to each true outline line and arc), not as a polygon
         // inscribed in it, which misses an edge inside the circle by less
         // than the sagitta.
@@ -540,7 +539,7 @@ pub fn line_chain(s: &rcad_sketch::Sketch) -> std::result::Result<Vec<[f64; 2]>,
 }
 
 /// The open line chain of `s` (as [`line_chain`]) in a geometric order that
-/// does not depend on entity ids or line directions (review run 7 #43): it
+/// does not depend on entity ids or line directions: it
 /// starts at the chain end with the smaller sketch x, or, when the two ends'
 /// x differ by at most 1e-9 × the sketch scale, the smaller y. Redrawing or
 /// reversing a line therefore never flips a ruled surface's normal (tangent
@@ -583,7 +582,7 @@ pub fn flat_pattern_sketch(part: &SheetPart, width: f64) -> rcad_sketch::Sketch 
 }
 
 // ---------------------------------------------------------------------------
-// Run 7: sheet rule, base face, edge flanges, flat pattern (docs/SHEET_METAL.md,
+// Sheet rule, base face, edge flanges, flat pattern (docs/SHEET_METAL.md,
 // ADR 0012). A sheet body is a planar plate (closed sketch profile, `thickness`
 // thick) with straight flanges bent outside its outline along straight edges.
 // The folded B-rep is built exactly from that definition at every
@@ -983,7 +982,7 @@ fn seg_hits_box(a: P, u: P, n: P, p: P, q: P, s0: f64, s1: f64, x0: f64, x1: f64
 /// Exact folded B-rep and flat pattern of `m`; impossible geometry is refused
 /// with the feature responsible and the reason.
 ///
-/// Review run 7 S12: checks on the whole outline (relief through the plate
+/// Checks on the whole outline (relief through the plate
 /// or a hole, flat-pattern overlap) cannot tell which flange caused them by
 /// themselves; on such a refusal the flanges are re-checked in history order
 /// and the first one whose addition fails is named.
@@ -1277,7 +1276,7 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
     // Flanges against each other and against the plate.
     for i in 0..footprints.len() {
         for j in i + 1..footprints.len() {
-            // Review run 7 S12: an up and a down flange are separated by the
+            // An up and a down flange are separated by the
             // plate except in their bend zones (outside the plate edge, up to
             // R + t); only those are compared across sides.
             let (fi, fj) = (&footprints[i], &footprints[j]);
@@ -1307,11 +1306,11 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
             }
         }
     }
-    // Review S1: this is the whole protection against unfolded strips that
+    // This is the whole protection against unfolded strips that
     // overlap each other or the plate. (Comparing the flat outline's area
     // with the plate plus the strips cannot detect it: by the shoelace
     // formula every strip detour adds exactly its own area, overlapping or
-    // not; review run 7 #45.)
+    // not.)
     check_simple(&to_sk(&flat)).map_err(|e| {
         DocError::Validation(format!(
             "{}: the flat pattern overlaps itself ({e}); flanges collide when unfolded",
@@ -1624,7 +1623,7 @@ pub fn notes(b: &SheetBuild, rule: &SheetRule) -> Vec<String> {
 mod dist_tests {
     use super::*;
 
-    /// Review run 7 #48: exact point-to-segment and point-to-arc distances.
+    /// Exact point-to-segment and point-to-arc distances.
     #[test]
     fn segment_and_arc_distances_are_exact() {
         assert_eq!(seg_dist([0.5, 2.0], [0.0, 0.0], [1.0, 0.0]), 2.0);

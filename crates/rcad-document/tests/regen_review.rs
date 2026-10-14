@@ -1,6 +1,5 @@
-//! Run-3 review findings on `regen.rs` (run-3 review,
-//! "Backend: regen.rs"). Expected volumes are derived by hand from box
-//! arithmetic, not from the implementation's output.
+//! Regeneration regressions in `regen.rs`. Expected volumes are derived by
+//! hand from box arithmetic, not from the implementation's output.
 use rcad_document::*;
 use rcad_kernel::{Measurements, VolumeResult};
 use rcad_sketch::Sketch;
@@ -71,7 +70,7 @@ fn body_vol(e: &Evaluation) -> f64 {
 /// Volume tolerance for box-only models (exact planar arithmetic).
 const VOL_TOL: f64 = 0.01;
 
-// ---------------------------------------------------------------- finding 1
+// ----------------------------------------------------------- mesh re-import
 
 fn tet_stl(s: f64) -> Vec<u8> {
     let v = [[0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, s, 0.0], [0.0, 0.0, s]];
@@ -144,7 +143,7 @@ fn reimport_of_identical_bytes_hits_the_cache() {
     assert!(m.cache_stats().0 > hits, "{:?}", m.cache_stats());
 }
 
-// ---------------------------------------------------------------- finding 2
+// ---------------------------------------------------- deferred measurements
 
 /// 20x20x10 block (4000) with a 4x4x3 cut at x = -5 (-48 = 3952), then
 /// `third`. Measurements are deferred and adopted after `third`; undoing it
@@ -263,12 +262,12 @@ fn adopted_measurement_is_reused_on_redo() {
     assert!((body_vol(m.evaluation()) - 3904.0).abs() < VOL_TOL);
 }
 
-// ---------------------------------------------------------------- finding 3
+// ---------------------------------------------------- caps on partial faces
 
-/// Truck 0.6 cannot cut with a cap coplanar to a partial face. Run 4 refused
-/// these cases (they used to cut `wrong` mm^3); since ADR 0006 the exact slab
-/// construction builds them, checked by the result gate: the exact volume, and
-/// the material that must stay (bounds along z) intact.
+/// Truck 0.6 cannot cut with a cap coplanar to a partial face (a naive cut
+/// removes `wrong` mm^3); the exact slab construction (ADR 0006) builds them,
+/// checked by the result gate: the exact volume, and the material that must
+/// stay (bounds along z) intact.
 fn exact(r: Result<Evaluation>, want: f64, wrong: f64, z: (f64, f64)) {
     let e = r.unwrap_or_else(|e| panic!("expected the exact result {want}, got {e:?}"));
     let v = body_vol(&e);
@@ -348,7 +347,7 @@ fn cut_from_face_inside_the_face_still_works() {
     assert!((v - (2720.0 - 72.0)).abs() < VOL_TOL, "{v}");
 }
 
-/// Post-fix review: an edge notch on the lower face (x -2..4, running off the
+/// An edge notch on the lower face (x -2..4, running off the
 /// x = 0 edge) with the raised step elsewhere on the body. The air above the
 /// notch is free, so the cut works: 2720 - 4x6x3 = 2648. The cut-probe slab in
 /// air made Truck return an empty result, which was taken for material and
@@ -366,7 +365,7 @@ fn edge_notch_beside_a_raised_step_still_cuts() {
     assert!((v - 2648.0).abs() < VOL_TOL, "{v}");
 }
 
-/// Post-fix review: a Join on world XY coplanar with the block's bottom face
+/// A Join on world XY coplanar with the block's bottom face
 /// (outward normal -Z). Builds before the "Join goes away from the material"
 /// rule needed `reverse: true` here and saved it; such files must still
 /// regenerate, and `reverse` makes no difference. 20x20x10 + 4x4x3 = 4048,
@@ -400,7 +399,7 @@ fn join_on_a_face_ignores_reverse_so_old_files_still_load() {
     }
 }
 
-// ---------------------------------------------------------------- finding 4
+// --------------------------------------------------------- blind-cut floors
 
 /// A blind cut whose floor lands on a bottom face that covers only part of the
 /// profile (a boss continues below) must stop at the floor: 2000 + 9*8*5 boss
@@ -490,7 +489,7 @@ fn pattern_copy_floor_is_rederived_where_it_lands() {
     assert!((v - 4080.0).abs() < VOL_TOL, "{v}");
 }
 
-// ---------------------------------------------------------------- finding 5
+// ------------------------------------------------------------- join overlap
 
 /// A Join on a plate thinner than twice the overlap must not poke out of the
 /// far side: 20x20x0.4 plate (160) + 4x4x5 boss (80).
@@ -516,7 +515,7 @@ fn join_on_thin_plate_does_not_poke_through() {
 /// pocket cut from the other side. The bounds do not change, so neither the
 /// depth cap nor the bounds check sees it. 20x20x10 (4000) - 10x10x9.7 pocket
 /// (970) + 4x4x5 boss (80) = 3110.
-/// Run 4: the overlap is sized from the clear material depth under the
+/// The overlap is sized from the clear material depth under the
 /// profile (0.3 mm here), so the result is exact.
 #[test]
 fn join_over_thin_skin_does_not_poke_into_cavity() {
@@ -539,7 +538,7 @@ fn join_over_thin_skin_does_not_poke_into_cavity() {
     assert!((v - 3110.0).abs() < VOL_TOL, "{v}");
 }
 
-// ---------------------------------------------------------------- finding 6
+// -------------------------------------------------------- circular patterns
 
 fn circular(count: u32, angle_deg: f64) -> Result<Evaluation> {
     let mut d = Document::new();

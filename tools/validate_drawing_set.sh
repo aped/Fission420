@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run-7 acceptance 5 (drawing set): build the holed plate and its pinned assembly with
+# Drawing set acceptance: build the holed plate and its pinned assembly with
 # tools/fixtures/drawing_set_workflow.json, then check the exported sheets with independent
 # readers: poppler (pdfinfo/pdftotext/pdftoppm) for the PDFs and FreeCAD's DXF importer
 # (flatpak org.freecad.FreeCAD, tools/freecad_check_drawing_dxf.py) for the part DXF.
@@ -17,11 +17,11 @@
 # Usage: tools/validate_drawing_set.sh <rcad-cli> [out-dir]   (run from the repo root)
 set -euo pipefail
 CLI=$(readlink -f "${1:?usage: validate_drawing_set.sh <rcad-cli> [out-dir]}")
-OUT=${2:-artifacts/run7/drawing_set}
+OUT=${2:-artifacts/drawing_set}
 ROOT=$(pwd)
 mkdir -p "$OUT"
-# The workflow writes to artifacts/run7/drawing_set; copy results to OUT if different.
-SRC=artifacts/run7/drawing_set
+# The workflow writes to artifacts/drawing_set; copy results to OUT if different.
+SRC=artifacts/drawing_set
 mkdir -p "$SRC"   # the workflow writes there (absent in a clean checkout)
 "$CLI" run tools/fixtures/drawing_set_workflow.json > "$OUT/run.jsonl" ||
   { echo "FAILED: workflow (see $OUT/run.jsonl)"; exit 1; }

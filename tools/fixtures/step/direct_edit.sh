@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate crates/rcad-kernel/tests/fixtures/step/direct_edit_block_mm.step (run 6
+# Regenerate crates/rcad-kernel/tests/fixtures/step/direct_edit_block_mm.step (the
 # direct-edit fixture) with the FreeCAD flatpak (made with 1.1.4 / OCC 7.8.1).
 # usage: tools/heavy.sh tools/fixtures/step/direct_edit.sh
 set -euo pipefail

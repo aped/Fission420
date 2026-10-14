@@ -5,7 +5,7 @@
 # Prints one line "FREECAD_RESULT {json}" with per-object mesh facts as FreeCAD's Mesh
 # module sees them. 3MF goes through Mesh.insert (FreeCAD's own 3MF reader, if present);
 # an import failure is reported as {"error": ...}.
-# Observed with FreeCAD 1.1.4 (artifacts/run4/print/validator/freecad_*.txt): its 3MF reader
+# Observed with FreeCAD 1.1.4 (artifacts/print/validator/freecad_*.txt): its 3MF reader
 # merges all build items into ONE mesh object (build transforms applied) and IGNORES the
 # model unit attribute (a unit="inch" 1-inch cube reports volume 1.0). Per-object and
 # non-millimeter 3MF results must therefore come from check_print_mesh.py, not FreeCAD.

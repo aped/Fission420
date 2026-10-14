@@ -1,5 +1,5 @@
-//! Organizer tray (SESSION_5 §7) built from ordinary commands, and its
-//! independent analytic oracle. The oracle is the spec's formula, derived from
+//! Organizer tray built from ordinary commands, and its independent
+//! analytic oracle. The oracle is the tray volume formula, derived from
 //! the parameters only; it never reads the model.
 use rcad_commands::{Command, Response, Session};
 use rcad_document::BodyId;

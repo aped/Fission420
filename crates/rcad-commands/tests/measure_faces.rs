@@ -1,4 +1,4 @@
-//! Exact face measurements (run 6, IN01): cylinder radius/diameter, distance
+//! Exact face measurements: cylinder radius/diameter, distance
 //! between parallel axes, plane-to-axis distance, plane distance/angle — from the
 //! B-rep surfaces, against the modelled dimensions; they follow regeneration.
 mod support;
@@ -153,7 +153,7 @@ fn rotated_body_axis_distance_is_invariant() {
     assert!((d - 30f64.hypot(20.0)).abs() < 1e-9, "{d}");
 }
 
-/// Run 7: exact planar face area (holes subtracted), following an edit.
+/// Exact planar face area (holes subtracted), following an edit.
 #[test]
 fn planar_face_area_is_exact_and_follows_edits() {
     let mut s = Session::new();

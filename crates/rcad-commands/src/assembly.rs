@@ -1,5 +1,5 @@
 //! Component / occurrence / joint commands, BOM, interference and assembly
-//! export (run 6 pull-forward of Run-7 §1-2; docs/ASSEMBLIES.md).
+//! export (docs/ASSEMBLIES.md).
 use crate::{Command, Response};
 use rcad_document::assembly::{
     ComponentId, Joint, JointId, JointKind, OccurrenceId, Placement, Pose, inverse, parse_path,
@@ -23,25 +23,25 @@ pub struct AssemblyOut {
     pub bom: Option<Vec<BomRow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interference: Option<Vec<Interference>>,
-    /// Run 7: indented BOM (quantity per parent; see [`structured_bom`]).
+    /// Indented BOM (quantity per parent; see [`structured_bom`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_bom: Option<Vec<StructuredBomRow>>,
-    /// Run 7: sampled motion check (`joint_sweep`).
+    /// Sampled motion check (`joint_sweep`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sweep: Option<Vec<SweepStep>>,
-    /// Run 7: status of external components (`check_external_components`).
+    /// Status of external components (`check_external_components`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<Vec<ExternalStatus>>,
 }
 
-/// One sample of a joint sweep (run 7).
+/// One sample of a joint sweep.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SweepStep {
     pub value: f64,
     pub interference: Vec<Interference>,
 }
 
-/// Source status of an external component (run 7).
+/// Source status of an external component.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalStatus {
     pub component: ComponentId,
@@ -105,7 +105,7 @@ pub struct Interference {
     /// Instance path names ("Sub#1/Bolt#2").
     pub a_name: String,
     pub b_name: String,
-    /// Run 7: stable instance paths ("O3/O7") for selection/highlighting.
+    /// Stable instance paths ("O3/O7") for selection/highlighting.
     #[serde(default)]
     pub a_path: String,
     #[serde(default)]
@@ -138,7 +138,7 @@ fn v(m: impl Into<String>) -> DocError {
     DocError::Validation(m.into())
 }
 
-/// Review run 7 #35: a name read from a file (STEP PRODUCT / usage /
+/// A name read from a file (STEP PRODUCT / usage /
 /// solid labels) made valid like a typed one: control characters dropped,
 /// whitespace trimmed, at most `MAX_FILE_NAME_CHARS` characters; empty ->
 /// `fallback`. Room is left for a " 99" de-duplication suffix.
@@ -365,7 +365,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     )));
                 }
                 d.assembly.occurrences.retain(|o| !occ.contains(&o.id));
-                // Review run 7 #6: configurations forget deleted occurrences.
+                // Configurations forget deleted occurrences.
                 for cfg in &mut d.configurations {
                     cfg.excluded_occurrences.retain(|o| !occ.contains(o));
                 }
@@ -532,7 +532,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             }
             m.transact(&format!("Delete {name}"), |d| {
                 d.assembly.occurrences.retain(|x| x.id != o);
-                // Review run 7 #6: configurations forget the deleted occurrence.
+                // Configurations forget the deleted occurrence.
                 for cfg in &mut d.configurations {
                     cfg.excluded_occurrences.remove(&o);
                 }
@@ -624,7 +624,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     kind.dof()
                 )));
             }
-            // Review run 7 #32: a zero axis is refused here, before the snap
+            // A zero axis is refused here, before the snap
             // divides by its length.
             check_axis(&j)?;
             // Optional snap of the child's own axis onto the joint axis.
@@ -651,7 +651,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             if occurrences.len() < 2 {
                 return Err(v("a rigid group needs at least two occurrences"));
             }
-            // Review run 7 #50: the joint limit is checked before any
+            // The joint limit is checked before any
             // per-joint work.
             let have = m.document().assembly.joints.len();
             let max = rcad_document::assembly::MAX_JOINTS;
@@ -735,7 +735,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
         } => {
             let id = *joint;
             let old = m.document().assembly.joint(id)?.clone();
-            // Review run 7 #31: an omitted field keeps the joint's current
+            // An omitted field keeps the joint's current
             // value (it no longer resets the axis to Z or clears dir2).
             let (origin, axis) = match axis_from {
                 Some(f) => axis_from_faces(m, old.parent, f, "parent")?,
@@ -1008,7 +1008,7 @@ fn source_identity(bytes: &[u8]) -> String {
 fn external_step(
     path: &std::path::Path,
 ) -> Result<(String, rcad_document::assembly::ExternalSource, usize), DocError> {
-    // Review run 7 #16: one bounded read; the bytes hashed are the bytes
+    // One bounded read; the bytes hashed are the bytes
     // parsed.
     let bytes = read_source(path)?;
     let nf = rcad_document::parse_native(&bytes)
@@ -1020,7 +1020,7 @@ fn external_step(
         let bodies = placed(&model, i)?;
         let multi = bodies.len() > 1;
         for (b, id) in bodies.into_iter().zip(o.bodies.iter()) {
-            // Review run 7 #41: an open surface body is not a solid.
+            // An open surface body is not a solid.
             if b.is_open_shell() {
                 return Err(DocError::ProductLimit(format!(
                     "external component {}: {} holds an open surface body; only closed \
@@ -1041,7 +1041,7 @@ fn external_step(
             items.push((n, b));
         }
     }
-    // Review run 7 #40: one rule for occurrences and loose bodies: every
+    // One rule for occurrences and loose bodies: every
     // evaluated solid is included, hidden or not (visibility is display
     // state; toggling it in the source must not change the solid count).
     for b in &ev.bodies {
@@ -1049,7 +1049,7 @@ fn external_step(
             continue;
         }
         match &b.geometry {
-            // Review run 7 #41: an open surface body is not a solid.
+            // An open surface body is not a solid.
             BodyGeometry::Brep(g) if g.is_open_shell() => {
                 return Err(DocError::ProductLimit(format!(
                     "external component {}: '{}' is an open surface body; only closed solids \
@@ -1210,7 +1210,7 @@ fn import_step_assembly(
             stack.push(*c);
         }
     }
-    // Review run 7 #7/#8: every product holding solids is reachable (the
+    // Every product holding solids is reachable (the
     // kernel makes every unused product a root and places solids outside
     // the structure under an extra root); refuse rather than drop one.
     if let Some(p) =
@@ -1345,7 +1345,7 @@ fn import_step_assembly(
         "imported {file} with its product structure: {nc} components, {no} occurrences \
          (definitions embedded as STEP copies; placements from the file)"
     );
-    // Review run 7 #36: the import's notes are reported, not dropped.
+    // The import's notes are reported, not dropped.
     if !warnings.is_empty() {
         msg += &format!("; {} note(s): {}", warnings.len(), warnings.join("; "));
     }
@@ -1496,7 +1496,7 @@ fn snap_child_axis(m: &Model, j: &Joint, f: &AxisFrom, flip: bool) -> Result<Rig
     if a.occurrence(j.child)?.grounded {
         return Err(v("the child is grounded"));
     }
-    // Review run 7 #32: refuse a zero joint axis before normalizing it.
+    // Refuse a zero joint axis before normalizing it.
     check_axis(j)?;
     let (c0, cd) = axis_from_faces(m, j.child, f, "child")?;
     let l = locals(m)?;
@@ -1749,7 +1749,7 @@ pub enum AxisFrom {
     },
 }
 
-/// Review run 7 #32: a joint axis must have a finite, non-zero length
+/// A joint axis must have a finite, non-zero length
 /// (every kind: the axis is normalized by the snap and the motion).
 fn check_axis(j: &Joint) -> Result<(), DocError> {
     let n = j.axis.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -1851,7 +1851,7 @@ fn material_names(m: &Model, bodies: &[BodyId]) -> String {
                 .map_or("—".to_string(), |x| x.name.clone())
         })
         .collect();
-    // Review run 7 #38: every repeat removed, first-use order kept.
+    // Every repeat removed, first-use order kept.
     let mut seen = std::collections::BTreeSet::new();
     names.retain(|n| seen.insert(n.clone()));
     if names.is_empty() {
@@ -1996,7 +1996,7 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
     Ok(out)
 }
 
-/// One CSV text field: RFC 4180 quoting, and (review run 7 #17) a leading
+/// One CSV text field: RFC 4180 quoting, and a leading
 /// `'` when the text starts like a spreadsheet formula (`=`, `+`, `-`, `@`,
 /// TAB or CR), so names from files (STEP products, external documents) are
 /// shown as text, never evaluated.
@@ -2015,7 +2015,7 @@ fn csv(s: &str) -> String {
     }
 }
 
-/// A structured item number ("1.10"), always quoted (review run 7 #39) so it
+/// A structured item number ("1.10"), always quoted so it
 /// is read as text by importers that honour quoting, not as the number 1.1.
 fn csv_item(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
@@ -2077,7 +2077,7 @@ fn placed_instance(
     let ev = m.evaluation();
     let mut out = Vec::new();
     for b in &eo.bodies {
-        // Review run 6 #7: a definition body that is not evaluated (consumed
+        // A definition body that is not evaluated (consumed
         // by a Combine, suppressed, rolled back) is reported, not skipped;
         // hidden bodies count (visibility is display only).
         let Some(eb) = ev.body_by_id(*b) else {
@@ -2220,7 +2220,7 @@ fn joint_sweep(
     if index >= base.len() {
         return Err(v(format!("{} has no value {index}", j.name)));
     }
-    // Review run 7 #5: only pairs with at least one part that moves with the
+    // Only pairs with at least one part that moves with the
     // joint are checked (its child, every occurrence jointed below it, and
     // everything inside them); static pairs are the same at every sample.
     let moving = moving_with(a, id)?;
@@ -2228,7 +2228,7 @@ fn joint_sweep(
     let mut cache = BTreeMap::new();
     let mut out = Vec::with_capacity(steps);
     for k in 0..steps {
-        // Review run 7 #29: a convex combination (no `to - from` overflow),
+        // A convex combination (no `to - from` overflow),
         // the ends exact, every sample clamped into the range.
         let t = k as f64 / (steps - 1) as f64;
         let x = if k == 0 {
@@ -2315,7 +2315,7 @@ fn pairs_with(
     let ids: Vec<usize> = (0..inst.len())
         .filter(|&i| list.is_none_or(|l| inst[i].path.iter().any(|p| l.contains(p))))
         .collect();
-    // Review run 7 #22: a listed occurrence without any evaluated instance
+    // A listed occurrence without any evaluated instance
     // (suppressed, or no bodies anywhere below it) is an error, not "clear".
     if let Some(l) = list {
         for o in l {
@@ -2404,7 +2404,7 @@ pub enum AssemblyFormat {
     /// Flattened: one STEP solid per placed body, named "occurrence" or
     /// "occurrence/body", in a single product (no hierarchy).
     Step,
-    /// Run 7: STEP with the product structure: one product per component
+    /// STEP with the product structure: one product per component
     /// (reused definitions written once), sub-assemblies, and every
     /// occurrence as a NEXT_ASSEMBLY_USAGE_OCCURRENCE with its placement.
     StepAssembly,
@@ -2470,7 +2470,7 @@ fn export_step_tree(m: &Model, path: &std::path::Path) -> Result<String, DocErro
             children: vec![],
         });
     }
-    // Review run 7 #21: a component is exportable when it has solids or a
+    // A component is exportable when it has solids or a
     // non-suppressed child that is (bottom-up over the acyclic graph).
     fn nonempty(
         a: &rcad_document::assembly::Assembly,
@@ -2643,13 +2643,13 @@ pub struct AssemblySummary {
     /// Sum of the non-suppressed occurrences' remaining degrees of freedom
     /// (per definition occurrence, not per instance).
     pub total_dof: u32,
-    /// Run 7: every evaluated instance (tree order, sub-assemblies included).
+    /// Every evaluated instance (tree order, sub-assemblies included).
     #[serde(default)]
     pub instances: Vec<InstanceSummary>,
-    /// Run 7: the active component.
+    /// The active component.
     #[serde(default)]
     pub active: Option<ComponentId>,
-    /// Run 7: exploded view shown, and the offsets per instance path.
+    /// Exploded view shown, and the offsets per instance path.
     #[serde(default)]
     pub exploded: bool,
     #[serde(default)]
@@ -2664,16 +2664,16 @@ pub struct ComponentSummary {
     pub bodies: Vec<BodyId>,
     /// Non-suppressed occurrences of it (definition level).
     pub occurrences: usize,
-    /// Run 7: evaluated instances through the whole tree (flattened count).
+    /// Evaluated instances through the whole tree (flattened count).
     #[serde(default)]
     pub instances: usize,
-    /// Run 7: occurrences inside its definition (sub-assembly).
+    /// Occurrences inside its definition (sub-assembly).
     #[serde(default)]
     pub children: Vec<OccurrenceId>,
-    /// Run 7: made as an independent copy of this component.
+    /// Made as an independent copy of this component.
     #[serde(default)]
     pub derived_from: Option<ComponentId>,
-    /// Run 7: inserted from another document (pinned copy).
+    /// Inserted from another document (pinned copy).
     #[serde(default)]
     pub external: Option<rcad_document::assembly::ExternalSource>,
 }
@@ -2695,10 +2695,10 @@ pub struct OccurrenceSummary {
     pub dof: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub driven_by: Option<JointId>,
-    /// Run 7: owner component (None = top level).
+    /// Owner component (None = top level).
     #[serde(default)]
     pub owner: Option<ComponentId>,
-    /// Run 7: solved transform relative to the owner.
+    /// Solved transform relative to the owner.
     #[serde(default = "identity_pose")]
     pub local: Pose,
     #[serde(default)]
@@ -2711,7 +2711,7 @@ fn identity_pose() -> Pose {
     Pose::from(Rigid::IDENTITY)
 }
 
-/// One evaluated instance (run 7).
+/// One evaluated instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InstanceSummary {
     /// "O3/O7".

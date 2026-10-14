@@ -2,7 +2,7 @@
 //!
 //! A profile is either a single circle or a single closed loop of lines and
 //! arcs (shared endpoints or `Coincident` points, every vertex of degree 2).
-//! Line-only loops keep the run-1 [`Profile::Polygon`] form; loops with arcs
+//! Line-only loops keep the [`Profile::Polygon`] form; loops with arcs
 //! are [`Profile::Loop`].
 //!
 //! Construction entities (`Sketch::construction`) are ignored here: they take
@@ -465,7 +465,7 @@ pub(crate) fn loop_self_intersects(geo: &[Prim], tol: f64) -> bool {
     false
 }
 
-/// Line-line test (exact orientation predicates at `tol × length`), as in run 1.
+/// Line-line test (exact orientation predicates at `tol × length`).
 pub(crate) fn segments_touch(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2], tol: f64) -> bool {
     let la = dist(a, b);
     let lc = dist(c, d);

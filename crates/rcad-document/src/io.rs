@@ -16,25 +16,25 @@ pub const FORMAT_NAME: &str = "r-cad";
 /// Format names written by earlier builds (the project was called Fission420 before
 /// 2026-10-13). Accepted on load; never written.
 pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
-/// v2 (run 2): sketches may carry `origin` and `Distance` constraints, and the
+/// v2: sketches may carry `origin` and `Distance` constraints, and the
 /// history may contain `Pocket` features. v1 files are a strict subset of v2.
-/// v3 (run 3, ADR 0003): bodies, blobs, extrude operations/extents, imports. v1/v2
+/// v3 (ADR 0003): bodies, blobs, extrude operations/extents, imports. v1/v2
 /// files are migrated on load (see [`migrate_to_v3`]).
-/// v4 (run 4, docs/PARAMETERS.md): named user parameters and feature expression
+/// v4 (docs/PARAMETERS.md): named user parameters and feature expression
 /// bindings (additive; a v3 document is a v4 document without them). Saves
 /// write v4, so older builds refuse the file instead of dropping expressions.
-/// v5 (run 5): feature suppression, face references to pattern/mirror
+/// v5: feature suppression, face references to pattern/mirror
 /// occurrences and chamfer faces (`FaceRole::Copy`, `FaceRole::Chamfer`), and
 /// the `TangentArcs` sketch constraint (all additive). A document is written
 /// as v5 only when it uses one of them ([`required_version`]); otherwise it
 /// stays v4, byte for byte as before, so older builds keep reading it and
 /// refuse (rather than misread) a v5 file.
-/// v6 (run 6): extrusion options (`ExtrudeOptions`: symmetric, two sides,
+/// v6: extrusion options (`ExtrudeOptions`: symmetric, two sides,
 /// start offset, up to a plane, thin, taper) and the Intersect operation, plus
-/// the other run-6 additions listed in [`v6_feature`]. Written only when used
-/// (otherwise v5 or v4 as before), so a run-5 build refuses the file instead
+/// the other v6 additions listed in [`v6_feature`]. Written only when used
+/// (otherwise v5 or v4 as before), so a v5 build refuses the file instead
 /// of silently ignoring a field it does not know.
-/// v7 (run 7): the run-7 additions listed in [`v7_feature`] (nested
+/// v7: the additions listed in [`v7_feature`] (nested
 /// assemblies, more joint types, drawing annotations, sheet-metal rules,
 /// surfaces, ...). Written only when used (otherwise v6 or older as before).
 pub const FORMAT_VERSION: u32 = 7;
@@ -45,7 +45,7 @@ pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// The saved [`GeometryCache`] bounds are rounded to 1/this (1e-9 mm).
 pub const CACHE_STEPS_PER_UNIT: f64 = 1.0e9;
-/// The saved cache volume is rounded to 1/this (1e-6 mm³; run 5): a volume
+/// The saved cache volume is rounded to 1/this (1e-6 mm³): a volume
 /// integrated over Truck boolean results varies by ~1e-12 relative between
 /// regenerations (observed 49303.902664472 vs …473 on one binary), which
 /// straddled the 1e-9 rounding and made saves of the same document differ.
@@ -124,8 +124,8 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
     {
         return Some("sweeps");
     }
-    // Run-5 parameter ranges / slots a run-4 build refuses with a misleading
-    // message (review run 5): a pattern of count 1, and `plane_offset`
+    // v5 parameter ranges / slots a v4 build refuses with a misleading
+    // message: a pattern of count 1, and `plane_offset`
     // bindings on a Mirror or Hole.
     if doc.features.iter().any(|f| {
         matches!(
@@ -172,7 +172,7 @@ pub fn v5_feature(doc: &Document) -> Option<&'static str> {
 }
 
 /// What in `doc` needs format v6, if anything (see [`FORMAT_VERSION`]).
-/// Every run-6 addition that an older build would ignore or misread must be
+/// Every v6 addition that an older build would ignore or misread must be
 /// listed here.
 pub fn v6_feature(doc: &Document) -> Option<&'static str> {
     if doc.rollback.is_some() {
@@ -267,16 +267,15 @@ pub fn v6_feature(doc: &Document) -> Option<&'static str> {
 }
 
 /// What in `doc` needs format v7, if anything (see [`FORMAT_VERSION`]).
-/// Every run-7 addition that an older build would ignore or misread must be
-/// listed here. Each area keeps its checks in its own helper below so
-/// parallel work merges cleanly.
+/// Every v7 addition that an older build would ignore or misread must be
+/// listed here. Each area keeps its checks in its own helper below.
 pub fn v7_feature(doc: &Document) -> Option<&'static str> {
     assembly_v7_feature(doc)
         .or_else(|| drawing_v7_feature(doc))
         .or_else(|| part_v7_feature(doc))
 }
 
-/// Run-7 assembly additions (nesting, joint types, ...).
+/// v7 assembly additions (nesting, joint types, ...).
 fn assembly_v7_feature(doc: &Document) -> Option<&'static str> {
     let a = &doc.assembly;
     if a.occurrences.iter().any(|o| o.owner.is_some()) {
@@ -309,7 +308,7 @@ fn assembly_v7_feature(doc: &Document) -> Option<&'static str> {
     None
 }
 
-/// Run-7 drawing / configuration / property additions.
+/// v7 drawing / configuration / property additions.
 fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
     if doc
         .features
@@ -321,7 +320,7 @@ fn drawing_v7_feature(doc: &Document) -> Option<&'static str> {
     doc.drawings.iter().find_map(|d| d.v7_feature())
 }
 
-/// Run-7 part-modeling additions (sheet metal, surfaces, ...).
+/// v7 part-modeling additions (sheet metal, surfaces, ...).
 fn part_v7_feature(doc: &Document) -> Option<&'static str> {
     use crate::FeatureKind as K;
     doc.features.iter().find_map(|f| match f.kind {
@@ -338,9 +337,9 @@ fn part_v7_feature(doc: &Document) -> Option<&'static str> {
     })
 }
 
-/// Run-6 sketch additions (worker "sketch"): sketch text (`Sketch::texts`) and
+/// v6 sketch additions: sketch text (`Sketch::texts`) and
 /// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
-/// a run-5 build would silently drop unknown fields or refuse with a misleading
+/// a v5 build would silently drop unknown fields or refuse with a misleading
 /// message. Separate from the other v6 checks so it can be folded into
 /// `v6_feature`.
 pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
@@ -366,7 +365,7 @@ pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
 }
 
 /// The oldest format version that can hold `doc`: 7 / 6 / 5 when it uses a
-/// run-7 / run-6 / run-5 feature, else 4.
+/// v7 / v6 / v5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
     if v7_feature(doc).is_some() {
         7
@@ -439,8 +438,8 @@ pub fn load_file(path: &Path) -> Result<NativeFile> {
 }
 
 /// The bytes of a file of at most [`MAX_FILE_BYTES`], in one bounded read
-/// (review run 7 #16: the size is enforced on what is read, so a file that
-/// grows or is swapped after a size check cannot make the read unbounded).
+/// (the size is enforced on what is read, so a file that grows or is
+/// swapped after a size check cannot make the read unbounded).
 pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     use std::io::Read as _;
     let ferr = |e: std::io::Error| DocError::File(format!("open {}: {e}", path.display()));
@@ -542,13 +541,13 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     }
     nf.document.evaluation_order()?;
     nf.document.validate_bodies()?;
-    // Review run 7 #14: drawings are validated on load (views ordered after
+    // Drawings are validated on load (views ordered after
     // their parents, so derived views cannot form cycles; finite placements).
     for d in &nf.document.drawings {
         d.validate()
             .map_err(|e| DocError::File(format!("drawing {}: {e}", d.id)))?;
     }
-    // Configurations may only name features of this document (review run 6 #4).
+    // Configurations may only name features of this document.
     for c in &nf.document.configurations {
         for f in &c.suppressed {
             if nf.document.feature(*f).is_err() {

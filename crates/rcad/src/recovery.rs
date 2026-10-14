@@ -1,4 +1,4 @@
-//! Autosave and recovery (SESSION_4 §7.7). While a document has unsaved
+//! Autosave and recovery. While a document has unsaved
 //! changes, a copy is written every [`Autosave::interval`] to the recovery
 //! directory with `save_copy` (atomic; the document's own path, dirty state and
 //! undo history are untouched). A successful Save, or deliberately leaving the
@@ -75,7 +75,7 @@ pub struct Autosave {
     pub(crate) opening: Option<PathBuf>,
     /// Copies removed because they are no longer needed while a `SaveCopy`
     /// to them may still be queued: removed again when it lands, and at exit
-    /// (review run 4 #19: Quit right after an autosave recreated a stale copy).
+    /// (so Quit right after an autosave does not leave a stale copy).
     pub(crate) dropped: Vec<PathBuf>,
 }
 
@@ -150,7 +150,7 @@ impl RcadApp {
     /// Where the open document's recovery copy goes: the file stem plus a
     /// hash of its full path and this process id, so two documents with the
     /// same name, two app instances, or a reopened document never overwrite
-    /// a copy left by a crashed session (review run 4 #12).
+    /// a copy left by a crashed session.
     fn autosave_path(&self) -> Option<PathBuf> {
         let dir = self.autosave.dir.as_ref()?;
         let (stem, full) = match &self.summary.path {
@@ -320,7 +320,7 @@ mod tests {
         }
     }
 
-    /// Review run 4 #19: a recovery copy written after it was dropped (Save /
+    /// A recovery copy written after it was dropped (Save /
     /// Discard / Quit while a `SaveCopy` was still queued) is removed when its
     /// reply lands, and `shutdown` removes any dropped copy at exit.
     #[test]

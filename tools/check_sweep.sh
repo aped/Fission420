@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the run-5 sweep fixtures written by
+# Independent FreeCAD (OpenCascade) validation of the sweep fixtures written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --lib sweep::
 # usage: tools/heavy.sh tools/check_sweep.sh DIR
 # FreeCAD integrates the exact surfaces (the channel's torus segment volume is only

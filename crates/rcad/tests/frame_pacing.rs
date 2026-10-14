@@ -1,4 +1,4 @@
-//! SESSION_3 5.E frame pacing, the parts that are testable without a
+//! Frame pacing, the parts that are testable without a
 //! compositor:
 //! * the worker wakes the UI itself: every command reply and every deferred
 //!   measurement follow-up calls the repaint callback (no pointer input, no
@@ -10,7 +10,7 @@
 //!   which stops once the work is done.
 //!
 //! Whether the compositor then delivers a frame (Wayland frame callbacks,
-//! egui #8326) is outside the app; see the run-3 report.
+//! egui #8326) is outside the app.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

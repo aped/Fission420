@@ -1,4 +1,4 @@
-//! Extruding a picked sketch region (SESSION_4 §7 item 1): two concentric
+//! Extruding a picked sketch region: two concentric
 //! rectangles and a circle island give three regions; extrude only the ring,
 //! edit dimensions and regenerate the same region, break a reference only when
 //! the referenced region itself disappears, save/reopen, refusals. Volumes are
@@ -303,8 +303,8 @@ fn cut_with_a_holed_region_is_exact_and_a_single_loop_region_cuts() {
     .unwrap();
     ok(&mut s, rev(extrude(plate, 10.0, ExtrudeOp::NewBody, None)));
     let v0 = volume(&s, 0);
-    // Since run 5 (ADR 0007) a holed region on a prismatic target is cut by
-    // the exact slab construction: the ring (2400 - 800 mm²) becomes a groove.
+    // A holed region on a prismatic target is cut by the exact slab
+    // construction (ADR 0007): the ring (2400 - 800 mm²) becomes a groove.
     // Inner-loop refusals on non-prismatic targets: tests/slab_arcs.rs.
     let r = s.execute(&extrude(f, 3.0, ExtrudeOp::Cut, Some(rs[0].clone())));
     assert!(r.ok, "{r:?}");

@@ -1,4 +1,4 @@
-//! SESSION_4 §4/§6.A/§6.B: the printable example workflows through the public
+//! The printable example workflows through the public
 //! command path, with analytic expected geometry for the baseline and the
 //! parameter-driven variant.
 use rcad_commands::printables::{self, ENCLOSURE_BASELINE, ENCLOSURE_VARIANT, Enclosure};

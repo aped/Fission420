@@ -1,9 +1,9 @@
-//! v1/v2 -> v3 migration against frozen copies of the run-1/run-2 example
+//! v1/v2 -> v3 migration against frozen copies of the v1/v2 example
 //! documents (crates/rcad-commands/tests/fixtures/native_v2; the live examples/
 //! are re-saved as v3 by `cargo xtask check`):
 //! every file loads, gets exactly one body (the base extrusion/revolve, "Body1"),
 //! keeps its feature ids, and regenerates to the volume recorded in its own
-//! save-time cache (written by the run-2 implementation).
+//! save-time cache (written by the build that saved it).
 use rcad_document::*;
 use rcad_kernel::VolumeResult;
 use std::path::PathBuf;
@@ -68,7 +68,7 @@ fn committed_v2_examples_migrate_and_regenerate_identically() {
         let out = dir.path().join("v3.rcad.json");
         save_file(&out, m.document(), Some(m.evaluation())).unwrap();
         let nf3 = load_file(&out).unwrap();
-        // Plain documents are written as v4 (v5 only for run-5 features).
+        // Plain documents are written as v4 (v5 only for v5 features).
         assert_eq!(nf3.version, 4);
         assert_eq!(&nf3.document, m.document());
     }

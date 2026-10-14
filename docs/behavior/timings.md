@@ -1,4 +1,4 @@
-# Observed timings (run 2)
+# Observed timings
 
 Measured 2026-10-10 with the timing harness in `crates/rcad/src/engine.rs`
 (`#[ignore]`d test, so it never gates CI):
@@ -41,7 +41,7 @@ Observations (labelled by confidence):
   at most two regenerations (the one already running when the burst arrives, plus the last
   value), not one per edit. Running kernel work is not interrupted.
 
-## Deferred measurement (run 2, coordinator)
+## Regeneration stage profile
 
 Profiling one plate-with-hole regeneration stage by stage
 (`cargo run --release -p rcad --example regen_profile`, same machine):
@@ -68,9 +68,9 @@ pending measurement synchronously.
 | same → measurements arrive | 2394 ms | 2365 ms | 3646 ms |
 
 Remaining geometry latency is the boolean plus display tessellation (kernel-side; not
-optimized this run).
+optimized here).
 
-## Kernel hardening: intersection-curve cost (run 2, kernel worker)
+## Kernel hardening: intersection-curve cost
 
 Same machine, release build. Root cause of the measured bottleneck above, then the fix
 (ADR 0002) with before/after numbers.

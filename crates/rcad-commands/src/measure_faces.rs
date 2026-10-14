@@ -1,4 +1,4 @@
-//! Exact face measurements (`measure_faces`, run 6, IN01): the analytic surface
+//! Exact face measurements (`measure_faces`): the analytic surface
 //! of a picked face (plane or circular cylinder, with radius and diameter) and the
 //! distance or angle to a second face. World frame; mm and degrees. Faces are named
 //! by body and B-rep face index (the display face order of the body).
@@ -29,7 +29,7 @@ pub struct FaceMeasureReport {
     /// Distance / angle between `a` and `b`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pair: Option<FacePairMeasure>,
-    /// Run 7: area of planar face `a` (mm², exact for line and arc
+    /// Area of planar face `a` (mm², exact for line and arc
     /// boundaries, holes subtracted); None for other faces and for planar
     /// faces whose boundary has other curves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,7 +89,7 @@ pub fn report(
                 .evaluation()
                 .body_by_id(a.body)
                 .and_then(|b| b.geometry.brep());
-            // Review run 7 #12: faces the exact area does not support
+            // Faces the exact area does not support
             // (ellipse/spline boundaries, multi-shell bodies) still measure
             // their plane; the area is then omitted, never estimated.
             g.and_then(|g| k::planar_face_area(g, a.face as usize).ok())

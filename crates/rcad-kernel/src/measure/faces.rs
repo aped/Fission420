@@ -1,4 +1,4 @@
-//! Exact measurements between B-rep faces (run 6, IN01): radius/diameter of a
+//! Exact measurements between B-rep faces: radius/diameter of a
 //! cylindrical face, distance/angle between planes, between parallel cylinder
 //! axes, and between a plane and an axis — from the analytic surfaces
 //! ([`crate::classify_face`]), never from a tessellation. World frame, mm,

@@ -1,5 +1,5 @@
 # FreeCAD (FreeCADCmd) script: the independent STEP fixture for direct editing of
-# imported bodies (run 6), written to $RCAD_OUT/direct_edit_block_mm.step and
+# imported bodies, written to $RCAD_OUT/direct_edit_block_mm.step and
 # re-imported for a verification line. Run through tools/fixtures/step/direct_edit.sh.
 #
 # Block [0,60]x[0,40]x[0,20] built from Part primitives (analytic values known):

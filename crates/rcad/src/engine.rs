@@ -85,10 +85,10 @@ pub struct DisplayBody {
     pub groups: std::ops::Range<u32>,
     /// Viewport tint palette index (see `Viewport::set_group_tints`).
     pub tint: u8,
-    /// Run 7: the assembly instance path ("O3/O7") this copy displays, if the
+    /// The assembly instance path ("O3/O7") this copy displays, if the
     /// body belongs to a component.
     pub instance: Option<String>,
-    /// Run 7: outside the active component (drawn dimmed).
+    /// Outside the active component (drawn dimmed).
     pub inactive: bool,
 }
 
@@ -270,8 +270,8 @@ pub fn display_scene(ev: &rcad_document::Evaluation) -> Result<DisplayScene, Str
     })
 }
 
-/// [`display_scene`] with the B-rep display tessellator as a parameter (run 5:
-/// the seam where tests inject a failing tessellation).
+/// [`display_scene`] with the B-rep display tessellator as a parameter (the
+/// seam where tests inject a failing tessellation).
 pub fn display_scene_with(
     ev: &rcad_document::Evaluation,
     tessellate: &dyn Fn(&rcad_kernel::Body) -> Result<rcad_kernel::TriMesh, String>,
@@ -293,8 +293,8 @@ pub fn display_scene_with(
             },
             BodyGeometry::Mesh(mb) => (mb.mesh.clone(), true),
         };
-        // Component bodies are drawn once per occurrence, placed (run 6,
-        // docs/ASSEMBLIES.md); other bodies once, in place.
+        // Component bodies are drawn once per occurrence, placed
+        // (docs/ASSEMBLIES.md); other bodies once, in place.
         for (tm, instance, inactive) in crate::assembly_ui::placed_meshes(ev, b.id, tm) {
             let rm = to_render_mesh(&tm);
             let groups = if mesh_body {
@@ -755,7 +755,7 @@ mod tests {
 
     const S1: FeatureId = FeatureId(1);
 
-    /// Review run 3 #17: one body failing to measure does not withhold the
+    /// One body failing to measure does not withhold the
     /// others' measurements.
     #[test]
     fn a_failed_body_measurement_keeps_the_others() {
@@ -794,7 +794,7 @@ mod tests {
             !s.model().unwrap().measurements_pending(),
             "not waited on forever"
         );
-        // Run 4: an unrelated edit does not retry the failed body (no new
+        // An unrelated edit does not retry the failed body (no new
         // job, no banner per revision); its failed state stays visible.
         let r = s.execute(&Command::RenameBody {
             body: good,

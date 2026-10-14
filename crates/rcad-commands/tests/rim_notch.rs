@@ -1,11 +1,10 @@
-//! Rim notch through a tray's front wall (SESSION_5 §4, §7): a rectangle
+//! Rim notch through a tray's front wall: a rectangle
 //! sketched on the outer side face, flush with the rim, cut exactly the wall
 //! thickness, so the notch floor lies in the cavity's wall plane. Truck 0.6
 //! panics on it; the exact slab construction (ADR 0006) builds it. Coordinates
 //! from derived dimensions (1/3 mm compartments) carry float noise that once
-//! left a 1e-9 mm spike in a face loop ("NotSimpleWire", coordinator repro
-//! `artifacts/run5/kernel_repro_rim_notch.json`). Expected values are the
-//! tray formula of SESSION_5 §7, independent of the model builder.
+//! left a 1e-9 mm spike in a face loop ("NotSimpleWire"). Expected values are
+//! the organizer-tray volume formula, independent of the model builder.
 use rcad_commands::{Command, ExtrudeOp, Session, SketchTemplate};
 use rcad_document::{BodyId, FaceRef, FaceRole, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
@@ -57,10 +56,10 @@ struct Tray {
     notch_w: f64,
     notch_d: f64,
     /// Plane of the blank's sketch and the tray's corner in its coordinates
-    /// (translated / rotated placements, SESSION_5 §4).
+    /// (translated / rotated placements).
     plane: SketchPlane,
     corner: [f64; 2],
-    /// Coordinator repro variant: the notch and compartment sketches are
+    /// Repro variant: the notch and compartment sketches are
     /// created at rounded centres and then bound by expressions, so their
     /// solved points carry solver noise (~1e-13 mm) instead of exact values.
     rebind: bool,
@@ -72,7 +71,7 @@ impl Tray {
     fn cw(&self) -> f64 {
         (self.l - 2.0 * self.wall - self.n as f64 * self.div) / (self.n as f64 + 1.0)
     }
-    /// SESSION_5 §7 formula, minus the notch.
+    /// Organizer-tray volume formula, minus the notch.
     fn volume(&self) -> f64 {
         let (cx, cy, cz) = (
             self.l - 2.0 * self.wall,
@@ -286,7 +285,7 @@ fn check(t: &Tray) {
     assert!(std::fs::metadata(&path).unwrap().len() > 1000);
 }
 
-/// The coordinator's repro: 120 x 80 x 30, wall/floor/divider 2, 2 dividers,
+/// The original repro: 120 x 80 x 30, wall/floor/divider 2, 2 dividers,
 /// notch 16 x 8 on compartment 1 (expected 49408 mm³).
 #[test]
 fn rim_notch_on_the_baseline_tray_is_exact() {
@@ -309,7 +308,7 @@ fn rim_notch_on_the_baseline_tray_is_exact() {
     check(&t);
 }
 
-/// SESSION_5 §7 variant 1 (160 x 90 x 35, 2.4 mm walls, 3 dividers) and
+/// Organizer tray variant 1 (160 x 90 x 35, 2.4 mm walls, 3 dividers) and
 /// slightly varied dimensions around both.
 #[test]
 fn rim_notch_at_varied_dimensions_is_exact() {
@@ -372,10 +371,9 @@ fn baseline() -> Tray {
     }
 }
 
-/// Coordinator follow-up: the failure was sensitivity to sub-grid coordinate
-/// noise, not the configuration. Both construction variants (sketch at its
-/// final centre; sketch at a rounded centre re-bound by expressions, as in
-/// `artifacts/run5/kernel_repro_rim_notch.json`) and seeded random ±1e-12 mm
+/// The failure was sensitivity to sub-grid coordinate noise, not the
+/// configuration. Both construction variants (sketch at its final centre;
+/// sketch at a rounded centre re-bound by expressions) and seeded random ±1e-12 mm
 /// perturbations of the notch's centre and size must all be exact.
 #[test]
 fn rim_notch_is_robust_to_sub_grid_noise() {

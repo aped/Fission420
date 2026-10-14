@@ -1,7 +1,6 @@
-//! Sheet-metal contour flange (run-6 pull-forward of SESSION_7 §5 / coverage
-//! SM01; acceptance project "sheet-metal U-channel"): width 40, thickness 1,
-//! inside radius 2, K 0.4, two 90° bends, straights between tangent points
-//! 60 + 20 + 20. Flat length = 100 + 2·(π/2)·(2 + 0.4·1) = 107.539822 mm.
+//! Sheet-metal contour flange (acceptance project "sheet-metal U-channel"):
+//! width 40, thickness 1, inside radius 2, K 0.4, two 90° bends, straights
+//! between tangent points 60 + 20 + 20. Flat length = 100 + 2·(π/2)·(2 + 0.4·1) = 107.539822 mm.
 //! The sketch is the inner surface: segment lengths = straights + setbacks
 //! (R tan 45° = 2 per bend). Folded volume = w·t·Σ straights + w·Σ θ/2·((R+t)² − R²).
 //! The DXF flat pattern is read back independently (line entities parsed here).

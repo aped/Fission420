@@ -1,4 +1,4 @@
-//! Sketch text dialog of the Text tool (run 6, docs/behavior/sketching.md
+//! Sketch text dialog of the Text tool (docs/behavior/sketching.md
 //! "Sketch text"). Edits [`SketchEditor::text_edit`]; Apply adds or changes the
 //! text through [`SketchEditor::apply_text`] (one local undo step), so the
 //! document changes only at Finish Sketch like every other editor tool.

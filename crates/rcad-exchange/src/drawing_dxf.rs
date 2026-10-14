@@ -1,4 +1,4 @@
-//! DXF export of a drawing sheet (run 6, docs/DRAWINGS.md).
+//! DXF export of a drawing sheet (docs/DRAWINGS.md).
 //!
 //! R12 (AC1009) ASCII like the sketch exporter (`crate::dxf::export`): HEADER
 //! (`$INSUNITS` 4 = mm, `$MEASUREMENT` 1, `$EXTMIN`/`$EXTMAX` = the sheet),

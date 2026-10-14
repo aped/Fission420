@@ -1,6 +1,7 @@
-//! Exact countersink of an existing round hole (run 6, coverage SO06).
+//! Exact countersink of an existing round hole.
 //!
-//! Truck 0.6 cannot boolean a revolved cone (run-4 spike), so the countersink
+//! Truck 0.6 cannot boolean a revolved cone (see
+//! `validate::tests::spike_countersink_cone`), so the countersink
 //! is built directly into the topology, like the direct edits of the parent
 //! module. Precondition: a cylindrical hole of radius `r` whose entry loop is a
 //! whole inner loop of a planar entry face perpendicular to the hole axis, the

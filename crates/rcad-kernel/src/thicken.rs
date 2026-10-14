@@ -1,4 +1,4 @@
-//! Thicken of a single cylindrical surface patch (run 7, ADR 0012): the exact
+//! Thicken of a single cylindrical surface patch (ADR 0012): the exact
 //! solid between the cylinder of radius r and the coaxial cylinder of radius
 //! r ± d, over the patch's axial and angular extent, built as the extrusion of
 //! an annular sector (or annulus) along the axis. Supported subset: the patch

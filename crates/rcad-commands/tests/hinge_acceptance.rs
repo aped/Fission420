@@ -1,5 +1,5 @@
-//! Run-7 acceptance project 1 ("reusable hinge assembly"), scoped to the run-6
-//! flat assembly model (docs/ASSEMBLIES.md): a grounded leaf, a moving leaf on a
+//! Acceptance project "reusable hinge assembly" on the flat assembly model
+//! (docs/ASSEMBLIES.md): a grounded leaf, a moving leaf on a
 //! revolute about the pin hole's axis, a pin, and a fastener component with three
 //! occurrences. Editing the fastener definition changes all three occurrences; an
 //! independent copy does not. Revolute limits constrain the actual transforms;
@@ -324,7 +324,7 @@ fn refused(s: &mut Session, v: Value) -> String {
     format!("{:?}", r.error)
 }
 
-/// Run 7: the hinge with a nested moving sub-assembly. Leaf A is grounded at
+/// The hinge with a nested moving sub-assembly. Leaf A is grounded at
 /// the origin with the pin rigidly attached; the "Wing" sub-assembly holds
 /// leaf B and three linked occurrences of the screw; the hinge (revolute about
 /// the exact pin-hole axis, 0–180°) drives Wing#1, so the nested screws follow
@@ -617,7 +617,7 @@ fn committed_hinge_example() {
     );
 }
 
-/// Run 7: the hierarchical STEP export of the hinge example imports back with
+/// The hierarchical STEP export of the hinge example imports back with
 /// its structure (components per product, Wing as a sub-assembly holding three
 /// linked occurrences of one Screw definition), the same flattened BOM, and
 /// the closed-form placement of a nested screw; undo removes it in one step;

@@ -1,4 +1,4 @@
-//! The full GOAL.md workflow as a test (same code path as `rcad-cli acceptance`).
+//! The full plate acceptance workflow as a test (same code path as `rcad-cli acceptance`).
 #[test]
 fn acceptance_workflow_passes() {
     let dir = tempfile::tempdir().unwrap();

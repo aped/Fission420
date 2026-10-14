@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# External validation of the run-6 rounded labelled enclosure (acceptance project 1):
+# External validation of the rounded labelled enclosure acceptance test:
 #   1. the acceptance test writes the native document, workflow, expected values and
 #      STEP/STL/3MF exports (crates/rcad-commands/tests/rounded_enclosure.rs);
 #   2. FreeCAD reads the STEP: 2 valid solids at the analytic volumes;

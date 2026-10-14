@@ -35,9 +35,9 @@ pub use overlay::{
 };
 pub use triad::{axis_triad_origin, axis_triad_shapes};
 
-/// Tint palette index of highlighted assembly occurrences (run 7).
+/// Tint palette index of highlighted assembly occurrences.
 pub const TINT_HIGHLIGHT: u8 = 8;
-/// Tint palette index of bodies outside the active component (run 7).
+/// Tint palette index of bodies outside the active component.
 pub const TINT_DIMMED: u8 = 9;
 
 use eframe::egui;

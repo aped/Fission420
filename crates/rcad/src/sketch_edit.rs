@@ -52,11 +52,11 @@ pub enum SketchTool {
     /// SKETCH corner fillet: round the corner where two lines (or a line and an
     /// arc) meet.
     Fillet,
-    /// Sketch text (run 6): click to place (or click a text to edit it).
+    /// Sketch text: click to place (or click a text to edit it).
     Text,
-    /// Centre-to-centre straight slot (run 6): two centres, then the width.
+    /// Centre-to-centre straight slot: two centres, then the width.
     Slot,
-    /// Regular polygon (run 6): centre, then a vertex (inscribed) or an edge
+    /// Regular polygon: centre, then a vertex (inscribed) or an edge
     /// midpoint (circumscribed); sides and fit from the toolbar.
     Polygon,
 }
@@ -249,7 +249,7 @@ pub struct FilletEdit {
     pub buffer: String,
 }
 
-/// Open text dialog of the Text tool (run 6): a new text (`id` None) or an
+/// Open text dialog of the Text tool: a new text (`id` None) or an
 /// existing one, with the editable fields as typed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextEdit {
@@ -268,7 +268,7 @@ pub struct TextEdit {
     pub anchor: Option<PointId>,
 }
 
-/// Open sketch pattern dialog (run 6): the selected entities and the typed
+/// Open sketch pattern dialog: the selected entities and the typed
 /// fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatternEdit {
@@ -500,7 +500,7 @@ fn retarget_tangents(sk: &mut Sketch, e: EntityId, piece: Option<EntityId>) -> u
     let mut keep = Vec::with_capacity(old.len());
     for c in old {
         // (first, second, rebuild with one of them replaced) for both
-        // line–arc and (run 5) arc–arc tangency.
+        // line–arc and arc–arc tangency.
         let (x, y) = match c {
             Constraint::Tangent { line, arc } => (line, arc),
             Constraint::TangentArcs { a, b } => (a, b),
@@ -751,7 +751,7 @@ impl SketchEditor {
     /// Profile state for the inspector (closed loop / circle, or why not).
     pub fn profile_state(&self) -> Result<String, String> {
         if !self.sketch.texts.is_empty() {
-            // Text (run 6): glyphs are separate loops; report the regions.
+            // Text: glyphs are separate loops; report the regions.
             return match self.sketch.regions() {
                 Ok(rs) if rs.len() == 1 => Ok(format!(
                     "1 region, area {} mm²",
@@ -2036,8 +2036,8 @@ impl SketchEditor {
                     let (s_id, h0) = cut_point(sk, ps, &[], &[e]);
                     let (e_id, h1) = cut_point(sk, pe, &[], &[e]);
                     free += usize::from(h0 == CutEnd::Free) + usize::from(h1 == CutEnd::Free);
-                    // The arc keeps the circle's entity id (review run 3 #15:
-                    // the id names generated faces; same centre point, so the
+                    // The arc keeps the circle's entity id (the
+                    // id names generated faces; same centre point, so the
                     // command layer accepts Circle -> Arc for it) and its
                     // construction flag, in place.
                     if let Some(slot) = sk.entities.iter_mut().find(|x| x.id() == e) {
@@ -2234,7 +2234,7 @@ impl SketchEditor {
                 let n0 = point(sk, lo);
                 let n1 = point(sk, hi);
                 set_ends(sk, a, n0);
-                // Review run 3 #11: a dimension between the original ends now
+                // A dimension between the original ends now
                 // spans two separate lines and no longer measures a length; no
                 // piece keeps both measured points, so it is removed (named in
                 // the status line).
@@ -2394,7 +2394,7 @@ impl SketchEditor {
         };
         let (dx, dy) = ((pb[0] - pa[0]).abs(), (pb[1] - pa[1]).abs());
         // The larger offset first; dimensioning the same two points again gives
-        // the other axis (run 5: a corner at (2, 2) needs both).
+        // the other axis (a corner at (2, 2) needs both).
         let pair = |x: PointId, y: PointId| (x == a && y == b) || (x == b && y == a);
         let has_h = self.sketch.constraints.iter().any(
             |c| matches!(c, Constraint::HorizontalDistance { a: x, b: y, .. } if pair(*x, *y)),
@@ -2882,7 +2882,7 @@ impl SketchEditor {
     }
 }
 
-/// Sketch text (run 6): the Text tool and its dialog state.
+/// Sketch text: the Text tool and its dialog state.
 impl SketchEditor {
     /// The text whose outline box (widened by the pick tolerance) contains `pos`.
     pub fn text_at(&self, pos: [f64; 2], view: &View) -> Option<u32> {
@@ -3074,7 +3074,7 @@ fn fmt_num(v: f64) -> String {
     if s == "-0" { "0".into() } else { s.into() }
 }
 
-/// Slot and regular polygon tools (run 6, SK02).
+/// Slot and regular polygon tools.
 impl SketchEditor {
     fn slot_click(&mut self, pos: [f64; 2], view: &View) {
         match self.gesture.clone() {
@@ -3204,7 +3204,7 @@ fn line_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])).abs() / l
 }
 
-/// Sketch patterns (run 6): rectangular / circular constrained copies.
+/// Sketch patterns: rectangular / circular constrained copies.
 impl SketchEditor {
     pub fn pattern_disabled_reason(&self) -> Option<&'static str> {
         self.selected_entities()
@@ -3385,7 +3385,7 @@ mod tests {
         assert!(!ed.can_redo());
     }
 
-    /// Review run 5: a trim that replaces one of two tangent arcs by a piece
+    /// A trim that replaces one of two tangent arcs by a piece
     /// moves the arc–arc tangency to the piece that keeps the shared point
     /// (it used to be left behind, then refused or silently dropped).
     #[test]
@@ -3661,7 +3661,7 @@ mod tests {
     }
 
     #[test]
-    fn review_fixes_stray_point_delete_duplicates_and_corner_snaps() {
+    fn stray_point_delete_duplicates_and_corner_snaps() {
         // A Line chain ended without a segment leaves no stray point.
         let mut ed = SketchEditor::new(Sketch::default());
         let n0 = ed.sketch.points.len();
@@ -4128,7 +4128,7 @@ mod tests {
         assert_eq!(ed.sketch.origin, Some(origin));
     }
 
-    /// Review run 3 #2: trimmed ends share the cutting curve's point, so the
+    /// Trimmed ends share the cutting curve's point, so the
     /// left half of a rectangle cut by a vertical line closes into a profile.
     #[test]
     fn trimmed_ends_attach_and_the_profile_closes() {
@@ -4181,7 +4181,7 @@ mod tests {
         assert!(ed.sketch.solve().is_success());
     }
 
-    /// Review run 3 #5: a split construction line stays construction.
+    /// A split construction line stays construction.
     #[test]
     fn trim_keeps_the_construction_flag() {
         let mut ed = SketchEditor::new(Sketch::default());
@@ -4213,7 +4213,7 @@ mod tests {
         assert!(horizontal.iter().all(|l| ed.sketch.is_construction(*l)));
     }
 
-    /// Review run 3 #6: a line through an arc's start point sees the arc,
+    /// A line through an arc's start point sees the arc,
     /// whatever the start angle (rounding used to wrap it to ~2π).
     #[test]
     fn arc_start_point_crossings_are_found_at_every_angle() {
@@ -4237,7 +4237,7 @@ mod tests {
         }
     }
 
-    /// Review run 3 #7: a Tangent at the end of the line that is kept survives.
+    /// A Tangent at the end of the line that is kept survives.
     #[test]
     fn trim_keeps_a_tangent_at_the_kept_end() {
         let mut sk = Sketch::default();
@@ -4365,7 +4365,7 @@ mod tests {
             .count()
     }
 
-    /// Review run 3 app #2 for circles/arcs: trimmed ends on a circle are held
+    /// Circles/arcs: trimmed ends on a circle are held
     /// on it (PointOnCircle), stay there after the circle changes, and when
     /// the circle is trimmed at the same places the ends are shared, so the
     /// line/arc profile closes; the arc keeps the circle's id (#15).
@@ -4448,7 +4448,7 @@ mod tests {
         );
     }
 
-    /// Review run 3 #11: splitting a line removes its full-length dimension
+    /// Splitting a line removes its full-length dimension
     /// (it would span two separate lines) and says so.
     #[test]
     fn split_line_drops_its_length_dimension_and_says_so() {

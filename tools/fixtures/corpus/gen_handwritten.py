@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hand-authored edge cases of the run-8 qualification corpus (Python stdlib
+"""Hand-authored edge cases of the qualification corpus (Python stdlib
 only), written from the public format specifications, independent of R-CAD's
 writers. Expected values are stated here and in MANIFEST.md / manifest.json.
 

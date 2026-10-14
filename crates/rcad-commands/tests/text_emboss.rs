@@ -1,5 +1,5 @@
-//! Text emboss / deboss on an enclosure's top face, end to end (run 6, SK04 +
-//! the multi-region extrusion `options.regions`): a 100 x 70 x 30 box with a
+//! Text emboss / deboss on an enclosure's top face, end to end (sketch
+//! text + the multi-region extrusion `options.regions`): a 100 x 70 x 30 box with a
 //! 2.4 mm wall/top cavity cut from below; "B8" (12 mm cap height, centred) on
 //! the top face; ALL glyph regions extruded in ONE feature (Join 1 mm raised,
 //! or Cut 0.8 mm recessed). Oracles: analytic volume (box − cavity ± glyph
@@ -346,7 +346,7 @@ fn recessed_b8_in_one_feature_keeps_counter_islands() {
     );
 }
 
-/// Run 6: the text's cap height is a parameter (`text<N>_height`), bindable
+/// The text's cap height is a parameter (`text<N>_height`), bindable
 /// to a user parameter; glyph areas scale with the square of the height.
 #[test]
 fn text_height_is_a_bindable_parameter() {

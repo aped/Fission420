@@ -1,4 +1,4 @@
-//! SESSION_4 §7 item 3 acceptance: the enclosure lid's lip opening built by
+//! Offset lip acceptance: the enclosure lid's lip opening built by
 //! offsetting the lip outline inward by `lip_wall` (an Offset dimension bound
 //! to the parameter), then cutting the inner region from the lip's end face.
 //! The lid volume equals `Enclosure::lid_volume()` for the baseline and after

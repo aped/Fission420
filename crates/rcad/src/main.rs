@@ -1,7 +1,7 @@
 //! R-CAD native app entry point.
 //!
 //! Flags:
-//! - `--demo`: run the GOAL.md acceptance sequence through the UI request path.
+//! - `--demo`: run the acceptance demo sequence through the UI request path.
 //! - `--screenshot <path.png>`: once idle, save a window screenshot and exit
 //!   (non-zero on failure).
 //! - `--demo-place`: build a plate, then place an off-centre hole with
@@ -270,7 +270,7 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
             ss.editor.sketch.dimensions().len()
         )
     });
-    // Run 4: per-body volumes, parameter values and the last reply.
+    // Per-body volumes, parameter values and the last reply.
     let body_volume: Vec<String> = s
         .bodies
         .iter()
@@ -289,7 +289,7 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
     let last_reply = app.last_reply().map_or("null".to_string(), |(c, ok)| {
         format!("{{\"command\":\"{}\",\"ok\":{ok}}}", esc(c))
     });
-    // Run 5: the section plane (unit normal toward the hidden side, offset) and
+    // The section plane (unit normal toward the hidden side, offset) and
     // the two-face measurement.
     let section = app.section_plane().map_or("null".to_string(), |p| {
         format!(
@@ -302,14 +302,14 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         .map_or("null".to_string(), |(par, v)| {
             format!("{{\"parallel\":{par},\"value\":{v}}}")
         });
-    // Run 7: assembly, configurations and drawings.
+    // Assembly, configurations and drawings.
     let joints: Vec<String> = s
         .assembly
         .joints
         .iter()
         .map(|j| format!("\"{}\":{}", j.id, j.value))
         .collect();
-    let run7 = format!(
+    let assembly = format!(
         "\"interference\":{},\"highlight\":{},\"exploded\":{},\"occurrences\":{},\"total_dof\":{},\"joints\":{{{}}},\"active_component\":{},\"configurations\":{},\"active_configuration\":{},\"drawings\":{},\"drawing_issues\":{}",
         app.interference_count()
             .map_or("null".to_string(), |n| n.to_string()),
@@ -329,7 +329,7 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         app.last_drawing_issues()
             .map_or("null".to_string(), |n| n.to_string()),
     );
-    // Run 7 sheet/surface: body visibility and closedness (open shells).
+    // Sheet/surface: body visibility and closedness (open shells).
     let body_state: Vec<String> = s
         .bodies
         .iter()
@@ -344,11 +344,11 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
             )
         })
         .collect();
-    let run7 = format!("{run7},\"bodies\":{{{}}}", body_state.join(","));
+    let assembly = format!("{assembly},\"bodies\":{{{}}}", body_state.join(","));
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
-        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply},\"section\":{section},\"measure\":{measure},{run7}}}",
+        "{{\"frame\":{frame},\"open\":{},\"revision\":{},\"features\":{},\"dirty\":{},\"busy\":{},\"measuring\":{},\"volume\":{volume},\"confirm\":{},\"editing\":{editing},\"body_volume\":{{{}}},\"params\":{{{}}},\"last_reply\":{last_reply},\"section\":{section},\"measure\":{measure},{assembly}}}",
         s.open,
         s.revision,
         s.features.len(),
@@ -385,7 +385,7 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
 impl eframe::App for Shell {
     fn on_exit(&mut self) {
         // Finish a queued autosave and remove copies that are no longer
-        // needed (review run 4 #19).
+        // needed.
         self.app.shutdown(std::time::Duration::from_secs(5));
     }
 

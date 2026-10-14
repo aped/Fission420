@@ -3,8 +3,8 @@
 //!
 //! Clearance policy: a hole of radius `r` centred at `c` is accepted only when
 //! every boundary piece of the host is farther than `r + tol::MIN_LENGTH` from
-//! `c` (and, for a line/arc loop, `c` is inside the loop). Polygon hosts keep the
-//! run-1 rule (signed distance to each edge's supporting line, which equals the
+//! `c` (and, for a line/arc loop, `c` is inside the loop). Polygon hosts use the
+//! line-distance rule (signed distance to each edge's supporting line, which equals the
 //! true distance for the convex outlines the product supports and is
 //! conservative otherwise).
 

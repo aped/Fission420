@@ -1,5 +1,5 @@
-//! Before/after probe (run 4 evidence): run on the pre-fix and fixed trees;
-//! prints the outcome of each known wrong-geometry case. No assertions.
+//! Geometry probe: prints the outcome of each known wrong-geometry case. No
+//! assertions.
 use rcad_commands::{Command, ExtrudeOp, Session, SketchTemplate};
 use rcad_document::{BodyId, FaceRef, FaceRole, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;

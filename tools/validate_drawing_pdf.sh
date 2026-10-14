@@ -3,7 +3,7 @@
 # the file parses, has one page of the expected size, and contains the expected texts.
 # Usage: tools/validate_drawing_pdf.sh <drawing.pdf> <A4|A3> [expected text ...]
 # Example (after `cargo test -p rcad-commands --test drawings`):
-#   tools/validate_drawing_pdf.sh artifacts/run6/drawings/block.pdf A4 40 30 10 Ø8 "THIRD ANGLE"
+#   tools/validate_drawing_pdf.sh artifacts/drawings/sheets/block.pdf A4 40 30 10 Ø8 "THIRD ANGLE"
 # Writes <drawing>.png (100 dpi render) next to the PDF for visual inspection.
 set -euo pipefail
 pdf="$1"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) check of the run-6 direct-edit and countersink STEP
+# Independent FreeCAD (OpenCascade) check of the direct-edit and countersink STEP
 # exports against expected solids FreeCAD builds itself from Part primitives (the same
 # construction as tools/fixtures/step/direct_edit.py, with the edit applied analytically):
 # the symmetric difference of the read solid and the expected one must vanish. A control

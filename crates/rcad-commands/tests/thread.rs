@@ -1,8 +1,8 @@
-//! Modeled threads through the command API (run 6, ADR 0011): Ø20 x 2 rod and
+//! Modeled threads through the command API (ADR 0011): Ø20 x 2 rod and
 //! mating square nut as new bodies, faceted with a declared chord tolerance.
 //! Reference volumes: the kernel test checks the rod against the ideal thread
 //! integral, and FreeCAD read the same rod as 3215.09586 mm³ and the nut as
-//! 7515.00173 mm³ with an empty rod ∩ nut (artifacts/run6/kernel/thread).
+//! 7515.00173 mm³ with an empty rod ∩ nut.
 use rcad_commands::{Command, Response, Session};
 use serde_json::{Value, json};
 
@@ -117,7 +117,7 @@ fn left_hand_and_refusals() {
     assert_eq!(s.summary().bodies.len(), 1);
 }
 
-/// SESSION_6 project 5: changing the pitch regenerates the thread (finer
+/// Changing the pitch regenerates the thread (finer
 /// pitch: shallower profile, so more material, still between the core and
 /// major cylinders); an impossible pitch for the diameter is refused.
 #[test]

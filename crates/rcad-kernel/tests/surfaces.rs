@@ -1,4 +1,4 @@
-//! Run 7 surfaces / open-shell repair (docs/SURFACES.md, ADR 0012): STEP
+//! Surfaces / open-shell repair (docs/SURFACES.md, ADR 0012): STEP
 //! fixtures made independently by FreeCAD (tools/fixtures/step/open_shells.py,
 //! FreeCAD 1.1.4 / OCC 7.8.1). Expected values are closed form.
 use rcad_kernel::{
@@ -81,7 +81,7 @@ fn loose_faces_report_gaps_then_stitch_and_fill() {
     // 8 coincident edge pairs: 4 floor edges, 4 vertical corners.
     assert_eq!(a.gaps.len(), 8);
     assert_eq!(a.gaps_total, 8);
-    // Review S7: an unbounded search is refused (gaps are small by definition).
+    // An unbounded search is refused (gaps are small by definition).
     assert!(analyze(&s.body, 1e9).is_err());
     assert!(a.gaps.iter().all(|g| g.size < 1e-9));
     // Fill refuses before stitching (several shells / no loop).
@@ -183,7 +183,7 @@ fn glue_two_boxes_along_their_shared_face() {
     assert!(glue(&[d, c], 1e-9).is_err());
 }
 
-/// Review #2: a file with good solids and a bad surface model still imports
+/// A file with good solids and a bad surface model still imports
 /// its solids (the surface model is ignored with a warning) unless surfaces
 /// are asked for; then the bad surface is reported.
 #[test]
@@ -236,7 +236,7 @@ fn near(a: [f64; 3], b: [f64; 3]) -> bool {
     (0..3).all(|i| (a[i] - b[i]).abs() < 1e-12)
 }
 
-/// Review run 7 #43: a ruled surface's normal is tangent × sketch normal
+/// A ruled surface's normal is tangent × sketch normal
 /// (right of the travel direction seen from +z), with or without `reverse`;
 /// `reverse` only puts the surface below the sketch plane. A closed
 /// (counter-clockwise) profile faces outward either way.
@@ -282,10 +282,11 @@ fn ruled_surface_normal_ignores_reverse() {
     }
 }
 
-/// Review run 7 #47: the converse of review #2. A file with a good surface
-/// model and a solid that cannot be built still imports its surfaces when
-/// surfaces are asked for (the solid is skipped with a warning naming it);
-/// a plain solid import of the same file still fails on that solid.
+/// The converse of `bad_surface_model_does_not_break_a_solid_import`: a file
+/// with a good surface model and a solid that cannot be built still imports
+/// its surfaces when surfaces are asked for (the solid is skipped with a
+/// warning naming it); a plain solid import of the same file still fails on
+/// that solid.
 #[test]
 fn bad_solid_does_not_break_a_surface_import() {
     let path = format!(

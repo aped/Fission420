@@ -1,4 +1,4 @@
-//! Exact loft as a feature (run 5, ADR 0008): new body between two sketches
+//! Exact loft as a feature (ADR 0008): new body between two sketches
 //! on parallel planes. Expected values: prismatoid V = h/6 (A1 + 4 Am + A2)
 //! (exact for straight-edged lofts between parallel planes) and the cone
 //! frustum π h/3 (R² + R r + r²).

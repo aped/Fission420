@@ -1,4 +1,4 @@
-//! Associative drawings (run 6, docs/DRAWINGS.md): a 40 x 30 x 10 block with
+//! Associative drawings (docs/DRAWINGS.md): a 40 x 30 x 10 block with
 //! a Ø8 through hole. Every check reads the exported files back with the
 //! small independent SVG and PDF readers below (not the writer's types) and
 //! compares against values derived from the model definition by hand.
@@ -17,7 +17,7 @@ fn ok(s: &mut Session, c: Command) -> Response {
 
 fn out_dir() -> PathBuf {
     let d = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../artifacts/run6/drawings")
+        .join("../../artifacts/drawings/sheets")
         .to_path_buf();
     std::fs::create_dir_all(&d).unwrap();
     d

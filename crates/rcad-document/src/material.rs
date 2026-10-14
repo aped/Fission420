@@ -1,4 +1,4 @@
-//! Physical material of a body (run 6, format v6): a name and a uniform density
+//! Physical material of a body (format v6): a name and a uniform density
 //! with its provenance. Separate from appearance (colour); used only for mass
 //! properties. docs/MATERIALS.md documents the catalog and its uncertainty.
 //!

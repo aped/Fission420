@@ -10,7 +10,7 @@ Exit status: 0 all probes pass, 1 a probe failed (or --strict-log and the log ha
 2 usage/parse error.
 
 What the parser relies on (verified on Bambu Studio 2.8.2.61 output, see
-artifacts/run4/print/slicer/profiles.md):
+artifacts/print/slicer/profiles.md):
   - `; HEADER_BLOCK_START` .. `END`: "; model printing time: ..; total estimated time: ..",
     "; total layer number: N", "; total filament length [mm] : ..", "; total filament weight [g] : ..",
     "; max_z_height: ..". (The "volume [cm^3]" figure is mm^3 despite the label; reported raw.)
@@ -316,7 +316,7 @@ LOG_BENIGN = [
     # clipping a concentric line against the floating (unsupported) area; the path is still
     # merged and used. 2026-10-12: the same bracket 3MF bytes sliced 6x logged it in 1 run;
     # 2 of the 6 runs (that one and another) produced different toolpaths at a few layers
-    # (slicer-side nondeterminism, not input geometry); see the run-4 addendum (local run records).
+    # (slicer-side nondeterminism, not input geometry).
     # Only this exact variant is benign; the other ZFiller messages stay findings.
     (re.compile(r"ZFiller: encounter idx from clip: \d+$"),
      "Bambu-internal log-only check in floating concentric fill (nondeterministic on identical input)"),

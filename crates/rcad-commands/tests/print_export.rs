@@ -65,7 +65,7 @@ fn face(feature: FeatureId, role: FaceRole) -> FaceRef {
 
 fn out_dir(name: &str) -> PathBuf {
     let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../artifacts/run4/print/tests")
+        .join("../../artifacts/print/tests")
         .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
@@ -703,7 +703,7 @@ fn open_mesh_bodies_need_explicit_reference_mode() {
 
 #[test]
 fn json_shape_is_backward_compatible() {
-    // Run-3 JSON (no print fields) parses with defaults and re-serializes unchanged.
+    // JSON without print fields parses with defaults and re-serializes unchanged.
     let old = r#"{"cmd":"export_stl","path":"a.stl","chord":0.05,"bodies":[1]}"#;
     let c: Command = serde_json::from_str(old).unwrap();
     assert!(matches!(&c, Command::ExportStl { print, .. } if *print == PrintOptions::default()));

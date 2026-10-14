@@ -198,10 +198,10 @@ fn unsupported_intersections_keep_original_curve() {
     assert!(check_mesh(&tessellate(&exact, 0.01).unwrap()).watertight);
 }
 
-/// Preserved fragile case (run-1 MORNING_REPORT): on a 120 x 60 x 8 plate, a corner
+/// Preserved fragile case: on a 120 x 60 x 8 plate, a corner
 /// Ø6.5 hole at (50, 20) followed by a centred Ø20 hole. With Truck 0.6,
 /// `truck_shapeops::and` returns None for the second cut with the first seam angle at
-/// every tolerance tried (measured in runs 1-2); the adapter's retries (other seam
+/// every tolerance tried; the adapter's retries (other seam
 /// angles, same exact geometry) succeed. The correctness contract is the public API's
 /// result (exact volume, no implicit edges, watertight); how many first-seam attempts
 /// fail is printed as a diagnostic only, so an upstream fix cannot break this test.

@@ -1,4 +1,4 @@
-//! Region enumeration and picking (SESSION_4 §7 item 1): nested islands at any
+//! Region enumeration and picking: nested islands at any
 //! depth, several outer loops, persistent region identities that survive
 //! dimension edits, point-in-region queries. Areas are analytic.
 use super::*;

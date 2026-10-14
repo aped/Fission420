@@ -1,4 +1,4 @@
-//! Replace a planar face with another plane (run 6, SESSION_6 §C d): the
+//! Replace a planar face with another plane: the
 //! "offset + tilt" direct edit for faces whose neighbours are all planes.
 //!
 //! Precondition (refused by name otherwise): the face has one boundary loop,

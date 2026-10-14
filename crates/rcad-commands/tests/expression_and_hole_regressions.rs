@@ -1,7 +1,7 @@
-//! Run-4 review findings fixed in run 5 (the run-4 review findings list):
-//! #15 — a file whose expressions no longer evaluate opens with its stored
-//! values and a warning, and can be repaired; the stored geometry is used,
-//! edits are refused until the expression is fixed.
+//! Expression and hole regressions: a file whose expressions no longer
+//! evaluate opens with its stored values and a warning, and can be repaired;
+//! the stored geometry is used, edits are refused until the expression is
+//! fixed. A hole takes its material side from the faces under it.
 mod support;
 use rcad_commands::Session;
 use serde_json::json;
@@ -58,10 +58,10 @@ fn a_file_with_a_broken_expression_opens_and_can_be_repaired() {
     assert!((tray::volume(&s2) - t3.plain_volume()).abs() < 1e-6);
 }
 
-/// #9: the hole's material side comes from the faces under the hole, not from
+/// The hole's material side comes from the faces under the hole, not from
 /// any coplanar face. Plane z = 10 holds the base's top (x 0..30, +Z) and an
 /// overhang's underside (x 40..60, −Z); a hole at (15, 15) on the base top
-/// was refused as ambiguous, and now drills down through the base.
+/// is not ambiguous: it drills down through the base.
 #[test]
 fn hole_side_comes_from_the_faces_under_the_hole() {
     let mut s = Session::new();

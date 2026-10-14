@@ -278,7 +278,7 @@ fn save_export_reopen_through_dialogs() {
     let mc = h.state().last_export().expect("mesh check").clone();
     assert!(mc.watertight);
     assert!((mc.mesh_volume - V_80X50).abs() / V_80X50 <= 1e-3);
-    // The dialog's per-body report (run 4 print export) shows the mesh checks.
+    // The dialog's per-body report (print export) shows the mesh checks.
     h.get_by_label_contains("valid solid mesh: closed yes");
     click(&mut h, "Cancel");
 
@@ -298,7 +298,7 @@ fn threaded_worker_shows_busy_state() {
     let mut h = harness(ExecMode::Threaded);
     build_plate_and_hole_sketch(&mut h);
     // Submit the cut; the boolean regenerates on the worker thread while the UI
-    // keeps rendering with a busy indicator. Run 2: commands are queued (FIFO
+    // keeps rendering with a busy indicator. Commands are queued (FIFO
     // worker) instead of disabled, so New stays available while busy.
     h.get_by_label("OK").click();
     let _ = h.try_run();

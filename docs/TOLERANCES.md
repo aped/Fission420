@@ -9,7 +9,7 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | `tol::FACE_MATCH` | 1e-7 mm | geometric | matching a semantic face reference to a B-rep plane |
 | `tol::MIN_LENGTH` | 1e-3 mm | validation | smallest accepted length/radius/distance |
 | `tol::THROUGH_ALL_MARGIN_*` | 5 % of bbox diagonal, >= 1 mm | construction | cutter overshoot (avoid coplanar boolean faces) |
-| join overlap `JOIN_OVERLAP` (rcad-document `regen.rs`) | min(0.5 mm, distance / 2, clear / 2) | construction | a Join sketched on a face of its target starts this far inside the material (Truck 0.6 booleans fail on coplanar contact, ADR 0003); `clear` = depth under the profile free of other surfaces (`validate.rs::clear_depth`, run 4, ADR 0005); refused below 2 × `MIN_LENGTH` |
+| join overlap `JOIN_OVERLAP` (rcad-document `regen.rs`) | min(0.5 mm, distance / 2, clear / 2) | construction | a Join sketched on a face of its target starts this far inside the material (Truck 0.6 booleans fail on coplanar contact, ADR 0003); `clear` = depth under the profile free of other surfaces (`validate.rs::clear_depth`, ADR 0005); refused below 2 × `MIN_LENGTH` |
 | result-check validation chord (`validate.rs::check_chord`) | clamp(1e-4 × size, 1e-3, 0.02) mm | mesh | tessellation of target and result for the independent boolean check (ADR 0005) |
 | result-check probe offsets | planar: max(20 × `KERNEL_LINEAR`, 1e-6 × size); curved: 3 × validation chord | geometric | distance of the inside/outside probe points from a result face; winding numbers within 0.1 of 0/1 classify, others are skipped |
 | result-check tool neighbourhood | max(1 mm, 2 % × size) around the tool actually used | geometric | faces outside are untouched target faces and are not probed |
@@ -28,7 +28,7 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | B-rep volume chords (rcad-kernel `measure.rs` `VOLUME_CHORDS`) | 512 / 1024 / 2048 chords per edge, Richardson extrapolation | numerical | exact-path boundary integral (`BrepBoundaryIntegral{Z,X,Y}`); error estimate = difference of the two extrapolants |
 | volume axis classification (`measure.rs` `classify_by_sampling`) | \|unit normal · a\| ≤ 1e-12 (ruled), or \|other two normal components\| ≤ 1e-12 and position along a within 1e-9 mm (perpendicular), on a 17×17 parameter grid | numerical | picks the first axis a in Z, X, Y for which every curved face is ruled along or perpendicular to a; planar faces: perpendicular if the two off-axis normal components sum < 1e-12, ignored if \|n · a\| ≤ 1e-12, otherwise integrated in the plane's own frame (tilted) |
 | tessellation volume fallback (`measure.rs` `FALLBACK_CHORD_REL`, `FALLBACK_REFINE`) | chord c = max(1e-4 × bbox diagonal, 4 × `MIN_MESH_CHORD_*`) and c / 4 | numerical | `TessellationEstimate` when no axis or revolution path applies (e.g. sphere): fine-mesh signed volume, error estimate \|V(c) − V(c/4)\| (≈ 3 × the fine error when O(chord) convergence holds; an estimate, not a bound). Torus R 40 r 10: error −3.3e-4 relative, estimate 1.0e-3 relative |
-| surface-of-revolution volume (`measure/revolution.rs` `SHAPE_REL`, run 5) | a face is recognised as plane / cone / cylinder / torus about the body's common axis when sampled points fit within 1e-9 × body size | numerical | `BrepBoundaryIntegralRevolution`: divergence theorem with a radial field, closed forms per exact boundary edge; observed 1e-15 – 2e-14 relative on analytic cases (`tests/volume_revolution.rs`); unrecognised faces (sphere, tori about two axes) fall back to the estimate |
+| surface-of-revolution volume (`measure/revolution.rs` `SHAPE_REL`) | a face is recognised as plane / cone / cylinder / torus about the body's common axis when sampled points fit within 1e-9 × body size | numerical | `BrepBoundaryIntegralRevolution`: divergence theorem with a radial field, closed forms per exact boundary edge; observed 1e-15 – 2e-14 relative on analytic cases (`tests/volume_revolution.rs`); unrecognised faces (sphere, tori about two axes) fall back to the estimate |
 | volume test thresholds (`tests/volume_general.rs`) | exact path: max(0.001 mm³, 1e-7 × V); fallback: \|V − analytic\| ≤ error estimate and estimate < 1 % of V | acceptance | side holes along X/Y, tilted planar faces, torus |
 | bounds extremum refinement (rcad-kernel `measure.rs`) | 60 golden-section iterations between neighbouring samples | numerical | exact axis extrema of explicit curved edges; skipped for boolean intersection curves (they keep sampling error; since ADR 0002 only unsupported cases such as cylinder ∩ cylinder remain implicit) |
 | exact boolean edge rebuild `exact::REBUILD_TOL` (rcad-kernel `exact.rs`) | 1e-7 mm | geometric | an exact plane ∩ extrusion curve replaces a boolean intersection edge only if its ends are within this of the edge vertices and 7 interior samples are within this of both surfaces (ADR 0002); also used by STEP export |
@@ -37,7 +37,7 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | hole containment clearance (rcad-document `hole.rs`) | `tol::MIN_LENGTH` | validation | a circular cut is accepted only if every host line segment / arc is farther than `r + MIN_LENGTH` from its centre (and, for a line/arc loop, the centre is inside) |
 | sketch solver tolerance | see crates/rcad-sketch | numerical | Newton residual convergence |
 | sketch profile tolerance `tol = solve_tolerance(scale)` | max(1e-9 mm, 1e-12 × sketch scale) | geometric | zero-length lines / zero-sweep arcs (chord ≤ tol), touching or crossing segments (line–line orientation at tol × length; line–arc and arc–arc exact circle intersections, within tol; angular span test widened by tol / r), zero area (\|area\| ≤ tol × perimeter / 2) |
-| sketch text chord `TEXT_CHORD_TOL` (rcad-sketch `text.rs`, run 6) | 0.005 mm | geometric | a font Bézier is split into n equal parameter steps, n = ceil(sqrt(max\|B''\| / (8 × tol))) (linear-interpolation bound h²/8 · max\|B''\|), so every chord is within this of its curve |
+| sketch text chord `TEXT_CHORD_TOL` (rcad-sketch `text.rs`) | 0.005 mm | geometric | a font Bézier is split into n equal parameter steps, n = ceil(sqrt(max\|B''\| / (8 × tol))) (linear-interpolation bound h²/8 · max\|B''\|), so every chord is within this of its curve |
 | sketch text edge `TEXT_MIN_EDGE` | 0.005 mm | geometric | polygon vertices closer than this to the previous kept vertex are dropped (moves the outline by less than this; keeps edges above `tol::MIN_LENGTH`); vertices within 1e-9 mm of their neighbours' chord are merged; contours with \|area\| ≤ this × perimeter / 2 are dropped |
 | sketch text outline bound `TEXT_OUTLINE_TOL` | 0.01 mm (chord + edge) | geometric | distance from a text polygon to the exact font outline (test: `crates/rcad-sketch/tests/text.rs::polygons_stay_within_the_declared_outline_tolerance`). Text solids are exact extrusions of the polygons, not of the font curves |
 | three-point arc degeneracy (rcad-sketch `arc.rs`) | any two points ≤ tol apart, or triangle height over its longest side ≤ tol; `MAX_ARC_RADIUS_RATIO` = 1e4 (radius ≤ 1e4 × longest side) | validation | `add_arc_3pt` / `arc_through_3_points`; flatter arcs are near-lines and badly conditioned |
@@ -50,16 +50,16 @@ Units: millimetres and radians internally; f64 everywhere authoritative.
 | sketch editor pick / snap / alignment (`rcad sketch_edit.rs`) | 8 / 10 / 8 points | viewport | screen-space; converted to sketch mm with the local px-per-mm at the cursor; never stored |
 | face analysis plane / cylinder (`rcad view3d.rs`) | max(1e-3 mm, 1e-5 × mesh radius); + display chord 0.05 mm for cylinders | display | maps a picked display face to a semantic cap reference or cut wall; the regenerator re-validates references on the exact B-rep |
 
-Acceptance tolerances (GOAL.md) live in tests and the headless demo, not in model code.
+Acceptance tolerances live in tests and the headless demo, not in model code.
 
 Solver convergence is judged on equation residuals (`max(1e-9 mm, 1e-12 × sketch scale)`), not
 on coordinates. Through nonlinear rows (the `Distance` constraint) solved coordinates can differ
 from the exact solution by a few residuals (observed 4e-9 mm on a 3-4-5 triangle), so tests and
 the acceptance scenarios compare solved coordinates at 1e-8 mm (10× the residual tolerance);
-volumes and bounds keep the GOAL.md tolerances.
+volumes and bounds keep the acceptance tolerances.
 
 Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware; fine for parts of
-~1 mm to ~10 m, unverified beyond (review finding 6).
+~1 mm to ~10 m, unverified beyond.
 
 ## Added 2026-10-12
 
@@ -74,7 +74,7 @@ Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware
 | planar re-triangulation ties | in-circle `|det| <= 1e-9 L^4` | export/display | cocircular quads (rectangles) get the diagonal avoiding the smallest-key vertex |
 
 
-## Added run 5 (ADR 0007, slab booleans with arcs)
+## Slab booleans with arcs (ADR 0007)
 
 | name | value | kind | meaning |
 |---|---|---|---|
@@ -89,7 +89,7 @@ Known deviation: `FACE_MATCH` and `WELD_TOLERANCE` are absolute, not scale-aware
 | arc-corpus oracle (`tests/arc_fuzz.rs`) | volume: 1e-6 × V + 10 × integration error estimate; probes skipped within 0.05 mm of a primitive boundary or level | acceptance | independent CSG oracle for the seeded round/rounded cut corpus |
 
 
-## Added run 7 (ADR 0012, sheet bodies and surface repair)
+## Sheet bodies and surface repair (ADR 0012)
 
 | name | value | kind | meaning |
 |---|---|---|---|

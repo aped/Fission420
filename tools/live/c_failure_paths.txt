@@ -1,4 +1,4 @@
-# SESSION_2 scenario C: drag + Escape, one-step undo, conflicts, invalid input, camera gestures, close guard
+# Scenario C: drag + Escape, one-step undo, conflicts, invalid input, camera gestures, close guard
 clickw New Sketch on XY
 wait_idle
 key l

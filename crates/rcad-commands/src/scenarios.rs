@@ -1,4 +1,4 @@
-//! SESSION_2 core scenarios A and B as plain command data: the editor-style
+//! Core scenarios A and B as plain command data: the editor-style
 //! sketches and edits they submit, and the replayable example workflows
 //! (`examples/scenario_{a,b}_workflow.json`) generated from them.
 //!

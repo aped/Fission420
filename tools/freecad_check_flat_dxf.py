@@ -1,4 +1,4 @@
-# FreeCAD (independent reader) check of a sheet-metal flat-pattern DXF (run 7).
+# FreeCAD (independent reader) check of a sheet-metal flat-pattern DXF.
 # flatpak run --env=RCAD_DXF=<abs path> --filesystem=<repo> --command=FreeCADCmd \
 #   org.freecad.FreeCAD tools/freecad_check_flat_dxf.py
 # Prints "FREECAD_RESULT {json}": per layer the straight-edge count, total length and

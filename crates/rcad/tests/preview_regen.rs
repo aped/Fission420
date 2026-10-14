@@ -1,7 +1,7 @@
-//! SESSION_4 §1: the extrude preview resolves the direction from the same face
+//! The extrude preview resolves the direction from the same face
 //! data as regeneration. Regression: a top face split in two by a slot is no
-//! longer a unique semantic face, so the run-3 preview (semantic faces only)
-//! drew a Cut sketched in that plane going into air while regeneration cut
+//! longer a unique semantic face, so a preview using semantic faces only
+//! would draw a Cut sketched in that plane going into air while regeneration cut
 //! into the material.
 use rcad::extrude::ExtrudeForm;
 use rcad_commands::{Command, ExtrudeOp, Session, SketchTemplate};

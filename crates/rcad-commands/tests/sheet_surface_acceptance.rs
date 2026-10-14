@@ -1,5 +1,5 @@
-//! SESSION_7 acceptance projects 6 (sheet-metal U-channel) and 7 (open-shell
-//! repair) replayed from the committed workflows
+//! Acceptance projects sheet-metal U-channel and open-shell repair, replayed
+//! from the committed workflows
 //! `examples/sheet_u_channel_workflow.json` and
 //! `examples/open_box_repair_workflow.json`, checked in closed form, with
 //! their exports written for external validation:
@@ -139,7 +139,7 @@ fn acceptance_6_u_channel() {
     assert_eq!(s.summary().features.len(), n + 1);
 }
 
-/// Item 10 pull-forward: an open hem (180° flange, gap 2R) for external
+/// An open hem (180° flange, gap 2R) for external
 /// validation: base 60 × 40, t 1, R 0.5, hem of 10 on the 60 mm edge y = 0.
 #[test]
 fn hem_evidence() {

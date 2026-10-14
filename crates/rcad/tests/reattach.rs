@@ -1,4 +1,4 @@
-//! SESSION_3 scenario B through the UI: a sketch on a picked side face, a
+//! Re-attach through the UI: a sketch on a picked side face, a
 //! blind cut into the material, an upstream edit that removes the support
 //! face (refused with BrokenReference, model kept), then the explicit repair:
 //! banner "Re-attach sketch…" → choose a face → preview → Re-attach (one undo

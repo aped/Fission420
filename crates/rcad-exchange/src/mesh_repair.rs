@@ -1,4 +1,4 @@
-//! Bounded mesh repair (run 7, Run-8 pull-forward ME01; docs/MESH.md).
+//! Bounded mesh repair (docs/MESH.md).
 //!
 //! Repair never edits its input: [`repair`] returns a new indexed mesh and a
 //! [`RepairReport`] with the diagnosis before and after ([`crate::mesh::diagnose`])
@@ -170,7 +170,7 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> Result<Welded, String> {
         .filter(|(i, p)| **p != *i as u32)
         .count();
     if tol > 0.0 {
-        // Review run 7 #11: the grid index must not saturate (tolerance tiny
+        // The grid index must not saturate (tolerance tiny
         // relative to the coordinates) and cells must stay small.
         let big = positions
             .iter()
@@ -251,7 +251,7 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> Result<Welded, String> {
             (out.len() - 1) as u32
         });
     }
-    // Review run 7 #27: union-find merges transitively; refuse when a chain
+    // Union-find merges transitively; refuse when a chain
     // moved a vertex farther than the tolerance from where it was.
     if tol > 0.0 {
         let far = (0..n)
@@ -422,9 +422,9 @@ pub fn repair(
         }
         let mut new_tris = Vec::new();
         let mut used: HashMap<(u32, u32), bool> = HashMap::new();
-        // Review run 7 #10: computed once (was per walk: quadratic).
+        // Computed once, not per walk (which would be quadratic).
         let cap = count.values().filter(|c| **c == 1).count() + 1;
-        // Review run 7 #9: the outline of a planar open sheet is not a hole
+        // The outline of a planar open sheet is not a hole
         // (filling it makes a zero-volume "closed" pillow).
         let planar_sheet = planar_components(&pos, &tris, opts.weld_tolerance);
         let starts: Vec<u32> = next.keys().copied().collect();
@@ -504,7 +504,7 @@ pub fn repair(
         }
         tris.extend(new_tris);
     }
-    // Outward (review run 7 #4, #8): after filling; each closed component is
+    // Outward, after filling: each closed component is
     // oriented by its nesting depth among the closed components (even: outward,
     // odd: a void, inward).
     if opts.orient {
@@ -685,7 +685,7 @@ fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]], notes: &mut Vec<Strin
             (lo, hi)
         })
         .collect();
-    // Review run 7 round 2 #1/#12/#20: a shell counts as nested in another
+    // A shell counts as nested in another
     // only when strictly contained (bounding box inside, and up to 16 spread
     // vertices all clearly inside by winding number); partially overlapping
     // shells (unbooleaned STL parts) are oriented outward independently.
@@ -828,7 +828,7 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
     let mut idx: Vec<usize> = (0..n).collect();
     let mut out = Vec::new();
     let mut guard = 0;
-    // Review run 7 #28: resume after the last ear instead of restarting.
+    // Resume after the last ear instead of restarting.
     let mut from = 0usize;
     while idx.len() > 3 {
         guard += 1;
@@ -1041,7 +1041,7 @@ mod tests {
         )
     }
 
-    /// Review run 7 #4: a hollow part (outer shell outward, inner void shell
+    /// A hollow part (outer shell outward, inner void shell
     /// inward) is already correct: nothing flips, volume 8 − 1.
     #[test]
     fn void_shells_keep_their_inward_orientation() {
@@ -1062,7 +1062,7 @@ mod tests {
         assert!((r.after.signed_volume.unwrap() - 7.0).abs() < 1e-12);
     }
 
-    /// Review run 7 #8: an inside-out open cube is closed by the fill and
+    /// An inside-out open cube is closed by the fill and
     /// then turned outward (the outward pass runs after filling).
     #[test]
     fn inside_out_open_mesh_ends_outward_after_filling() {
@@ -1084,7 +1084,7 @@ mod tests {
         assert_eq!(r.flipped_triangles, 10);
     }
 
-    /// Review run 7 #9: a flat open sheet's outline is not filled.
+    /// A flat open sheet's outline is not filled.
     #[test]
     fn flat_sheet_outline_is_not_a_hole() {
         let p = vec![
@@ -1103,7 +1103,7 @@ mod tests {
         assert!(!r.after.closed);
     }
 
-    /// Review run 7 #11, #27: tolerances below floating-point resolution and
+    /// Tolerances below floating-point resolution and
     /// chains that move vertices farther than the tolerance are refused.
     #[test]
     fn weld_tolerance_guards() {
@@ -1124,7 +1124,7 @@ mod tests {
         assert!(repair(&p, &t, &o).unwrap_err().contains("chains"));
     }
 
-    /// Review round 2 #1: two overlapping outward cubes (unbooleaned STL
+    /// Two overlapping outward cubes (unbooleaned STL
     /// parts) are not nested: nothing flips, total signed volume 16.
     #[test]
     fn overlapping_shells_are_not_voids() {
@@ -1137,7 +1137,7 @@ mod tests {
         assert!((r.after.signed_volume.unwrap() - 16.0).abs() < 1e-12);
     }
 
-    /// Review round 2 #20: a cube standing on another's top face (its first
+    /// A cube standing on another's top face (its first
     /// vertex on the other's surface) is not nested.
     #[test]
     fn touching_shells_are_not_voids() {

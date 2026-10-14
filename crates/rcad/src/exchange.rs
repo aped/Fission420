@@ -86,7 +86,7 @@ pub struct ImportForm {
     /// Face selected when the dialog opened (offered as a DXF plane).
     pub face: Option<(FaceRef, String)>,
     pub allow_partial: bool,
-    /// STEP (run 7): import the file's surface models (open shells) as one
+    /// STEP: import the file's surface models (open shells) as one
     /// surface body instead of its solids.
     pub surfaces: bool,
     /// Submitted: the request token (sequence number) of the import command
@@ -503,7 +503,7 @@ impl RcadApp {
             return;
         };
         let mut close = false;
-        // Run 7: a surface import is not a solid import.
+        // A surface import is not a solid import.
         let surfaces = self
             .summary
             .features

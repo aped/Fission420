@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the run-6 direct-edit STEP exports written by
+# Independent FreeCAD (OpenCascade) validation of the direct-edit STEP exports written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --lib direct
 # usage: tools/heavy.sh tools/check_direct_edit.sh DIR
 # Source: tools/fixtures/step/direct_edit.py (block 60x40x20, D8 through hole, D6x8 blind

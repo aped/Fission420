@@ -1,6 +1,6 @@
 # SVG planar paths (`rcad_exchange::svg`)
 
-Status: run 3. Commands `import_svg` (new unconstrained sketch on a plane) and `export_svg`
+Commands `import_svg` (new unconstrained sketch on a plane) and `export_svg`
 (a sketch). Clean-room from the SVG 1.1 specification (path grammar, transform list, arc
 implementation notes F.6.5); XML tokenizing by `quick-xml` (already a dependency for 3MF).
 

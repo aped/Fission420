@@ -1,6 +1,6 @@
-//! The GOAL.md acceptance workflow, executed only through [`Session::execute`], with
+//! The plate acceptance workflow, executed only through [`Session::execute`], with
 //! every geometric claim checked against independently derived analytic values.
-//! The SESSION_2 scenarios A and B (editor-built sketches) run after the GOAL.md
+//! The core scenarios A and B (editor-built sketches) run after the plate
 //! workflow in fresh sessions; their steps are prefixed "A." / "B.". Stretch
 //! scenarios follow: blind pocket ("P.") and three-point arcs ("R.").
 
@@ -47,7 +47,7 @@ struct Run<'a> {
     out_dir: &'a Path,
 }
 
-/// GOAL.md volume tolerance: max(0.001 mm³, V * 1e-7).
+/// Acceptance volume tolerance: max(0.001 mm³, V * 1e-7).
 fn vol_tol(v: f64) -> f64 {
     0.001f64.max(v * 1e-7)
 }
@@ -206,7 +206,7 @@ impl Run<'_> {
     }
 }
 
-/// Run the GOAL.md workflow, SESSION_2 scenarios A and B and the stretch
+/// Run the plate workflow, the core scenarios A and B and the stretch
 /// scenarios. Writes `plate.*`, `scenario_a.*`, `scenario_b.*`, `pocket.*` and
 /// `scenario_r*.*` (.rcad.json, .stl, .step) into `out_dir`.
 pub fn run(out_dir: &Path) -> Report {

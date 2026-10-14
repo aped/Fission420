@@ -1,4 +1,4 @@
-//! SESSION_4 §7.7 autosave/recovery through the real app: a dirty document is
+//! Autosave/recovery through the real app: a dirty document is
 //! copied to the recovery directory, a "crashed" session's copy is offered and
 //! opens as an unsaved document, and saving removes the copy. Own test binary:
 //! it sets process environment variables.

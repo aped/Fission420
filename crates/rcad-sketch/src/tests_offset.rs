@@ -1,4 +1,4 @@
-//! Loop offset (SESSION_4 §7 item 3): exact geometry with analytic areas
+//! Loop offset: exact geometry with analytic areas
 //! (sharp-cornered rectangles and L shapes, slots, rounded rectangles,
 //! circles), the editable distance dimension, the copy following source edits,
 //! and refusals for collapsed or touching copies.

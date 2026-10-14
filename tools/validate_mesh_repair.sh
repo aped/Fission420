@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run 7 (ME01): repair tools/fixtures/stl/broken_cube.stl (a 20 mm cube without its top
+# Repair tools/fixtures/stl/broken_cube.stl (a 20 mm cube without its top
 # face, one flipped side triangle, a duplicate and a degenerate triangle) with
 # tools/fixtures/mesh_repair_workflow.json, then check both exports with independent
 # readers: tools/check_stl.py (Python, exact float32 weld) and FreeCAD's Mesh module.

@@ -49,7 +49,7 @@ pub(crate) enum Dialog {
         cx: String,
         cz: String,
     },
-    /// Run 6: modeled (faceted) thread: rod, or square nut (ADR 0011).
+    /// Modeled (faceted) thread: rod, or square nut (ADR 0011).
     Thread {
         diameter: String,
         pitch: String,
@@ -61,18 +61,18 @@ pub(crate) enum Dialog {
     Revolve {
         sketch: Option<FeatureId>,
         angle: String,
-        /// Run 6: axis (sketch Y, sketch X or a line of the sketch) and
+        /// Axis (sketch Y, sketch X or a line of the sketch) and
         /// direction.
         axis: rcad_document::RevolveAxis,
         reverse: bool,
     },
-    /// Run 5: exact loft between two sketches (`sweep == false`) or sweep of
+    /// Exact loft between two sketches (`sweep == false`) or sweep of
     /// sketch `a`'s profile along sketch `b`'s path (`sweep == true`).
     LoftSweep {
         a: Option<FeatureId>,
         b: Option<FeatureId>,
         sweep: bool,
-        /// Run 6: an optional middle section of a loft.
+        /// An optional middle section of a loft.
         via: Option<FeatureId>,
     },
     Rectangle {
@@ -156,7 +156,7 @@ pub(crate) enum Dialog {
         a: rcad_document::FaceRef,
         b: Option<rcad_document::FaceRef>,
         distance: String,
-        /// Run 5: an exact solid fillet of the edge (`distance` = radius).
+        /// An exact solid fillet of the edge (`distance` = radius).
         fillet: bool,
     },
     /// Start a sketch on an offset construction plane (world plane or the
@@ -166,7 +166,7 @@ pub(crate) enum Dialog {
         /// Face offered as a base (selected when the dialog opened).
         face: Option<(rcad_document::FaceRef, String)>,
         distance: String,
-        /// Run 5: tilt about the base plane's local X axis (degrees).
+        /// Tilt about the base plane's local X axis (degrees).
         angle: String,
     },
     /// Scoped shell of a New Body extrusion (docs/SHELL.md).
@@ -176,7 +176,7 @@ pub(crate) enum Dialog {
         open_end: bool,
         thickness: String,
     },
-    /// Run 6: direct edit of an imported body (crate::direct_edit_ui).
+    /// Direct edit of an imported body (crate::direct_edit_ui).
     DirectEdit(crate::direct_edit_ui::DirectForm),
 }
 
@@ -264,16 +264,16 @@ pub enum Guarded {
     New,
     /// New document followed by a sketch on XY (empty-state "Create Sketch").
     NewAndSketch,
-    /// New document built from a parametric printable template (run 4).
+    /// New document built from a parametric printable template.
     NewTemplate(PrintTemplate),
-    /// Open a recovery copy as an unsaved document (run 4).
+    /// Open a recovery copy as an unsaved document.
     OpenCopy(PathBuf),
     Open(PathBuf),
     Close,
     Exit,
 }
 
-/// Parametric printable templates (SESSION_4 §7.7): a new document with the
+/// Parametric printable templates: a new document with the
 /// same named parameters and bindings as the committed examples, edited by
 /// changing parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -384,7 +384,7 @@ pub struct RcadApp {
     pub(crate) banner: Option<Diagnostic>,
     pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
-    /// Display-only section view (run 5); None = off.
+    /// Display-only section view; None = off.
     pub section: Option<crate::section::SectionState>,
     pub(crate) mesh_triangles: usize,
     /// Last display scene: all visible bodies (face analysis, picking; display only).
@@ -418,24 +418,24 @@ pub struct RcadApp {
     /// Sheet-metal flange form: thickness, radius, K, width; flat-pattern path.
     pub(crate) sheet_form: [String; 4],
     pub(crate) flat_path: String,
-    /// Run 7 sheet-metal / surface forms (crate::sheet_ui).
+    /// Sheet-metal / surface forms (crate::sheet_ui).
     pub(crate) sheet_surface: crate::sheet_ui::SheetSurfaceForm,
-    /// Wall thickness typed for "Shell from this face" (run 6).
+    /// Wall thickness typed for "Shell from this face".
     pub(crate) shell_thickness: String,
     pub(crate) scale_factor: String,
     /// Split-by-plane form: world plane (0 XY, 1 XZ, 2 YZ), offset text.
     pub(crate) split_form: (u8, String),
-    /// Configuration name / part number being typed (run 6).
+    /// Configuration name / part number being typed.
     pub(crate) config_form: (String, String),
-    /// Browser Drawings section: export path, last export report (run 6).
+    /// Browser Drawings section: export path, last export report.
     pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
     pub(crate) config_table: crate::config_ui::ConfigTableUi,
     pub(crate) mesh_repair: crate::mesh_repair_ui::MeshRepairUi,
-    /// Body material form and last mass-properties report (run 6).
+    /// Body material form and last mass-properties report.
     pub(crate) body_props: crate::bodies::BodyProps,
-    /// Exact face measurement state (run 6).
+    /// Exact face measurement state.
     pub(crate) exact_measure: crate::face_measure::ExactMeasure,
-    /// Browser Components section state (run 6).
+    /// Browser Components section state.
     pub(crate) assembly_ui: crate::assembly_ui::AssemblyUi,
     pub(crate) doc_dim_edit: Option<DocDimEdit>,
     /// Screen rects of the selected finished sketch's dimension labels.
@@ -705,7 +705,7 @@ impl RcadApp {
         self.exit_confirmed
     }
 
-    /// Queue the GOAL.md acceptance sequence (mirrors rcad_commands::acceptance)
+    /// Queue the acceptance demo sequence (mirrors rcad_commands::acceptance)
     /// through the same request path as the buttons.
     pub fn start_demo(&mut self, scratch_dir: PathBuf) {
         use DemoStep::*;
@@ -978,7 +978,7 @@ impl RcadApp {
                 format!("not displayed: {e} (the model is unchanged; export and measurements use the exact solid)"),
             );
         }
-        // Run 7: assembly highlight / inactive dimming (assembly_ui::tints).
+        // Assembly highlight / inactive dimming (assembly_ui::tints).
         let hl = self.assembly_ui.highlight_paths(&self.summary);
         match upload(&scene.mesh, &crate::assembly_ui::tints(&scene, &hl)) {
             Ok(()) => {
@@ -1794,7 +1794,7 @@ impl RcadApp {
         let sketch = s.editor.sketch.clone();
         let cmd = match &s.target {
             SketchTarget::New { plane } => {
-                // An empty (or text-only) sketch is still created (run 6): it
+                // An empty (or text-only) sketch is still created: it
                 // can receive projected geometry from the sketch inspector.
                 Command::CreateSketch {
                     name: None,
@@ -2720,7 +2720,7 @@ mod tests {
     use super::*;
     use rcad_commands::{Response, Session};
 
-    /// Review run 3 #17 (UI side): a measurement follow-up that reports one
+    /// A measurement follow-up that reports one
     /// failed body still delivers the bodies that did measure.
     #[test]
     fn failed_measurement_followup_still_applies_measured_bodies() {

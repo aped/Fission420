@@ -1,5 +1,5 @@
 //! Exact loft between two planar closed profiles in parallel planes, as a new
-//! body (run 5, SESSION_5 §9.3; correspondence rule in ADR 0008).
+//! body (correspondence rule in ADR 0008).
 //!
 //! Supported (anything else is refused by name):
 //! * two straight-edged loops (polygons, or line-only loops) with the same
@@ -265,8 +265,8 @@ fn polygon_loft(
     Ok(body)
 }
 
-/// Loft through several straight-edged profiles on parallel planes (run 6:
-/// additional sections), in order: each consecutive pair obeys the
+/// Loft through several straight-edged profiles on parallel planes,
+/// in order: each consecutive pair obeys the
 /// two-profile rules (same vertex count, corresponding edges parallel, vertex
 /// 0 nearest to the previous section's vertex 0) and the sections must
 /// advance monotonically along the normal. Built as one exact shell: planar

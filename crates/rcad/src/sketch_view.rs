@@ -217,7 +217,7 @@ pub fn paint_sketch(
         };
         fade(c, st.alpha)
     };
-    // Text outlines (run 6): the flattened glyph contours that become profile
+    // Text outlines: the flattened glyph contours that become profile
     // loops; a text whose outlines cannot be placed is skipped (its error is
     // reported by the region/profile status).
     for t in &s.texts {

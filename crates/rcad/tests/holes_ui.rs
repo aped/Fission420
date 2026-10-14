@@ -1,4 +1,4 @@
-//! SESSION_4 §7.6 through the real widgets: select a face, Hole…, the centre
+//! Hole dialog through the real widgets: select a face, Hole…, the centre
 //! defaults to the face's centroid, tick Counterbore, OK; exact volume.
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};

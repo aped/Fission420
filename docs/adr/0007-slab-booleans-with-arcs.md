@@ -1,6 +1,6 @@
 # ADR 0007: Slab booleans with exact arcs, cylindrical walls and holed tools
 
-Status: accepted (run 5, 2026-10-12). Extends ADR 0006; ADR 0005 (independent result check)
+Status: accepted (2026-10-12). Extends ADR 0006; ADR 0005 (independent result check)
 applies unchanged to every result.
 
 ## Context
@@ -70,9 +70,9 @@ T-junctions; every edge must be used twice in opposite directions; one connected
 * Join/Cut tools with inner loops: only the slab construction (over the nominal span); the
   result check's `Prism` carries the holes, so a hole's interior is never probed as tool
   material. Not applicable: `ProductLimit` naming the inner loops and the reason;
-* a Join sketched on a face that its profile leaves: slab construction, else the run-4
+* a Join sketched on a face that its profile leaves: slab construction, else the
   product limit with the slab reason appended;
-* `regen.rs::legacy_cut` (run-1 Cut Through All / Pocket): the same fallback and check;
+* `regen.rs::legacy_cut` (legacy Cut Through All / Pocket): the same fallback and check;
 * `fillet.rs::fillet_edge`: the exact edge fillet is a slab cut of the corner region
   bounded by the two faces and the tangent arc (refused when the body is not prismatic
   along the edge).
@@ -81,7 +81,7 @@ T-junctions; every edge must be used twice in opposite directions; one connected
 
 * Canonical engulfed-hole cut exact: 40000 − 640π mm³, 4 cylinder patches all of radius 8,
   no radius-5 surface (`prismatic::arc_tests`, `tests/slab_arcs.rs`, `tests/geometry_gate.rs`).
-  Off-centre partial overlap (Ø16 4 mm off the Ø10) exact, also through the run-1
+  Off-centre partial overlap (Ø16 4 mm off the Ø10) exact, also through the legacy
   `CutThroughAll` command.
 * A cylindrical wall is split into ≤ quarter-turn faces, and at every vertex any level has on
   that circle (a Truck-built Ø10 hole rebuilt by a slab result has 6 faces instead of 3).
@@ -96,11 +96,11 @@ T-junctions; every edge must be used twice in opposite directions; one connected
   Truck) is refused by the slab construction for every later tool. Conservative.
 * Determinism: the construction itself is deterministic (no hash-order dependence in its
   output). Truck's boolean, tried first, is not: the same seeded corpus gave different
-  Truck outcomes in different processes (run 5: 156 vs 161 accepted of ~190 on one stream).
+  Truck outcomes in different processes (156 vs 161 accepted of ~190 on one stream).
 
 ## Addendum to ADR 0005: target faces are probed too
 
-The run-5 arc corpus found a closed Truck result that the result check accepted although it
+The arc corpus found a closed Truck result that the result check accepted although it
 was wrong: a Ø11 cut externally tangent to the wall of an earlier 1 mm pocket returned the
 body with that pocket *filled again* (+72.27 mm³, `tests/arc_fuzz.rs::
 tangent_round_cut_beside_a_shallow_rounded_pocket`). The check probed result faces only,
@@ -109,4 +109,4 @@ sides of the target's faces whose triangles overlap the tool neighbourhood (larg
 triangles first, up to 3 decided per face, same offsets as result faces) against the
 result's own winding number; any disagreement with the expected solid is a refusal
 ("beside a face of the target … existing geometry away from the tool was changed"). The
-whole run-4/5 test suite and corpora pass unchanged under the stronger check.
+whole test suite and corpora pass unchanged under the stronger check.

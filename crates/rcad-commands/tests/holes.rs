@@ -1,4 +1,4 @@
-//! SESSION_4 §7.6: Hole feature with counterbore (through / blind), refusals,
+//! Hole feature with counterbore (through / blind), refusals,
 //! patterns and parameter bindings. Expected volumes are cylinder arithmetic
 //! (the solids are Z-ruled, so the measured volume is the exact boundary
 //! integral).
@@ -220,7 +220,7 @@ fn patterned_counterbored_holes_and_parameters() {
     let _ = ExtrudeOp::Cut;
 }
 
-/// Review run 4 #3: "through all" goes into the material only. A hole on the
+/// "through all" goes into the material only. A hole on the
 /// lower jaw of a C-channel must not drill the upper jaw above the face.
 #[test]
 fn through_hole_does_not_drill_material_behind_the_face() {
@@ -291,7 +291,7 @@ fn through_hole_does_not_drill_material_behind_the_face() {
     );
 }
 
-/// Review run 4 #4: a hole's depth and counterbore depth bound to one
+/// A hole's depth and counterbore depth bound to one
 /// parameter change together; the final combination is what is validated.
 #[test]
 fn coupled_hole_depths_change_together() {

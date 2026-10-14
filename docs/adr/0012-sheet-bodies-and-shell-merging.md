@@ -1,10 +1,10 @@
 # ADR 0012: Sheet bodies and surface repair by exact shell merging
 
-Status: accepted (run 7)
+Status: accepted
 
 ## Context
 
-SESSION_7 §5/§6 need folded sheet metal with edge flanges and surface repair (stitch, patch,
+The product needs folded sheet metal with edge flanges and surface repair (stitch, patch,
 thicken). Truck 0.6 booleans are unreliable on coincident and tangent geometry (ADR 0001,
 0005): uniting a plate with a flange prism that shares a whole face is exactly the coincident
 case they fail on, and Truck has no sewing, no open-shell solids and no offset surfaces.

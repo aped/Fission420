@@ -582,7 +582,7 @@ fn boolean(a: &Region, b: &Region, rule: OverlayRule) -> Result<Region> {
 /// [`boolean`] whose output clean-up never removes a point for which `keep`
 /// holds (the ring points of the arc construction: two special points on a
 /// circle very close together leave a ring vertex within `SAME` of their
-/// chord, which must stay an arc vertex; review run 5 #10).
+/// chord, which must stay an arc vertex).
 fn boolean_keep(
     a: &Region,
     b: &Region,
@@ -662,7 +662,7 @@ fn boolean_keep(
 /// x = 117.99999999955 at one end and 117.99999999949 at the other); on the
 /// 1e-9 mm grid that can round to adjacent grid points and leave a 1e-9 mm
 /// sliver or spike, which would become a non-simple face loop (rim notch
-/// repro, run 5). None when nothing is left.
+/// repro). None when nothing is left.
 fn clean_contour(mut c: Contour, keep: &dyn Fn([f64; 2]) -> bool) -> Option<Contour> {
     let near =
         |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() <= SAME && (a[1] - b[1]).abs() <= SAME;

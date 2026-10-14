@@ -1,11 +1,11 @@
 # ADR 0006: Exact slab construction for coplanar Join/Cut on prismatic bodies
 
-Status: accepted (2026-10-12, after run 4).
+Status: accepted (2026-10-12).
 
 ## Context
 
 Truck 0.6 booleans fail (panic, return `None`) or return a non-closed shell when a tool
-face coincides with a face of the target. Run 4's overlap fuzz (`gate_fuzz.rs`, 64 random
+face coincides with a face of the target. The overlap fuzz (`gate_fuzz.rs`, 64 random
 overlapping rectangular pockets on a 2 mm grid) refused 21 of 64 for this reason: 19 Truck
 failures and 2 results rejected by the result check (ADR 0005). Pockets flush with an outer wall, a
 pocket continuing an earlier pocket's walls or floor, and a boss sketched exactly on a face

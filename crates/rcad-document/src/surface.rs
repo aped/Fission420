@@ -1,4 +1,4 @@
-//! Surface bodies and open-shell repair (run 7, docs/SURFACES.md, ADR 0012):
+//! Surface bodies and open-shell repair (docs/SURFACES.md, ADR 0012):
 //! import of STEP surface models as open-shell bodies, stitching within a
 //! stated healing tolerance, planar filling of boundary loops, and thickening
 //! of single planar/cylindrical faces. Each operation makes a new body and
@@ -128,7 +128,7 @@ pub fn thicken(
     ))
 }
 
-/// Run 7: surface body of a `SurfacePatch` / `SurfaceExtrude` feature from
+/// Surface body of a `SurfacePatch` / `SurfaceExtrude` feature from
 /// its sketch (closed profile region, or for an extrusion an open line chain).
 pub fn from_sketch(
     id: FeatureId,

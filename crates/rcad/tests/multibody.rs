@@ -1,8 +1,7 @@
-//! Run-3 multi-body UI: two bodies, the Bodies browser (select, hide/show,
+//! Multi-body UI: two bodies, the Bodies browser (select, hide/show,
 //! inline rename, undo), picking per body, and the Extrude dialog (New Body /
 //! Join / Cut with a target, Through All, preview, cancel, refusal) driven
-//! through the real widgets. Expected volumes are hand-derived box volumes
-//! (SESSION_3 acceptance model A).
+//! through the real widgets. Expected volumes are hand-derived box volumes.
 
 use std::time::{Duration, Instant};
 
@@ -438,7 +437,7 @@ fn preview_direction_matches_regeneration_on_coplanar_world_plane() {
     assert_eq!(h.state().extrude_preview().unwrap().z_range, [0.0, 2.0]);
 }
 
-/// Review run 3 #3/#4: an open body rename whose body disappears (toolbar Undo)
+/// An open body rename whose body disappears (toolbar Undo)
 /// closes, so keyboard shortcuts work again; a reply that selects a feature
 /// clears the body selection (no hidden "Selected [A]" export default).
 #[test]
@@ -466,7 +465,7 @@ fn undo_closes_a_rename_of_a_vanished_body() {
     assert_eq!(h.state().selected_body(), None);
 }
 
-/// Review run 3 #10: Re-attach does not preselect a face it does not offer
+/// Re-attach does not preselect a face it does not offer
 /// (the cap of the sketch's own extrusion would be a cycle), and its button
 /// stays disabled until a valid support is chosen.
 #[test]
@@ -491,7 +490,7 @@ fn reattach_does_not_preselect_an_unoffered_face() {
     assert!(h.get_by_label("Re-attach").accesskit_node().is_disabled());
 }
 
-/// Review run 3 #9: a dialog holding ids of the old document does not survive
+/// A dialog holding ids of the old document does not survive
 /// a document change.
 #[test]
 fn dialogs_close_when_the_document_changes() {

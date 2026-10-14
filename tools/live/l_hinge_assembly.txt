@@ -1,4 +1,4 @@
-# Run 7 (SESSION_7 acceptance 1/2 UI): assemblies through real pointer/keyboard
+# Assemblies through real pointer/keyboard
 # input on examples/hinge_assembly.rcad.json (grounded leaf A + pin, the Wing
 # sub-assembly with leaf B and three linked screws on a revolute hinge at 90°
 # (0–180°), an independent screw copy). Tree selection, component activation,

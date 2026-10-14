@@ -1,6 +1,6 @@
 # Named parameters and expressions
 
-Run 4 (SESSION_4 §3). Code: `crates/rcad-document/src/params.rs` (language, evaluation,
+Code: `crates/rcad-document/src/params.rs` (language, evaluation,
 binding), commands in `crates/rcad-commands/src/lib.rs`, UI in
 `crates/rcad/src/params_ui.rs` and the inspector (`panels.rs`).
 
@@ -92,8 +92,8 @@ dependents correct by rewriting them in the same transaction.
 
 v4 adds `document.parameters` and `features[].expressions` (both omitted when empty). A v3
 document is a v4 document without them, so v3 files load unchanged
-(`crates/rcad-commands/tests/fixtures/native_v3/`, frozen copies of the run-3 documents,
-checked by `native_formats.rs::v3_run3_examples`). Saves always write v4, so an older build
+(`crates/rcad-commands/tests/fixtures/native_v3/`, frozen copies of v3 documents,
+checked by `native_formats.rs::v3_examples`). Saves always write v4, so an older build
 refuses the file ("newer than supported") instead of silently dropping expressions. A file
 that claims an older version but contains parameters or expressions is refused.
 

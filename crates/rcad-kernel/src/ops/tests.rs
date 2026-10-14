@@ -273,7 +273,7 @@ fn join_and_cut_refuse_tools_with_inner_loops_up_front() {
     assert!((volume(&a) - volume(&c) - 400.0 * 5.0).abs() < 1e-6);
 }
 
-// The engulfed-hole cut (run-3 review sketch/kernel #3) is a Truck 0.6 result
+// The engulfed-hole cut is a Truck 0.6 result
 // that `cut_prism` still returns; it is detected by `validate::tests::
 // swallowed_hole_cut_is_detected` and refused by the document
 // (rcad-commands/tests/geometry_gate.rs).

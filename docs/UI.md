@@ -1,7 +1,7 @@
-# UI notes (run 3)
+# UI notes
 
 The UI shows the last `DocSummary` from the engine and changes the document only through
-`Command`s. Run-3 additions, the module that implements each one, and the test that drives it
+`Command`s. UI areas, the module that implements each one, and the test that drives it
 through the real widgets:
 
 | Area | Behaviour | Code | UI test |
@@ -28,7 +28,7 @@ states (`crates/rcad/src/scenes.rs`) in a private headless mutter at 1280×800 a
 Cancelling the Import dialog while an import is running only closes the dialog. The import cannot
 be interrupted and still completes, and Undo removes it in one step.
 
-## Run 4 additions
+## Parameters, measure, printable templates, export and recovery
 
 * **Browser → Parameters (N)**: named parameters with expression, value and unit; click a
   name to edit, rename or delete (disabled with the reason while used); bottom row adds one.
@@ -60,7 +60,7 @@ be interrupted and still completes, and Undo removes it in one step.
 * Dialogs holding feature/body ids close on Undo/Redo (ids may be reused afterwards) and
   when their ids disappear; import replies resolve only the form that submitted them.
 
-## Run 5 additions
+## Modifier faces, section view, mirror, suppression and dialogs
 
 * **Sketch on modifier faces:** faces made by linear/circular patterns, mirrors and chamfers
   are semantic references (`FaceRole::Copy { instance, tool, of }`, `FaceRole::Chamfer`) and can
@@ -89,7 +89,7 @@ be interrupted and still completes, and Undo removes it in one step.
 * **Templates › Organizer tray** (after the blank-document workflow, which is the acceptance path).
 * Live walkthrough of the tray from New: `tools/live/t_organizer_tray.txt`.
 
-## Run 6 additions (sketch)
+## Sketch tools
 
 * **Text tool (sketch toolbar "Text"):** click to place a text (on an existing point the text is
   anchored to it and follows it), or click an existing text to edit it (double-click in Select

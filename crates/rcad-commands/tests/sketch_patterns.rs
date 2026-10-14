@@ -1,4 +1,4 @@
-//! Sketch patterns through the command API (run 6): a 80 x 60 plate with a
+//! Sketch patterns through the command API: a 80 x 60 plate with a
 //! bolt circle made by a circular sketch pattern of one Ø6 hole (6 × 60°),
 //! extruded as one New Body: volume = (4800 − 6 · 9π) · 5. The pattern angle is
 //! a feature parameter (edit: holes move, volume unchanged; an angle that makes

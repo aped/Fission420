@@ -1,4 +1,4 @@
-//! Run 7 commands: sheet metal (base face, edge flanges, sheet rule, flat
+//! Commands for sheet metal (base face, edge flanges, sheet rule, flat
 //! pattern display and DXF) and surfaces (import, analysis, stitch, fill,
 //! thicken). docs/SHEET_METAL.md, docs/SURFACES.md.
 use crate::{Command, Response, Session};
@@ -155,7 +155,7 @@ pub struct SurfaceFromSketchArgs {
     pub body_name: Option<String>,
 }
 
-/// Who owns a new body (review #16): a modelled body joins the active
+/// Who owns a new body: a modelled body joins the active
 /// component; a display body (flat pattern) joins none; a derived body
 /// (stitch / fill / thicken) takes its source's place in its component.
 #[derive(Clone, Copy)]
@@ -238,7 +238,7 @@ fn current_build(
             "{base}: the sheet body is not evaluated (suppressed or failed)"
         )));
     };
-    // Review S3: the flat pattern comes from the sheet definition; a later
+    // The flat pattern comes from the sheet definition; a later
     // non-sheet edit of the body (hole, cut, ...) would be silently missing.
     let last_sheet = doc
         .features
@@ -289,7 +289,7 @@ fn current_build(
 }
 
 impl Session {
-    /// Run-7 sheet-metal and surface commands; false when `cmd` is not one.
+    /// Sheet-metal and surface commands; false when `cmd` is not one.
     pub(crate) fn run_sheet_surface(
         &mut self,
         cmd: &Command,
@@ -347,16 +347,16 @@ impl Session {
                             end_offset: a.end_offset,
                         },
                     );
-                    // Review #5: the flat pattern must include every flange of
+                    // The flat pattern must include every flange of
                     // its body, so a new flange goes before an existing flat.
                     // `push` inserted it just after the timeline marker and
                     // moved the marker onto it. If the flat lies after that
                     // point (rolled back) the flange is already before it.
                     // Otherwise the flat is active, the flange moves before
-                    // it, and the marker goes back where it was (review
-                    // run 7 #4): the features that were active stay active,
-                    // the rolled-back ones stay rolled back, and the new
-                    // flange (now before the old marker) is active.
+                    // it, and the marker goes back where it was: the features
+                    // that were active stay active, the rolled-back ones stay
+                    // rolled back, and the new flange (now before the old
+                    // marker) is active.
                     let pos = |d: &Document, x| d.features.iter().position(|g| g.id == x);
                     if let Some(f) = flat
                         && pos(d, f) < pos(d, id)
@@ -439,7 +439,7 @@ impl Session {
                     .as_ref()
                     .and_then(|m| base_of(m.document(), *feature))
                 else {
-                    return Ok(false); // the run-6 contour flange path
+                    return Ok(false); // the contour flange path
                 };
                 let (built, rule) = current_build(self, base)?;
                 let text = rcad_document::sheet::flat_dxf(&built);

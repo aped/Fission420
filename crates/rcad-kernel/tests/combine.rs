@@ -29,7 +29,7 @@ fn correct_results_pass_and_wrong_ones_are_caught() {
         let rep = verify_boolean_by_membership(&a, &b, &r, op, 12).unwrap();
         eprintln!("{op:?}: {rep:?}");
         assert!(rep.passed(), "{op:?}: {rep:?}");
-        // The union grid plus a grid over the tool's own bounds (review run 6 #5).
+        // The union grid plus a grid over the tool's own bounds.
         assert_eq!(rep.samples, 2 * 12 * 12 * 12);
         assert!(rep.compared > rep.samples / 2);
         assert_eq!(rep.volume_ok, Some(true));
@@ -74,7 +74,7 @@ fn disjoint_bodies_are_refused_before_any_boolean() {
     }
 }
 
-/// Review run 6 #18a: a Cut whose tool encloses the target is refused as an
+/// A Cut whose tool encloses the target is refused as an
 /// empty result, not as a failed boolean; a partial overlap still cuts.
 #[test]
 fn cut_by_an_enclosing_tool_is_refused_as_empty() {

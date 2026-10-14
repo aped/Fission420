@@ -1,8 +1,8 @@
-//! Component / occurrence / joint model (run 6 flat model, run 7 nesting and
-//! more joint types; docs/ASSEMBLIES.md; formats v6/v7).
+//! Component / occurrence / joint model (flat model in format v6, nesting and
+//! more joint types in v7; docs/ASSEMBLIES.md).
 //!
 //! * A **component** is a definition: a named set of this document's bodies
-//!   (modeled by the ordinary feature history) plus, since run 7, *child
+//!   (modeled by the ordinary feature history) plus *child
 //!   occurrences* of other components (a sub-assembly). A body belongs to at
 //!   most one component. A component may be empty (a new component that is
 //!   about to receive bodies through activation).
@@ -97,18 +97,18 @@ pub struct Component {
     pub bodies: Vec<BodyId>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part_number: String,
-    /// Run 7: this component was made as an independent copy of that one
+    /// This component was made as an independent copy of that one
     /// (its bodies are copies with their own history; it does not follow the
     /// source's later edits). Provenance only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derived_from: Option<ComponentId>,
-    /// Run 7: the component was inserted from another native document (its
+    /// The component was inserted from another native document (its
     /// bodies are an embedded STEP copy of that document's evaluated solids).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalSource>,
 }
 
-/// Provenance of an external component (run 7). The geometry is always the
+/// Provenance of an external component. The geometry is always the
 /// embedded copy; the source file is only read by an explicit update.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalSource {
@@ -201,16 +201,16 @@ pub struct Occurrence {
     pub placement: Placement,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub grounded: bool,
-    /// Run 6: excluded from the evaluated assembly (display, BOM, mass,
+    /// Excluded from the evaluated assembly (display, BOM, mass,
     /// interference, export) with everything below it; a configuration can
     /// control it. The definition is not deleted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub suppressed: bool,
-    /// Run 7: the component whose definition contains this occurrence
+    /// The component whose definition contains this occurrence
     /// (`None` = the top-level assembly).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<ComponentId>,
-    /// Run 7: not displayed (with everything below it). Still counted in BOM,
+    /// Not displayed (with everything below it). Still counted in BOM,
     /// mass properties, interference and export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
@@ -225,15 +225,15 @@ pub enum JointKind {
     Revolute,
     /// Translation along `axis`; value in mm.
     Slider,
-    /// Run 7: rotation about and translation along `axis` (2 DOF: degrees, mm).
+    /// Rotation about and translation along `axis` (2 DOF: degrees, mm).
     Cylindrical,
-    /// Run 7: rotation about `axis` through `origin` and translation along the
+    /// Rotation about `axis` through `origin` and translation along the
     /// slot direction `dir2` (⊥ axis) (2 DOF: degrees, mm).
     PinSlot,
-    /// Run 7: translation in the plane with normal `axis` along `u` = `dir2`
+    /// Translation in the plane with normal `axis` along `u` = `dir2`
     /// and `w` = axis × u, and rotation about the normal (3 DOF: mm, mm, deg).
     Planar,
-    /// Run 7: rotation about `origin` (3 DOF: degrees):
+    /// Rotation about `origin` (3 DOF: degrees):
     /// `M = R_axis(v1) ∘ R_u(v2) ∘ R_w(v3)` with `axis`, `u`, `w` the parent's
     /// fixed joint axes, i.e. applied to the child as first `w`, then `u`,
     /// then `axis` about the fixed axes (equivalently intrinsic: `axis`, then
@@ -281,7 +281,7 @@ impl JointKind {
         JointKind::Ball,
     ];
 
-    /// Run 7 kinds (need format v7).
+    /// Kinds that need format v7.
     pub fn is_v7(self) -> bool {
         !matches!(
             self,
@@ -290,7 +290,7 @@ impl JointKind {
     }
 }
 
-/// A further joint value with its own limits (run 7, multi-DOF joints).
+/// A further joint value with its own limits (multi-DOF joints).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct DofValue {
     #[serde(default)]
@@ -319,10 +319,10 @@ pub struct Joint {
     pub max: Option<f64>,
     /// Child pose relative to `L_parent ∘ M(values)` at creation.
     pub rest: Pose,
-    /// Run 7: second and third values of multi-DOF joints.
+    /// Second and third values of multi-DOF joints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra: Vec<DofValue>,
-    /// Run 7: slot direction (pin-slot) or in-plane `u` direction (planar,
+    /// Slot direction (pin-slot) or in-plane `u` direction (planar,
     /// ball); projected perpendicular to `axis`. Default: a fixed
     /// perpendicular (see [`Joint::frame`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -486,7 +486,7 @@ impl Joint {
         Ok(())
     }
 
-    /// Run-6 single-value check (the first value; others unchanged).
+    /// Single-value check (the first value; others unchanged).
     pub fn check_value(&self, v: f64) -> Result<()> {
         let mut vals = self.values();
         if vals.is_empty() {
@@ -542,15 +542,15 @@ pub struct Assembly {
     pub next_occurrence: u32,
     #[serde(default = "one")]
     pub next_joint: u32,
-    /// Run 7: the component being edited: bodies created while it is active
+    /// The component being edited: bodies created while it is active
     /// become its definition bodies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<ComponentId>,
-    /// Run 7: exploded-view offsets (world mm) per instance path ("O3/O7");
+    /// Exploded-view offsets (world mm) per instance path ("O3/O7");
     /// display state only (no geometry, joint, BOM or mass effect).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub explode: BTreeMap<String, [f64; 3]>,
-    /// Run 7: whether the exploded offsets are displayed.
+    /// Whether the exploded offsets are displayed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exploded: bool,
 }
@@ -595,18 +595,18 @@ pub struct EvalOccurrence {
     /// Remaining degrees of freedom of the leaf occurrence relative to its
     /// owner (0 grounded / rigid child, joint DOF, 6 free).
     pub dof: u8,
-    /// Run 7: top-level occurrence first.
+    /// Top-level occurrence first.
     pub path: Vec<OccurrenceId>,
-    /// Run 7: names along the path joined by "/".
+    /// Names along the path joined by "/".
     pub path_name: String,
-    /// Run 7: nesting level (0 = top level).
+    /// Nesting level (0 = top level).
     pub level: usize,
-    /// Run 7: false when this occurrence or one above it is hidden.
+    /// False when this occurrence or one above it is hidden.
     pub visible: bool,
-    /// Run 7: exploded display offset (world mm; zero unless the exploded view
+    /// Exploded display offset (world mm; zero unless the exploded view
     /// is on). Never applied to geometry, mass or interference.
     pub explode: [f64; 3],
-    /// Run 7: inside the active component (or no component is active).
+    /// Inside the active component (or no component is active).
     pub in_active: bool,
 }
 
@@ -777,7 +777,7 @@ impl Assembly {
     /// limits, valid exploded-view paths.
     pub fn validate(&self, bodies: &[crate::BodyInfo]) -> Result<()> {
         let v = |m: String| Err(DocError::Validation(m));
-        // Review run 6 #6: stored poses must be proper rigid motions.
+        // Stored poses must be proper rigid motions.
         for j in &self.joints {
             let p = &j.rest;
             let finite =
@@ -1301,7 +1301,7 @@ mod tests {
         }
     }
 
-    /// Review run 7 #1: a DAG with reuse (16 levels, each component holding
+    /// A DAG with reuse (16 levels, each component holding
     /// 30 occurrences of the next) validates in bounded time and is refused
     /// for depth / instance count instead of hanging.
     #[test]
@@ -1354,7 +1354,7 @@ mod tests {
         assert!(a.validate(&[]).is_err());
     }
 
-    /// Review run 7 #19: a 5000-joint chain validates and solves without
+    /// A 5000-joint chain validates and solves without
     /// deep recursion, in bounded time.
     #[test]
     fn long_joint_chain_is_iterative() {
@@ -1395,7 +1395,7 @@ mod tests {
         assert!(a.validate(&[]).is_err());
     }
 
-    /// Review run 7: exploded keys must be canonical paths.
+    /// Exploded keys must be canonical paths.
     #[test]
     fn non_canonical_explode_keys_are_refused() {
         let mut a = Assembly::default();

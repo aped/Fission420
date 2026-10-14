@@ -1,4 +1,4 @@
-//! Sketch pattern dialog (run 6, docs/behavior/sketching.md "Sketch patterns"):
+//! Sketch pattern dialog (docs/behavior/sketching.md "Sketch patterns"):
 //! rectangular (one or two directions) or circular constrained copies of the
 //! selected curves. Apply goes through [`SketchEditor::apply_pattern`] (one
 //! local undo step); the document changes at Finish Sketch.

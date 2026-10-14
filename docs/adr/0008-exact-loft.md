@@ -1,6 +1,6 @@
 # ADR 0008: Exact loft between two planar profiles (narrow scope)
 
-Status: accepted (run 5, SESSION_5 §9.3).
+Status: accepted.
 
 ## Decision
 
@@ -31,7 +31,7 @@ are refused.
 **Checks inside `loft`.** One closed shell; the volume equals the prismatoid formula
 V = h/6 (A1 + 4 Am + A2) (exact: the section area of a straight-edged loft between
 parallel planes is quadratic in the height) or the frustum formula πh/3 (r1² + r1 r2 + r2²).
-Cones are measured exactly by the surface-of-revolution path added later in run 5
+Cones are measured exactly by the surface-of-revolution path
 (`BrepBoundaryIntegralRevolution`, `measure/revolution.rs`; the frustum test holds it to
 1e-9 relative); FreeCAD confirms independently (`tools/check_loft.sh`).
 

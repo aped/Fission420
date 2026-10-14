@@ -1,4 +1,4 @@
-//! Evaluation of [`crate::FeatureKind::Combine`] (run 6, SO04): validation of the
+//! Evaluation of [`crate::FeatureKind::Combine`]: validation of the
 //! body lists, the kernel combine with its independent check, and the mapping of
 //! kernel failures to structured document errors.
 use crate::{BodyId, DocError, FeatureId, Result};

@@ -1,4 +1,4 @@
-//! Tapered (drafted) extrusion tools (run 6, SESSION_6 §B): the exact frustum
+//! Tapered (drafted) extrusion tools: the exact frustum
 //! of a profile along a frame normal, and its use as a Join/Cut tool.
 //!
 //! Section law: the profile is exact at `w = 0` of `frame` (its plane) and the
@@ -16,8 +16,9 @@
 //! construction, ADR 0006/0007, only handles walls parallel to the axis), and
 //! the result must pass [`crate::verify_tapered_boolean`] against the nominal
 //! tapered tool (the ADR 0005 check with the section law applied). Truck 0.6
-//! fails on revolved cones (run-4 spike), so round tapered Join/Cut is
-//! expected to be refused with Truck's error; polygons work.
+//! fails on revolved cones (`validate::tests::spike_countersink_cone`), so
+//! round tapered Join/Cut is expected to be refused with Truck's error;
+//! polygons work.
 use crate::build::{BOOLEAN_TOLS, check_single_closed, with_exact_edges};
 use crate::validate::{BooleanCheck, Prism, PrismOp};
 use crate::{Body, Frame, KernelError, Profile, Result, guarded, tol};

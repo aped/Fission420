@@ -1,4 +1,4 @@
-//! Mesh repair (run 7, Run-8 pull-forward ME01; docs/MESH.md): an ASCII STL of
+//! Mesh repair (docs/MESH.md): an ASCII STL of
 //! a 20 mm cube with the top face missing, one side triangle flipped, a
 //! duplicate triangle and a degenerate sliver. Diagnosis first; preview changes
 //! nothing; apply makes a new mesh body (the source is kept) that is closed and

@@ -7,16 +7,16 @@
 #   4. Bambu Studio headless slice (P1S 0.4 / 0.20mm Standard / Generic PLA) of the baseline and
 #      variant 3MF and STL sets, G-code probes for walls/cavity/floor/lip/clearance.
 # Usage: tools/print/validate_print_exports.sh <rcad-cli binary> [outdir]
-# (default outdir artifacts/run4/print/validation). Run from the repository root. Every FreeCAD
+# (default outdir artifacts/print/validation). Run from the repository root. Every FreeCAD
 # and slicer run goes through tools/heavy.sh. Exit 1 if any step fails; each step still runs.
 set -uo pipefail
 CLI=${1:?usage: validate_print_exports.sh <rcad-cli> [outdir]}
 CLI=$(readlink -f "$CLI")
-OUT=${2:-artifacts/run4/print/validation}
+OUT=${2:-artifacts/print/validation}
 ROOT=$(pwd)
 mkdir -p "$OUT"
 OUT=$(readlink -f "$OUT")
-EXP=$ROOT/artifacts/run4/print/exports
+EXP=$ROOT/artifacts/print/exports
 FAIL=0
 step() { echo "== $*"; }
 mark() { if [ "$1" -ne 0 ]; then FAIL=1; echo "   -> FAIL (exit $1)"; else echo "   -> ok"; fi; }

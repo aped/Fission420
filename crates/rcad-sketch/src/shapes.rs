@@ -1,4 +1,4 @@
-//! Constrained shape generators (run 6, SK02): straight slots and regular
+//! Constrained shape generators: straight slots and regular
 //! polygons made of ordinary lines, arcs and construction circles, so they stay
 //! editable (drag, dimension edits, trim) like hand-drawn geometry.
 //!

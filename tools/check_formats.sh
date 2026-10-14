@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent validation of the SESSION_3 scenario C/D exports (written by
+# Independent validation of the acceptance scenario C/D exports (written by
 # `rcad-cli acceptance`, crates/rcad-commands/src/acceptance/formats.rs) with FreeCAD 1.1
 # (OpenCascade) and a pure-Python STL reader -- no R-CAD reader is involved.
 # usage: tools/check_formats.sh [DIR]   (default artifacts/acceptance)
@@ -18,7 +18,7 @@
 #                       closed, area 800 + 50*pi, bounds [-10,0]-[40,20].
 #   scenario_d_mesh.stl  the FreeCAD 20x10x5 box STL re-exported as a mesh body: 12 facets,
 #                       closed, V = 1000.
-# Tolerances: volume max(0.001, V*1e-7) mm^3 (GOAL.md); bounds 1e-6 mm (OCC's
+# Tolerances: volume max(0.001, V*1e-7) mm^3 (docs/TOLERANCES.md); bounds 1e-6 mm (OCC's
 # optimalBoundingBox adds the 1e-7 shape tolerance); loop centre 1e-6 mm; loop area 1e-6 rel.
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)

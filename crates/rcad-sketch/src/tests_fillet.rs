@@ -132,7 +132,7 @@ fn refusals_leave_the_sketch_unchanged() {
     assert_eq!(t, before);
 }
 
-// ---- Run 5: line–arc corners ----
+// ---- Line–arc corners ----
 
 /// ½∮(x dy − y dx) over the arc of centre `c`, radius `r`, from angle `a0`
 /// sweeping `d` (signed) radians: exact Green's-theorem term.
@@ -319,7 +319,7 @@ fn line_arc_fillet_internal_and_refusals() {
     assert_eq!(t, before);
 }
 
-/// Review run 5: at the largest radius that fits (the fillet is a half
+/// At the largest radius that fits (the fillet is a half
 /// circle, double root) the fillet must run through the corner side.
 #[test]
 fn line_arc_fillet_half_circle_goes_through_the_corner_side() {

@@ -1,4 +1,4 @@
-//! SESSION_4 §1 geometry gate, through the public command path: every known
+//! Geometry gate, through the public command path: every known
 //! wrong-geometry case either yields the exact intended solid or a specific
 //! refusal that leaves the document unchanged, and each refusal has an adjacent
 //! control that still works. Expected volumes are box/cylinder arithmetic.
@@ -85,12 +85,12 @@ fn holed_plate(s: &mut Session) -> FeatureId {
     e
 }
 
-/// Truck 0.6 keeps the engulfed hole's walls (run 3: 2010.6 removed instead of
-/// 1225.2 with a "closed" shell); the result check refuses that. Since run 5
-/// the exact slab construction with arcs (ADR 0007) builds the cut instead,
-/// through Extrude Cut through-all and blind alike, and the same result check
-/// passes it. The run-1 "Cut Through All" command (`legacy_cut`) has the same
-/// slab fallback since run 5 (C3) and is exact too.
+/// Truck 0.6 keeps the engulfed hole's walls (2010.6 removed instead of
+/// 1225.2 with a "closed" shell); the result check refuses that. The exact
+/// slab construction with arcs (ADR 0007) builds the cut instead, through
+/// Extrude Cut through-all and blind alike, and the same result check passes
+/// it. The legacy "Cut Through All" command (`legacy_cut`) has the same slab
+/// fallback and is exact too.
 #[test]
 fn cut_swallowing_an_existing_hole_is_exact() {
     let want = 40000.0 - PI * 64.0 * 10.0;
@@ -196,9 +196,9 @@ fn bounds_z(s: &Session) -> (f64, f64) {
     (m.bounds.min[2], m.bounds.max[2])
 }
 
-/// Run-3 thin-flange leak (reviewer repro 2161.6 vs 2160): the bounds do not
-/// change, so the old bounds check missed it. Now exact: the overlap is sized
-/// from the 0.3 mm of clear material.
+/// Thin-flange leak (repro 2161.6 vs 2160): the bounds do not change, so a
+/// bounds check alone misses it. Exact: the overlap is sized from the 0.3 mm
+/// of clear material.
 #[test]
 fn join_over_thin_flange_is_exact() {
     let mut s = Session::new();
@@ -284,8 +284,8 @@ fn circular_pattern_join_over_flange_is_exact() {
     );
 }
 
-/// A skin over a cavity, joined from the top (run-3 review regen #5 second
-/// case): 20x20x10 - 10x10x9.7 + 4x4x5 = 3110, exact.
+/// A skin over a cavity, joined from the top (second regeneration case):
+/// 20x20x10 - 10x10x9.7 + 4x4x5 = 3110, exact.
 #[test]
 fn join_over_skin_above_a_cavity_is_exact() {
     let mut s = Session::new();

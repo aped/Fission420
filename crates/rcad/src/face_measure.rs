@@ -1,4 +1,4 @@
-//! Exact face measurement in the face inspector (run 6, IN01): cylinder
+//! Exact face measurement in the face inspector: cylinder
 //! radius/diameter, axis-to-axis, plane-to-axis and plane-to-plane distance or
 //! angle from the B-rep surfaces (`Command::MeasureFaces`). World frame; mm and
 //! degrees. The readout is shown only while it describes the current document

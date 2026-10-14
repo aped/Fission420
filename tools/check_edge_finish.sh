@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the run-5 edge-finishing fixtures
+# Independent FreeCAD (OpenCascade) validation of the edge-finishing fixtures
 # (slanted-end chamfer, exact fillet) written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --lib chamfer fillet
 # usage: tools/heavy.sh tools/check_edge_finish.sh DIR

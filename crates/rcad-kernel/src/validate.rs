@@ -1,4 +1,4 @@
-//! Independent checks of boolean results (SESSION_4 §1).
+//! Independent checks of boolean results.
 //!
 //! Truck 0.6 booleans can return a single closed shell that is still the wrong
 //! solid (an engulfed hole's walls left inside a cut; a Join overlap poking into
@@ -201,7 +201,7 @@ struct PrismTest {
     length: f64,
     poly: Vec<[f64; 2]>,
     holes: Vec<Vec<[f64; 2]>>,
-    /// Run 6: tan of the draft angle; the section at height `w` is the
+    /// Tan of the draft angle; the section at height `w` is the
     /// profile offset inward by `w * taper` (0: a right prism).
     taper: f64,
     /// Tapered sections: the exact base shape.
@@ -294,7 +294,7 @@ impl PrismTest {
     /// spread over all loops, the middle of the chord the inward normal at the
     /// edge midpoint cuts through the region on either side. The chord
     /// midpoints reach rings and slots thinner than the grid spacing or the 1 %
-    /// margin (review run 5 #1).
+    /// margin.
     fn samples(&self) -> Vec<[f64; 2]> {
         let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
         for p in &self.poly {
@@ -407,7 +407,7 @@ impl Winding {
             .iter()
             .map(|t| t.map(|i| m.positions[i as usize]))
             .collect();
-        // Run 7 (performance qualification): for a watertight mesh the winding
+        // Performance: for a watertight mesh the winding
         // number equals the signed count of +X ray crossings; a grid makes a
         // probe cost O(triangles per cell) instead of O(all triangles).
         let closed = tris.len() >= 256 && crate::check_mesh(m).watertight;
@@ -426,7 +426,7 @@ impl Winding {
                 let n = ((tris.len() as f64).sqrt() as usize / 2).clamp(1, 512);
                 let cell = [0, 1].map(|k| ((hi[k] - lo[k]) / n as f64).max(1e-12));
                 let mut cells = vec![Vec::new(); n * n];
-                // Review round 2 #26: bounded total size (a triangle is listed in
+                // Bounded total size (a triangle is listed in
                 // every cell its (y, z) box touches); beyond it, no grid.
                 let mut total = 0usize;
                 let idx = |v: f64, k: usize| {
@@ -646,7 +646,7 @@ pub fn verify_prism_boolean_reusing(
     verify_impl(target, result, op, &[(prism, used)], 0.0, target_mesh)
 }
 
-/// [`verify_prism_boolean`] for a drafted tool (run 6, `crate::taper`): the
+/// [`verify_prism_boolean`] for a drafted tool (`crate::taper`): the
 /// section at height `w` along `prism.start.z` is `prism.profile` offset
 /// inward by `w * tan(taper)` (polygons mitred, circles by radius). `used` as
 /// for [`verify_prism_boolean`].
@@ -883,7 +883,7 @@ fn check_faces(
     }
     let rwind = Winding::new(rmesh);
     // Target faces near the tools, probed on both sides against the result's
-    // own winding number (run 5): a boolean that refills an existing void (a
+    // own winding number: a boolean that refills an existing void (a
     // shallow pocket beside a tangent cut lost its floor and walls) or removes
     // untouched material leaves no result face there for the probes above.
     let tplanar = planar_faces(target);
@@ -961,9 +961,9 @@ fn check_faces(
         }
     }
     // Interior probes of every nominal tool against the result itself: a tool
-    // the kernel never applied leaves no faces to probe above (review run 4
-    // #1). Cut: points of tool ∩ target must be outside the result; Join:
-    // points of the tool must be inside it.
+    // the kernel never applied leaves no faces to probe above. Cut: points of
+    // tool ∩ target must be outside the result; Join: points of the tool must
+    // be inside it.
     for (k, ((prism, _), test)) in tools.iter().zip(&tests).enumerate() {
         let mut decided = 0;
         let mut considered = 0;
@@ -1065,7 +1065,7 @@ pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Re
             if pts.iter().all(|p| p[2] < w_min) || pts.iter().all(|p| p[2] >= best) {
                 continue;
             }
-            // Footprint bounding-box reject (review run 4 #5).
+            // Footprint bounding-box reject.
             if pts.iter().all(|p| p[0] < fp_lo[0] - slack)
                 || pts.iter().all(|p| p[0] > fp_hi[0] + slack)
                 || pts.iter().all(|p| p[1] < fp_lo[1] - slack)
@@ -1151,7 +1151,7 @@ fn invasion_depth(p: &[[f64; 3]], poly: &[[f64; 2]], slack: f64) -> Option<f64> 
     // (c) footprint vertices inside the polygon's projection (non-degenerate).
     if n >= 3 {
         let a = p[0];
-        // Newell normal: robust to repeated vertices from clipping (review #7).
+        // Newell normal: robust to repeated vertices from clipping.
         let mut nrm = [0.0; 3];
         for i in 0..n {
             let (u, v) = (p[i], p[(i + 1) % n]);
@@ -1222,7 +1222,7 @@ pub fn prism_is_empty(
     }
     let poly = profile_polygon(profile);
     // The deepest interior point, farther from the boundary than the chord
-    // error of the membership test (review run 4 #6).
+    // error of the membership test.
     let b = crate::measure::raw_bounds(&body.solid)?;
     let chord = check_chord(diag_of(&b));
     let Some((q, d)) = deepest_point(&poly) else {

@@ -1,6 +1,6 @@
 # ADR 0002 — Store boolean intersection edges as verified exact explicit curves
 
-Status: accepted (run 2, 2026-10-10)
+Status: accepted (2026-10-10)
 
 ## Context
 Truck 0.6 booleans (`truck_shapeops::and`) return every new edge as an `IntersectionCurve`:

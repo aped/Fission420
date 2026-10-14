@@ -1,4 +1,4 @@
-//! Associative sketch projection (run 6, SESSION_6 §B / coverage SK03):
+//! Associative sketch projection:
 //! project a model face (all loops, exact lines and arcs) or another sketch
 //! into a parallel sketch; upstream edits move the projected geometry;
 //! topology changes break the link by name (never a silent rebinding);
@@ -272,7 +272,7 @@ fn projected_sketches_are_fully_constrained_not_redundant() {
     );
 }
 
-/// Review run 6 #16: a projected loop whose points are no longer pinned
+/// A projected loop whose points are no longer pinned
 /// matches every rotation of a square equally well. Which sketch line drives
 /// which edge would then depend on the kernel's loop order, so the link is
 /// refused as ambiguous (BrokenReference), never bound silently.

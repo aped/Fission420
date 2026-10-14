@@ -1,4 +1,4 @@
-//! Named configurations (run-6 pull-forward of SESSION_7 §3 / coverage PA03):
+//! Named configurations:
 //! two product variants (80 and 100 mm) with different part numbers and an
 //! optional feature suppressed in one; a shared dimension edited once
 //! regenerates both; batch exports named by variant leave the document as
@@ -109,7 +109,7 @@ fn two_variants_follow_a_shared_edit_and_export_by_name() {
                 "step": true, "stl": true}),
     );
     assert_eq!(s.model().unwrap().document(), &before);
-    // Review run 6 #14: undo/redo history and dirty flag are untouched, so Redo
+    // Undo/redo history and dirty flag are untouched, so Redo
     // still redoes the user's undone wall edit.
     assert_eq!(history(&s), history_before);
     for f in [
@@ -203,7 +203,7 @@ fn configuration_refusals_leave_the_document_unchanged() {
     }
 }
 
-/// Review run 7 #7: renaming a user parameter renames it inside every
+/// Renaming a user parameter renames it inside every
 /// configuration; deleting one a configuration sets is refused.
 #[test]
 fn parameter_rename_and_delete_keep_configurations_valid() {

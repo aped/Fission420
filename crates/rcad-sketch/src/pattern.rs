@@ -1,4 +1,4 @@
-//! Sketch patterns (run 6, SK02 follow-up): rectangular (linear in one or two
+//! Sketch patterns: rectangular (linear in one or two
 //! directions) and circular copies of selected sketch entities, kept as
 //! **constrained** ordinary geometry so they follow the source.
 //!

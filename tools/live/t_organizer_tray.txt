@@ -1,9 +1,8 @@
-# Run 5 (SESSION_5 §7): a parameterized organizer tray authored from New
+# A parameterized organizer tray authored from New
 # through real pointer/keyboard input: parameters, drawn + bound sketches,
 # blank, compartment pocket + pattern (count = divider_count + 1), rim
 # notch; then edits (size, divider count 3/0, invalid), section view,
-# measurement, save/close/reopen and exports. Expected volumes are the
-# spec's formula (run-5 specification §7).
+# measurement, save/close/reopen and exports. Expected volumes are closed form.
 clickw New
 wait_idle
 typew New parameter name | tray_length

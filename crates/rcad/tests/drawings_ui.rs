@@ -1,4 +1,4 @@
-//! Browser "Drawings" section through the real widgets (egui_kittest, run 6;
+//! Browser "Drawings" section through the real widgets (egui_kittest;
 //! docs/DRAWINGS.md): select a body, create its drawing, export it, switch
 //! the projection, add an iso view, delete the hole the drawing shows and see
 //! the dangling-reference report, delete the drawing.
@@ -55,7 +55,7 @@ fn request(h: &mut Harness<'_, RcadApp>, c: Command) {
 }
 
 fn out(name: &str) -> PathBuf {
-    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/run6/drawings");
+    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/drawings_ui");
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }
@@ -168,7 +168,7 @@ fn combo(h: &mut Harness<'_, RcadApp>, combo: &str, option: &str) {
     settle(h);
 }
 
-/// Run 7: dimension with tolerance, note, BOM/balloons through the widgets.
+/// Dimension with tolerance, note, BOM/balloons through the widgets.
 #[test]
 fn annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser() {
     let mut h = harness();

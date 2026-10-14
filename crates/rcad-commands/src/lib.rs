@@ -98,14 +98,14 @@ pub enum Command {
         /// its holes) as before. See docs/behavior/sketching.md.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<rcad_sketch::RegionRef>,
-        /// Run-6 options (symmetric, two sides `distance2`, `start_offset`,
+        /// Options (symmetric, two sides `distance2`, `start_offset`,
         /// up `to` a parallel plane, `thin` wall, `taper`, further `regions`);
         /// see `rcad_document::ExtrudeOptions`. Format v6 when used.
         #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
         options: ExtrudeOptions,
     },
     /// New body: revolve a sketch about its local Y axis (WorldXZ sketch -> world Z axis),
-    /// or (run 6) its local X axis or one of its lines (`axis`); `reverse` sweeps toward
+    /// or its local X axis or one of its lines (`axis`); `reverse` sweeps toward
     /// +normal instead of −normal.
     Revolve {
         #[serde(default)]
@@ -119,13 +119,13 @@ pub enum Command {
         axis: rcad_document::RevolveAxis,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reverse: bool,
-        /// Run 6: `join` / `cut` with `target` instead of a new body.
+        /// `join` / `cut` with `target` instead of a new body.
         #[serde(default, skip_serializing_if = "ExtrudeOp::is_new_body")]
         op: ExtrudeOp,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<BodyId>,
     },
-    /// Exact loft (run 5, ADR 0008) between the closed profiles of sketches
+    /// Exact loft (ADR 0008) between the closed profiles of sketches
     /// `a` and `b` (parallel planes) as a new body: equal-count polygons with
     /// parallel corresponding edges, or coaxial circles. Refused otherwise
     /// with the reason (ProductLimit), document unchanged.
@@ -134,13 +134,13 @@ pub enum Command {
         name: Option<String>,
         a: FeatureId,
         b: FeatureId,
-        /// Run 6: intermediate section sketches, in order.
+        /// Intermediate section sketches, in order.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         via: Vec<FeatureId>,
         #[serde(default)]
         body_name: Option<String>,
     },
-    /// Exact sweep (run 5, ADR 0009): the closed profile of sketch `profile`
+    /// Exact sweep (ADR 0009): the closed profile of sketch `profile`
     /// along the open line/arc chain of sketch `path` (starting at the profile
     /// sketch's origin along its normal), as a new body.
     Sweep {
@@ -203,7 +203,7 @@ pub enum Command {
         b: FaceRef,
         distance: f64,
     },
-    /// Exact solid fillet (run 5) of the straight convex edge between planar
+    /// Exact solid fillet of the straight convex edge between planar
     /// faces `a` and `b` (semantic references), `radius` mm: an exact cylinder
     /// tangent to both. Body prismatic along the edge with perpendicular end
     /// faces; refused otherwise. Parameter `radius`.
@@ -214,7 +214,7 @@ pub enum Command {
         b: FaceRef,
         radius: f64,
     },
-    /// Direct edit (run 6, ADR 0010) of an imported STEP body at imported face
+    /// Direct edit (ADR 0010) of an imported STEP body at imported face
     /// `face` (`FaceRole::Imported`, stable import index; see
     /// [`Command::ImportedFaces`]): offset a planar face, resize or remove the
     /// hole/boss of a cylindrical face. Exact; refused with the reason when the
@@ -225,7 +225,7 @@ pub enum Command {
         face: FaceRef,
         op: rcad_document::DirectOp,
     },
-    /// Exact countersink (run 6) at the entry of Hole feature `hole`: `diameter`
+    /// Exact countersink at the entry of Hole feature `hole`: `diameter`
     /// mm at the entry face, included angle `angle_deg` (default 90).
     /// Parameters `diameter`, `angle_deg`.
     Countersink {
@@ -236,7 +236,7 @@ pub enum Command {
         #[serde(default = "default_csink_angle")]
         angle_deg: f64,
     },
-    /// Modeled thread (run 6, ADR 0011) as a new body: a threaded rod, or a
+    /// Modeled thread (ADR 0011) as a new body: a threaded rod, or a
     /// square nut when `nut_width` is given (internal thread with radial
     /// `clearance`, default 0.1). Axis along the normal of `plane` through
     /// `center`; `length` a whole number of pitches; faceted with chord
@@ -261,14 +261,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
     },
-    /// Query (run 6): the faces of imported body `body` that direct edits can
+    /// Query: the faces of imported body `body` that direct edits can
     /// name, as JSON in `message`: `[{"face": FaceRef, "kind": DirectFace}]`
     /// in current B-rep order. Fails when the body is not an imported body
     /// changed only by direct edits.
     ImportedFaces {
         body: BodyId,
     },
-    /// Round hole (run 4) from a planar face of `target` (default: the body
+    /// Round hole from a planar face of `target` (default: the body
     /// owning the face), centred at `center` (plane coordinates): `diameter`,
     /// `depth` mm (omit for through all), optional `counterbore`
     /// `[diameter, depth]`. Patternable and mirrorable like an Extrude Cut.
@@ -342,7 +342,7 @@ pub enum Command {
         feature: FeatureId,
         sketch: Sketch,
     },
-    /// Add a text item to a sketch (run 6, docs/behavior/sketching.md "Sketch
+    /// Add a text item to a sketch (docs/behavior/sketching.md "Sketch
     /// text"): the font is resolved now from the installed fonts and the glyph
     /// outlines are stored in the document. One undoable step. The response's
     /// `text` is the new text id.
@@ -375,7 +375,7 @@ pub enum Command {
         body: BodyId,
         visible: bool,
     },
-    /// Physical material of a body for mass properties (run 6, format v6; one
+    /// Physical material of a body for mass properties (format v6; one
     /// undo step). `material`: a catalog key (`rcad_document::material::CATALOG`,
     /// e.g. "pla"); or `density` (in `density_unit`, default g/cm³) with an
     /// optional `name` for a user-defined material; neither: clear it. Both
@@ -391,7 +391,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
-    /// Body Combine (run 6, format v6; one undo step): join `tools` to,
+    /// Body Combine (format v6; one undo step): join `tools` to,
     /// cut them from, or intersect them with `target`
     /// (`FeatureKind::Combine`). Without `keep_tools` the tool bodies are
     /// consumed (they leave the model; their creators stay in history).
@@ -406,11 +406,11 @@ pub enum Command {
         #[serde(default)]
         keep_tools: bool,
     },
-    /// Components / occurrences / joints (run 6 pull-forward of Run-7 §1-2,
-    /// docs/ASSEMBLIES.md; format v6). A component groups bodies of this
-    /// document and gets a first occurrence at identity.
+    /// Components / occurrences / joints (docs/ASSEMBLIES.md; format v6). A
+    /// component groups bodies of this document and gets a first occurrence
+    /// at identity.
     ///
-    /// Run 7: `occurrences` (siblings with the same owner) move into the new
+    /// `occurrences` (siblings with the same owner) move into the new
     /// component's definition, which becomes a sub-assembly; its first
     /// occurrence takes their former owner at identity, so nothing moves.
     /// With neither bodies nor occurrences an empty component is made (activate
@@ -435,7 +435,7 @@ pub enum Command {
     /// A further linked occurrence: rotate `angle_deg` about `axis` (default +Z)
     /// through the world origin, then translate.
     ///
-    /// Run 7: with `owner`, the occurrence is a child in that component's
+    /// With `owner`, the occurrence is a child in that component's
     /// definition (a sub-assembly; placement relative to it). Cyclic
     /// containment is refused.
     AddOccurrence {
@@ -490,14 +490,14 @@ pub enum Command {
         min: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<f64>,
-        /// Run 7: second/third values with limits (cylindrical, pin-slot,
+        /// Second/third values with limits (cylindrical, pin-slot,
         /// planar, ball).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         extra: Vec<rcad_document::assembly::DofValue>,
-        /// Run 7: slot direction (pin-slot) / in-plane u (planar, ball).
+        /// Slot direction (pin-slot) / in-plane u (planar, ball).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir2: Option<[f64; 3]>,
-        /// Run 7: snap the child first: its axis (a cylinder face or the edge
+        /// Snap the child first: its axis (a cylinder face or the edge
         /// line of two planar faces of the child's definition) is brought onto
         /// the joint axis (direction aligned, reversed with `flip`; the axial
         /// position along the joint axis is kept), then the joint is made.
@@ -522,7 +522,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
         index: usize,
     },
-    /// Run 7: redefine a joint's axis (`origin`/`axis`, or `axis_from` faces of
+    /// Redefine a joint's axis (`origin`/`axis`, or `axis_from` faces of
     /// the parent, and `dir2`), keeping its values and the child's current pose
     /// (as-built: the rest pose is recaptured, nothing moves). An omitted
     /// `origin`, `axis` or `dir2` keeps the joint's current one; a zero axis
@@ -538,14 +538,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dir2: Option<[f64; 3]>,
     },
-    /// Run 7: write the BOM as CSV (flattened, or structured with item
+    /// Write the BOM as CSV (flattened, or structured with item
     /// numbers and levels); atomic write. Read-only for the document.
     ExportBom {
         path: PathBuf,
         #[serde(default)]
         structured: bool,
     },
-    /// Run 7: sampled motion check (read-only): value `index` of `joint` is
+    /// Sampled motion check (read-only): value `index` of `joint` is
     /// stepped from `from` to `to` (both within its limits) in `steps`
     /// samples (2–200; the first is `from` and the last `to` exactly); at
     /// each sample the static interference check runs on the solved
@@ -564,7 +564,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         occurrences: Option<Vec<rcad_document::assembly::OccurrenceId>>,
     },
-    /// Run 7: set all values of a multi-DOF joint at once (atomic).
+    /// Set all values of a multi-DOF joint at once (atomic).
     SetJointValues {
         joint: rcad_document::assembly::JointId,
         values: Vec<f64>,
@@ -586,7 +586,7 @@ pub enum Command {
         path: PathBuf,
         format: assembly::AssemblyFormat,
     },
-    /// Run 7: insert another native document as a component: its evaluated
+    /// Insert another native document as a component: its evaluated
     /// solids (placed instances and loose bodies) are embedded as a STEP copy
     /// (an import feature) and become the definition bodies; one occurrence at
     /// the origin. `linked` keeps the path so `update_external_component` can
@@ -598,7 +598,7 @@ pub enum Command {
         #[serde(default)]
         linked: bool,
     },
-    /// Run 7: import a STEP assembly preserving its product structure: one
+    /// Import a STEP assembly preserving its product structure: one
     /// component per product (solids in its own coordinates, embedded as a
     /// STEP copy), sub-assemblies, and one occurrence per usage with its
     /// placement; reused products are written once (linked occurrences).
@@ -608,38 +608,38 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         units_to_mm: Option<f64>,
     },
-    /// Run 7: re-read a linked component's source file (explicit update):
+    /// Re-read a linked component's source file (explicit update):
     /// missing → refused with the embedded copy kept; unchanged → no-op;
     /// changed → the embedded copy is replaced (same solid count required).
     UpdateExternalComponent {
         component: rcad_document::assembly::ComponentId,
     },
-    /// Run 7: status of every external component's source (read-only):
+    /// Status of every external component's source (read-only):
     /// `embedded`, `up_to_date`, `modified` or `missing`.
     CheckExternalComponents,
-    /// Run 7: rename a component (definition name; BOM row).
+    /// Rename a component (definition name; BOM row).
     RenameComponent {
         component: rcad_document::assembly::ComponentId,
         name: String,
     },
-    /// Run 7: rename an occurrence.
+    /// Rename an occurrence.
     RenameOccurrence {
         occurrence: rcad_document::assembly::OccurrenceId,
         name: String,
     },
-    /// Run 7: make `component` the active component (bodies created while it
+    /// Make `component` the active component (bodies created while it
     /// is active join its definition); `null` returns to the top level.
     ActivateComponent {
         #[serde(default)]
         component: Option<rcad_document::assembly::ComponentId>,
     },
-    /// Run 7: hide/show an occurrence (display only; still in BOM, mass,
+    /// Hide/show an occurrence (display only; still in BOM, mass,
     /// interference and export).
     SetOccurrenceHidden {
         occurrence: rcad_document::assembly::OccurrenceId,
         hidden: bool,
     },
-    /// Run 7: break the link of `occurrence`: a new component (independent
+    /// Break the link of `occurrence`: a new component (independent
     /// copy) with copies of the definition bodies, made from the current
     /// geometry by body-copy features; the occurrence keeps its placement and
     /// stops following later edits of the source definition.
@@ -648,22 +648,22 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
-    /// Run 7: rigid group: rigid joints from the first occurrence to each of
+    /// Rigid group: rigid joints from the first occurrence to each of
     /// the others (siblings, free, not grounded); one undo step.
     CreateRigidGroup {
         occurrences: Vec<rcad_document::assembly::OccurrenceId>,
     },
-    /// Run 7: exploded-view offset (world mm) of the instance `path` ("O3/O7");
+    /// Exploded-view offset (world mm) of the instance `path` ("O3/O7");
     /// display state only. A zero offset removes the entry.
     SetExplodeOffset {
         path: String,
         offset: [f64; 3],
     },
-    /// Run 7: show or hide the exploded view.
+    /// Show or hide the exploded view.
     SetExploded {
         exploded: bool,
     },
-    /// Run 7: move a free occurrence so that planar face `from` (of its
+    /// Move a free occurrence so that planar face `from` (of its
     /// definition) lies on planar face `to` of another occurrence, facing it
     /// (normals opposite) with `offset` mm gap; translation + minimal rotation.
     AlignOccurrence {
@@ -701,7 +701,7 @@ pub enum Command {
         #[serde(default)]
         with_dependents: bool,
     },
-    /// Project geometry into a sketch, associatively (run 6, SK03; one undo
+    /// Project geometry into a sketch, associatively (one undo
     /// step): every boundary edge of a planar `Face` parallel to the sketch,
     /// or the non-construction curves of another `Sketch` on a parallel plane.
     /// The projected lines/arcs/circles are pinned by fixed points that follow
@@ -721,7 +721,7 @@ pub enum Command {
         sketch: FeatureId,
         link: usize,
     },
-    /// Rigid move of a body, or an independent copy (run 6; one undo step):
+    /// Rigid move of a body, or an independent copy (one undo step):
     /// rotate `angle_deg` about the axis through `origin` along `axis`
     /// (default +Z), then translate. With `copy`, a new body (`body_name`)
     /// holds the moved result and the source stays.
@@ -742,7 +742,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
     },
-    /// Create or replace configuration `name` (run 6; one undo step):
+    /// Create or replace configuration `name` (one undo step):
     /// user-parameter expressions, the features it suppresses (they become
     /// configured features), part number. Re-applied when it is active.
     SetConfiguration {
@@ -757,7 +757,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         excluded_occurrences: Vec<rcad_document::assembly::OccurrenceId>,
     },
-    /// Exclude (or include) a component occurrence (run 6; one undo step):
+    /// Exclude (or include) a component occurrence (one undo step):
     /// a suppressed occurrence leaves display, BOM, mass, interference and
     /// assembly export.
     SetOccurrenceSuppressed {
@@ -767,7 +767,7 @@ pub enum Command {
     DeleteConfiguration {
         name: String,
     },
-    /// Run 7: replace every configuration at once (the configuration table
+    /// Replace every configuration at once (the configuration table
     /// editor; one undo step). Each row is checked like `set_configuration`
     /// and names must be unique; the active configuration is re-applied (or
     /// cleared when it is no longer in the table). Features and occurrences
@@ -800,7 +800,7 @@ pub enum Command {
         #[serde(default)]
         overwrite: bool,
     },
-    /// Sheet-metal contour flange (run 6; docs/SHEET_METAL.md): the open
+    /// Sheet-metal contour flange (docs/SHEET_METAL.md): the open
     /// line chain of `sketch` with `thickness`, inner bend `radius`,
     /// `k_factor` (default 0.44) and `width`; `flip` puts the material on the
     /// left of the chain. A new body (`body_name`).
@@ -820,36 +820,36 @@ pub enum Command {
     },
     /// Write the flat pattern of sheet-metal feature `feature` as an R12 DXF
     /// (mm): outline on layer CUT, bend centre lines on layer BEND. The
-    /// response message carries the flat length. Run 7: for a sheet base /
+    /// response message carries the flat length. For a sheet base /
     /// flange / flat feature, bend lines on BEND_UP / BEND_DOWN with notes
     /// (docs/SHEET_METAL.md).
     ExportFlatPattern {
         feature: FeatureId,
         path: PathBuf,
     },
-    /// Run 7 sheet metal (docs/SHEET_METAL.md): base face from a closed profile.
+    /// Sheet metal (docs/SHEET_METAL.md): base face from a closed profile.
     SheetBase(sheet_surface::SheetBaseArgs),
-    /// Run 7: straight edge flange on a base-profile line.
+    /// Straight edge flange on a base-profile line.
     SheetFlange(sheet_surface::SheetFlangeArgs),
-    /// Run 7: edit the sheet rule of a base (all flanges regenerate).
+    /// Edit the sheet rule of a base (all flanges regenerate).
     EditSheetRule(sheet_surface::SheetRuleArgs),
-    /// Run 7: show the flat pattern / folded body (flat body made on first use).
+    /// Show the flat pattern / folded body (flat body made on first use).
     SheetFlatState(sheet_surface::SheetFlatArgs),
-    /// Run 7 surfaces (docs/SURFACES.md): STEP surface models as a surface body.
+    /// Surfaces (docs/SURFACES.md): STEP surface models as a surface body.
     ImportSurfaces(sheet_surface::ImportSurfacesArgs),
-    /// Run 7: free edges, gaps, boundary loops, orientation of a body.
+    /// Free edges, gaps, boundary loops, orientation of a body.
     AnalyzeSurface(sheet_surface::AnalyzeSurfaceArgs),
-    /// Run 7: stitch a surface body within a healing tolerance (new body).
+    /// Stitch a surface body within a healing tolerance (new body).
     StitchSurface(sheet_surface::SurfaceRepairArgs),
-    /// Run 7: fill the planar boundary loops of a surface body (new body).
+    /// Fill the planar boundary loops of a surface body (new body).
     FillSurface(sheet_surface::SurfaceRepairArgs),
-    /// Run 7: thicken a single planar/cylindrical face into a solid (new body).
+    /// Thicken a single planar/cylindrical face into a solid (new body).
     ThickenSurface(sheet_surface::ThickenArgs),
-    /// Run 7: planar surface patch from a closed sketch profile.
+    /// Planar surface patch from a closed sketch profile.
     SurfacePatch(sheet_surface::SurfaceFromSketchArgs),
-    /// Run 7: ruled surface: a sketch profile / open line chain extruded.
+    /// Ruled surface: a sketch profile / open line chain extruded.
     SurfaceExtrude(sheet_surface::SurfaceFromSketchArgs),
-    /// Align the body of planar face `from` flush onto face `to` (run 6; see
+    /// Align the body of planar face `from` flush onto face `to` (see
     /// `FeatureKind::AlignBody`).
     AlignBody {
         #[serde(default)]
@@ -859,7 +859,7 @@ pub enum Command {
         #[serde(default)]
         offset: f64,
     },
-    /// Uniform scale of a body about `center` (run 6; one undo step).
+    /// Uniform scale of a body about `center` (one undo step).
     ScaleBody {
         #[serde(default)]
         name: Option<String>,
@@ -876,7 +876,7 @@ pub enum Command {
         face: FaceRef,
         thickness: f64,
     },
-    /// Split `body` by `plane` (run 6; one undo step): the body keeps the
+    /// Split `body` by `plane` (one undo step): the body keeps the
     /// part behind the plane, a new body (`body_name`) the part in front.
     SplitBody {
         #[serde(default)]
@@ -886,14 +886,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body_name: Option<String>,
     },
-    /// Timeline marker (run 6; one undo step): evaluate history up to and
+    /// Timeline marker (one undo step): evaluate history up to and
     /// including `at`; later features are kept but not evaluated, and new
     /// features are inserted after the marker. `at: null` rolls to the end.
     SetRollback {
         #[serde(default)]
         at: Option<FeatureId>,
     },
-    /// Reorder history (run 6; one undo step): move `feature` before
+    /// Reorder history (one undo step): move `feature` before
     /// `before` (null: to the end). Refused when a dependency would come after
     /// it or a dependent before it, or when the new order does not regenerate
     /// (the document is unchanged).
@@ -986,7 +986,7 @@ pub enum Command {
     },
     /// Remove a feature that nothing depends on (one undoable step). Refused
     /// with the dependent features named otherwise.
-    /// Run 7 (ME01, docs/MESH.md): preview or apply a bounded repair of a mesh
+    /// Mesh repair (docs/MESH.md): preview or apply a bounded repair of a mesh
     /// body (weld within `options.weld_tolerance`, remove degenerate and
     /// duplicate triangles, orient, fill planar holes up to
     /// `options.fill_holes_max_edges` edges) as a new mesh body; the source is
@@ -1037,7 +1037,7 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bodies: Option<Vec<BodyId>>,
     },
-    /// Drawing sheet (run 6, format v6; docs/DRAWINGS.md). With `bodies`, a
+    /// Drawing sheet (format v6; docs/DRAWINGS.md). With `bodies`, a
     /// Front base view (auto scale) and, unless `standard_views: false`, the
     /// views from above and from the right. `Response.drawing` is the new id.
     CreateDrawing {
@@ -1057,7 +1057,7 @@ pub enum Command {
         bodies: Vec<BodyId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         standard_views: Option<bool>,
-        /// Run 7: an assembly drawing: the base view shows the evaluated
+        /// An assembly drawing: the base view shows the evaluated
         /// assembly (every placed occurrence, plus `bodies` as loose bodies),
         /// with balloons on it and a BOM table on the sheet.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1118,7 +1118,7 @@ pub enum Command {
         view: rcad_document::drawing::ViewId,
         feature: FeatureId,
     },
-    /// Run 7: a driven dimension in a view between semantic references
+    /// A driven dimension in a view between semantic references
     /// (`{"face": {feature, role}}` planar face or `{"hole": F}` hole axis),
     /// or the diameter of a hole (`b` omitted), with an optional tolerance
     /// (`{"type": "symmetric", "value"}`, `deviation`/`limits` with
@@ -1362,7 +1362,7 @@ pub enum ExtrudeOp {
     NewBody,
     Join,
     Cut,
-    /// Keep only the target's material inside the tool (run 6).
+    /// Keep only the target's material inside the tool.
     Intersect,
 }
 
@@ -1378,7 +1378,7 @@ pub struct BodySummary {
     pub id: BodyId,
     pub name: String,
     pub visible: bool,
-    /// "brep" (exact solid), "surface" (exact open-shell surface body, run 7)
+    /// "brep" (exact solid), "surface" (exact open-shell surface body)
     /// or "mesh" (triangle mesh, STL import).
     pub kind: String,
     pub source: BodySource,
@@ -1401,15 +1401,15 @@ pub struct BodySummary {
     /// Why measuring this body failed (stable until its geometry changes).
     #[serde(default)]
     pub measure_error: Option<String>,
-    /// Run 6: imported bodies changed only by their import and direct edits:
+    /// Imported bodies changed only by their import and direct edits:
     /// per current B-rep face (display order), its semantic reference and
     /// kind, for direct editing (ADR 0010). Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imported_faces: Vec<ImportedFace>,
-    /// Run 6: physical material (None: not assigned).
+    /// Physical material (None: not assigned).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<rcad_document::Material>,
-    /// Run 6: mass in g = density × the measured volume (None without a
+    /// Mass in g = density × the measured volume (None without a
     /// material or a volume). Labelled like the volume (exact or estimate).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mass: Option<f64>,
@@ -1469,17 +1469,17 @@ pub struct FeatureSummary {
     /// Parameters bound to expressions (name -> expression).
     #[serde(default)]
     pub expressions: std::collections::BTreeMap<String, String>,
-    /// Suppressed: in history, not evaluated (run 5).
+    /// Suppressed: in history, not evaluated.
     #[serde(default)]
     pub suppressed: bool,
-    /// After the timeline marker: in history, not evaluated (run 6).
+    /// After the timeline marker: in history, not evaluated.
     #[serde(default)]
     pub rolled_back: bool,
-    /// Sketches: sources of their associative projections (run 6), in link
+    /// Sketches: sources of their associative projections, in link
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projections: Vec<rcad_document::ProjectSource>,
-    /// Sheet bases: the rule's relief shape (review run 7 #49; the numeric
+    /// Sheet bases: the rule's relief shape (the numeric
     /// rule values are in `parameters`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet_relief: Option<rcad_document::sheet::ReliefShape>,
@@ -1536,15 +1536,15 @@ pub struct DocSummary {
     /// Named user parameters in display order.
     #[serde(default)]
     pub parameters: Vec<ParameterSummary>,
-    /// Components, occurrences, joints and DOF (run 6, docs/ASSEMBLIES.md).
+    /// Components, occurrences, joints and DOF (docs/ASSEMBLIES.md).
     #[serde(default)]
     pub assembly: assembly::AssemblySummary,
-    /// Named configurations (run 6) and the active one.
+    /// Named configurations and the active one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configurations: Vec<rcad_document::Configuration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_configuration: Option<String>,
-    /// Drawing sheets (run 6; docs/DRAWINGS.md).
+    /// Drawing sheets (docs/DRAWINGS.md).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<rcad_document::drawing::Drawing>,
 }
@@ -1568,30 +1568,30 @@ pub struct Response {
     pub summary: Option<DocSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DocError>,
-    /// Assembly commands: created ids, BOM, interference (run 6).
+    /// Assembly commands: created ids, BOM, interference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assembly: Option<assembly::AssemblyOut>,
-    /// `measure_faces`: exact face geometry and pair measurement (run 6).
+    /// `measure_faces`: exact face geometry and pair measurement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_measure: Option<measure_faces::FaceMeasureReport>,
-    /// `mass_properties`: per-body and total mass properties (run 6).
+    /// `mass_properties`: per-body and total mass properties.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mass_properties: Option<mass::MassReport>,
-    /// `add_sketch_text`: the new text item's id (run 6).
+    /// `add_sketch_text`: the new text item's id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<u32>,
-    /// Drawing commands (run 6): the drawing and view acted on.
+    /// Drawing commands: the drawing and view acted on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawing: Option<rcad_document::drawing::DrawingId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<rcad_document::drawing::ViewId>,
-    /// `export_drawing`: per-view report and issues (run 6).
+    /// `export_drawing`: per-view report and issues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawing_report: Option<drawings::DrawingReport>,
-    /// `analyze_surface`: free edges, gaps, loops, orientation (run 7).
+    /// `analyze_surface`: free edges, gaps, loops, orientation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_analysis: Option<rcad_kernel::ShellAnalysis>,
-    /// `repair_mesh`: what the repair changes / changed (run 7).
+    /// `repair_mesh`: what the repair changes / changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_repair: Option<rcad_exchange::mesh_repair::RepairReport>,
     /// Set by a queueing front end (the app engine) when this command was not
@@ -2265,7 +2265,7 @@ impl Session {
                     Some(t) => *t,
                     None => {
                         // A face, or a construction plane offset from one: the
-                        // face's body (run 5).
+                        // face's body.
                         let r = match plane {
                             SketchPlane::Face(r)
                             | SketchPlane::Offset {
@@ -2458,7 +2458,7 @@ impl Session {
                         detail: "another parameter already has this name".into(),
                     });
                 }
-                // Review run 7 #19: a configuration value already stored
+                // A configuration value already stored
                 // under the new name would be overwritten by the renamed one.
                 if old != new
                     && let Some(c) = m
@@ -2489,7 +2489,7 @@ impl Session {
                             *e = params::rename_in(e, &old, &new);
                         }
                     }
-                    // Review run 7 #7: configurations follow the rename (keys
+                    // Configurations follow the rename (keys
                     // and expressions).
                     for c in &mut d.configurations {
                         let values = std::mem::take(&mut c.values);
@@ -2519,7 +2519,7 @@ impl Session {
                     });
                 }
                 let mut users = params::users_of(m.document(), &name);
-                // Review run 7 #7: a configuration that sets or uses it.
+                // A configuration that sets or uses it.
                 for c in &m.document().configurations {
                     if c.values.contains_key(&name)
                         || c.values
@@ -2640,7 +2640,7 @@ impl Session {
                 let name = m.document().feature(feature)?.name.clone();
                 // A dimension bound to an expression keeps its expression's
                 // value: an edit that changes it would be silently reverted, so
-                // it is refused with the expression named (review run 4 #16).
+                // it is refused with the expression named.
                 {
                     let f = m.document().feature(feature)?;
                     if let FeatureKind::Sketch { sketch: old, .. } = &f.kind {
@@ -2729,11 +2729,11 @@ impl Session {
                     }
                     let removed = d.feature(feature)?.clone();
                     d.features.retain(|f| f.id != feature);
-                    // Review run 6 #4: configurations stop controlling it.
+                    // Configurations stop controlling it.
                     for c in d.configurations.iter_mut() {
                         c.suppressed.remove(&feature);
                     }
-                    // Review run 7 #3: a derived body's source returns to its
+                    // A derived body's source returns to its
                     // component.
                     d.restore_derived_source(&removed);
                     d.prune_bodies();
@@ -3206,7 +3206,7 @@ impl Session {
                         plan.push((c.name.clone(), *e, p));
                     }
                 }
-                // Review run 6 #11: sanitized names must not collide.
+                // Sanitized names must not collide.
                 {
                     let mut seen = std::collections::BTreeSet::new();
                     for (n, _, p) in &plan {
@@ -3220,7 +3220,7 @@ impl Session {
                 }
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| DocError::File(format!("{}: {e}", dir.display())))?;
-                // Review run 6 #14: put the document, its undo/redo history and
+                // Put the document, its undo/redo history and
                 // the dirty flag back exactly (the activations leave no trace).
                 let snapshot = self.model_mut()?.snapshot();
                 let mut written = Vec::new();
@@ -3310,9 +3310,9 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
-            // Handled by `run_mesh` (run 7) before this match.
+            // Handled by `run_mesh` before this match.
             Command::RepairMesh(_) => {}
-            // Handled by `run_sheet_surface` (run 7) before this match.
+            // Handled by `run_sheet_surface` before this match.
             Command::SheetBase(_)
             | Command::SheetFlange(_)
             | Command::EditSheetRule(_)
@@ -4125,7 +4125,7 @@ impl Session {
                     name: b.name.clone(),
                     visible: b.visible,
                     kind: match &b.geometry {
-                        // Run 7: open-shell surface bodies are not solids.
+                        // Open-shell surface bodies are not solids.
                         BodyGeometry::Brep(g) if g.is_open_shell() => "surface",
                         BodyGeometry::Brep(_) => "brep",
                         BodyGeometry::Mesh(_) => "mesh",
@@ -4389,7 +4389,7 @@ fn default_target(m: &Model, sketch: FeatureId) -> Result<BodyId, DocError> {
     let breps: Vec<_> = ev
         .bodies
         .iter()
-        // Run 7 (review #25): open surface bodies are not join/cut targets.
+        // Open surface bodies are not join/cut targets.
         .filter(|b| b.geometry.brep().is_some_and(|g| !g.is_open_shell()))
         .collect();
     match breps.as_slice() {
@@ -4440,7 +4440,7 @@ pub(crate) fn export_selection(m: &Model, ids: Option<&[BodyId]>) -> Result<Vec<
 
 /// 1-128 printable characters, trimmed.
 /// The open message's notes: an expression error (stored values shown) and,
-/// separately, stale entries cleaned on load (review run 7 #30).
+/// separately, stale entries cleaned on load.
 fn load_notes(r: &rcad_document::LoadReport) -> String {
     let mut msg = String::new();
     if let Some(w) = &r.expression_error {
@@ -4555,7 +4555,7 @@ fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
     // An entity keeps its identity when its endpoints change (the editor can
     // reconnect a line), but not when its kind changes, with one exception: a
     // circle may become an arc of the SAME centre point (Trim cuts a circle to
-    // an arc; review run 3 #15). That arc is a piece of the same curve, so the
+    // an arc). That arc is a piece of the same curve, so the
     // id (a persistent face name) stays with it. Every other kind change
     // (line <-> round, arc -> circle, circle -> arc about another centre) is
     // refused.

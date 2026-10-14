@@ -1,4 +1,4 @@
-//! SESSION_4 §3 through the real widgets: add parameters in the Parameters
+//! User parameters through the real widgets: add parameters in the Parameters
 //! panel, bind a sketch dimension and an extrusion distance to expressions in
 //! the inspector, edit a parameter (one Undo step), see a refused edit with the
 //! model unchanged, rename (dependents follow), and the enclosure example's
@@ -185,7 +185,7 @@ fn enclosure_fit_clearance_from_the_panel() {
     assert!((ll.value.unwrap() - 75.3).abs() < 1e-9);
 }
 
-/// SESSION_4 §4: selection-based measurement of the enclosure: wall thickness
+/// Selection-based measurement of the enclosure: wall thickness
 /// (base outer -X face to the cavity's -X wall) and the lip's per-side
 /// clearance (lip outer -X face of the lid to the cavity wall of the base),
 /// exact from the B-rep planes.
@@ -224,7 +224,7 @@ fn measure_wall_and_lip_clearance_between_faces() {
     h.get_by_label_contains("Distance between parallel faces: 0.25 mm");
 }
 
-/// SESSION_4 §7.7: Templates > Parametric enclosure + lid builds the editable
+/// Templates > Parametric enclosure + lid builds the editable
 /// enclosure in a new document (same parameters and volumes as the example).
 #[test]
 fn enclosure_template_from_the_menu() {

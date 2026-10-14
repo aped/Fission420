@@ -1,6 +1,6 @@
 # Materials and mass properties
 
-Status: run 6. Code: `crates/rcad-document/src/material.rs` (catalog, validation),
+Code: `crates/rcad-document/src/material.rs` (catalog, validation),
 `crates/rcad-kernel/src/measure/mass.rs` + `measure/revolution.rs` (volume, centroid, second
 moments), `crates/rcad-commands/src/mass.rs` (mass, inertia, totals). Commands:
 `set_body_material`, `mass_properties` (docs/COMMANDS.md).
@@ -30,7 +30,7 @@ but no mass; totals over bodies are only reported when every listed body has a m
 **Provenance and uncertainty.** These are typical nominal densities of the solid material as
 commonly quoted in filament manufacturers' technical data sheets (polymers) and general
 engineering handbooks (metals). They were compiled from general knowledge for this catalog and
-were **not** checked against one specific cited source during run 6; treat them as typical
+were **not** checked against one specific cited source; treat them as typical
 values, not a specification. Real material varies with grade, supplier, fillers and colourant
 (the ranges above). A 3D-printed part with less than 100 % infill, or with voids, weighs less
 than density × solid volume; this program models solid bodies only. For a known material use
@@ -81,7 +81,7 @@ Evidence: `crates/rcad-kernel/tests/mass_properties.rs` (box, cylinder, tube, of
 hole along X, tilted wedge vs. polygon formulas, frustum with coaxial and off-axis holes vs.
 Boole-rule integrals, torus, half ring vs. Pappus, sphere estimate, tetrahedron exactness of
 the cubature, Gauss–Legendre exactness), `crates/rcad-commands/tests/mass_properties.rs`
-(Run-7 acceptance 4 property oracle: 20 × 30 × 40 box at 1.2 g/cm³ = 24 cm³, 28.8 g; centre
+(property oracle: 20 × 30 × 40 box at 1.2 g/cm³ = 24 cm³, 28.8 g; centre
 of mass after a known translation and rotation; two bodies; hidden/suppressed; density unit
 edit; catalog; undo; save/reopen; labelled estimate), `crates/rcad/tests/materials_ui.rs`
 (inspector widgets).

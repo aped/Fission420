@@ -1,4 +1,4 @@
-# Run 7 (SESSION_7 acceptance 6/7 UI): sheet metal and surface repair through real
+# Sheet metal and surface repair through real
 # pointer/keyboard input. U-channel (examples/sheet_u_channel.rcad.json: base 60 x 40,
 # t 1, R 2, K 0.4, two 90° flanges of 20): V = 4000 + 100 pi = 4314.159265.
 # Rule edit t 2, R 3 -> V = 8000 + 80 (pi/4)(25 - 9) = 9005.309649.

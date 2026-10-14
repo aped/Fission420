@@ -358,7 +358,7 @@ fn export_printable_examples() {
         );
     }
 
-    // Organizer tray (SESSION_5 §7): baseline (notched), variant 1 through
+    // Organizer tray: baseline (notched), variant 1 through
     // its parameters, and the finished variant (finger notch with r-filleted
     // bottom corners, four 1.5 mm corner chamfers). One body, printed as
     // modelled (floor down), centred on the bed. Volumes from the parameters:
@@ -432,7 +432,7 @@ fn export_printable_examples() {
         }
     }
 
-    // Rounded tray (run 5): the baseline tray with its four outer vertical
+    // Rounded tray: the baseline tray with its four outer vertical
     // edges rounded by exact solid fillets (radius 4): plain notched volume
     // minus 4 (r² − πr²/4) H. Mesh: four quarter cylinders, sagitta x arc
     // length x height of slack.

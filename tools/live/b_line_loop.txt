@@ -1,4 +1,4 @@
-# SESSION_2 scenario B: line loop, extrude, vertex drag, driving dimension, invalid loop
+# Scenario B: line loop, extrude, vertex drag, driving dimension, invalid loop
 clickw New Sketch on XY
 wait_idle
 key l

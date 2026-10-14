@@ -1,4 +1,4 @@
-//! Offset tool through the real sketch UI (SESSION_4 §7 item 3): draw a
+//! Offset tool through the real sketch UI: draw a
 //! 40 x 20 rectangle, press O, click its bottom edge, type −2 in the inline
 //! entry (dashed preview), Enter: the inner copy and its `offset` dimension
 //! are added; the finished sketch's ring extrudes to the analytic volume, and

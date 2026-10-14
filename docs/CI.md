@@ -143,8 +143,8 @@ expected; **C** = cosmetic.
 | L4 | R | Windows, macOS | `crates/rcad/src/recovery.rs:42-51` | The autosave directory is `RCAD_RECOVERY_DIR`, then `XDG_STATE_HOME`, then `HOME/.local/state`. Windows usually has no `HOME`, so autosave is silently off there. On macOS it lands in a Linux-style path. | Fall back to `%LOCALAPPDATA%` on Windows and `~/Library/Application Support` on macOS, with no new dependency. |
 | L5 | R | Windows | `crates/rcad-document/src/io.rs:111-116` | Saving copies the target's permissions onto the temp file before the rename. On Windows a read-only target, or a target another process holds open, makes the rename fail. The previous file survives, so it is safe, but the save fails. | Do not copy the read-only bit on Windows; retry the rename briefly on `PermissionDenied`. Add a test for saving over a read-only file. |
 | L6 | T? | slow runners | `crates/rcad/tests/exchange_ui.rs:375` (20 s); `tests/measure_imports.rs:28` (30 s); `tests/frame_pacing.rs:94-104` | Wall-clock limits tuned on a 9800X3D. A shared CI runner may be several times slower. | Raise them to about 120 s. They guard against hangs, not performance. |
-| L7 | **T (confirmed, intermittent)** | macOS | `crates/rcad-commands/tests/export_determinism.rs:114` (`bracket_exports_and_saves_are_byte_identical`); `crates/rcad-document/src/io.rs:48-52` (cache rounding) | Seen in run 38346875644 after two green macOS runs. The two saves of the mounting bracket differ at byte 13523 of 13701, inside `"cache": {"volume": 20245.180555535}`. The bracket's volume is a `TessellationEstimate`. The likely cause, inferred and not yet reproduced locally, is that its floating-point sum follows Truck's pointer-derived face order. Rounding the cache to 1e-9 does not absorb a summation-order difference of that size, and macOS's randomised allocation changes the order between sessions where glibc's allocator happened not to. This is a real save-determinism defect, not a test bug. | Sum per-face contributions in a canonical face order (the same canonical ordering `step.rs` uses), or round estimate-method volumes in the cache to their error bound. Then run the test in a loop on macOS. Do not loosen the byte-identity assertion. **Fix exists on `work/run-5` (`bbd19c9`, cache volume rounded to 1e-6 mm³), pending port.** |
-| F4 | T | Debian container, macOS, Windows | `crates/rcad-sketch/src/font.rs:52-71` (`font_dirs`); the 17 tests listed under "Native build dependencies" | Seen on run 38437546623 (`work/run-6`): the Debian container has no fonts, so 17 sketch-text tests failed with "font family 'Liberation Sans' is not installed". macOS and Windows do not ship Liberation Sans either, and `font_dirs` searches only Linux directories. | **applied (CI):** `fonts-liberation` in the Debian container (and `tools/ci/container_check.sh`); a pinned upstream 2.1.5 download plus `RCAD_FONT_DIRS` on macOS and Windows. Local `tools/ci/container_check.sh debian:trixie` with the package: pass (131 test binaries, 0 failed; acceptance 855/855; examples unchanged). The macOS/Windows step was only simulated on Linux (download, checksum, extract). **Open (R):** the app finds no installed fonts on macOS or Windows; add `/Library/Fonts`, `/System/Library/Fonts`, `~/Library/Fonts` and `%WINDIR%\Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts` to `font_dirs`. |
+| L7 | **T (confirmed, intermittent)** | macOS | `crates/rcad-commands/tests/export_determinism.rs:114` (`bracket_exports_and_saves_are_byte_identical`); `crates/rcad-document/src/io.rs:48-52` (cache rounding) | Seen in GitHub Actions run ID 38346875644 after two green macOS runs. The two saves of the mounting bracket differ at byte 13523 of 13701, inside `"cache": {"volume": 20245.180555535}`. The bracket's volume is a `TessellationEstimate`. The likely cause, inferred and not yet reproduced locally, is that its floating-point sum follows Truck's pointer-derived face order. Rounding the cache to 1e-9 does not absorb a summation-order difference of that size, and macOS's randomised allocation changes the order between sessions where glibc's allocator happened not to. This is a real save-determinism defect, not a test bug. | Sum per-face contributions in a canonical face order (the same canonical ordering `step.rs` uses), or round estimate-method volumes in the cache to their error bound. Then run the test in a loop on macOS. Do not loosen the byte-identity assertion. **applied:** the saved cache volume is rounded to 1e-6 mm³ (`crates/rcad-document/src/io.rs`, `CACHE_VOLUME_STEPS`); not yet re-run on macOS. |
+| F4 | T | Debian container, macOS, Windows | `crates/rcad-sketch/src/font.rs:52-71` (`font_dirs`); the 17 tests listed under "Native build dependencies" | Seen in GitHub Actions run ID 38437546623: the Debian container has no fonts, so 17 sketch-text tests failed with "font family 'Liberation Sans' is not installed". macOS and Windows do not ship Liberation Sans either, and `font_dirs` searches only Linux directories. | **applied (CI):** `fonts-liberation` in the Debian container (and `tools/ci/container_check.sh`); a pinned upstream 2.1.5 download plus `RCAD_FONT_DIRS` on macOS and Windows. Local `tools/ci/container_check.sh debian:trixie` with the package: pass (131 test binaries, 0 failed; acceptance 855/855; examples unchanged). The macOS/Windows step was only simulated on Linux (download, checksum, extract). **Open (R):** the app finds no installed fonts on macOS or Windows; add `/Library/Fonts`, `/System/Library/Fonts`, `~/Library/Fonts` and `%WINDIR%\Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts` to `font_dirs`. |
 | C1 | C | Windows | `crates/rcad/src/main.rs:1` | The GUI binary opens a console window. | `#![cfg_attr(windows, windows_subsystem = "windows")]`, once a log location exists. |
 | C2 | C | non-Linux | `crates/rcad/Cargo.toml`, `crates/rcad-viewport/Cargo.toml` | eframe's `wayland`/`x11` features do nothing there. They build fine. | None. |
 | C3 | C | all | `tools/heavy.sh:7` (hard-coded `ROOT`); `tools/*freecad*`, `tools/print/slice_bambu.sh` (flatpak) | Local-only tooling. Neither tests nor CI use it. | None for CI. |
@@ -160,8 +160,8 @@ Checked and fine (audit):
 ### Status (2026-10-13)
 
 CI lives on `main` of https://github.com/aped/R-CAD (public). The first three GitHub runs
-ran on the pre-rewrite history (branch `ci/github-actions`, since deleted; see
-docs/RENAME.md). Their results still describe the same code:
+ran on an earlier branch (`ci/github-actions`, since deleted). Their results still describe
+the same code:
 
 | run | layout | ubuntu-24.04 | debian-13 | macos-arm64 | windows-x64 (non-gating) |
 |---|---|---|---|---|---|
@@ -174,10 +174,10 @@ CI changes after these runs (`dfe8dbe`, not yet exercised by a GitHub run):
 - **Cache on failure:** `Swatinem/rust-cache@v2` saves only after a successful job, so the
   failing Windows leg never had a cache ("No cache found"; the cache list held debian, macOS
   and ubuntu entries only; "Post Run Swatinem/rust-cache" skipped) and built cold every time
-  (run 38362474951: job 31m26; release binaries 7m16, clippy 251.9 s, test stage 1109 s
+  (Actions run ID 38362474951: job 31m26; release binaries 7m16, clippy 251.9 s, test stage 1109 s
   including the cold release test build; `arc_fuzz` 335 s against 178 s on ubuntu). `cache-on-failure: true` keeps it warm.
 - **No fail-fast:** CI has no nextest, so xtask falls back to `cargo test`, which stopped at the
-  first failing test binary: in run 38362474951 (main `c4627c3`) the Windows log has 54
+  first failing test binary: in Actions run ID 38362474951 (main `c4627c3`) the Windows log has 54
   `test result:` lines against 96 on ubuntu. The fallback now passes `--no-fail-fast` (nextest
   already did), so the test binaries that have never run on Windows will report on the next run.
 
@@ -189,10 +189,9 @@ Findings:
   stage, so acceptance and the example replays (and with them L2) have not run on Windows
   yet.
 - **F3 and L1 did not occur on macOS or Windows.**
-- **L7 confirmed on macOS, intermittently.** It passed in runs 1–2 and failed in run 3.
-  `work/run-5` already carries the fix (`bbd19c9`, cache volume rounded to 1e-6 mm³), to be
-  ported (docs/RENAME.md).
-- **Archives** (run 3): Linux 13 MB, macOS 10 MB, Windows 11 MB, each with binaries,
+- **L7 confirmed on macOS, intermittently.** It passed in the first two runs and failed in the
+  third. Fixed since (cache volume rounded to 1e-6 mm³, see L7 above).
+- **Archives** (third run): Linux 13 MB, macOS 10 MB, Windows 11 MB, each with binaries,
   `LICENSE-*`, `THIRD_PARTY_LICENSES.txt`, the examples, `artifacts/` and `BUILD_INFO.txt`.
   The Linux archive was downloaded and checked: its CLI runs `examples/plate_workflow.json`.
   The Windows `.exe` files are PE images, and that archive's `BUILD_INFO.txt` reports the
@@ -214,15 +213,14 @@ checkout, untracked):
 
 Next, in value order:
 
-1. Port `work/run-5` (docs/RENAME.md); this brings the L7 fix.
+1. ~~Fix L7~~ (applied, cache volume rounded to 1e-6 mm³); confirm macOS green.
 2. ~~Fix F1~~ (applied, `0538511`); confirm Windows green, then make Windows and macOS gating.
 3. Fix L4, L5 and L6.
 
 ## Naming and identity: done (2026-10-13)
 
-The project was renamed to R-CAD, the history was rewritten, and run records were removed
-from it. See docs/RENAME.md for what changed, the compatibility rules, and how to port work
-from the old history.
+The project was renamed from Fission420 to R-CAD. See docs/RENAME.md for the compatibility
+rules for legacy names and files.
 
 ## Regression tests added with CI
 
@@ -230,7 +228,7 @@ These are headless, need no external tools, and use analytic expected values, no
 
 | file | covers |
 |---|---|
-| `crates/rcad-commands/tests/native_formats.rs` (`v4_run4_printable_documents`, `v4_parameters_drive_a_loaded_document`, `committed_printable_examples`) | Frozen v4 documents with parameters and expressions (`tests/fixtures/native_v4/`) open, regenerate to analytic volumes, re-save identically, and still respond to parameter edits. The enclosure, coupon and mounting-bracket examples are now opened by a test, not only rewritten by the replays. |
+| `crates/rcad-commands/tests/native_formats.rs` (`v4_printable_documents`, `v4_parameters_drive_a_loaded_document`, `committed_printable_examples`) | Frozen v4 documents with parameters and expressions (`tests/fixtures/native_v4/`) open, regenerate to analytic volumes, re-save identically, and still respond to parameter edits. The enclosure, coupon and mounting-bracket examples are now opened by a test, not only rewritten by the replays. |
 | `crates/rcad-document/tests/native_fuzz.rs` | Every truncation of a v3 and a v4 file is a `DocError::File`. 600 deterministic byte mutations never panic, in loading or in regeneration. A v1–v3 file carrying parameters or expressions is refused. Malformed `version` headers are refused. |
 | `crates/rcad-commands/tests/print_goldens.rs` | The committed, externally validated `examples/print/*` (3MF, STL, STEP) are read back. Mesh files must be closed and manifold, rest at z = 0, and have volumes inside the analytic chord-bound interval. STEP files must re-import as one closed solid with the exact volume. |
 | `crates/rcad-kernel/tests/step_curved_roundtrip.rs` | STEP export then re-import of curved bodies (rounded rectangle, slot, D-shape, 270° sector, chamfered block) against analytic volume, bounds and a watertight mesh. The revolved washer's `SURFACE_OF_REVOLUTION` is not supported by our importer; the test asserts that explicit refusal. |

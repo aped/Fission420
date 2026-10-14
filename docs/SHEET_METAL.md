@@ -1,7 +1,7 @@
 # Sheet metal (bounded subset)
 
-Two families exist. The run-6 **contour flange** (`sheet_metal`) is unchanged and documented at
-the end. Run 7 adds a **sheet body**: a base face, edge flanges, a shared sheet rule, a flat
+Two families exist. The **contour flange** (`sheet_metal`) is documented at the end. The
+**sheet body** has a base face, edge flanges, a shared sheet rule, a flat
 pattern display state and a flat-pattern DXF. Everything is exact B-rep (planes, exact circular
 cylinders); nothing is meshed or approximated.
 
@@ -40,8 +40,7 @@ Every flange and the flat pattern regenerate from it.
 * **Bend position: outside the base outline.** The bend starts at the selected edge (the edge is
   the bend's tangent line on the plate); the plate is not trimmed.
 * **Length = straight leg beyond the bend**, from the bend's tangent line to the flange end,
-  measured along the flange. This is the "between tangent points" convention of SESSION_7
-  acceptance 6; it is not an outside (mold-line) dimension.
+  measured along the flange. This is the "between tangent points" convention; it is not an outside (mold-line) dimension.
 * **Angle** θ in (0°, 180°]: 90° makes the flange perpendicular to the plate; **180° is an open
   hem**: the leg lies back over the plate with a gap of 2R (inside radius from the rule). Closed
   (zero-gap) and rolled/teardrop hems are not implemented.
@@ -122,7 +121,7 @@ conical bends, forming tools, K-factor tables per material, bend deduction table
 arbitrary solids, flat-pattern drawings with bend tables, face references to sheet faces for
 downstream sketches.
 
-## Run 6: contour flange (`sheet_metal`)
+## Contour flange (`sheet_metal`)
 
 `FeatureKind::SheetMetal`: a **contour flange** from an open chain of sketch lines, extruded
 `width` along the sketch normal. The chain is one surface of the sheet; material lies to the

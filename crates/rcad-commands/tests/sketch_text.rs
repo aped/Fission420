@@ -1,4 +1,4 @@
-//! Sketch text through the command API (run 6, SK04): add/edit/remove text,
+//! Sketch text through the command API: add/edit/remove text,
 //! raised and recessed glyph regions with counters, save/reload as format v6
 //! without needing the font, undo. Volumes are analytic: plate box plus or
 //! minus (glyph region area from the sketch polygons) × height. The polygon

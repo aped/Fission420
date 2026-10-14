@@ -1,4 +1,4 @@
-//! Section view (run 5): a display-only clipping plane through the model, on
+//! Section view: a display-only clipping plane through the model, on
 //! a principal plane or a selected planar face, with an adjustable offset.
 //! Material beyond the plane is not drawn and cannot be picked; the exposed
 //! inside surfaces are tinted. The cut is **not capped** (no section face is

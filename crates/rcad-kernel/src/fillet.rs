@@ -1,5 +1,5 @@
 //! Exact constant-radius fillet of a straight edge between two planar faces
-//! (run 5, SESSION_5 §6/§9.7: convex; run 6: concave edges add the region).
+//! (convex edges remove the corner region; concave edges add it).
 //!
 //! The edge is named by its two faces exactly as for [`crate::chamfer_edge`].
 //! In the plane perpendicular to the edge, with interior angle θ between the
@@ -57,7 +57,7 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
     }
     let t = r / (theta / 2.0).tan();
     // Convex: the corner region between the faces and the arc is cut away.
-    // Concave (run 6): the arc lies in the air wedge between the faces and
+    // Concave: the arc lies in the air wedge between the faces and
     // the same region (corner, tangent points, arc) is added; θ is then the
     // air wedge's angle, so the area formula is the same.
     let mid = p + e * (0.5 * (smin + smax));

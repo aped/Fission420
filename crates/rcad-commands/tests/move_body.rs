@@ -1,4 +1,4 @@
-//! Body Move / Copy (run 6, SESSION_6 §B "Move/Copy", coverage SO04):
+//! Body Move / Copy:
 //! rigid moves keep face references made before the move (sketches, fillets
 //! and holes land on the moved body), copies are independent of later edits
 //! of the source but follow upstream edits before the copy, patterns seeded

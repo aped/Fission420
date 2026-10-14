@@ -1,4 +1,4 @@
-//! Run 7 controlled external components (SESSION_7 §1): another native
+//! Controlled external components: another native
 //! document inserted as a component from an embedded STEP copy of its solids,
 //! with a pinned content identity. The model changes only through an explicit
 //! update; a modified source is reported, a missing source is diagnosed and the
@@ -202,7 +202,7 @@ fn embedded_external_component_and_bad_sources() {
     );
 }
 
-/// Review run 7 #24: an update whose solids changed names/order is refused
+/// An update whose solids changed names/order is refused
 /// (bodies would silently swap geometry).
 #[test]
 fn reordered_source_solids_are_refused() {

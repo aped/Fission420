@@ -43,13 +43,13 @@ pub struct StepImportOptions {
     /// Millimetres per file length unit, used only when the file declares no length
     /// unit. Without it such files are refused ("units required").
     pub unit_override_to_mm: Option<f64>,
-    /// Run 7: also read the SHELL_BASED_SURFACE_MODELs into
+    /// Also read the SHELL_BASED_SURFACE_MODELs into
     /// [`StepImport::surfaces`] (failures then abort the import). Off: they
-    /// are ignored with a warning, exactly as before run 7, so a bad surface
+    /// are ignored with a warning, so a bad surface
     /// model never breaks a solid import.
     #[serde(default)]
     pub surfaces: bool,
-    /// Run 7 (review #2, #36): read the product structure into
+    /// Read the product structure into
     /// [`StepImport::assembly`] (`import_step_assembly`). Structure errors are
     /// then fatal, and when the file has one the flattened `solids` are not
     /// built (nor limited by their instance count): every product's
@@ -120,11 +120,11 @@ pub struct ImportedSolid {
     pub planar_faces: Vec<ImportedPlanarFace>,
 }
 
-/// Product structure of a STEP assembly (run 7).
+/// Product structure of a STEP assembly.
 #[derive(Debug, Clone)]
 pub struct ImportedAssembly {
     pub products: Vec<ImportedProduct>,
-    /// Top products: every product used by no other (review #7: a
+    /// Top products: every product used by no other (a
     /// free-standing part is a root too). Products without solids or
     /// children may be listed; they hold nothing to place.
     pub roots: Vec<usize>,
@@ -139,7 +139,7 @@ pub struct ImportedProduct {
     pub children: Vec<(usize, String, crate::Rigid)>,
 }
 
-/// The surfaces of a STEP file (run 7): every shell of every
+/// The surfaces of a STEP file: every shell of every
 /// SHELL_BASED_SURFACE_MODEL, placed, gathered into one surface body (one
 /// shell per STEP shell). Open shells stay open: never reported as a solid.
 #[derive(Debug, Clone)]
@@ -158,19 +158,19 @@ pub struct StepImport {
     /// The flattened, placed solids (empty when `assembly` holds the
     /// structure: see [`StepImportOptions::assembly`]).
     pub solids: Vec<ImportedSolid>,
-    /// Run 7: the product structure (assembly files, only when
+    /// The product structure (assembly files, only when
     /// [`StepImportOptions::assembly`] is set): every product's solids in its
     /// own coordinates and its usages with placements. Every
     /// MANIFOLD_SOLID_BREP of the file is in it exactly once per placement
     /// path: one outside any product's shape is folded into the product its
     /// representation is placed in, else placed under an extra root product
-    /// (with a warning either way, review #8).
+    /// (with a warning either way).
     pub assembly: Option<ImportedAssembly>,
-    /// Surface models (open shells), if the file has any (run 7).
+    /// Surface models (open shells), if the file has any.
     pub surfaces: Option<ImportedSurfaces>,
     pub length_unit: LengthUnit,
     /// Notes: what was approximated, skipped or restructured (always read
-    /// them: e.g. solids outside the product structure, review #8).
+    /// them: e.g. solids outside the product structure).
     pub warnings: Vec<String>,
     pub stats: StepStats,
 }
@@ -325,18 +325,18 @@ fn import_parsed(
     };
     // Scale-aware consistency tolerance (docs/formats/step.md).
     let tol = consistency_tol(&geo)?;
-    // Review run 7 #2: the structure only on request (and then fatal).
+    // The structure only on request (and then fatal).
     let structure = if opts.assembly {
         placements.structure()?
     } else {
         None
     };
     let mut solids = Vec::new();
-    // Review run 7 #36: with the structure, the flattened view (and its
+    // With the structure, the flattened view (and its
     // instance limit) is not built.
     let flat: &[u64] = if structure.is_some() { &[] } else { &breps };
     for &brep in flat {
-        // Review run 7 #47: one solid is built into local copies of the
+        // One solid is built into local copies of the
         // stats and warnings, committed only when it succeeds, so a solid
         // that fails while surfaces were asked for is skipped cleanly.
         let mut st = stats.clone();
@@ -407,7 +407,8 @@ fn import_parsed(
                 solids.extend(got);
             }
             // Surfaces asked for: a bad solid does not fail the surface
-            // import (the converse of review #2).
+            // import (the converse: a bad surface model never fails a solid
+            // import).
             Err(e) if opts.surfaces && !limit => {
                 warnings.push(format!("{} (solid skipped: importing surfaces)", e.0))
             }
@@ -415,7 +416,7 @@ fn import_parsed(
         }
     }
     stats.solids = solids.len();
-    // Run 7: the product structure as definitions + usages.
+    // The product structure as definitions + usages.
     let assembly = match structure {
         None => None,
         Some(st) => Some(structured(
@@ -430,7 +431,7 @@ fn import_parsed(
             &mut warnings,
         )?),
     };
-    // Run 7: the product structure is read only for placements and names; say
+    // The product structure is read only for placements and names; say
     // so rather than present the placed bodies as a preserved assembly.
     let usages = idx.all_with("NEXT_ASSEMBLY_USAGE_OCCURRENCE").len();
     if usages > 0 && assembly.is_none() {
@@ -452,7 +453,7 @@ fn import_parsed(
     })
 }
 
-/// The shell of MANIFOLD_SOLID_BREP `brep`. Run 7: with faces on
+/// The shell of MANIFOLD_SOLID_BREP `brep`. With faces on
 /// SURFACE_OF_REVOLUTION, the solid must tessellate watertight and
 /// consistently oriented, with Truck's normal for those surfaces or else the
 /// opposite one (writers differ: R-CAD's own writer needs either, observed per
@@ -589,8 +590,8 @@ fn rigid_of(m: &Matrix4) -> crate::Rigid {
 }
 
 /// The product structure with every product's definition solids (each
-/// MANIFOLD_SOLID_BREP built once per definition, review #36). Every solid of
-/// the file lands somewhere (review #7/#8): in the product whose shape holds
+/// MANIFOLD_SOLID_BREP built once per definition). Every solid of
+/// the file lands somewhere: in the product whose shape holds
 /// it; else folded into the one product its representation is placed in
 /// (moved into that product's coordinates); else under an extra root
 /// product "Unstructured solids" at each of its world placements. The last
@@ -641,7 +642,7 @@ fn structured(
         })
         .collect();
     let mut roots = st.roots;
-    // Review #37: identity group -> first product holding it, built once.
+    // Identity group -> first product holding it, built once.
     let mut product_of: std::collections::HashMap<u64, usize> = Default::default();
     for (i, p) in st.products.iter().enumerate() {
         for &r in &p.reps {
@@ -795,7 +796,7 @@ fn import_surfaces(
     if shells.is_empty() {
         return Ok(None);
     }
-    // Review S6: closed shells of a surface model are oriented outward like
+    // Closed shells of a surface model are oriented outward like
     // solids; a surface model of several closed shells only is refused (one
     // body is one solid; import solids as MANIFOLD_SOLID_BREPs).
     if open == 0 && shells.len() > 1 {

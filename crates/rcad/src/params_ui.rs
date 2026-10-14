@@ -1,4 +1,4 @@
-//! Parameters panel (SESSION_4 §3): the document's named user parameters with
+//! Parameters panel: the document's named user parameters with
 //! their expressions, evaluated values, units and relationships; add, edit,
 //! rename and delete through the shared commands (`set_user_parameter`,
 //! `rename_user_parameter`, `delete_user_parameter`). Every change is one
@@ -22,12 +22,12 @@ pub struct ParamsPanel {
     /// Last refusal of a parameter command (shown until the next success).
     pub error: Option<String>,
     /// Commands an Apply sent and still unanswered (rename + set): the edit is
-    /// closed only when all succeeded (review run 4 #17: a successful rename
-    /// followed by a refused value used to drop the typed expression).
+    /// closed only when all succeeded (a successful rename followed by a
+    /// refused value must not drop the typed expression).
     pub pending: usize,
     /// The value change of an Apply that also renames: sent only after the
     /// rename succeeded (otherwise it would create a parameter under the new
-    /// name; review run 5).
+    /// name).
     pub after_rename: Option<Command>,
 }
 
@@ -186,7 +186,7 @@ impl RcadApp {
                     ui.end_row();
                 }
             });
-        // Edit actions on their own row (run 5): in the grid's last column
+        // Edit actions on their own row: in the grid's last column
         // they were clipped off a narrow browser by long expressions.
         if let Some((orig, name, expr, unit)) = self.params.edit.clone()
             && let Some(p) = params.iter().find(|p| p.name == orig)
@@ -221,7 +221,7 @@ impl RcadApp {
             } else if apply {
                 let name = name.trim().to_string();
                 if name != orig && params.iter().any(|x| x.name == name) {
-                    // Review run 4 #14: a refused rename must not fall through to
+                    // A refused rename must not fall through to
                     // editing the other parameter.
                     self.params.error =
                         Some(format!("another parameter is already named '{name}'"));

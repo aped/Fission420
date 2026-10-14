@@ -1,4 +1,4 @@
-//! SESSION_2 core scenarios A and B, headless, through [`Session::execute`]
+//! Core scenarios A and B, headless, through [`Session::execute`]
 //! only, with editor-built sketches (see `crate::scenarios`). Every geometric
 //! expectation below is derived by hand in this file (comments show the
 //! derivation); none is read back from the implementation.

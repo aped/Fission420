@@ -38,11 +38,11 @@ pub struct ExtrudeForm {
     pub reverse: bool,
     /// Picked sketch region (None: the whole profile, the default).
     pub region: Option<RegionRef>,
-    /// Run-6 extent and shape options (see `rcad_document::ExtrudeOptions`).
+    /// Extent and shape options (see `rcad_document::ExtrudeOptions`).
     pub more: ExtrudeMore,
 }
 
-/// How the far end of an extrusion is given (run 6).
+/// How the far end of an extrusion is given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExtentMode {
     #[default]
@@ -52,7 +52,7 @@ pub enum ExtentMode {
     ToPlane,
 }
 
-/// Edit buffers of the run-6 Extrude options.
+/// Edit buffers of the Extrude extent and shape options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtrudeMore {
     pub mode: ExtentMode,
@@ -310,8 +310,8 @@ pub fn face_side(
 }
 
 /// The sketch plane holds faces of the target facing both ways: the material
-/// side is ambiguous and regeneration refuses a Join/Cut from it (review run
-/// 4 #20: the preview used to take the first plane's sign).
+/// side is ambiguous and regeneration refuses a Join/Cut from it (the
+/// preview does not take the first plane's sign).
 pub fn face_side_ambiguous(
     bodies: &[BodySummary],
     sketch: &FeatureSummary,
@@ -714,8 +714,8 @@ impl RcadApp {
             ExtrudeOp::Intersect => "Intersect",
         };
         // Fixed spot at the bottom of the view, right of the axis gizmo and
-        // clear of the dialog (the run-3 label next to the prism collided with
-        // the dialog at 1280x800).
+        // clear of the dialog (a label next to the prism collides with the
+        // dialog at 1280x800).
         crate::view3d::chip(
             painter,
             egui::pos2(rect.min.x + 150.0, rect.max.y - 58.0),
@@ -919,7 +919,7 @@ impl RcadApp {
 }
 
 impl RcadApp {
-    /// Extent and shape options of the Extrude dialog (run 6).
+    /// Extent and shape options of the Extrude dialog.
     fn extent_ui(&self, ui: &mut egui::Ui, form: &mut ExtrudeForm) {
         use rcad_document::PlaneBase as B;
         let m = &mut form.more;

@@ -383,7 +383,7 @@ impl Body {
     pub fn deep_copy(&self) -> Result<Body> {
         let compressed = guarded("compress body", || self.solid.compress())?;
         if self.is_open_shell() {
-            // Run 7: surface bodies (open shells) are not closed solids;
+            // Surface bodies (open shells) are not closed solids;
             // extract shell by shell.
             let shells = compressed
                 .boundaries

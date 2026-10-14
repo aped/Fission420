@@ -1,4 +1,4 @@
-//! Countersink feature (run 6, coverage SO06) through the command API: an exact cone
+//! Countersink feature through the command API: an exact cone
 //! built into the topology at a Hole's entry (`rcad_kernel::countersink`). Plate
 //! 60 x 40 x 10 with a Ø6 hole at (30, 20). Volumes are analytic: a countersink of
 //! diameter 2R and included angle a on a hole of radius r removes the frustum of height

@@ -1,4 +1,4 @@
-//! Seeded corpus of round and rounded cuts (run 5, ADR 0007): through and
+//! Seeded corpus of round and rounded cuts (ADR 0007): through and
 //! blind round holes that are concentric with (engulfing or engulfed by),
 //! partially overlapping, or apart from earlier ones, rounded-rectangle and
 //! rectangular pockets over them, on an 80 x 60 x 12 plate, all on 0.5 / 1 mm
@@ -545,7 +545,7 @@ fn arc_corpus(only: Option<usize>) {
     }
 }
 
-/// Run-5 arc corpus finding (an earlier, outcome-dependent version of the
+/// Arc corpus finding (an earlier, outcome-dependent version of the
 /// stream above, case 21 #4): a Ø11 blind cut externally tangent to the
 /// straight wall of an earlier 1 mm deep rounded pocket. Truck returned a
 /// closed solid in which that pocket was filled with material again (72.27

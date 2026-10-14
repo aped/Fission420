@@ -1,4 +1,4 @@
-//! SESSION_3 scenarios A (multi-body, explicit booleans) and B (side-face
+//! Body scenarios A (multi-body, explicit booleans) and B (side-face
 //! sketch, regeneration, broken reference), headless through
 //! [`Session::execute`] only. Step prefixes "3A." / "3B.". Expected values are
 //! derived by hand in the comments; none is read back from the implementation.
@@ -1241,7 +1241,10 @@ pub(super) fn scenario_svg(r: &mut Run<'_>) {
         path: out.clone(),
         sketch: sk,
     });
-    r.ok("export_svg (external check: tools/check_scenario_steps.sh)", &x);
+    r.ok(
+        "export_svg (external check: tools/check_scenario_steps.sh)",
+        &x,
+    );
     let mut t = crate::Session::new();
     t.execute(&Command::NewDocument);
     let x = t.execute(&Command::ImportSvg {

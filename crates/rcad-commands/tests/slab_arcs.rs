@@ -1,5 +1,5 @@
 //! Cuts the exact slab construction with arcs builds through the command path
-//! (ADR 0007, SESSION_5 §4): the canonical engulfed-hole cut, an off-centre
+//! (ADR 0007): the canonical engulfed-hole cut, an off-centre
 //! partial overlap, round cuts sharing a floor, rounded pockets, holed tools,
 //! and the transactional refusals that remain. Expected values are analytic;
 //! occupancy probes use the result's own winding number (independent of the
@@ -211,7 +211,7 @@ fn canonical_engulfed_hole_cut_is_exact_and_regenerates() {
 
 #[test]
 fn off_centre_partial_overlap_is_exact() {
-    // A distinct case (SESSION_5 §4): Ø16 offset 4 mm from the Ø10 hole.
+    // A distinct case: Ø16 offset 4 mm from the Ø10 hole.
     for (dx, dy, through) in [(4.0, 0.0, true), (2.4, -3.2, false)] {
         let mut s = Session::new();
         let e = holed_plate(&mut s, true);
@@ -244,7 +244,7 @@ fn off_centre_partial_overlap_is_exact() {
 
 #[test]
 fn seedhole_repro_overlapping_blind_round_cuts_on_a_boss() {
-    // Coordinator repro artifacts/run5/tray/seedhole.json.
+    // Overlapping blind round cuts on a boss (seed-hole repro).
     let mut s = Session::new();
     ok(&mut s, Command::NewDocument);
     let sk = sketch(&mut s, SketchPlane::WorldXY, rect(60.0, 30.0, [0.0, 0.0]));
@@ -515,8 +515,8 @@ fn remaining_refusals_leave_the_document_unchanged() {
     assert_eq!(state(&s), before);
 }
 
-/// The run-1 Cut Through All command (`legacy_cut`) has the slab fallback
-/// since run 5 (C3): the canonical engulfing cut through it is exact.
+/// The legacy Cut Through All command (`legacy_cut`) has the slab fallback:
+/// the canonical engulfing cut through it is exact.
 #[test]
 fn legacy_cut_through_all_engulfing_the_hole_is_exact() {
     let mut s = Session::new();

@@ -1,4 +1,4 @@
-# Run 6 (SESSION_6 acceptance 1): a rounded, labelled enclosure built from New
+# A rounded, labelled enclosure built from New
 # through real pointer/keyboard input with general tools: parameters, a drawn
 # and bound rectangle, extrusion, four solid fillets bound to corner_r, the
 # cavity from the projected top face offset inward by the wall (associative),

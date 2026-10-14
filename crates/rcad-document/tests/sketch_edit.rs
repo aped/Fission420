@@ -1,4 +1,4 @@
-//! Run-2 document behaviour: editor sketches (origin point, free vertices),
+//! Document behaviour: editor sketches (origin point, free vertices),
 //! optional profiles, dimension edits storing solved geometry, format v2
 //! migration and float round-trip exactness.
 use rcad_document::*;
@@ -76,7 +76,7 @@ fn volume(m: &Model) -> f64 {
     }
 }
 
-/// Frozen copy of the run-1 `examples/plate.rcad.json` (format v1). The
+/// Frozen copy of the original `examples/plate.rcad.json` (format v1). The
 /// example itself is re-saved (as v2) by `examples/plate_workflow.json`.
 fn v1_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plate_v1.rcad.json")

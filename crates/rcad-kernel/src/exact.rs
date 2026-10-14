@@ -17,7 +17,7 @@
 //!
 //! Every replacement is *verified* against the original edge before it is accepted
 //! (see [`VERIFY_TOL`]); any mismatch keeps the original intersection curve, which
-//! stays correct, only slow. Run 6: a plane perpendicular to the axis of a
+//! stays correct, only slow. A plane perpendicular to the axis of a
 //! surface of revolution (a lofted or revolved cone/cylinder) meets it in a circle
 //! about the axis, rebuilt as the exact rational arc and verified the same way.
 //! Other intersection types (cylinder ∩ cylinder, plane oblique to the extrusion
@@ -181,7 +181,7 @@ pub(crate) fn exact_edge(
 }
 
 /// A plane perpendicular to the axis of a surface of revolution (a cone or
-/// cylinder from a loft, a revolve) meets it in circles about the axis (run 6:
+/// cylinder from a loft, a revolve) meets it in circles about the axis (e.g.
 /// round tapered Join/Cut tools). The edge is the exact rational arc about the
 /// axis point in the plane from `p0` to `p1`, in the sense the original edge
 /// runs. Verified like the other cases: ends on the vertices, interior samples

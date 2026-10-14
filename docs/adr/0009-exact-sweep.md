@@ -1,6 +1,6 @@
 # ADR 0009: Exact sweep along a planar line/arc path (narrow scope)
 
-Status: accepted (run 5, SESSION_5 §9.4).
+Status: accepted.
 
 ## Decision
 
@@ -35,7 +35,7 @@ pub enum PathSegment {
   ignoring the stretch of (π + 2) × reach of arc length right after a point).
 * **Checks.** One closed shell; volume = Pappus (area × length per line, area × angle ×
   centroid distance from the axis per arc), exact through `measure` when all curved faces
-  share an axis (e.g. a rectangle swept by line/arc/line) and, since the later run-5
+  share an axis (e.g. a rectangle swept by line/arc/line) and, through the
   `BrepBoundaryIntegralRevolution` path, for tori about one axis (a circular profile along an
   arc); other cases fall back to the labelled tessellation estimate; FreeCAD confirms
   independently

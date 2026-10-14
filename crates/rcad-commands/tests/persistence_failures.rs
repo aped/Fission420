@@ -1,4 +1,4 @@
-//! Persistence failure cases (run 7, pull-forward of Run-8 §5), all in
+//! Persistence failure cases, all in
 //! task-owned temporary directories: a failed save keeps the previous file
 //! byte-for-byte and leaves no temporary file; the document stays dirty and
 //! editable; truncated, corrupt, mislabelled and future-version files are refused

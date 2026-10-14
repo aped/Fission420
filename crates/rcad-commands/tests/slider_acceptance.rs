@@ -1,4 +1,4 @@
-//! Run-7 acceptance project 2 ("slider fixture", SESSION_7): a parameterized
+//! Acceptance project "slider fixture": a parameterized
 //! rail (grounded) and carriage on a slider joint limited to 0–40 mm. Positions
 //! inside the limits move the carriage by exactly the commanded distance;
 //! positions outside are refused with the document unchanged. The travel is

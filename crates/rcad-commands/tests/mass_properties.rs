@@ -1,4 +1,4 @@
-//! Materials and mass properties (run 6; Run-7 acceptance 4 "property oracle"):
+//! Materials and mass properties ("property oracle"):
 //! every expected value is computed here in closed form, independently of the
 //! kernel's boundary integrals. Units: mm, g, g/cm³, g·mm²; world frame.
 mod support;

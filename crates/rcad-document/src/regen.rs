@@ -25,7 +25,7 @@ pub struct ResolvedFace {
     /// Body the face belongs to.
     #[serde(default)]
     pub body: BodyId,
-    /// When several faces of the body lie in the plane (run 5): a world point
+    /// When several faces of the body lie in the plane: a world point
     /// inside the referenced face (from its generating tool's footprint), which
     /// tells it apart from the others. None when the plane holds one face.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +104,7 @@ pub enum BodySource {
     ImportedMesh {
         file_name: String,
     },
-    /// Run 7: a repaired copy of mesh body `source` (FeatureKind::MeshRepair).
+    /// A repaired copy of mesh body `source` (FeatureKind::MeshRepair).
     RepairedMesh {
         source: BodyId,
     },
@@ -154,11 +154,11 @@ pub struct Evaluation {
     pub body: Option<Body>,
     /// Measurements of [`Evaluation::body`].
     pub measurements: Option<Measurements>,
-    /// Run 6: import identity of the faces of imported bodies changed by
+    /// Import identity of the faces of imported bodies changed by
     /// nothing but their import and direct edits (for picking a face to edit
     /// directly). Absent for any other body.
     pub imported_face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
-    /// Run 6: solved placements of the component occurrences (docs/ASSEMBLIES.md).
+    /// Solved placements of the component occurrences (docs/ASSEMBLIES.md).
     pub occurrences: Vec<crate::assembly::EvalOccurrence>,
 }
 
@@ -332,13 +332,13 @@ struct ExtrudeOut {
     removes: bool,
     /// Join: the start cap is not a face of the result (it lies in the support).
     joined: bool,
-    /// Intersect (run 6): no face of the result is referencable by role.
+    /// Intersect: no face of the result is referencable by role.
     intersect: bool,
-    /// No run-6 option (start on the sketch plane, one side, no thin/taper).
+    /// No extent option (start on the sketch plane, one side, no thin/taper).
     plain: bool,
     /// Several regions in one feature (patterns/mirrors do not copy it).
     multi: bool,
-    /// Run 6: draft angle (radians) of a tapered Join/Cut (patterns/mirrors
+    /// Draft angle (radians) of a tapered Join/Cut (patterns/mirrors
     /// do not copy it: their copies would be straight).
     taper: f64,
     body: BodyId,
@@ -369,18 +369,18 @@ struct Snapshot {
     /// Chamfer features: the chamfer face's frame (outward normal) and body.
     chamfers: HashMap<FeatureId, (Frame, BodyId)>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
-    /// Run 6: face identity of imported bodies (direct edits).
+    /// Face identity of imported bodies (direct edits).
     face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
     bodies: BTreeMap<BodyId, BodyState>,
     /// Body ids in creation order.
     created: Vec<BodyId>,
     results: Vec<FeatureResult>,
-    /// Evaluation index of every evaluated feature (run 6).
+    /// Evaluation index of every evaluated feature.
     index: HashMap<FeatureId, usize>,
     /// Rigid moves of bodies (body, evaluation index of the move, transform),
     /// in order: faces made before a move are found moved with the body.
     moves: Vec<(BodyId, usize, k::Rigid)>,
-    /// Run 7: sheet-metal bodies (definition state for flanges / flat pattern).
+    /// Sheet-metal bodies (definition state for flanges / flat pattern).
     sheets: BTreeMap<BodyId, crate::sheet::SheetModel>,
 }
 
@@ -550,7 +550,7 @@ fn kernel(feature: FeatureId) -> impl Fn(k::KernelError) -> DocError {
     }
 }
 
-/// Run 7: the sheet model of body `body` made by base `base`, refused when
+/// The sheet model of body `body` made by base `base`, refused when
 /// another feature changed the body since its last sheet feature.
 fn sheet_of(
     st: &Snapshot,
@@ -576,7 +576,7 @@ fn sheet_of(
     Ok(m.clone())
 }
 
-/// Run 7: the B-rep of surface-operation source `source`.
+/// The B-rep of surface-operation source `source`.
 fn surface_source(st: &Snapshot, id: FeatureId, source: BodyId) -> Result<Body> {
     match st.bodies.get(&source).map(|b| &b.geometry) {
         Some(BodyGeometry::Brep(b)) => Ok(b.clone()),
@@ -1135,7 +1135,7 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
-            // Run 7 sheet metal (logic in `crate::sheet`).
+            // Sheet metal (logic in `crate::sheet`).
             FeatureKind::SheetBase {
                 sketch,
                 rule,
@@ -1161,7 +1161,7 @@ fn regen_impl(
             }
             FeatureKind::SheetFlange { base, body, .. } => {
                 let mut model = sheet_of(&st, id, *base, *body)?;
-                // Review #5: a flange after the flat pattern would leave the
+                // A flange after the flat pattern would leave the
                 // displayed flat out of date (the DXF includes every flange).
                 if let Some(flat) = model.flat {
                     return Err(DocError::Validation(format!(
@@ -1201,7 +1201,7 @@ fn regen_impl(
                 )?;
                 r.body = Some(*body);
             }
-            // Run 7 surfaces (logic in `crate::surface`).
+            // Surfaces (logic in `crate::surface`).
             FeatureKind::ImportSurfaces {
                 blob,
                 unit_override_to_mm,
@@ -1362,7 +1362,7 @@ fn regen_impl(
                     .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
                 let b = brep_target(&st, id, *body)?;
                 let scaled = k::transform_body(&b, &t).map_err(kernel(id))?;
-                // Review run 6 #13: keep every dimension above the modelling
+                // Keep every dimension above the modelling
                 // tolerances.
                 let bb = k::bounds(&scaled).map_err(kernel(id))?;
                 let small = (0..3)
@@ -1496,7 +1496,7 @@ fn regen_impl(
                     .ok_or_else(|| {
                         DocError::Validation(format!("{id}: {hole} is not a Hole feature"))
                     })??;
-                // Review run 6 #2: the hole's tool is where the hole was made;
+                // The hole's tool is where the hole was made;
                 // after a move/scale of its body that is not where it is now.
                 if st.moved_since(Some(target), *hole) {
                     return Err(DocError::ProductLimit(format!(
@@ -1888,7 +1888,7 @@ fn extrude_feature(
         .get(&sketch)
         .ok_or(not_a_sketch(id, sketch))?
         .clone();
-    // Thin extrusion of an open line chain (run 6: ribs/webs): the band of
+    // Thin extrusion of an open line chain (ribs/webs): the band of
     // width `thin` centred on the chain, mitred at its corners, square ends.
     let open_band = match (opts.thin, pick, &s.profile) {
         (Some(t), None, Err(_)) => match crate::sheet::line_chain(&s.solved) {
@@ -2038,7 +2038,7 @@ fn extrude_feature(
             return Err(invalid("the 'to' plane is the sketch plane itself".into()));
         }
         dir = h.signum();
-        // `start_offset` is measured along the direction (review run 6 #8).
+        // `start_offset` is measured along the direction.
         if s0 >= h.abs() - k::tol::MIN_LENGTH {
             return Err(invalid(format!(
                 "the start offset {s0} mm reaches the 'to' plane ({:.6} mm away)",
@@ -2089,7 +2089,7 @@ fn extrude_feature(
                 "a tapered extrusion needs a region without inner loops".into(),
             ));
         }
-        // Review run 6 #9: the taper is anchored at the near end of the span;
+        // The taper is anchored at the near end of the span;
         // only a span starting on the sketch plane keeps the sketch profile
         // exact there.
         if opts.symmetric || opts.distance2 != 0.0 || opts.start_offset != 0.0 {
@@ -2213,7 +2213,7 @@ fn extrude_feature(
     Ok(out)
 }
 
-/// Join/Cut with a drafted tool (run 6, kernel worker): the exact frustum of
+/// Join/Cut with a drafted tool: the exact frustum of
 /// the profile over `(a, b)` along the sketch normal, exact at the near end
 /// (along `dir`) and offset inward by `w·tan(taper)` at distance `w` from it,
 /// applied with Truck's boolean and checked against that nominal tool
@@ -2479,7 +2479,7 @@ pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Bod
                 other => other,
             })
     };
-    // Run 7: the same half-space box extruded along an in-plane axis instead
+    // The same half-space box extruded along an in-plane axis instead
     // of the plane normal. When the body's curved faces (holes, bosses) are
     // parallel to that axis the exact slab construction applies where Truck's
     // boolean fails (e.g. a section plane crossing a hole off its axis).
@@ -2586,7 +2586,7 @@ fn open_band(id: FeatureId, pts: &[[f64; 2]], t: f64) -> Result<SketchProfile> {
     if area < 0.0 {
         poly.reverse();
     }
-    // Review run 6 #10: a chain folding back over itself makes a crossing band.
+    // A chain folding back over itself makes a crossing band.
     let m = poly.len();
     let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
         (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
@@ -2809,8 +2809,8 @@ fn margin_is_free(
         return Ok(true);
     }
     // Exact test (no boolean): no surface crosses the slab and it lies in air.
-    // (Run 3 probed with a cut, which Truck can fail or panic on for a slab
-    // wholly in air beside a coplanar face; that refused valid cuts.)
+    // (A probe cut is avoided: Truck can fail or panic on one for a slab
+    // wholly in air beside a coplanar face, refusing valid cuts.)
     k::prism_is_empty(t, plane, kp, beyond, margin)
 }
 
@@ -2901,7 +2901,7 @@ fn verify_applied(
 
 /// Apply extrusion `e`'s tool, placed on `frame` (its sketch frame for the
 /// seed, a transformed frame for a pattern/mirror copy), to `body`. This is the
-/// one path for seeds and copies (SESSION_4 §1): the workarounds for Truck's
+/// one path for seeds and copies: the workarounds for Truck's
 /// coplanar-face failures are re-derived for each placement from the material
 /// around it, and the result is checked against the nominal operation
 /// ([`k::verify_prism_boolean`]) before it is accepted.
@@ -3040,7 +3040,7 @@ fn apply_tool(
         return Ok((out, span));
     }
     let (a, b) = e.nominal;
-    // The support face matters only when the tool starts on it (run 6: a
+    // The support face matters only when the tool starts on it (a
     // symmetric, two-sided or offset join crosses or leaves the face).
     let on_face = (e.dir > 0.0 && a == 0.0) || (e.dir < 0.0 && b == 0.0);
     let span = match e.side {
@@ -3233,7 +3233,7 @@ fn plane_frame(
             "{id}.plane_angle_deg: the plane angle must be finite"
         )));
     }
-    // Tilt about the base's local X axis through its origin (run 5).
+    // Tilt about the base's local X axis through its origin.
     let frame = if a == 0.0 {
         frame
     } else {
@@ -3422,9 +3422,9 @@ fn hole_tools(
     target: BodyId,
 ) -> Result<Vec<ExtrudeOut>> {
     let t = brep_target(st, id, target)?;
-    // The material side from the faces under the hole itself (review run 4
-    // #9: any coplanar face of the body used to decide, so a plane holding
-    // faces facing both ways elsewhere refused every hole on it).
+    // The material side from the faces under the hole itself (not any
+    // coplanar face of the body: a plane holding faces facing both ways
+    // elsewhere would refuse every hole on it).
     let side = match hole_face_side(&t, frame, center, diameter).map_err(kernel(id))? {
         Some(s) => Some(s),
         None => k::coplanar_face_side(&t, frame).map_err(kernel(id))?,
@@ -3479,7 +3479,7 @@ fn hole_tools(
         }
     };
     // "Through all" goes into the material only, through everything of the
-    // target in that direction (review run 4 #3: a two-sided span also drilled
+    // target in that direction (a two-sided span must not drill
     // an overhang above the face).
     let (lo, hi) = k::extent_along(&t, frame).map_err(kernel(id))?;
     let through = if dir > 0.0 { hi } else { -lo };
@@ -3787,7 +3787,7 @@ fn mirror_feature(
     Ok(target)
 }
 
-/// Run-1/2 circular cut (`depth == None`: through all) and pocket features on
+/// Legacy (v1/v2) circular cut (`depth == None`: through all) and pocket features on
 /// their explicit target, with the original product limits.
 fn legacy_cut(
     doc: &Document,
@@ -3869,7 +3869,7 @@ fn legacy_cut(
         }
     };
     let start = s.frame.offset(nominal.0);
-    // Run 7: the target's check tessellation from the check that produced it.
+    // The target's check tessellation from the check that produced it.
     let target_mesh = st.bodies.get(&target).and_then(|b| b.check_mesh.clone());
     // Independent check against the nominal cut (ADR 0005).
     let verify = |b: &Body, used: (f64, f64)| {
@@ -4325,7 +4325,7 @@ fn chamfer_face_frame(a: &Frame, b: &Frame, d: f64) -> Option<Frame> {
 /// confirm it against the owning body's current B-rep: exactly one planar face
 /// must coincide (same plane, same outward normal). Never guesses.
 /// Revolve `profile` (sketch coordinates on `frame`) by `angle` about
-/// `axis` (run 6). The kernel revolves about a frame's local Y with the
+/// `axis`. The kernel revolves about a frame's local Y with the
 /// profile on its +X side and sweeps toward that frame's −Z; the frame is
 /// chosen so the profile is on +X (a proper rotation of the sketch frame), and
 /// the result is turned back about the axis when the sweep must leave toward
@@ -4657,7 +4657,7 @@ fn bind_link(
         ),
     };
     // Stored pin of a projected point: (x, y), either may be absent
-    // (FixedX / FixedY pin one coordinate; review run 6 #16).
+    // (FixedX / FixedY pin one coordinate).
     let stored = |p: rcad_sketch::PointId, s: &rcad_sketch::Sketch| {
         let (mut x, mut y) = (None, None);
         for c in &s.constraints {
@@ -4914,9 +4914,9 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
     if n > 0
         && let Some((e, role)) = tool
     {
-        // The face is the one this tool's footprint overlaps (review run 5:
+        // The face is the one this tool's footprint overlaps,
         // also when the plane holds one face, which may be another tool's —
-        // e.g. an occurrence's floor cut away and the seed's still there).
+        // e.g. an occurrence's floor cut away and the seed's still there.
         // The footprint is computed where the tool was made, then moved.
         let (outline, curved) = footprint(e, role, &moved_back(&moved, &frame));
         let outline: Vec<[f64; 3]> = outline.into_iter().map(|p| moved.point(p)).collect();

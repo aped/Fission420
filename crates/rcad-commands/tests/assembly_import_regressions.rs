@@ -1,5 +1,5 @@
-//! Review run 7, round 2 regressions (assembly import, external components,
-//! joints and sweeps, BOM CSV, load-time cleanup). Each test names its row.
+//! Regressions in assembly import, external components, joints and sweeps,
+//! BOM CSV and load-time cleanup.
 mod support;
 use rcad_commands::assembly::{AssemblyOut, AxisFrom};
 use rcad_commands::measure_faces::FacePick;
@@ -70,7 +70,7 @@ fn write(dir: &tempfile::TempDir, name: &str, text: &str) -> std::path::PathBuf 
     p
 }
 
-/// #2: a usage without placement is fatal only for the structured import;
+/// A usage without placement is fatal only for the structured import;
 /// the plain import (and the reopen that regenerates it) still works.
 #[test]
 fn plain_step_import_ignores_an_unresolvable_structure() {
@@ -93,7 +93,7 @@ fn plain_step_import_ignores_an_unresolvable_structure() {
     assert!(e.contains("no placement"), "{e}");
 }
 
-/// #7: a free-standing part product beside an assembly becomes a component
+/// A free-standing part product beside an assembly becomes a component
 /// with a top-level occurrence.
 #[test]
 fn free_standing_part_product_becomes_a_component() {
@@ -124,7 +124,7 @@ fn free_standing_part_product_becomes_a_component() {
     assert_eq!(m.occurrences.len(), 2);
 }
 
-/// #8 / #36: solids outside the product shapes are imported (folded into
+/// Solids outside the product shapes are imported (folded into
 /// their part, or under an extra root) and the import's notes are reported.
 #[test]
 fn solids_outside_product_shapes_are_imported_and_reported() {
@@ -166,7 +166,7 @@ fn solids_outside_product_shapes_are_imported_and_reported() {
     }
 }
 
-/// #35: names from STEP are cut to the document's name rules.
+/// Names from STEP are cut to the document's name rules.
 #[test]
 fn step_names_are_sanitized() {
     let long = "N".repeat(200);
@@ -195,7 +195,7 @@ fn step_names_are_sanitized() {
     assert!(a.components.iter().any(|c| c.name.starts_with("NNNN")));
 }
 
-/// #42: the kernel's structure depth is the document's.
+/// The kernel's structure depth is the document's.
 #[test]
 fn structure_depth_limits_agree() {
     assert_eq!(
@@ -243,7 +243,7 @@ fn cube_stl() -> String {
     s
 }
 
-/// #3: deleting the repair whose body replaced its source in a component
+/// Deleting the repair whose body replaced its source in a component
 /// gives the source its place back.
 #[test]
 fn deleting_a_derived_body_restores_its_source_in_the_component() {
@@ -281,7 +281,7 @@ fn deleting_a_derived_body_restores_its_source_in_the_component() {
     assert_eq!(comp(&s), vec![BodyId(2)]);
 }
 
-/// #40: hidden loose bodies of an external source are embedded like hidden
+/// Hidden loose bodies of an external source are embedded like hidden
 /// occurrences (visibility does not change the solid count).
 #[test]
 fn external_source_includes_hidden_bodies() {
@@ -316,7 +316,7 @@ fn external_source_includes_hidden_bodies() {
     );
 }
 
-/// #41: an open surface body in an external source is refused by name.
+/// An open surface body in an external source is refused by name.
 #[test]
 fn external_source_with_a_surface_body_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -338,7 +338,7 @@ fn external_source_with_a_surface_body_is_refused() {
     assert!(e.contains("open surface body"), "{e}");
 }
 
-/// #16: the native loader reads at most the size limit, even from a file
+/// The native loader reads at most the size limit, even from a file
 /// whose size is not known up front.
 #[cfg(unix)]
 #[test]
@@ -372,7 +372,7 @@ fn slider(s: &mut Session, parent: u32, child: u32, axis: [f64; 3], lim: (f64, f
     r.assembly.unwrap().joint.unwrap().0
 }
 
-/// #5: the sweep checks only pairs where a part moves with the joint; a
+/// The sweep checks only pairs where a part moves with the joint; a
 /// static overlap elsewhere is not reported at every sample.
 #[test]
 fn sweep_ignores_static_pairs() {
@@ -421,7 +421,7 @@ fn sweep_ignores_static_pairs() {
     }
 }
 
-/// #29: the last sample is the end exactly (no rounding past a limit), and
+/// The last sample is the end exactly (no rounding past a limit), and
 /// a range wider than f64 can subtract does not give NaN samples.
 #[test]
 fn sweep_end_points_are_exact_and_wide_ranges_work() {
@@ -454,7 +454,7 @@ fn sweep_end_points_are_exact_and_wide_ranges_work() {
     assert_eq!(v, vec![-1e308, 0.0, 1e308]);
 }
 
-/// #31 / #32: omitted axis fields keep the joint's; a zero axis is refused
+/// Omitted axis fields keep the joint's; a zero axis is refused
 /// for every kind; a child-axis face on the wrong part names the child.
 #[test]
 fn set_joint_axis_keeps_omitted_fields_and_refuses_zero_axis() {
@@ -567,7 +567,7 @@ fn set_joint_axis_keeps_omitted_fields_and_refuses_zero_axis() {
     assert!(!r.ok && e.contains("zero length"), "{e}");
 }
 
-/// #50: an oversized rigid group is refused by count before any joint is
+/// An oversized rigid group is refused by count before any joint is
 /// checked.
 #[test]
 fn oversized_rigid_group_is_refused_up_front() {
@@ -583,7 +583,7 @@ fn oversized_rigid_group_is_refused_up_front() {
     assert!(t.elapsed().as_secs_f64() < 5.0);
 }
 
-/// #17 / #38: BOM CSV text that starts like a formula is neutralized;
+/// BOM CSV text that starts like a formula is neutralized;
 /// materials are listed once each.
 #[test]
 fn bom_csv_guards_formulas_and_lists_materials_once() {
@@ -611,7 +611,7 @@ fn bom_csv_guards_formulas_and_lists_materials_once() {
     assert!(row.contains(",\"Steel, Al\","), "{row}");
 }
 
-/// #19 / #30: stale configuration entries are cleaned on open with their
+/// Stale configuration entries are cleaned on open with their
 /// own notice, and the document is marked changed so saving keeps it.
 #[test]
 fn stale_configuration_entries_are_cleaned_on_open() {

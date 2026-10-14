@@ -1,4 +1,4 @@
-//! SESSION_4 §2: stale asynchronous state. Import replies carry a request
+//! Stale asynchronous state. Import replies carry a request
 //! token, so a reply from a cancelled or replaced import form never resolves a
 //! newer one; Undo/Redo close dialogs holding ids that may now name other
 //! objects; a dialog whose ids vanish is closed instead of acting on them.
@@ -120,10 +120,10 @@ fn queue_slow_edits(h: &mut Harness<'_, RcadApp>) {
     let _ = h.try_run();
 }
 
-/// Run-3 app finding #14: cancel a pending import, reopen Import, choose a
-/// different file and press OK before the first reply arrives. Before the
-/// fix the first reply resolved the second form (its file name with the
-/// first import's bodies) and the second reply was dropped.
+/// Cancel a pending import, reopen Import, choose a
+/// different file and press OK before the first reply arrives. The first
+/// reply must not resolve the second form (its file name with the first
+/// import's bodies), and the second reply must not be dropped.
 #[test]
 fn import_reply_after_cancel_does_not_resolve_the_reopened_form() {
     let mut h = harness(ExecMode::Threaded);
@@ -232,7 +232,7 @@ fn failed_import_then_document_switch() {
     );
 }
 
-/// Run-3 app finding #9 (Undo part): an Extrude dialog holding a sketch id is
+/// An Extrude dialog holding a sketch id is
 /// closed by Undo, so a later object reusing that id cannot be extruded by it.
 #[test]
 fn undo_closes_dialogs_holding_ids() {

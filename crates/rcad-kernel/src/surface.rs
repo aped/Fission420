@@ -1,4 +1,4 @@
-//! Exact surface bodies from sketches (run 7, docs/SURFACES.md): a planar
+//! Exact surface bodies from sketches (docs/SURFACES.md): a planar
 //! patch bounded by a closed profile (holes allowed), and the extrusion of a
 //! profile or of an open polyline into a ruled surface (planar strips for
 //! lines, exact cylindrical patches for arcs). Results are open shells.
@@ -28,7 +28,7 @@ pub fn planar_patch(outer: &Profile, holes: &[Profile], frame: &Frame) -> Result
 /// `path` on `frame` swept `distance` along `frame.z` (against it when
 /// `reverse`) as an open ruled surface body.
 ///
-/// Orientation (review run 7 #43): every face's normal is the path tangent ×
+/// Orientation: every face's normal is the path tangent ×
 /// `frame.z`, i.e. to the right of the direction of travel seen from +z. A
 /// closed profile (counter-clockwise, as profiles are given) therefore
 /// faces outward; an open chain faces to the right of its point order (the

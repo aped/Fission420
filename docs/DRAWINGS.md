@@ -1,7 +1,6 @@
 # Associative drawings
 
-Status: run 6, foundation of SESSION_7 §4 (coverage DW01 base/projected views and sheet,
-DW02 driven dimensions: partial). Code: `crates/rcad-document/src/drawing.rs` (model,
+Status: base/projected views on a sheet, annotations, driven dimensions (partial). Code: `crates/rcad-document/src/drawing.rs` (model,
 projection, hidden lines, dimensions), `crates/rcad-kernel/src/edges.rs` (exact B-rep edges),
 `crates/rcad-exchange/src/drawing.rs` (sheet primitives, SVG writer),
 `crates/rcad-exchange/src/pdf.rs` (PDF writer), `crates/rcad-exchange/src/drawing_dxf.rs` (DXF writer), `crates/rcad-commands/src/drawings.rs`
@@ -174,9 +173,9 @@ interpreter), independent of the writer's types:
   number PN-STD-40 appear in the title block; an A3 sheet at 2:1 doubles every view while the
   dimension values stay 40/30/10/Ø8.
 
-## Run 7: assembly views, BOM and balloons, driven dimensions, tolerances, notes
+## Assembly views, BOM and balloons, driven dimensions, tolerances, notes
 
-All stored in format **v7** (`Drawing::v7_feature`; written only when used, so a run-6
+All stored in format **v7** (`Drawing::v7_feature`; written only when used, so a v6-only
 build refuses such a file instead of dropping the annotations).
 
 * **Assembly views.** A base view with `assembly: true` draws every evaluated component
@@ -246,7 +245,7 @@ real widgets).
 ## Not supported (yet)
 
 Half/offset/aligned/broken-out sections and hatch patterns per material, broken/auxiliary views, user-placed angular
-dimensions other than the run-7 subset above (angles, radii of arcs, chains/baselines,
+dimensions other than the subset above (angles, radii of arcs, chains/baselines,
 oblique), fits and geometric tolerances, leaders on notes, thread
 representation, multiple sheets per
 drawing, view grouping in DXF, a drawing editor canvas (views are placed numerically),

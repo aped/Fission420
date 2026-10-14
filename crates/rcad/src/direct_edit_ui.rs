@@ -1,4 +1,4 @@
-//! Direct editing of imported STEP bodies (run 6, ADR 0010): inspector actions
+//! Direct editing of imported STEP bodies (ADR 0010): inspector actions
 //! on a selected face of an imported body ("Offset face…", "Resize hole…",
 //! "Remove hole") and their dialog. Everything goes through
 //! `Command::DirectEdit`; the kernel decides what is allowed and the dialog

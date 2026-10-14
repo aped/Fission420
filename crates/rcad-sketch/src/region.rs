@@ -281,7 +281,7 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
         ));
         loops.push((p, ents));
     }
-    // Text glyph contours (run 6): closed polygons with synthetic edge ids.
+    // Text glyph contours: closed polygons with synthetic edge ids.
     for t in s.text_loops()? {
         names.push(format!(
             "text {} glyph '{}' (character {}) contour {}",

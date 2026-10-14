@@ -1,4 +1,4 @@
-//! Run-7 drawing annotations (docs/DRAWINGS.md "Dimensions, tolerances,
+//! Drawing annotations (docs/DRAWINGS.md "Dimensions, tolerances,
 //! notes, BOM and balloons"): driven dimensions between semantic references
 //! with tolerances, assembly views with a BOM table and balloons, and notes.
 //! Values are checked against the model definition by hand; texts are read
@@ -25,7 +25,7 @@ fn refused(s: &mut Session, c: Command) -> String {
 }
 
 fn out_dir() -> PathBuf {
-    let d = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/run7/drawings");
+    let d = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/drawings/annotations");
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -633,7 +633,7 @@ fn assembly_drawing_bom_balloons_and_notes() {
     );
 }
 
-/// Regression (run 7): a hole silhouette hidden behind a front face that is
+/// Regression: a hole silhouette hidden behind a front face that is
 /// triangulated with a diagonal crossing it was drawn with a 0.03 mm visible
 /// speck where the diagonal crossed (each triangle was tested alone with the
 /// outline margin). 80 × 50 × 10 plate, Ø8 at (20, 25) and Ø6 at (60, 25):
@@ -688,7 +688,7 @@ fn hidden_hole_silhouettes_have_no_visible_specks() {
     assert_eq!(views[0].visible_curves, 4, "front: {:?}", views[0]);
 }
 
-/// Review run 7 #3: a hole reference must not print a stale value after the
+/// A hole reference must not print a stale value after the
 /// body moves (the hole's frame is where it was made): the dimension dangles.
 #[test]
 fn hole_dimension_dangles_after_the_body_moves() {
@@ -738,7 +738,7 @@ fn hole_dimension_dangles_after_the_body_moves() {
     );
 }
 
-/// Review run 7 #14: a file whose detail views are each other's parent (or
+/// A file whose detail views are each other's parent (or
 /// any invalid drawing) is refused on load instead of recursing later.
 #[test]
 fn invalid_drawings_are_refused_on_load() {
@@ -786,7 +786,7 @@ fn invalid_drawings_are_refused_on_load() {
     );
 }
 
-/// Review run 7 #15: an occurrence whose definition body is not evaluated
+/// An occurrence whose definition body is not evaluated
 /// (here: rolled back) flags the assembly view instead of vanishing silently.
 #[test]
 fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
@@ -825,7 +825,7 @@ fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
     assert!(r.drawing_report.as_ref().unwrap().issues.is_empty());
     // Roll back to after the plate: the screw's body is not evaluated.
     let r0 = s.execute(&json(serde_json::json!({"cmd": "set_rollback", "at": 2})));
-    // Review round 2 #51(a): the precondition must hold (no early pass).
+    // The precondition must hold (no early pass).
     assert!(r0.ok, "rollback refused: {:?}", r0.error);
     let (r, _) = export(&mut s, d, "rollback_1.svg");
     let issues = &r.drawing_report.as_ref().unwrap().issues;
@@ -835,7 +835,7 @@ fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
     );
 }
 
-/// Review round 2 #9: a 180° rotation swaps two equal holes, so a cylinder of
+/// A 180° rotation swaps two equal holes, so a cylinder of
 /// the same size sits on the first hole's old axis; the dimension must still
 /// dangle (body moved after the hole), not print a value.
 #[test]
@@ -907,7 +907,7 @@ fn hole_dimension_dangles_after_a_rotation_that_swaps_holes() {
     assert!(dims[0].1.is_none() && dims[0].3, "{dims:?}");
 }
 
-/// Review round 2 #13: centre lines are for holes and bosses (full circles),
+/// Centre lines are for holes and bosses (full circles),
 /// not for fillets: a block with one rounded vertical edge has no centre line
 /// or mark anywhere on the sheet.
 #[test]

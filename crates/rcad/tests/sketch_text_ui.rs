@@ -1,4 +1,4 @@
-//! Text tool through the real sketch UI (run 6, SK04): draw a 60 x 30
+//! Text tool through the real sketch UI: draw a 60 x 30
 //! rectangle, Text tool, click inside, type "B8" at 10 mm, Apply: the glyphs
 //! become regions inside the plate (2 glyphs with 2 counters each); a refused
 //! font keeps the dialog open and the sketch unchanged; Cancel adds nothing;

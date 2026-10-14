@@ -10,7 +10,7 @@
 //! coplanar faces and on tool edges lying in body faces).
 //!
 //! The edge's two END faces may be slanted (planar, not perpendicular to the
-//! edge; run 5): the tool is clipped by them, so the removed solid is the
+//! edge): the tool is clipped by them, so the removed solid is the
 //! triangle T (edge, A, B) swept between the two end planes. Each end plane is
 //! s_k(w) = (n_k·(Q_k - P) - n_k·w) / (n_k·e) along the edge, linear in the
 //! in-section offset w, so the removed volume is exactly
@@ -289,7 +289,7 @@ pub(crate) fn straight_edge(
             "{what}: the two faces do not meet in a straight edge of the body"
         )));
     }
-    // The edge must be one uninterrupted run (review run 6 #1): collinear
+    // The edge must be one uninterrupted run: collinear
     // edges with a gap between them (e.g. a slot crossing the corner) are
     // separate edges, and the fillet/chamfer tool would bridge the gap.
     spans.sort_by(|x, y| x.0.total_cmp(&y.0));

@@ -1,6 +1,6 @@
 # ADR 0010: Direct editing of imported (STEP) bodies
 
-Status: accepted (run 6, 2026-10-13). ADR 0005 (independent result check) applies to
+Status: accepted (2026-10-13). ADR 0005 (independent result check) applies to
 every result.
 
 ## Context
@@ -50,7 +50,7 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   between the radii over the axial span; removal: the disk). Interference with geometry
   away from the edited face (e.g. a hole growing into an internal void) therefore fails
   the probe check rather than producing a self-intersecting solid.
-* `replace_face(body, face, origin, normal)` (task d of SESSION_6 §C): the planar face
+* `replace_face(body, face, origin, normal)`: the planar face
   replaced by another plane within 89° of it. **Precondition:** one convex loop of
   straight edges, every touching face planar, exactly one straight side edge per
   vertex. Each vertex slides along its side edge's line to the new plane (`t > 0`, the
@@ -108,7 +108,7 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   approximate pcurves for the planar faces' circular edges), so that check uses 5e-6.
 * Our STEP writer emits imported cylinders as `SURFACE_OF_REVOLUTION`, which our own
   importer does not read yet: an edited body cannot be re-imported into R-CAD (FreeCAD
-  reads it). Recorded as a gap. Attempted (run 6, not kept): reading
+  reads it). Recorded as a gap. Attempted (not kept): reading
   `SURFACE_OF_REVOLUTION` (LINE or B-spline generatrix, AXIS1_PLACEMENT) as a Truck
   revolved curve with the generatrix reversed for the ISO normal. The re-imported
   `direct_composed` export then measured the right exact volume and classified its holes

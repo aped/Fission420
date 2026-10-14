@@ -1,11 +1,11 @@
-# ADR 0005: Independent check of every Join/Cut result (run 4)
+# ADR 0005: Independent check of every Join/Cut result
 
-Status: accepted (run 4, SESSION_4 §1).
+Status: accepted.
 
 ## Context
 
-Truck 0.6 booleans can return a single closed shell that is still the wrong solid. Run 3
-documented two such cases behind ignored tests and a third untested one:
+Truck 0.6 booleans can return a single closed shell that is still the wrong solid. Before
+this decision, two such cases were documented behind ignored tests and a third untested one:
 
 * a cut that fully engulfs an existing hole keeps the old hole's walls inside the void
   (2010.6 mm³ removed instead of 1225.2; the shell reports "closed");
@@ -42,8 +42,7 @@ and validating with the same boolean is not independent.
      clear the chord error; points too close to a surface are skipped, not guessed.
    * every nominal tool's interior is sampled (7 × 7 profile grid × 3 depths): points of
      `tool ∩ target` must be outside the result (Cut), points of the tool inside it (Join),
-     by the result's own winding number — so a tool the kernel silently did not apply fails
-     (review finding, run 4);
+     by the result's own winding number — so a tool the kernel silently did not apply fails;
    * a check in which no probe could be classified is a refusal, not a pass.
    A failure is `DocError::GeometryCheck { feature, detail }`; the transaction is refused
    and nothing is committed, saved or exported. Patterns and mirrors are checked once, on
@@ -57,8 +56,8 @@ and validating with the same boolean is not independent.
    Less than 2 × `MIN_LENGTH` of clear material is a `ProductLimit` refusal.
 5. **Exact blind-cut margin test.** Moving a cutter end past a coplanar face is allowed only
    where the slab it sweeps is empty: `prism_is_empty` = no surface crosses the slab
-   (`clear_depth`) and an interior point lies outside the body (winding number). Run 3
-   probed with a cut, which Truck could fail or panic on beside coplanar faces, refusing
+   (`clear_depth`) and an interior point lies outside the body (winding number). The
+   earlier test probed with a cut, which Truck could fail or panic on beside coplanar faces, refusing
    valid cuts (e.g. a notch through an enclosure wall exactly into the cavity).
 
 ## Consequences
@@ -74,8 +73,8 @@ and validating with the same boolean is not independent.
   The check is a strong guard against wrong whole faces (the observed failure mode), not a
   proof of exactness. The kernel's own closed-shell test is kept.
 * Cost: two extra tessellations and O(probes × triangles) winding sums per boolean (once per
-  pattern); the run-3 855-check acceptance suite runs in the same time (7.6 s before, 7.2 s
-  after); the 19-hole pattern benchmark 1908 ms (run 3) → 2116 ms.
+  pattern); the 855-check acceptance suite runs in the same time (7.6 s before, 7.2 s
+  after); the 19-hole pattern benchmark 1908 ms → 2116 ms.
 * Hole "through all" goes into the material only (through everything of the target in that
   direction), so the nominal tool never includes material behind the face.
 * Pocket/flush cases that Truck cannot build (cutter walls coplanar with outer walls) remain

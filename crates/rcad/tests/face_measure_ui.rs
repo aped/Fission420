@@ -1,4 +1,4 @@
-//! Exact face measurement through the face inspector widgets (run 6, IN01):
+//! Exact face measurement through the face inspector widgets:
 //! select a hole's cylinder → radius/diameter; measure from it to a second hole
 //! → axis distance; a side plane to an axis. Expected values are the closed-form
 //! hole layout. Face indices are per evaluation (display order), so the holes are

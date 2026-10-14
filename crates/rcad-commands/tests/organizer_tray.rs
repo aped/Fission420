@@ -1,5 +1,5 @@
-//! Organizer tray acceptance (SESSION_5 §7) through the shared command API:
-//! the spec's analytic oracle (tests/support/tray.rs, from the parameters
+//! Organizer tray acceptance through the shared command API:
+//! the analytic oracle (tests/support/tray.rs, from the parameters
 //! only), occupancy probes for walls/floor/dividers/compartments, one connected
 //! closed solid, the user-controlled variants, an invalid edit refused with
 //! the document unchanged, undo/redo + save/reopen, and a seeded sweep.

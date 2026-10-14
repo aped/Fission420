@@ -48,7 +48,7 @@ else
   echo "FreeCAD flatpak not installed: external STEP validation NOT RUN"
 fi
 
-# Keep the original file names for the plate (run-1 evidence paths).
+# The plate keeps its original evidence file names.
 exp_plate=$(expected "50000 - 250*math.pi")
 echo "== plate: python STL check"
 python3 "$REPO/tools/check_stl.py" "$DIR/plate.stl" "$exp_plate" | tee "$DIR/stl_check_python.json" || status=1
@@ -79,7 +79,7 @@ fi
 [ -f "$DIR/scenario_r_initial.stl" ] && check_stem scenario_r_initial "10*(80*50 - (4 - math.pi)*8**2)"
 [ -f "$DIR/scenario_r.stl" ] && check_stem scenario_r "10*(80*50 - (4 - math.pi)*12**2 - math.pi*25)"
 [ -f "$DIR/scenario_r_slot.stl" ] && check_stem scenario_r_slot "5*(60*20 + math.pi*10**2)"
-# SESSION_3 scenarios C (imported STEP box + Ø6 hole) and D (DXF slot solid, DXF export,
+# Scenarios C (imported STEP box + Ø6 hole) and D (DXF slot solid, DXF export,
 # mesh-body STL export): expected values and tolerances are in tools/check_formats.sh.
 if [ -f "$DIR/scenario_c.step" ] || [ -f "$DIR/scenario_d_slot.step" ]; then
   "$REPO/tools/check_formats.sh" "$DIR" | tee "$DIR/formats_check.txt"

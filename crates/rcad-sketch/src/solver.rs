@@ -99,7 +99,7 @@ enum Eq {
         v: f64,
         k: usize,
     },
-    /// `x[to] − x[from] − k (x[b] − x[a])` (one axis; pattern step, run 6).
+    /// `x[to] − x[from] − k (x[b] − x[a])` (one axis; pattern step).
     Step {
         to: usize,
         from: usize,
@@ -108,7 +108,7 @@ enum Eq {
         k: f64,
     },
     /// Axis `axis` of `to − c − R (from − c)`, R the rotation by (cs, sn)
-    /// (point x columns; circular pattern copy, run 6).
+    /// (point x columns; circular pattern copy).
     Rot {
         to: usize,
         from: usize,
@@ -1216,7 +1216,7 @@ mod tests {
                     center: PointId(4),
                     radius: 3.3,
                 },
-                // Run 5: an arc sharing arc 1's end point (TangentArcs row).
+                // An arc sharing arc 1's end point (TangentArcs row).
                 Entity::Arc {
                     id: EntityId(5),
                     center: PointId(7),

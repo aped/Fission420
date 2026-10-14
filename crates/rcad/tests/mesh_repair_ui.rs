@@ -1,5 +1,5 @@
 //! Mesh check / repair in the body inspector through the real widgets
-//! (egui_kittest, run 7; docs/MESH.md): import a cube STL missing its top,
+//! (egui_kittest; docs/MESH.md): import a cube STL missing its top,
 //! preview (nothing changes), repair as a new body (closed), undo.
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -52,7 +52,7 @@ fn request(h: &mut Harness<'_, RcadApp>, c: Command) {
 }
 
 fn out(name: &str) -> PathBuf {
-    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/run7/mesh_ui");
+    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/mesh_ui");
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }

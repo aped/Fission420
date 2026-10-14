@@ -1,5 +1,5 @@
-//! Run-6 controls through the real widgets (egui_kittest): Extrude dialog
-//! extent options (symmetric + thin, two sides, to plane, Intersect) with the
+//! Extrude and History controls through the real widgets (egui_kittest):
+//! Extrude dialog extent options (symmetric + thin, two sides, to plane, Intersect) with the
 //! preview span agreeing with the committed solid, and the History timeline
 //! marker / reorder buttons. Volumes are closed-form.
 use std::f64::consts::PI;
@@ -495,7 +495,7 @@ fn align_a_body_from_the_face_inspector() {
 /// at the live-input window size (1280×800 output, 1272×768 client). A third
 /// row moves the viewport down while a user (or a live script) clicks sketch
 /// points. Regression: the Pattern… button wrapped the bar to three rows and
-/// broke the organizer-tray live walkthrough.
+/// broke scripted clicks on the organizer tray.
 #[test]
 fn sketch_bar_fits_two_rows_at_1280() {
     let mut h = Harness::builder()

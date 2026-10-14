@@ -1,4 +1,4 @@
-//! Mass properties of bodies and of a set of bodies (`mass_properties`, run 6).
+//! Mass properties of bodies and of a set of bodies (`mass_properties`).
 //!
 //! Frame and units: world coordinates; lengths mm, volume mm³, density g/cm³,
 //! mass g, inertia g·mm² (about the centre of mass, world axes). Geometry comes from
@@ -86,7 +86,7 @@ pub struct MassReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OccurrenceMass {
     pub occurrence: OccurrenceId,
-    /// Run 7: instance path ("O3/O7"); `name` is the path of names.
+    /// Instance path ("O3/O7"); `name` is the path of names.
     #[serde(default)]
     pub path: String,
     pub name: String,
@@ -194,7 +194,7 @@ pub fn report(
             .map(|b| b.id)
             .collect(),
     };
-    // Run 7 (nesting): one entry per evaluated instance; a listed occurrence
+    // Nesting: one entry per evaluated instance; a listed occurrence
     // selects every instance whose path passes through it.
     let occ_ids: Vec<usize> = match (occurrences, bodies) {
         (Some(list), _) => {

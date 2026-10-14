@@ -106,7 +106,7 @@ fn pocket(t: &Body, p: &Profile, depth: f64) -> Result<Body> {
 
 #[test]
 fn engulfing_cut_removes_the_old_hole_exactly() {
-    // SESSION_5 canonical: Ø10 through hole, then a concentric Ø16 through cut.
+    // Canonical case: Ø10 through hole, then a concentric Ø16 through cut.
     let t = holed_plate(5.0);
     let tool = disc([40.0, 25.0], 8.0);
     let start = Frame::XY.offset(-1.0);
@@ -277,7 +277,7 @@ fn round_boss_on_the_top_and_a_pocket_with_an_island() {
 
 #[test]
 fn overlapping_blind_round_cuts_on_a_boss_seedhole_repro() {
-    // Coordinator repro (run 5): 60 x 30 x 8 block centred on the origin, a
+    // Repro: 60 x 30 x 8 block centred on the origin, a
     // 10 x 10 x 5 boss at (15, 0), a Ø4 blind cut 2 deep at (15, 0), then a
     // second Ø4 2 deep at (16, 0.5): Truck panics on the second.
     let base = extrude(&rect(-30.0, -15.0, 30.0, 15.0), &Frame::XY, 8.0).unwrap();
@@ -374,7 +374,7 @@ fn rect_disc_area(x0: f64, y0: f64, x1: f64, y1: f64, c: [f64; 2], r: f64) -> f6
         .sum()
 }
 
-/// Review run 5 #10: two special points on a circle very close together (a
+/// Two special points on a circle very close together (a
 /// pocket corner 1e-3 mm outside a Ø20 hole: its two edges cross the circle
 /// about 2e-4 rad apart). The ring vertex between them deviates from their
 /// chord by ~1e-8 mm; the boolean output clean-up must not drop it as

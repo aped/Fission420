@@ -1,4 +1,4 @@
-//! Scoped shell (SESSION_4 §7 item 4, docs/SHELL.md): a New Body extrusion of
+//! Scoped shell (docs/SHELL.md): a New Body extrusion of
 //! one closed loop hollowed to walls + floor of `thickness`, open at one cap.
 //! Analytic volumes, point probes of walls/floor/cavity, parameter edits,
 //! start-cap opening, rounded profiles (offset area formula), refusals and
@@ -107,7 +107,7 @@ fn rectangle_shell_open_top_is_the_enclosure_base_and_follows_parameters() {
     let f = summary.features.iter().find(|f| f.id == sh).unwrap();
     assert_eq!(f.kind, "shell");
     assert_eq!(f.parameters, vec![("thickness".to_string(), 2.0)]);
-    // Parameter edits: the SESSION_4 B variant sizes.
+    // Parameter edits: the enclosure variant sizes.
     for (feature, name, value) in [
         (sk, "width", 100.0),
         (sk, "height", 65.0),

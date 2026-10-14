@@ -1,4 +1,4 @@
-//! Tapered (drafted) Extrude Join and Cut (run 6, kernel worker): exact
+//! Tapered (drafted) Extrude Join and Cut: exact
 //! frustum tools through Truck's boolean, checked against the nominal drafted
 //! tool (`rcad_kernel::tapered_boolean`). Block 40 x 30 x 10 at the origin.
 //! Expected volumes in closed form: a 10 x 10 square offset inward by w·t has

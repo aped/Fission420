@@ -1,4 +1,4 @@
-//! Run-7 acceptance project 3 ("two product configurations"): an enclosure
+//! Acceptance project "two product configurations": an enclosure
 //! assembly (tray body, lid, optional fan) in an 80 mm and a 100 mm variant.
 //! The basic variant excludes the fan occurrence and suppresses the drain hole;
 //! the variants have different part numbers. For each: assembly mass
@@ -111,7 +111,7 @@ fn totals(s: &mut Session) -> (f64, f64, usize) {
 /// dimensions of the front view, from a fresh SVG export.
 fn sheet(s: &mut Session, name: &str) -> (Vec<(String, String, usize)>, Vec<f64>) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../artifacts/run7/product_configurations");
+        .join("../../artifacts/product_configurations");
     std::fs::create_dir_all(&dir).unwrap();
     let r = tray::ok(
         s,

@@ -1,5 +1,5 @@
 # FreeCAD (FreeCADCmd) script: independent STEP fixtures for surface bodies and
-# open-shell repair (run 7, docs/SURFACES.md), written to $RCAD_OUT and
+# open-shell repair (docs/SURFACES.md), written to $RCAD_OUT and
 # re-imported for a verification line. Run through tools/fixtures/step/open_shells.sh.
 #
 #   open_box_mm.step      box [0,40]x[0,30]x[0,20] without its top face: one sewn

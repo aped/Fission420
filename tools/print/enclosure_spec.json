@@ -1,5 +1,5 @@
 {
-  "_comment": "Expected values for tools/print/enclosure_print_workflow.json exports (analytic, SESSION_4 6.A/6.B formulas). Placed exports: lid plate-down (lip up), base on its floor, laid out along X with 10 mm gaps centred on the P1S bed (256x256, height 250).",
+  "_comment": "Expected values for tools/print/enclosure_print_workflow.json exports (analytic: closed-form base and lid volumes and bounds). Placed exports: lid plate-down (lip up), base on its floor, laid out along X with 10 mm gaps centred on the P1S bed (256x256, height 250).",
   "files": {
     "baseline_as_modeled.3mf": {
       "unit": "millimeter", "objects": 2, "names": ["Base", "Lid"], "closed": true,

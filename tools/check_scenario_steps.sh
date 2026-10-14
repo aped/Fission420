@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Independent FreeCAD 1.1 (OpenCascade) validation of the run-3 scenario STEP exports
+# Independent FreeCAD 1.1 (OpenCascade) validation of the acceptance scenario STEP exports
 # written by `rcad-cli acceptance --out DIR` (steps 3A, 3B, 3N, 3P).
-# usage: tools/check_scenario_steps.sh [DIR]   (default artifacts/run3/acceptance)
+# usage: tools/check_scenario_steps.sh [DIR]   (default artifacts/acceptance)
 # Expected values are analytic (derived here, not read from R-CAD output); probe
 # points check feature placement (inside material / inside a removed region).
 set -u -o pipefail
-DIR=$(realpath "${1:-artifacts/run3/acceptance}")
+DIR=$(realpath "${1:-artifacts/acceptance}")
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 if ! flatpak info org.freecad.FreeCAD >/dev/null 2>&1; then
-  echo "FreeCAD flatpak not installed: run-3 STEP validation NOT RUN"; exit 2
+  echo "FreeCAD flatpak not installed: scenario STEP validation NOT RUN"; exit 2
 fi
 status=0
 check() { # file, expected sorted volumes (python list expr), bounds (python list), probes JSON, expected inside (python list)

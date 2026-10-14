@@ -1,4 +1,4 @@
-//! Sketch Pattern dialog through the real UI (run 6): select a circle, Pattern…,
+//! Sketch Pattern dialog through the real UI: select a circle, Pattern…,
 //! Circular 6 × 60° about the origin, Apply: six holes constrained to the
 //! source; Cancel adds nothing; a rectangular 3 × 2 grid of a rectangle gives
 //! six regions; Finish keeps the pattern dimensions as feature parameters.

@@ -194,7 +194,7 @@ fn the_check_is_not_vacuous() {
 
 #[test]
 fn round_tapered_cut_is_exact_or_refused() {
-    // Truck 0.6 cannot boolean revolved cones (run-4 spike): either an exact,
+    // Truck 0.6 cannot boolean revolved cones (`spike_countersink_cone`): either an exact,
     // checked result or a named failure, never a wrong body.
     let blk = block();
     let prof = Profile::Circle {
@@ -219,7 +219,7 @@ fn round_tapered_cut_is_exact_or_refused() {
             );
             // Exported exactly when Truck's intersection edges have exact
             // replacements; otherwise the export refuses (never approximates).
-            // Run 6: the cone ∩ plane edges have exact circular replacements
+            // The cone ∩ plane edges have exact circular replacements
             // (exact.rs), so the result exports.
             assert!(!crate::has_implicit_edges(&b), "implicit edges left");
             evidence(&b, "taper_cut_round");

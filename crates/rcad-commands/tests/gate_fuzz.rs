@@ -235,7 +235,7 @@ fn random_features_are_exact_or_refused() {
     );
 }
 
-/// One machine-readable summary line per corpus (run-5 evidence): accepted
+/// One machine-readable summary line per corpus: accepted
 /// results are all exact (an incorrect one fails the test before this line);
 /// refusals by kind, from their error text.
 fn corpus_line(name: &str, accepted: usize, refusals: &[String]) {

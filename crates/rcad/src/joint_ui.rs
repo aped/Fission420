@@ -1,4 +1,4 @@
-//! Joint creation dialog (run 7, docs/ASSEMBLIES.md): kind (rigid, revolute,
+//! Joint creation dialog (docs/ASSEMBLIES.md): kind (rigid, revolute,
 //! slider, cylindrical, pin-slot, planar, ball), parent and child occurrences
 //! (siblings), the axis source (explicit, a cylinder face or the edge line of
 //! two planar faces picked in the viewport, exact from the B-rep), the second

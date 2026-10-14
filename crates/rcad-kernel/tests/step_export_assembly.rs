@@ -1,4 +1,4 @@
-//! Hierarchical STEP export (`export_step_assembly`, run 7): refusals, the
+//! Hierarchical STEP export (`export_step_assembly`): refusals, the
 //! product-structure entities, and a re-read through R-CAD's importer (placements
 //! from the NAUO/CDSR chain; not an independent check — the FreeCAD check is
 //! tools/check_step_assembly.sh).
@@ -154,7 +154,7 @@ fn structure_is_read_back() {
         part(&b, vec![]),
     ];
     let text = export_step_assembly(&p, 0, "R-CAD").unwrap();
-    // Plain import: no structure is read (review run 7 #2).
+    // Plain import: no structure is read.
     assert!(
         import_step(&text, &StepImportOptions::default())
             .unwrap()
@@ -162,7 +162,7 @@ fn structure_is_read_back() {
             .is_none()
     );
     let imp = import_step(&text, &with_structure()).unwrap();
-    // Review run 7 #36: the flattened view is not built with the structure.
+    // The flattened view is not built with the structure.
     assert!(imp.solids.is_empty());
     assert_eq!(imp.stats.solids, 1);
     let a = imp.assembly.expect("structure");
@@ -247,7 +247,7 @@ fn drop_entities(text: &str, ids: &[u64]) -> String {
     s
 }
 
-/// Review run 7 #2: a usage without a placement (no
+/// A usage without a placement (no
 /// CONTEXT_DEPENDENT_SHAPE_REPRESENTATION) does not stop a plain import (or
 /// the regeneration of an embedded copy); only the structured import refuses.
 #[test]
@@ -262,7 +262,7 @@ fn unplaced_usage_fails_only_the_structured_import() {
     assert!(e.contains("no placement"), "{e}");
 }
 
-/// Review run 7 #7: a free-standing part product (used by no assembly) is a
+/// A free-standing part product (used by no assembly) is a
 /// root of the structure, so its solid is not lost.
 #[test]
 fn free_standing_part_is_a_root() {
@@ -282,7 +282,7 @@ fn free_standing_part_is_a_root() {
     assert_eq!(total, 2);
 }
 
-/// Review run 7 #8: a solid whose representation is placed in its part's
+/// A solid whose representation is placed in its part's
 /// shape representation by a relationship with transformation (not an
 /// identity link) is folded into that part; a solid in no representation is
 /// placed under an extra root. Both are reported.
@@ -357,7 +357,7 @@ fn solids_outside_product_shapes_are_kept_and_reported() {
     assert_eq!(placed, flat);
 }
 
-/// Review run 7 #42: the structure is refused past the document's nesting
+/// The structure is refused past the document's nesting
 /// limit before any solid is built; at the limit it is read.
 #[test]
 fn structure_depth_matches_the_document_limit() {
@@ -389,7 +389,7 @@ fn structure_depth_matches_the_document_limit() {
     .unwrap();
 }
 
-/// Run 7 (corpus a1): R-CAD's writer stores revolved surfaces as
+/// Corpus a1: R-CAD's writer stores revolved surfaces as
 /// SURFACE_OF_REVOLUTION; an embedded copy of an imported cylinder, sphere or
 /// torus must read back with the same volume (exact for the cylinder,
 /// within the estimate otherwise).
@@ -437,7 +437,7 @@ fn surfaces_of_revolution_written_by_r_cad_read_back() {
     }
 }
 
-/// Known limit (run 7): a sphere written by R-CAD (SURFACE_OF_REVOLUTION
+/// Known limit: a sphere written by R-CAD (SURFACE_OF_REVOLUTION
 /// with poles) does not read back yet; it must be refused with an error,
 /// never imported wrongly. Replace with a volume check when supported.
 #[test]
@@ -463,7 +463,7 @@ fn written_sphere_is_refused_not_misread() {
     }
 }
 
-/// Handoff (sheet worker, review #47 / #2): in the structured path a solid
+/// In the structured path a solid
 /// that fails to build is skipped with a warning only when surfaces were
 /// asked for; otherwise the import fails.
 #[test]

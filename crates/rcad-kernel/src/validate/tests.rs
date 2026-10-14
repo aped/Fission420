@@ -57,7 +57,7 @@ fn ordinary_cut_and_join_pass() {
     assert!(s.faces_probed >= 5, "{s:?}");
 }
 
-/// Run-3 review sketch/kernel #3: Truck keeps the engulfed hole's walls.
+/// Truck keeps the engulfed hole's walls.
 #[test]
 fn swallowed_hole_cut_is_detected() {
     let p = plate();
@@ -104,7 +104,7 @@ fn swallowed_hole_cut_is_detected() {
     }
 }
 
-/// Run-3 review regen #5 (skin over a cavity): a 0.5 mm overlap under a
+/// Skin over a cavity: a 0.5 mm overlap under a
 /// 0.3 mm skin leaks into the cavity; the check sees it and clear_depth sizes
 /// the overlap so it cannot.
 #[test]
@@ -167,7 +167,7 @@ fn clear_depth_cases() {
     assert_eq!(d, 0.5);
 }
 
-/// Feasibility spike (run 4): a 90° countersink as a revolved annular cone cut
+/// Feasibility spike: a 90° countersink as a revolved annular cone cut
 /// from a plate with a Ø5.5 hole, and from a plain plate. Observed with Truck
 /// 0.6: `and` returns None at every tolerance (holed plate) and panics (plain
 /// plate), so the Hole feature offers no countersink. Prints, asserts nothing.
@@ -232,7 +232,7 @@ fn spike_countersink_cone() {
     }
 }
 
-/// Review run 4 #1: a tool the kernel never applied (result = target) left no
+/// A tool the kernel never applied (result = target) left no
 /// faces near it to probe; the interior probes now refuse it.
 #[test]
 fn unapplied_tool_is_detected() {
@@ -408,11 +408,10 @@ fn zz_brep_edge_determinism() {
     eprintln!("faces A {:?}\nfaces B {:?}", d1.1, d2.1);
 }
 
-/// Review run 5 #1: the interior probes sampled a 7 x 7 grid of the outer
-/// loop's bounding box with a 1 % margin, so a ring (Ø40 minus Ø38) or a
-/// 0.5 mm slot got no sample and an unapplied tool passed with no evidence.
-/// The samples now come from the actual region (grid plus chord midpoints
-/// along inward normals at boundary edges).
+/// A 7 x 7 grid of the outer loop's bounding box with a 1 % margin gives a
+/// ring (Ø40 minus Ø38) or a 0.5 mm slot no sample, so an unapplied tool
+/// would pass with no evidence. The samples come from the actual region
+/// (grid plus chord midpoints along inward normals at boundary edges).
 #[test]
 fn ring_and_thin_slot_tools_are_sampled() {
     let block = extrude(&rect(0.0, 0.0, 60.0, 60.0), &Frame::XY, 10.0).unwrap();
@@ -455,7 +454,7 @@ fn ring_and_thin_slot_tools_are_sampled() {
     }
 }
 
-/// Run 7: the ray-crossing fast path of `Winding` agrees with the exact
+/// The ray-crossing fast path of `Winding` agrees with the exact
 /// solid-angle sum wherever the latter is decisive (a plate with eight
 /// through holes, ~10^4 triangles; 4000 deterministic pseudo-random probes,
 /// including points on hole axes and face planes).
@@ -510,7 +509,7 @@ fn ray_crossing_winding_matches_the_exact_sum() {
         }
     }
     assert!(fast > 3000 && agree > 3000, "fast {fast}, compared {agree}");
-    // Review round 2 #51(e): rays through mesh vertices and edge midpoints
+    // Rays through mesh vertices and edge midpoints
     // (probes on the vertex's y/z line, 1 mm before it in x) must fall back
     // or agree.
     let (mut agreed, mut fell_back) = (0, 0);

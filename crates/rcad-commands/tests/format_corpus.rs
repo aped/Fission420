@@ -1,4 +1,4 @@
-//! Run 8 §3 qualification corpus (tools/fixtures/corpus/MANIFEST.md): every
+//! Qualification corpus (tools/fixtures/corpus/MANIFEST.md): every
 //! file of `manifest.json` is imported through the typed command API and
 //! checked against independent expectations (closed form or FreeCAD's own
 //! read-back); malformed files must fail with an error and leave nothing in
@@ -41,7 +41,7 @@ fn corpus_imports_match_their_references() {
                 continue;
             }
             let msg = format!("{:?}", r.error);
-            // Review round 2 #15: a specific message, never a caught panic
+            // A specific message, never a caught panic
             // or an internal error.
             if want.is_empty() || msg.contains("panicked") || msg.contains("Internal") {
                 bad(format!("unexpected error kind {msg}"));
@@ -122,7 +122,7 @@ fn corpus_imports_match_their_references() {
                 }
             }
         }
-        // Review round 2 #14: exact unless the entry says "estimate"; an
+        // Exact unless the entry says "estimate"; an
         // estimate's stated error must be finite and below `vol_err_max`.
         let want_estimate = exp.get("method").and_then(Value::as_str) == Some("estimate");
         if estimated && !want_estimate {
@@ -197,7 +197,7 @@ fn corpus_imports_match_their_references() {
     assert!(manifest.len() >= 20);
 }
 
-/// Review round 2 #51(f): the FreeCAD assemblies through
+/// The FreeCAD assemblies through
 /// `import_step_assembly`: one placed occurrence per solid and the total
 /// volume FreeCAD measured.
 #[test]

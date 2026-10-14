@@ -1,5 +1,5 @@
-//! Browser "Assembly" section (run 6 flat model, run 7 nesting;
-//! docs/ASSEMBLIES.md): a navigable occurrence tree (sub-assemblies indented,
+//! Browser "Assembly" section
+//! (docs/ASSEMBLIES.md): a navigable occurrence tree (sub-assemblies indented,
 //! linked vs independent copies labelled, inactive parts dimmed), the selected
 //! occurrence's actions (activate its component, hide, ground, suppress, move
 //! with snapping, align face to face, rename, make independent, group into a
@@ -132,10 +132,10 @@ pub struct AssemblyUi {
     pub sweep: Option<SweepResult>,
     /// Joint and value index of the sweep request in flight.
     pub sweep_joint: Option<(JointId, usize)>,
-    /// Review run 7 #6: drive-slider value while the pointer is held on it
+    /// Drive-slider value while the pointer is held on it
     /// (joint, value index, value); committed once on release.
     pub drive_pending: Option<(JointId, usize, f64)>,
-    /// Review run 7 #34: index into `exchange::UNITS` used when an imported
+    /// Index into `exchange::UNITS` used when an imported
     /// STEP assembly declares no length unit (None: ask by refusing).
     pub assembly_units: Option<usize>,
     /// Instance path of the last viewport face pick (a new pick selects its
@@ -160,7 +160,7 @@ pub type SweepResult = (
 impl AssemblyUi {
     /// Engine hook in `handle_reply`.
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
-        // Review run 7 #30: the joint dialog closes only when its joint was
+        // The joint dialog closes only when its joint was
         // made; a refusal keeps every input.
         if response.command == "add_joint"
             && let Some(d) = &mut self.joint_dialog
@@ -172,7 +172,7 @@ impl AssemblyUi {
                 d.pending = false;
             }
         }
-        // Review run 7 #33: a refused sweep does not leave the previous
+        // A refused sweep does not leave the previous
         // result on screen as if it were the answer.
         if response.command == "joint_sweep" && !response.ok {
             self.sweep = None;
@@ -493,7 +493,7 @@ impl RcadApp {
             let p = self.assembly_ui.external_path.trim().to_string();
             let tip = "Import a STEP file with its product structure: components, \
                        sub-assemblies and linked occurrences with their placements";
-            // Review run 7 #34: the length unit for a file that declares
+            // The length unit for a file that declares
             // none (a declared unit always wins).
             let units = crate::exchange::UNITS;
             let shown = self
@@ -692,7 +692,7 @@ impl RcadApp {
                     && o.driven_by.is_none()
                     && ui.small_button("Move…").named(&l).probe(&l).clicked()
                 {
-                    // Review run 7: keep the stored rotation axis (an aligned or
+                    // Keep the stored rotation axis (an aligned or
                     // joint-released occurrence may turn about any axis).
                     let ang = o.angle_deg;
                     self.assembly_ui.edit = Some((
@@ -1209,7 +1209,7 @@ impl RcadApp {
                             });
                         }
                     } else {
-                        // Review run 7 #33: say why the button is unavailable.
+                        // Say why the button is unavailable.
                         let bad: Vec<&str> = [
                             "origin X", "origin Y", "origin Z", "axis X", "axis Y", "axis Z",
                         ]
@@ -1257,7 +1257,7 @@ impl RcadApp {
                     };
                     let limited = matches!((smin, smax), (Some(a), Some(b)) if a < b);
                     if !limited {
-                        // Review run 7 #33: the controls stay visible with the
+                        // The controls stay visible with the
                         // reason they are unavailable.
                         let why = "Set both limits (min < max) to drive or sweep this value";
                         ui.horizontal(|ui| {
@@ -1303,7 +1303,7 @@ impl RcadApp {
                         if r.changed() {
                             vals[i] = fmt(x);
                         }
-                        // Review run 7 #6: one commit per gesture. While the
+                        // One commit per gesture. While the
                         // pointer is held on the slider the value is only
                         // remembered; it is committed once when the pointer is
                         // released. Keyboard steps commit at once.
@@ -1356,7 +1356,7 @@ impl RcadApp {
                 .filter(|s| !s.interference.is_empty())
                 .map(|s| fmt(s.value))
                 .collect();
-            // Review run 7 #33: name the swept value on multi-DOF joints.
+            // Name the swept value on multi-DOF joints.
             let name = asm
                 .joints
                 .iter()

@@ -7,7 +7,11 @@ use std::process::Command;
 
 /// Files that must name the markers themselves: this check, the root-layout
 /// check and the ignore rules for the local notes directory.
-const EXEMPT: &[&str] = &[".gitignore", "xtask/src/main.rs", "xtask/src/public_text.rs"];
+const EXEMPT: &[&str] = &[
+    ".gitignore",
+    "xtask/src/main.rs",
+    "xtask/src/public_text.rs",
+];
 
 /// Case-insensitive substrings that are always process vocabulary.
 const MARKERS: &[&str] = &["morning_report", "goal.md", ".meta/", "claude.local.md"];

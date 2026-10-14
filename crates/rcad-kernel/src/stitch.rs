@@ -1,4 +1,4 @@
-//! Topological shell merging (run 7, ADR 0012): exact gluing of closed solids
+//! Topological shell merging (ADR 0012): exact gluing of closed solids
 //! along coincident faces (sheet-metal flanges onto their plate), and analysis,
 //! stitching, planar filling and thickening of open shells (surface bodies).
 //!
@@ -105,7 +105,7 @@ fn merge(shells: Vec<CShell>, tol: f64, stats: &mut MergeStats) -> Result<CShell
         }
     }
     // Vertices: uniform grid (cell = tol), neighbours in the 27 cells; union
-    // into the earliest index (review S7: no quadratic sweep).
+    // into the earliest index (no quadratic sweep).
     let n = out.vertices.len();
     let mut rep: Vec<usize> = (0..n).collect();
     fn find(rep: &mut [usize], mut i: usize) -> usize {
@@ -158,7 +158,7 @@ fn merge(shells: Vec<CShell>, tol: f64, stats: &mut MergeStats) -> Result<CShell
         }
     }
     let vmap: Vec<usize> = (0..n).map(|i| find(&mut rep, i)).collect();
-    // Review S9: merging is transitive; a chain of close vertices must not
+    // Merging is transitive; a chain of close vertices must not
     // move any vertex farther than the tolerance from where it merges.
     if tol >= 0.0 {
         for (i, &r) in vmap.iter().enumerate() {
@@ -575,7 +575,7 @@ pub fn analyze(body: &Body, search: f64) -> Result<ShellAnalysis> {
         .collect();
     let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
     // Candidate pairs from a grid over edge midpoints (cell = search): two
-    // edges of a gap have midpoints within `search` (review S7).
+    // edges of a gap have midpoints within `search`.
     let cell = search.max(1e-9);
     let key = |q: Point3| {
         [
@@ -713,7 +713,7 @@ fn inside_loop(pts: &[Point3], n: Vector3, q: Point3) -> bool {
 
 /// The parent of each coplanar nested boundary loop (`loops` sorted by
 /// decreasing area; each loop is its sample points and unit Newell normal).
-/// Review S5 / run 7 #46: a loop is a hole of the *smallest* coplanar loop
+/// A loop is a hole of the *smallest* coplanar loop
 /// that wholly contains it; containment is decided from every sample point
 /// and a segment-crossing test, not from one point. Loops whose boundaries
 /// cross, or that lie partly inside and partly outside each other (or
@@ -878,7 +878,7 @@ fn finish(
         // Still several pieces at this tolerance: an open multi-shell body.
         let parts = shell.connected_components();
         let pieces = parts.len();
-        // Review S6: separate closed pieces would make an unoriented
+        // Separate closed pieces would make an unoriented
         // multi-solid "body"; refuse instead (one solid per body).
         if parts
             .iter()
@@ -981,7 +981,7 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
     let mut filled = 0;
     let mut max_planarity: f64 = 0.0;
     // Each loop run the other way round (the fill face's orientation), with
-    // dense samples (review S10: curved edges sampled at 16 points) and its
+    // dense samples (curved edges sampled at 16 points) and its
     // Newell plane.
     struct L {
         inv: Wire,
@@ -1015,7 +1015,7 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
         let area = newell_area(&pts);
         loops.push(L { inv, pts, n, area });
     }
-    // Review S5: coplanar nested loops form one face with holes.
+    // Coplanar nested loops form one face with holes.
     loops.sort_by(|a, b| b.area.total_cmp(&a.area));
     let parent = nest_loops(
         &loops
@@ -1125,7 +1125,7 @@ mod tests {
     use super::*;
     use crate::{Frame, Profile};
 
-    /// Review S5: an open tube (annulus extrusion without its end caps)
+    /// An open tube (annulus extrusion without its end caps)
     /// fills into a solid ring: each end gets one face with a hole, not two
     /// overlapping disks.
     #[test]
@@ -1183,7 +1183,7 @@ mod nesting_tests {
             .collect()
     }
 
-    /// Review run 7 #46: two coplanar boundary loops of opposite
+    /// Two coplanar boundary loops of opposite
     /// orientation that only partly overlap (an outward square tube and an
     /// inward one sticking out of it) are refused, not filled as a face
     /// whose hole crosses its outer boundary.
@@ -1242,7 +1242,7 @@ mod piece_tests {
     use super::*;
     use crate::{Frame, LoopSegment, Profile};
 
-    /// Review S6: two separate closed boxes stitched → refused, not an
+    /// Two separate closed boxes stitched → refused, not an
     /// unoriented two-solid body.
     #[test]
     fn separate_closed_pieces_are_refused() {
@@ -1276,7 +1276,7 @@ mod piece_tests {
 mod chain_tests {
     use super::*;
 
-    /// Review S9: vertices 0.9·tol apart in a chain do not merge 1.8·tol.
+    /// Vertices 0.9·tol apart in a chain do not merge 1.8·tol.
     #[test]
     fn transitive_merge_chains_are_refused() {
         let sh = CShell {

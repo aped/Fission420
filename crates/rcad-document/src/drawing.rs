@@ -1,4 +1,4 @@
-//! Associative drawings (run 6, SESSION_7 §4 foundation; docs/DRAWINGS.md).
+//! Associative drawings (docs/DRAWINGS.md).
 //!
 //! A [`Drawing`] is stored in the document (format v6): sheet size, projection
 //! convention, title block fields and views. Views reference bodies by
@@ -263,7 +263,7 @@ pub enum ViewKind {
     /// Bodies seen in a standard orientation at `scale` (sheet mm per model
     /// mm), centred at `position` (sheet mm from the bottom-left corner).
     ///
-    /// Run 7 (format v7): with `assembly`, the view also shows every placed
+    /// Format v7: with `assembly`, the view also shows every placed
     /// component occurrence of the evaluated assembly (suppressed ones
     /// excluded; `bodies` are then loose bodies shown in addition, and may
     /// be empty).
@@ -344,7 +344,7 @@ pub enum Annotation {
     /// Diameter callout of Hole feature `feature`, attached to its circle
     /// where the hole is seen end-on.
     HoleCallout { feature: FeatureId },
-    /// Run 7 (v7): a driven dimension between semantic references, measured
+    /// Format v7: a driven dimension between semantic references, measured
     /// from the current model at every render (never stored). With `b`: the
     /// distance between `a` and `b` (parallel planar faces, a face and a
     /// parallel hole axis, or two parallel hole axes), measured
@@ -360,7 +360,7 @@ pub enum Annotation {
         #[serde(default, skip_serializing_if = "Tolerance::is_none")]
         tolerance: Tolerance,
     },
-    /// Run 7 (v7): a balloon (item number of the drawing's BOM) for every
+    /// Format v7: a balloon (item number of the drawing's BOM) for every
     /// component shown in this view, with a leader to the centre of its
     /// first occurrence. Only meaningful in assembly views.
     Balloons,
@@ -447,7 +447,7 @@ fn fmt_tol(x: f64) -> String {
     if s == "-0" { "0".into() } else { s.to_string() }
 }
 
-/// A free text note on the sheet (run 7, v7). `position`: sheet mm of the
+/// A free text note on the sheet (v7). `position`: sheet mm of the
 /// first line's start; lines are separated by `\n`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
@@ -455,7 +455,7 @@ pub struct Note {
     pub position: [f64; 2],
 }
 
-/// The bill-of-materials table on the sheet (run 7, v7): flattened
+/// The bill-of-materials table on the sheet (v7): flattened
 /// quantities of the evaluated assembly (see [`bom_rows`]). `position`: its
 /// bottom-left corner in sheet mm (default: the sheet's top-right corner
 /// inside the border).
@@ -502,10 +502,10 @@ pub struct Drawing {
     /// Overall bounding dimensions (each world axis once) and hole diameters.
     #[serde(default = "yes")]
     pub auto_dimensions: bool,
-    /// Run 7 (v7): free text notes.
+    /// Free text notes (v7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
-    /// Run 7 (v7): BOM table on the sheet.
+    /// BOM table on the sheet (v7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bom: Option<BomTable>,
 }
@@ -798,7 +798,7 @@ impl Drawing {
         Ok(())
     }
 
-    /// Whether this drawing uses a run-7 (format v7) addition.
+    /// Whether this drawing uses a format v7 addition.
     pub fn v7_feature(&self) -> Option<&'static str> {
         if self
             .views
@@ -883,7 +883,7 @@ pub enum ViewStatus {
 /// One dimension or callout as drawn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionReport {
-    /// "horizontal", "vertical", "diameter", "hole_callout"; run 7: "distance",
+    /// "horizontal", "vertical", "diameter", "hole_callout"; v7: "distance",
     /// "hole_diameter" (user dimensions), "balloon" (value = item number).
     pub kind: String,
     /// Model value (mm); None for a dangling callout.
@@ -970,7 +970,7 @@ struct BodyData {
     mesh: k::TriMesh,
     /// (origin, unit axis, radius) of cylindrical faces, for exact silhouettes.
     cylinders: Vec<([f64; 3], [f64; 3], f64)>,
-    /// Run 7: (point on axis, unit axis, axial range) of each cylindrical
+    /// (point on axis, unit axis, axial range) of each cylindrical
     /// face, from its tessellation, for centre lines.
     axes: Vec<AxisSpan>,
     bounds: k::Bounds,
@@ -1003,7 +1003,7 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
             _ => None,
         })
         .collect();
-    // Run 7 centre lines (review round 2 #13/#28): per cylindrical face its
+    // Centre lines: per cylindrical face its
     // axial range and the angles of its vertices about the axis, in one pass
     // over the tessellation; faces sharing an axis line and radius are merged
     // and get a centre line only when together they cover the full circle
@@ -2295,7 +2295,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
         let bodies = dr.bodies(v.id)?;
         let keys = view_keys(dr, v.id, eval)?;
         let assembly_view = keys.iter().any(|k| k.0 != 0);
-        // Review run 7 #15: occurrence bodies that are not evaluated
+        // Occurrence bodies that are not evaluated
         // (consumed, suppressed, rolled back) are reported, not skipped.
         let mut missing_occ: Vec<BodyId> = keys
             .iter()
@@ -2510,7 +2510,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                     style: LineStyle::Center,
                 });
             }
-            // Run 7: centre lines of cylinders seen side-on (hole and boss
+            // Centre lines of cylinders seen side-on (hole and boss
             // axes), 2 sheet mm past the cylinder; merged when coincident
             // (split cylinder faces). Not in pictorial or detail views.
             if frame.name() != "Iso" && !matches!(v.kind, ViewKind::Detail { .. }) {
@@ -2733,7 +2733,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
                 }
             }
         }
-        // Run 7: driven dimensions between semantic references, and balloons.
+        // Driven dimensions between semantic references, and balloons.
         // Rows of user dimensions below the view (the view label goes under them).
         let mut user_rows_below = 0usize;
         if let Some(g) = &geom {
@@ -3288,7 +3288,7 @@ fn resolve_ref(
                 .find(|r| r.id == *feature)
                 .and_then(|r| r.frame)
                 .ok_or_else(|| format!("hole {feature} was not evaluated"))?;
-            // Review round 2 #9: the hole's frame is where it was made; a
+            // The hole's frame is where it was made; a
             // later move/scale/align of its body is not followed, so the
             // reference dangles instead of measuring a stale (or another)
             // hole.
@@ -3322,7 +3322,7 @@ fn resolve_ref(
                 }
             }
             let (p, d) = (fr.to_world(*center), fr.z);
-            // Review run 7 #3: the hole's frame is where it was made. Require
+            // The hole's frame is where it was made. Require
             // its cylinder in the current body on that axis (a later move,
             // scale or fill of the body makes the reference dangle instead of
             // printing a stale value).
@@ -3354,7 +3354,7 @@ fn hole_cylinder_present(
         return false;
     };
     let tol = k::tol::KERNEL_LINEAR.max(1e-9 * r);
-    // One classification of all faces (review round 2 #27).
+    // One classification of all faces.
     let Ok(classes) = k::classify_faces(b) else {
         return false;
     };

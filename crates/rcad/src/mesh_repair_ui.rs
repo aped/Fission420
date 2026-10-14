@@ -1,5 +1,5 @@
-//! Mesh repair in the body inspector (run 7, Run-8 pull-forward ME01;
-//! docs/MESH.md): the diagnosis of a mesh body, repair options with an
+//! Mesh repair in the body inspector
+//! (docs/MESH.md): the diagnosis of a mesh body, repair options with an
 //! explicit weld tolerance, **Preview** (counts only, nothing changes) and
 //! **Repair as new body** (one undo step; the source is kept, hidden).
 use crate::app::RcadApp;
@@ -28,7 +28,7 @@ impl MeshRepairUi {
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
         if let (Some(r), Some((b, preview))) = (&response.mesh_repair, self.pending.take()) {
             self.report = Some((summary.doc_id, summary.revision, b, preview, r.clone()));
-            // Review round 2 #25: an applied repair's report also shows on the
+            // An applied repair's report also shows on the
             // new body (the source is hidden).
             self.new_body = response.feature.and_then(|f| {
                 summary
@@ -123,7 +123,7 @@ impl RcadApp {
                         }
                     }
                 });
-                // Review run 7 #29: only for this body at this revision (an
+                // Only for this body at this revision (an
                 // applied repair is one revision older than the new body's
                 // document state, so it is shown on the source until edited).
                 if let Some((d, r, b, preview, rep)) = &st.report

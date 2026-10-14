@@ -1,4 +1,4 @@
-//! Body Combine (run 6, SESSION_6 §B SO04): join, cut or intersect a target body
+//! Body Combine: join, cut or intersect a target body
 //! with one or more tool bodies, with an independent check of the result.
 //!
 //! The boolean is Truck's (`truck_shapeops::{or, and}`, the complement for a cut),
@@ -125,7 +125,7 @@ pub fn boolean(a: &Body, b: &Body, op: CombineOp) -> Result<Body> {
             }
         )));
     }
-    // Review run 6 #18a: when the tool encloses the target, Truck's Cut returns
+    // When the tool encloses the target, Truck's Cut returns
     // the target unchanged (observed with truck-shapeops 0.4); refuse it as an
     // empty result instead.
     if op == CombineOp::Cut && contains(b, a, &ab, &bb)? {
@@ -419,7 +419,7 @@ fn check_combine(
             ]
         })
         .collect();
-    // Review run 6 #5: a tool much smaller than the union (a small hole in a
+    // A tool much smaller than the union (a small hole in a
     // large plate) can fall between grid points; also sample a grid over
     // each tool's own bounds so every tool is probed.
     let mut pts = pts;
@@ -450,7 +450,7 @@ fn check_combine(
             CombineOp::Cut => a && !ins.iter().any(|&x| x),
             CombineOp::Intersect => a && ins.iter().all(|&x| x),
         };
-        // Review run 6 #18b: the result's surface lies on the inputs'
+        // The result's surface lies on the inputs'
         // surfaces, so away from them its winding must be a clean 0 or 1. An
         // unclassifiable result there (a spurious internal face, a gap)
         // counts as a mismatch rather than a skipped sample.
@@ -538,7 +538,7 @@ mod tests {
         assert!((d([3.0, 0.0, 4.0]) - 20f64.sqrt()).abs() < 1e-12); // vertex b
     }
 
-    /// Review run 6 #18b: a "join" result with an extra internal shell (a
+    /// A "join" result with an extra internal shell (a
     /// box inside the overlap) has winding 2 inside it, away from every
     /// input surface. Those samples used to be skipped and the result passed;
     /// they are mismatches.

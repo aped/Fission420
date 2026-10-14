@@ -381,7 +381,7 @@ impl RcadApp {
                 left_hand: false,
             });
         }
-        // Run 5: exact loft / sweep (new bodies from two sketches).
+        // Exact loft / sweep (new bodies from two sketches).
         ui.menu_button("Loft / Sweep", |ui| {
             if ui
                 .add_enabled(has_sketch, egui::Button::new("Loft…"))
@@ -868,7 +868,7 @@ impl RcadApp {
                             offset: "0".into(),
                         });
                     }
-                    // Run 6: align this face's body flush onto a face of another body.
+                    // Align this face's body flush onto a face of another body.
                     let mine = self.selected_face().and_then(|f| f.body);
                     let targets: Vec<(String, rcad_document::FaceRef)> = self
                         .summary
@@ -909,7 +909,7 @@ impl RcadApp {
                             offset: 0.0,
                         });
                     }
-                    // Run 6: shell the body under this face, leaving it open.
+                    // Shell the body under this face, leaving it open.
                     ui.add(
                         egui::TextEdit::singleline(&mut self.shell_thickness).desired_width(40.0),
                     )
@@ -1011,7 +1011,7 @@ impl RcadApp {
                 self.delete_selected_feature();
             }
         });
-        // Run 5: suppression (kept in history, not evaluated). Dependents are
+        // Suppression (kept in history, not evaluated). Dependents are
         // never silently rebound: suppress them too, or the change is refused.
         ui.horizontal_wrapped(|ui| {
             let users = self.dependents_of(f.id);
@@ -1076,7 +1076,7 @@ impl RcadApp {
                 }
             }
         });
-        // Run 6: timeline marker and reorder (each one Undo step; a move that
+        // Timeline marker and reorder (each one Undo step; a move that
         // breaks a dependency or does not regenerate is refused unchanged).
         ui.horizontal_wrapped(|ui| {
             let ids: Vec<FeatureId> = self.summary.features.iter().map(|x| x.id).collect();
@@ -1210,7 +1210,7 @@ impl RcadApp {
                     });
                 }
                 ui.horizontal_wrapped(|ui| {
-                    // Text glyph walls (run 6) are many small faces: not listed
+                    // Text glyph walls are many small faces: not listed
                     // as buttons (pick them in the view instead).
                     let text_side = |r: &rcad_document::FaceRole| match r {
                         rcad_document::FaceRole::ExtrudeSide { entity } => {
@@ -1635,8 +1635,8 @@ impl RcadApp {
                 self.banner = None;
             }
         });
-        // Wrapped: a long message must not widen the browser panel (run 5:
-        // a refused edit squeezed the 3D view to ~220 px at 1280x800).
+        // Wrapped: a long message must not widen the browser panel (a
+        // refused edit would squeeze the 3D view to ~220 px at 1280x800).
         if let Some(e) = self.diagnostics.iter().rev().find(|d| d.error) {
             ui.add(
                 egui::Label::new(
@@ -2435,7 +2435,7 @@ pub(crate) fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
 }
 
 /// A narrow text field for the Browser column (keeps it from widening and
-/// squeezing the 3D view; run 6 live-walkthrough regression).
+/// squeezing the 3D view).
 pub(crate) fn short_text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
     field(ui, label, buf, 120.0);
 }
@@ -2464,7 +2464,7 @@ pub(crate) fn feature_combo(
 }
 
 impl RcadApp {
-    /// Run 6 (SK03): project a planar face or another sketch into this
+    /// Project a planar face or another sketch into this
     /// sketch (associative), and unlink existing projections.
     fn projection_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
         let Some(z) = f.frame.map(|fr| fr.z) else {
@@ -2551,7 +2551,7 @@ impl RcadApp {
 }
 
 impl RcadApp {
-    /// Run 6 (pull-forward of SESSION_7 §3): named configurations. "Save
+    /// Named configurations. "Save
     /// current" stores every user parameter's expression and the features
     /// suppressed now; Activate applies one (one Undo step each).
     fn configurations_panel(&mut self, ui: &mut egui::Ui) {
@@ -2663,7 +2663,7 @@ impl RcadApp {
 }
 
 impl RcadApp {
-    /// Run 6: sheet-metal flange from this sketch's open line chain, and the
+    /// Sheet-metal flange from this sketch's open line chain, and the
     /// flat-pattern export of a flange feature (docs/SHEET_METAL.md).
     fn sheet_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
         let mut send = None;

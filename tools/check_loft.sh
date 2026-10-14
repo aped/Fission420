@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the run-5 loft fixtures written by
+# Independent FreeCAD (OpenCascade) validation of the loft fixtures written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --lib loft
 # usage: tools/heavy.sh tools/check_loft.sh DIR
 # FreeCAD integrates the exact surfaces (the cone frustum's volume is only estimated

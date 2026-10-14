@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# External (FreeCAD / OpenCascade) validation of the run-7 sheet-metal and surface
-# acceptance outputs (SESSION_7 projects 6 and 7), written by
+# External (FreeCAD / OpenCascade) validation of the sheet-metal and surface
+# acceptance outputs, written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test sheet_surface_acceptance
 # usage: tools/heavy.sh tools/validate_sheet_surface.sh DIR
 # Expected values are closed form (derived here, not read from R-CAD):

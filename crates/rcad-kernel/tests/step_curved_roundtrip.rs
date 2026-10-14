@@ -169,7 +169,7 @@ fn sector_270_roundtrip() {
 fn revolve_washer_roundtrip() {
     // Rectangle x ∈ [20, 40], z ∈ [0, 10] in XZ revolved about Z (same as
     // tests/plate.rs). Pappus: V = A · θ · x̄. truck-stepio writes the revolved
-    // faces as SURFACE_OF_REVOLUTION, which the importer reads since run 7.
+    // faces as SURFACE_OF_REVOLUTION, which the importer reads.
     let (ri, ro, h) = (20.0, 40.0, 10.0);
     let prof = Profile::Polygon(vec![[ri, 0.0], [ro, 0.0], [ro, h], [ri, h]]);
     // Half turn (about -Y from the XZ frame: the half with y <= 0 or y >= 0):

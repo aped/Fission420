@@ -20,15 +20,15 @@ const MAX_DEPTH: usize = 32;
 const MAX_PATHS: usize = 10_000;
 /// Deepest product structure read by [`Placements::structure`]: an instance
 /// path from a root product down holds at most this many usages (root
-/// included), the same bound as the document's assembly (review run 7 #42:
-/// deeper files are refused before the solids are built, not after).
+/// included), the same bound as the document's assembly (deeper
+/// files are refused before the solids are built, not after).
 pub const MAX_STRUCTURE_DEPTH: usize = 16;
 
 pub(super) struct Placements<'a> {
     idx: &'a Index,
-    /// Review run 7 #37: item -> representations containing it (sorted).
+    /// Item -> representations containing it (sorted).
     item_reps: HashMap<u64, Vec<u64>>,
-    /// Review run 7 #37: representation -> its identity group's
+    /// Representation -> its identity group's
     /// representative (the smallest id; absent = a group of its own).
     group: HashMap<u64, u64>,
     /// Representative -> members (sorted), for groups of two or more.
@@ -37,11 +37,11 @@ pub(super) struct Placements<'a> {
     group_product_name: HashMap<u64, (usize, String)>,
     /// child representation -> (parent representation, child-to-parent transform)
     up: HashMap<u64, Vec<(u64, Matrix4)>>,
-    /// Run 7: relationship entity -> child-to-parent transform.
+    /// Relationship entity -> child-to-parent transform.
     rel: HashMap<u64, Matrix4>,
 }
 
-/// Run 7: the product structure of a STEP file (products = product
+/// The product structure of a STEP file (products = product
 /// definitions, usages = NEXT_ASSEMBLY_USAGE_OCCURRENCE with their
 /// CONTEXT_DEPENDENT_SHAPE_REPRESENTATION placement).
 pub(super) struct Structure {
@@ -93,7 +93,7 @@ impl<'a> Placements<'a> {
                 }
             }
             // A simple `SHAPE_REPRESENTATION_RELATIONSHIP(...)` instance has the
-            // same attributes as its supertype (run 7: OCCT and R-CAD's
+            // same attributes as its supertype (OCCT and R-CAD's
             // hierarchical export link a part's B-rep representation to its
             // shape representation with it).
             let simple_srr = e.parts.len() == 1 && e.has("SHAPE_REPRESENTATION_RELATIONSHIP");
@@ -152,8 +152,8 @@ impl<'a> Placements<'a> {
                 )));
             }
         }
-        // Review run 7 #37: the lookups below are built once (they were
-        // searched per solid: O(solids x products x representations)).
+        // The lookups below are built once, not searched per solid
+        // (O(solids x products x representations)).
         let mut item_reps: HashMap<u64, Vec<u64>> = HashMap::new();
         for (&r, items) in &rep_items {
             for &i in items {
@@ -322,7 +322,7 @@ impl<'a> Placements<'a> {
         Ok(())
     }
 
-    /// Review run 7 #8: products an item reaches from its representation
+    /// Products an item reaches from its representation
     /// through representation relationships with transformation (e.g. an
     /// ADVANCED_BREP_SHAPE_REPRESENTATION placed in a part's shape
     /// representation by a REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION
@@ -377,7 +377,7 @@ impl<'a> Placements<'a> {
         Ok(found)
     }
 
-    /// Run 7: the product structure, when the file has assembly usages
+    /// The product structure, when the file has assembly usages
     /// (`None` without NEXT_ASSEMBLY_USAGE_OCCURRENCE). Refused (error) when a
     /// usage's placement cannot be resolved or usage is cyclic.
     pub fn structure(&self) -> Result<Option<Structure>, StepError> {
@@ -505,7 +505,7 @@ impl<'a> Placements<'a> {
             memo[i] = best;
             Ok(best)
         }
-        // Review run 7 #7: every product used by no other is a root,
+        // Every product used by no other is a root,
         // including a free-standing part (it becomes a top-level occurrence);
         // products without solids or children are dropped by the caller.
         let roots: Vec<usize> = (0..products.len()).filter(|&i| !is_child[i]).collect();

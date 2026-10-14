@@ -64,7 +64,7 @@ fn volume(s: &Session, id: BodyId) -> f64 {
     }
 }
 
-/// Exact (boundary-integral) volumes: GOAL.md tolerance. A labelled
+/// Exact (boundary-integral) volumes: acceptance volume tolerance. A labelled
 /// tessellation estimate (no axis-ruled integral applies, e.g. holes along two
 /// axes): the analytic value must lie within the estimate's stated error.
 fn assert_volume(s: &Session, id: BodyId, exp: f64) {
@@ -89,7 +89,7 @@ fn bounds(s: &Session, id: BodyId) -> ([f64; 3], [f64; 3]) {
     (m.bounds.min, m.bounds.max)
 }
 
-/// GOAL.md volume tolerance.
+/// Acceptance volume tolerance: max(0.001 mm³, V * 1e-7).
 fn vol_close(v: f64, exp: f64) -> bool {
     (v - exp).abs() <= 0.001f64.max(exp * 1e-7)
 }

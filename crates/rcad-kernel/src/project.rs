@@ -1,5 +1,5 @@
-//! Exact boundary curves of a planar face for sketch projection (run 6,
-//! SESSION_6 §B "project/include model edges").
+//! Exact boundary curves of a planar face for sketch projection
+//! (project/include model edges).
 //!
 //! The face in `frame`'s plane (exactly one face of the body may lie there)
 //! is walked loop by loop; every edge is returned as a line, a circular arc
@@ -37,7 +37,7 @@ const SAMPLES: usize = 16;
 
 fn circle3(p: [f64; 2], q: [f64; 2], r: [f64; 2]) -> Option<([f64; 2], f64)> {
     let d = 2.0 * (p[0] * (q[1] - r[1]) + q[0] * (r[1] - p[1]) + r[0] * (p[1] - q[1]));
-    // Collinear within a relative 1e-9 (review run 6 #12): d is twice the
+    // Collinear within a relative 1e-9: d is twice the
     // signed triangle area; compare it with the product of the side lengths.
     let span = (q[0] - p[0]).hypot(q[1] - p[1]) * (r[0] - p[0]).hypot(r[1] - p[1]);
     if d.abs() <= 1e-9 * span {

@@ -1,4 +1,4 @@
-//! Run-6 history editing (SESSION_6 §D, coverage PA02): timeline rollback
+//! History editing: timeline rollback
 //! marker (insert at the marker, roll forward), safe reorder (dependency
 //! checked, regeneration-checked, one undo step), suppression with
 //! dependents, repair of a broken face reference by re-attaching, undo and

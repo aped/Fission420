@@ -135,10 +135,10 @@ impl Dimension {
 pub enum Constraint {
     /// `p == (x, y)`; 2 equations.
     FixedPoint { p: PointId, x: f64, y: f64 },
-    /// `p.x == x`; 1 equation (run 6: pins one coordinate, e.g. the centre of
+    /// `p.x == x`; 1 equation (pins one coordinate, e.g. the centre of
     /// a projected arc whose ends are fixed, without a redundant equation).
     FixedX { p: PointId, x: f64 },
-    /// `p.y == y`; 1 equation (run 6).
+    /// `p.y == y`; 1 equation.
     FixedY { p: PointId, y: f64 },
     /// Line endpoints share y; 1 equation.
     Horizontal { line: EntityId },
@@ -174,8 +174,8 @@ pub enum Constraint {
     Tangent { line: EntityId, arc: EntityId },
     /// Two arcs share exactly one endpoint and are tangent there (internally
     /// or externally): the radius vectors at the shared point P are collinear.
-    /// 1 equation (mm), `(P − C_a) × (P − C_b) / |P − C_b|`. Added in run 5
-    /// for line–arc sketch fillets (serde-additive).
+    /// 1 equation (mm), `(P − C_a) × (P − C_b) / |P − C_b|`. Used by
+    /// line–arc sketch fillets (serde-additive).
     TangentArcs { a: EntityId, b: EntityId },
     /// Two arcs/circles have equal radii (arc radius = |start − centre|);
     /// 1 equation, no dimension.
@@ -205,11 +205,11 @@ pub enum Constraint {
     /// supporting circle; the arc's angular range is not enforced). 1 equation
     /// (mm): circle `|p − c| − r`, arc `|p − c| − |start − c|`. The point may not
     /// be the centre, nor an arc's own start/end (they lie on it by definition).
-    /// Added in run 4 (serde-additive: older sketches never contain it).
+    /// Serde-additive: older sketches never contain it.
     PointOnCircle { point: PointId, circle: EntityId },
     /// The `copy` curves are the `source` loop offset by `dim.value` mm (see
     /// [`offset`] and [`Sketch::offset_loop`]): two equations per copy vertex,
-    /// one for a copy circle. `pairs` are in loop order. Added in run 4
+    /// one for a copy circle. `pairs` are in loop order
     /// (serde-additive).
     Offset {
         pairs: Vec<OffsetPair>,
@@ -225,7 +225,7 @@ pub enum Constraint {
         b: EntityId,
         dim: Dimension,
     },
-    /// Linear sketch pattern copy (run 6, [`pattern`]): `to − from = k (b − a)`,
+    /// Linear sketch pattern copy ([`pattern`]): `to − from = k (b − a)`,
     /// the step vector being the (construction) line `a -> b`. 2 equations, or 1
     /// (only coordinate `axis`, 0 = x, 1 = y) for the one point of a copied arc
     /// whose second equation would duplicate the arc's implied radius equation.
@@ -238,7 +238,7 @@ pub enum Constraint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis: Option<u8>,
     },
-    /// Circular sketch pattern copy (run 6): `to = c + R(k θ) (from − c)`, θ =
+    /// Circular sketch pattern copy: `to = c + R(k θ) (from − c)`, θ =
     /// `dim.value` degrees counter-clockwise (0 < θ < 360). 2 equations, or 1
     /// (`axis`) as for [`Constraint::PatternStep`].
     PatternRotate {
@@ -367,10 +367,10 @@ pub enum SketchError {
     #[error("degenerate arc: {0}")]
     DegenerateArc(String),
     /// Sketch text: the requested font is not installed or cannot be read
-    /// (run 6). Stored text keeps its outlines; only re-resolving needs it.
+    /// Stored text keeps its outlines; only re-resolving needs it.
     #[error("font not found: {0}")]
     FontNotFound(String),
-    /// Sketch text: invalid string/height or an unusable font (run 6).
+    /// Sketch text: invalid string/height or an unusable font.
     #[error("text: {0}")]
     Text(String),
 }
@@ -394,7 +394,7 @@ pub struct Sketch {
     /// Only raised by [`Sketch::remove_entity`]; absent (0) otherwise.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retired_entity_ids: u32,
-    /// Text items (run 6, [`text`]): their glyph outlines are profile loops.
+    /// Text items ([`text`]): their glyph outlines are profile loops.
     /// Absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub texts: Vec<SketchText>,

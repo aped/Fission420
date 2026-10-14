@@ -1,5 +1,5 @@
-//! Run 7 surfaces and open-shell repair through the command API
-//! (docs/SURFACES.md; acceptance project 7). STEP fixtures were made by
+//! Surfaces and open-shell repair through the command API
+//! (docs/SURFACES.md). STEP fixtures were made by
 //! FreeCAD (tools/fixtures/step/open_shells.py); expected values are closed
 //! form: the open box is [0,40]×[0,30]×[0,20] without its top (V = 24000).
 mod support;
@@ -208,7 +208,7 @@ fn thicken_plate_and_half_tube_with_collapse_refusal() {
     );
 }
 
-/// Review #25: with one solid and one surface body, a cut without a target
+/// With one solid and one surface body, a cut without a target
 /// goes to the solid (surface bodies are not default targets).
 #[test]
 fn surface_bodies_are_not_default_targets() {
@@ -245,7 +245,7 @@ fn surface_bodies_are_not_default_targets() {
     assert!((v - (1000.0 - PI * 4.0 * 10.0)).abs() < 1e-6, "{v}");
 }
 
-/// Review #16: with a component active, the flat-pattern display body joins
+/// With a component active, the flat-pattern display body joins
 /// no component and a stitch/fill output replaces its source only when the
 /// source is in a component (here: none, so they stay loose).
 #[test]
@@ -394,7 +394,7 @@ fn surfaces_from_sketches() {
     assert!((volume(&t, 2).unwrap() - 12000.0).abs() < 1e-6);
 }
 
-/// Review run 7 #43: an open chain's ruled surface faces the same way
+/// An open chain's ruled surface faces the same way
 /// however its lines were drawn (entity order and line directions), so a
 /// downstream thicken stays on its side; `reverse` moves the surface below
 /// the sketch plane without flipping it. Convention (docs/SURFACES.md): the

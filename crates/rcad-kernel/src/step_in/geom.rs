@@ -24,7 +24,7 @@ pub(super) struct Geo<'a> {
     pub k: f64,
     /// File plane-angle unit -> rad.
     pub angle: f64,
-    /// Run 7: read SURFACE_OF_REVOLUTION with the opposite normal (the
+    /// Read SURFACE_OF_REVOLUTION with the opposite normal (the
     /// writers' conventions differ; see `build_checked` in mod.rs).
     pub invert_revolution: bool,
 }
@@ -418,7 +418,7 @@ impl Geo<'_> {
 
     /// SURFACE_OF_REVOLUTION('', swept_curve, AXIS1_PLACEMENT): the swept
     /// curve (LINE or B-spline, full parametrisation) revolved about the axis.
-    /// Run 7: R-CAD's writer (truck-stepio) uses it for every revolved
+    /// R-CAD's writer (truck-stepio) uses it for every revolved
     /// surface, so embedded copies of imported cylinders, cones, spheres and
     /// tori must read back. STEP's normal of a surface of revolution is
     /// d(rotation) x d(curve) (ISO 10303-42: u = angle, v = curve), the

@@ -1,4 +1,4 @@
-//! Exact edge fillet (run 5). Expected removed volume (t·r − (π − θ)·r²/2)·L
+//! Exact edge fillet. Expected removed volume (t·r − (π − θ)·r²/2)·L
 //! with t = r·cot(θ/2); cylinder radius and axis from the B-rep surfaces;
 //! tangency and section shape from point probes on the result's winding
 //! number (a non-tangent cut, e.g. a chamfer, fails the near-tangent probes).
@@ -200,7 +200,7 @@ fn fillet_refusals() {
         origin: [0.0, 0.0, 5.0],
         ..Frame::XY
     };
-    // Concave (run 6): the corner region is added, (r² − πr²/4)·length.
+    // Concave: the corner region is added, (r² − πr²/4)·length.
     let filled = fillet_edge(&l, &wall, &step, 1.0).unwrap();
     let want = volume(&l) + (1.0 - std::f64::consts::PI / 4.0) * 20.0;
     assert!((volume(&filled) - want).abs() < 1e-6, "{}", volume(&filled));

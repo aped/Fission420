@@ -5,7 +5,7 @@
 # given verification script run inside it. Feature work continues in the main checkout
 # meanwhile; heavy steps still go through tools/heavy.sh slots.
 # Usage (repository root): tools/verify_at.sh <commit> <out-dir> <script> [args...]
-#   e.g. tools/verify_at.sh HEAD artifacts/final tools/run5_final_verify.sh
+#   e.g. tools/verify_at.sh HEAD artifacts/verify tools/release.sh
 # The script receives <out-dir> (absolute) as its first argument.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")" && pwd)"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Print-export validation of the REAL printable examples (rcad_commands::printables):
 # enclosure baseline + variant (base + lid), clearance coupon (plate + peg), mounting bracket,
-# organizer tray baseline / variant 1 / finished (run 5).
+# organizer tray baseline / variant 1 / finished.
 #   1. crates/rcad-commands/tests/print_examples.rs (ignored test) replays the example workflows
 #      and writes placed per-body STLs, multi-object 3MFs, one STEP per body, and analytic
 #      expectations (spec.json for the mesh checker, step_expected.json for FreeCAD);
@@ -11,13 +11,13 @@
 #   4. Bambu Studio 2.8.2.61 headless slices (P1S 0.4 / 0.20mm Standard / Generic PLA) with
 #      toolpath probes (tools/print/probes/*.json).
 # Usage (repository root): tools/print/validate_examples.sh [outdir]
-#   default outdir artifacts/run4/print/examples; logs <outdir>/*.log, summary <outdir>/SUMMARY.txt.
+#   default outdir artifacts/print/examples; logs <outdir>/*.log, summary <outdir>/SUMMARY.txt.
 # All cargo, FreeCAD and slicer runs go through tools/heavy.sh; cargo uses
 # CARGO_TARGET_DIR (default <main checkout>/target-print).
 # Exit 1 if any step fails (every step still runs).
 set -uo pipefail
 ROOT=$(pwd)
-OUT=${1:-artifacts/run4/print/examples}
+OUT=${1:-artifacts/print/examples}
 mkdir -p "$OUT"
 OUT=$(readlink -f "$OUT")
 EXP=$OUT/out

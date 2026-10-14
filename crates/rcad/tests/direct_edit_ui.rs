@@ -1,5 +1,5 @@
 //! Direct editing of an imported STEP body through the real widgets
-//! (egui_kittest, run 6): pick the top face → "Offset face…", pick the
+//! (egui_kittest): pick the top face → "Offset face…", pick the
 //! through-hole wall → "Resize hole…", pick the blind-hole wall → "Remove
 //! hole", undo. Fixture and analytic values as in
 //! crates/rcad-commands/tests/direct_edit.rs.

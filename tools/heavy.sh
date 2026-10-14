@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Run a heavy job (cargo build/test/clippy, FreeCAD or slicer validation) under a
-# machine-wide limit shared by the coordinator and workers (the run specification's
-# resource budget). Up to HEAVY_SLOTS (default 2) jobs run at once; a job takes a second
-# or later slot only while MemAvailable is at least HEAVY_MIN_FREE_GB (default 8),
-# otherwise it waits for slot 0 (one heavy job at a time, as before).
+# machine-wide limit shared by every checkout and worktree of this repository. Up to
+# HEAVY_SLOTS (default 2) jobs run at once; a job takes a second or later slot only
+# while MemAvailable is at least HEAVY_MIN_FREE_GB (default 8), otherwise it waits for
+# slot 0 (one heavy job at a time).
 # Usage: tools/heavy.sh cargo test -p rcad-document --release
 # Builds use 4 jobs and the shared disk-backed target dir unless CARGO_TARGET_DIR is set
 # (each worktree should set its own; cargo locks a target dir itself, so two jobs on one

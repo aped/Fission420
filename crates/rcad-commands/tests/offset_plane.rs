@@ -1,4 +1,4 @@
-//! Offset construction planes (SESSION_4 §7 item 6): a sketch on a world plane
+//! Offset construction planes: a sketch on a world plane
 //! or a face moved along its normal, with a bindable "plane_offset" parameter;
 //! deterministic regeneration, BrokenReference for a missing base face,
 //! save/reopen, JSON shape. Bounds are analytic.

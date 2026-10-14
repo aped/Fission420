@@ -1,4 +1,4 @@
-//! Run 7 nested assemblies (docs/ASSEMBLIES.md): sub-assembly components,
+//! Nested assemblies (docs/ASSEMBLIES.md): sub-assembly components,
 //! instance paths, world = composition along the path, cyclic containment
 //! refused, structured / flattened BOM with reuse and suppression, mass
 //! aggregated through nesting, joints inside a sub-assembly, active-component
@@ -960,12 +960,12 @@ fn joint_axis_redefinition_keeps_the_pose() {
     assert!(near3(p(&s), [0.0, 20.0, 0.0], 1e-12));
 }
 
-/// Review run 7 fixes: configuration exclusions of deleted occurrences, an
+/// Regressions: configuration exclusions of deleted occurrences, an
 /// interference request naming an occurrence without instances, an empty
 /// nested sub-assembly in the hierarchical export, alignment to a joint
 /// descendant, surplus joint values, and add_derived_body semantics.
 #[test]
-fn review_fixes_for_assemblies() {
+fn assembly_edge_case_regressions() {
     let mut f = fixture();
     let s = &mut f.s;
     // #6: a configuration excluding Module#2; deleting it drops the id.
@@ -1204,7 +1204,7 @@ fn bom_csv_export() {
         tl[0],
         "item,level,name,part_number,quantity,assembly,material"
     );
-    // Item numbers are quoted text (review run 7 #39: "1.10" is not 1.1).
+    // Item numbers are quoted text ("1.10" is not 1.1).
     assert_eq!(tl[1], "\"1\",0,Module,MOD-1,2,true,—");
     assert!(tl[3].starts_with("\"1.2\",1,Bolt,"), "{}", tl[3]);
     assert_eq!(tl.len(), 4);

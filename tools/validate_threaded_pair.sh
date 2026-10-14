@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run-6 acceptance 5 (threaded pair): rod and nut (stated 60° V test profile, Ø20 x 2,
+# Threaded pair acceptance: rod and nut (stated 60° V test profile, Ø20 x 2,
 # length 12, 0.1 mm radial clearance; ADR 0011, faceted, labelled) through the CLI, then:
 #   1. FreeCAD: rod and nut valid single solids at our volumes; rod ∩ nut empty in the
 #      designed mating placement, control clash when the nut is moved half a pitch

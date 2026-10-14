@@ -1,5 +1,5 @@
-//! Body material and mass properties through the real widgets (egui_kittest,
-//! run 6): pick a catalog material, then a custom density, in the body
+//! Body material and mass properties through the real widgets (egui_kittest):
+//! pick a catalog material, then a custom density, in the body
 //! inspector, and read the mass properties back. Expected values are closed-form
 //! (20 × 30 × 40 mm box: 24 cm³; 1.24 g/cm³ → 29.76 g; 1.2 g/cm³ → 28.8 g).
 use std::time::{Duration, Instant};

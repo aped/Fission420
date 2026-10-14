@@ -1,4 +1,4 @@
-# Surfaces and open-shell repair (run 7, bounded subset)
+# Surfaces and open-shell repair (bounded subset)
 
 Exact B-rep surfaces (Truck faces with their exact planes, cylinders, NURBS) held as **surface
 bodies**: bodies whose shells are open. A surface body is never reported as a solid:

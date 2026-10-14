@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate the run-7 surface/open-shell STEP fixtures in
+# Regenerate the surface/open-shell STEP fixtures in
 # crates/rcad-kernel/tests/fixtures/step/ (open_box_mm, loose_faces_mm, gap_box_mm,
 # plate_mm, half_tube_mm) with the FreeCAD flatpak (made with 1.1.4 / OCC 7.8.1).
 # usage: tools/heavy.sh tools/fixtures/step/open_shells.sh

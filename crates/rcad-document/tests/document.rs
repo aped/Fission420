@@ -217,7 +217,7 @@ fn save_load_round_trip_and_corrupt_inputs() {
     save_file(&p, m.document(), Some(m.evaluation())).unwrap();
     let nf = load_file(&p).unwrap();
     assert_eq!(&nf.document, m.document());
-    assert_eq!(nf.version, 4, "no run-5 feature: written as v4");
+    assert_eq!(nf.version, 4, "no v5 feature: written as v4");
     assert!(FORMAT_VERSION >= nf.version);
     let m2 = Model::from_document(nf.document).unwrap();
     assert_eq!(volume(&m2), volume(&m));
@@ -271,7 +271,7 @@ fn save_load_round_trip_and_corrupt_inputs() {
 
 #[test]
 fn second_extrusion_creates_a_second_body() {
-    // Run 2 refused a second base extrusion; with bodies (ADR 0003) it is a new body.
+    // With bodies (ADR 0003) a second base extrusion is a new body.
     let (mut m, [s1, ..]) = plate(80.0, 50.0, 10.0, 10.0, FaceRole::ExtrudeEndCap);
     m.transact("e2", |d| Ok(d.push_extrude("E2", s1, 5.0)))
         .unwrap();
@@ -332,7 +332,7 @@ fn doc_with_cut(
 }
 
 #[test]
-fn review_start_cap_containment_uses_host_frame() {
+fn start_cap_containment_uses_host_frame() {
     // Plate y in [-5, 15]. Start-cap frame has y flipped: local (0, 4) is world (0, -4).
     let rect = || anchored(Sketch::centered_rectangle(40.0, 20.0).unwrap(), 0.0, 5.0);
     let start = |e| {
@@ -362,7 +362,7 @@ fn review_start_cap_containment_uses_host_frame() {
 }
 
 #[test]
-fn review_world_xy_cut_is_also_contained() {
+fn world_xy_cut_is_also_contained() {
     let xy = |_| SketchPlane::WorldXY;
     let notch = doc_with_cut(
         Sketch::centered_rectangle(40.0, 20.0).unwrap(),
@@ -388,7 +388,7 @@ fn review_world_xy_cut_is_also_contained() {
 }
 
 #[test]
-fn review_feature_id_space_does_not_wrap() {
+fn feature_id_space_does_not_wrap() {
     let mut d = Document::new();
     d.next_id = u32::MAX - 1;
     let sk = || FeatureKind::Sketch {

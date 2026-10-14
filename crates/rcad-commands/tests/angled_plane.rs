@@ -1,4 +1,4 @@
-//! Angled construction planes (SESSION_5 §9 item 2): `SketchPlane::Offset`
+//! Angled construction planes: `SketchPlane::Offset`
 //! with `angle` tilts the base about its local X axis through its origin
 //! before the offset. Bounds are analytic; the angle is a bindable parameter
 //! (`plane_angle_deg`); out-of-range values are refused unchanged; the file is

@@ -48,7 +48,7 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
         // start varies between runs like everything keyed by pointer ids.
         let solid = canonical_wires(&body.solid);
         let solid = solid.as_ref().unwrap_or(&body.solid);
-        // Run 7: an open surface body cannot go through `Solid` triangulation
+        // An open surface body cannot go through `Solid` triangulation
         // (Truck rebuilds a closed solid and panics); mesh its shells instead.
         // Face order is the same (the solid's faces are its shells' in order).
         let open = body.is_open_shell();

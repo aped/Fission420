@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run-8 §6 performance qualification fixtures (run 7 pull-forward).
+"""Performance qualification fixtures.
 
 Generates three command workflows, runs each in a fresh release `rcad-cli`
 process under GNU time (peak RSS), and writes a Markdown table with the

@@ -1,4 +1,4 @@
-//! Mesh repair commands (run 7, Run-8 pull-forward ME01; docs/MESH.md):
+//! Mesh repair commands (docs/MESH.md):
 //! `repair_mesh` previews (report only, nothing changes) or applies a bounded
 //! repair of a mesh body as a new body (`FeatureKind::MeshRepair`, one undo
 //! step); the source body is kept (optionally hidden).
@@ -60,7 +60,7 @@ impl Session {
                     "another body is already named '{n}'"
                 )));
             }
-            // Review run 7 #16: the repaired copy takes the source's place in
+            // The repaired copy takes the source's place in
             // its component (if any), never joins the active one by accident.
             let body = d.add_derived_body(n, a.body);
             if a.hide_source {

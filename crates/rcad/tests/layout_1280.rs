@@ -1,7 +1,7 @@
-//! Layout guards at 1280 × 800 (run 7; the run-6 tray regression class: a
+//! Layout guards at 1280 × 800 (the tray regression class: a
 //! wrapping bar moved the viewport under scripted clicks). The main toolbar
 //! stays within two rows, and the viewport keeps a usable width and position
-//! with the run-7 browser sections expanded (configuration table, drawings
+//! with the larger browser sections expanded (configuration table, drawings
 //! with the dimension editor) and a mesh body's repair panel in the inspector.
 //! It caught the import feature's header ("Import1 (import_mesh)" + Rename… +
 //! Delete) widening the inspector by 26 px; headers now wrap.
@@ -71,7 +71,7 @@ fn toolbar_rows_and_viewport_at_1280() {
         rows.len()
     );
     let (x0, w0) = viewport(&h);
-    // Open the drawing-set example and expand the run-7 sections.
+    // Open the drawing-set example and expand its browser sections.
     h.state_mut().request(Command::Open {
         path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/drawing_set.rcad.json"),
@@ -91,7 +91,7 @@ fn toolbar_rows_and_viewport_at_1280() {
         "viewport moved: {x0},{w0} -> {x1},{w1}"
     );
     assert!(w1 >= 600.0, "viewport too narrow: {w1}");
-    // Selecting a B-rep body keeps the viewport (checked run 7).
+    // Selecting a B-rep body keeps the viewport.
     h.state_mut().select_body(Some(rcad_document::BodyId(1)));
     settle(&mut h);
     assert!(

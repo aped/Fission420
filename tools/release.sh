@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux x86_64 release candidate (Run-8 §6 pull-forward): build rcad + rcad-cli from a
+# Linux x86_64 release candidate: build rcad + rcad-cli from a
 # clean tree with the git revision embedded (RCAD_GIT_REV -> `--version`), stage binaries,
 # licenses, third-party license list (from `cargo metadata`), user docs and examples, run
 # smoke tests from the staged package, and write SHA-256 checksums. Nothing is uploaded,

@@ -1,4 +1,4 @@
-//! Browser "Components" section through the real widgets (egui_kittest, run 6):
+//! Browser "Components" section through the real widgets (egui_kittest):
 //! create a component from the selected body, add and move an occurrence, ground,
 //! BOM, interference, a joint value within/outside its limits; plus the display
 //! scene drawing one placed copy per occurrence.
@@ -89,7 +89,7 @@ fn components_section_create_move_ground_bom_interference_joint() {
     click(&mut h, "Add occurrence of Block");
     assert_eq!(h.state().summary().assembly.occurrences.len(), 2);
     // Move Block#2 numerically so it overlaps Block#1 by 10 × 27 × 35
-    // (run 7: select the tree row, then its actions).
+    // (select the tree row, then its actions).
     click(&mut h, "Occurrence Block#2");
     click(&mut h, "Move Block#2");
     type_into(&mut h, "X (mm)", "10");

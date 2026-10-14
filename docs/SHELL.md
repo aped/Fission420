@@ -1,6 +1,6 @@
 # Shell (scoped)
 
-Status: run 4. A **scoped** shell, not a general one: it hollows one kind of body (a New Body
+A **scoped** shell, not a general one: it hollows one kind of body (a New Body
 extrusion of a single closed profile) into walls and a floor of one thickness, open at one cap.
 It is the enclosure-base shortcut done honestly, with the limits below stated and enforced.
 

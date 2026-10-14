@@ -1,4 +1,4 @@
-//! Run-6 extrusion options (SESSION_6 §B, acceptance project 7): symmetric,
+//! Extrusion options: symmetric,
 //! two sides, start offset, up to a plane (following that plane upstream),
 //! thin walls, taper, Intersect, several regions in one feature; undo/redo,
 //! save/reopen as format v6 and refusal of v6 content in an older-labelled
@@ -439,7 +439,7 @@ fn options_save_as_v6_and_older_labels_are_refused() {
     tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert!((vol(&t, 1) - 2000.0).abs() < 1e-6);
-    // The same content labelled v5 is refused (a run-5 build would ignore
+    // The same content labelled v5 is refused (a v5 reader would ignore
     // the options and build a different solid).
     v["version"] = json!(5);
     let old = dir.path().join("o5.rcad.json");

@@ -5,7 +5,7 @@ implemented; listing them here is not a claim of support. Ordered roughly by val
 
 ## Modeling
 - Booleans with tools that have inner loops (Join/Cut of a region with holes). Truck 0.6
-  `shapeops` fails for such tools (measured run 3); options: upstream fix, or decompose into
+  `shapeops` fails for such tools (measured); options: upstream fix, or decompose into
   per-loop operations where that is provably equivalent.
 - Region picking inside a sketch (choose which closed region(s) to extrude; islands inside holes;
   several outer loops in one feature producing several bodies).

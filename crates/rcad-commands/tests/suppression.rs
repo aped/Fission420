@@ -1,4 +1,4 @@
-//! Feature suppression (SESSION_5 §9 item 1): a suppressed feature stays in
+//! Feature suppression: a suppressed feature stays in
 //! history and is not evaluated; suppressing a consumed feature is refused
 //! (document unchanged) unless its dependents are suppressed with it; restore
 //! needs the dependencies restored; the result after restore is identical
@@ -86,9 +86,9 @@ fn suppress_restore_with_dependency_rules() {
     assert_eq!(tray::volume(&s2), full);
 }
 
-/// Format: run-5 features make the file v5 (older builds refuse it instead of
+/// Format: v5 features make the file v5 (older readers refuse it instead of
 /// evaluating suppressed features); without them it stays v4, byte-identical
-/// to a run-4 save. A v4-labelled file containing a v5 feature is refused.
+/// to a v4 save. A v4-labelled file containing a v5 feature is refused.
 #[test]
 fn v5_only_when_needed() {
     let t = Tray::BASELINE;
@@ -122,7 +122,7 @@ fn v5_only_when_needed() {
     );
 }
 
-/// Frozen v4 files (examples at 8f2b797, before any run-5 schema change)
+/// Frozen v4 files (examples at 8f2b797, before any v5 schema change)
 /// still load, regenerate to their saved volume, and re-save as v4.
 #[test]
 fn frozen_v4_fixtures_load_unchanged() {
@@ -180,8 +180,8 @@ fn frozen_v4_fixtures_load_unchanged() {
     assert_eq!(n, 5);
 }
 
-/// Review run 5 #8: a pattern of count 1 (divider_count 0) is a run-5 range:
-/// saved as v5 so a run-4 build says "newer version" instead of a misleading
+/// A pattern of count 1 (divider_count 0) is a v5 range:
+/// saved as v5 so a v4 reader says "newer version" instead of a misleading
 /// count error.
 #[test]
 fn count_one_pattern_is_saved_as_v5() {

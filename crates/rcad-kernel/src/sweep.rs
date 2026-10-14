@@ -1,5 +1,5 @@
 //! Exact sweep of a closed planar profile along a planar path of straight
-//! lines and tangent-continuous circular arcs (run 5, SESSION_5 §9.4).
+//! lines and tangent-continuous circular arcs.
 //!
 //! * The path starts at the profile frame's origin with tangent `frame.z`
 //!   (the profile's normal); every segment must leave tangentially.

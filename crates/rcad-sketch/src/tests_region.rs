@@ -131,7 +131,7 @@ fn hole_inside_an_arc_bulge_is_classified_by_the_arc() {
 
 #[test]
 fn hole_touching_an_arc_chord_line_inside_is_accepted() {
-    // Review finding: square whose top is an arc (10,10)->(0,10) via (5,12), and
+    // Square whose top is an arc (10,10)->(0,10) via (5,12), and
     // a hole whose top point (5,10) lies on the arc's chord line. Classifying by
     // chord + segment toggle saw no crossing and refused "2 separate outer loops".
     let mut s = base();
@@ -151,7 +151,7 @@ fn hole_touching_an_arc_chord_line_inside_is_accepted() {
 
 #[test]
 fn loop_under_an_inward_arch_is_refused() {
-    // Review finding: the bottom edge arches up into the part, (0,0)->(10,0) via
+    // The bottom edge arches up into the part, (0,0)->(10,0) via
     // (5,3); the triangle under the arch is outside the part. It was accepted as
     // a hole (its first-edge midpoint (5.5,0) lies on the chord line), which gave
     // a solid with material "subtracted" outside the face.

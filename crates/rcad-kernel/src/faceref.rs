@@ -1,5 +1,5 @@
 //! Telling coplanar faces apart by the footprint of the tool that generated
-//! them (run 5). A semantic face reference first resolves to a plane and an
+//! them. A semantic face reference first resolves to a plane and an
 //! outward normal; when several faces of the body lie in that plane (pattern
 //! occurrences with a common floor, walls continuing each other), the face the
 //! reference means is the one its own tool's footprint overlaps. This is
@@ -10,7 +10,7 @@
 //! exact; curved boundaries are polygonized finely ([`FINE_SAMPLES`] points
 //! per arc or curved edge), and an overlap must exceed the polygonization's
 //! possible sliver: twice the sagitta of that sampling times the perimeter
-//! (review run 5: with the 64-point region sampling the slack reached tens of
+//! (with the 64-point region sampling the slack reached tens of
 //! mm² on large round footprints and could hide a real second face).
 use crate::{Body, Frame, Profile, Result, guarded, tol};
 

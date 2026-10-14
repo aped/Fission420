@@ -149,8 +149,7 @@ fn arc_cover(loops: &[ELoop], circles: &[Circ], k: usize) -> Vec<(f64, f64)> {
 /// `cover`.
 /// Angular half-width (rad) of a near-tangent contact on `c`: a line or
 /// circle within [`TANGENT`] of tangency crosses `c` up to √(2r·TANGENT) from
-/// the foot, so a used arc ending that close may still be crossed (review
-/// run 6 #17).
+/// the foot, so a used arc ending that close may still be crossed.
 fn tangent_slack(c: &Circ) -> f64 {
     (CIRCLE_MATCH + (2.0 * c.r * TANGENT).sqrt()) / c.r
 }
@@ -813,7 +812,7 @@ impl Partition {
 mod tangent_tests {
     use super::*;
 
-    /// Review run 6 #17: a line 5e-7 mm inside tangency of r = 100 crosses the
+    /// A line 5e-7 mm inside tangency of r = 100 crosses the
     /// circle about ±0.01 mm from the foot; an arc ending 5e-3 mm before the
     /// foot is crossed, so the contact must be refused, not ignored.
     #[test]

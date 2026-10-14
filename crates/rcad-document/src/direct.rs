@@ -1,4 +1,4 @@
-//! Direct edits of imported STEP bodies in the document (run 6, ADR 0010).
+//! Direct edits of imported STEP bodies in the document (ADR 0010).
 //!
 //! An imported solid's faces are named by their *import index*: the position
 //! in the solid's face order right after import (deterministic for the same

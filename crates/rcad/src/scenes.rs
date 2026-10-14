@@ -81,7 +81,7 @@ fn import(app: &mut RcadApp, path: PathBuf, unit: usize, partial: bool) {
 }
 
 /// The committed parametric enclosure example.
-/// Run 5: the organizer tray example (committed document).
+/// The organizer tray example (committed document).
 fn tray(finished: bool) -> SceneStep {
     SceneStep::Cmd(Command::Open {
         path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if finished {
@@ -133,7 +133,7 @@ fn two_bodies() -> Vec<SceneStep> {
     ]
 }
 
-/// Run 6: plate 60 x 30 x 3 with a "B8" sketch text (12 mm, centred) on its
+/// Plate 60 x 30 x 3 with a "B8" sketch text (12 mm, centred) on its
 /// top face (sketch F3, not yet extruded).
 fn text_plate() -> Vec<SceneStep> {
     use SceneStep::*;
@@ -178,7 +178,7 @@ impl RcadApp {
                     Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
                 ]
             }
-            // Run 7: mesh repair inspector on the broken-cube STL fixture.
+            // Mesh repair inspector on the broken-cube STL fixture.
             "mesh_repair" => vec![
                 Cmd(Command::NewDocument),
                 Cmd(Command::ImportStl {
@@ -191,7 +191,7 @@ impl RcadApp {
                     a.select_body(Some(BodyId(1)));
                 }),
             ],
-            // Run 6: the rounded labelled enclosure (committed example).
+            // The rounded labelled enclosure (committed example).
             "rounded_enclosure" => vec![
                 Cmd(Command::Open {
                     path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -199,7 +199,7 @@ impl RcadApp {
                 }),
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],
-            // Run 6: sheet-metal U-channel (flange inspector selected).
+            // Sheet-metal U-channel (flange inspector selected).
             "sheet_metal" => {
                 let mut sk = rcad_sketch::Sketch::default();
                 let p: Vec<_> = [[0.0, 22.0], [0.0, 0.0], [64.0, 0.0], [64.0, 22.0]]
@@ -232,7 +232,7 @@ impl RcadApp {
                     }),
                 ]
             }
-            // Run 6: modeled (faceted) thread pair, rod and nut side by side.
+            // Modeled (faceted) thread pair, rod and nut side by side.
             "thread" => {
                 let t = |center: [f64; 2], nut: Option<f64>| Command::Thread {
                     name: None,
@@ -395,7 +395,7 @@ impl RcadApp {
                     });
                 }),
             ],
-            // Run 4: parameters panel and expression-bound dimensions.
+            // Parameters panel and expression-bound dimensions.
             "params" => vec![
                 enclosure(),
                 Ui(|a| {
@@ -404,7 +404,7 @@ impl RcadApp {
                     a.set_view(rcad_viewport::ViewPreset::Iso);
                 }),
             ],
-            // Run 4: exact two-face measurement (lip clearance across bodies).
+            // Exact two-face measurement (lip clearance across bodies).
             "measure" => vec![
                 enclosure(),
                 Ui(|a| {
@@ -418,7 +418,7 @@ impl RcadApp {
                     }
                 }),
             ],
-            // Run 4: an illegal parameter edit, refused with the model unchanged.
+            // An illegal parameter edit, refused with the model unchanged.
             "param_error" => vec![
                 enclosure(),
                 Cmd(Command::SetUserParameter {
@@ -429,7 +429,7 @@ impl RcadApp {
                 }),
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],
-            // Run 4: print export dialog (lid face down, layout, P1S bed).
+            // Print export dialog (lid face down, layout, P1S bed).
             "print_export" => vec![
                 enclosure(),
                 Ui(|a| {
@@ -452,7 +452,7 @@ impl RcadApp {
                     a.dialog = Some(Dialog::Export3mf(form));
                 }),
             ],
-            // Run 4: Hole dialog with a counterbore on the bracket template.
+            // Hole dialog with a counterbore on the bracket template.
             "hole" => vec![
                 Cmd(Command::NewDocument),
                 Ui(|a| {
@@ -487,7 +487,7 @@ impl RcadApp {
                     }
                 }),
             ],
-            // Run 5: tray parameters and the pattern's bound count/spacing.
+            // Tray parameters and the pattern's bound count/spacing.
             "tray_params" => vec![
                 tray(false),
                 Ui(|a| {
@@ -496,7 +496,7 @@ impl RcadApp {
                     a.set_view(rcad_viewport::ViewPreset::Iso);
                 }),
             ],
-            // Run 5: display-only section through the compartments.
+            // Display-only section through the compartments.
             "tray_section" => vec![
                 tray(false),
                 Ui(|a| {
@@ -508,7 +508,7 @@ impl RcadApp {
                     });
                 }),
             ],
-            // Run 5: the floor of the second compartment (a pattern occurrence)
+            // The floor of the second compartment (a pattern occurrence)
             // selected: it can host a sketch (semantic Copy reference).
             "tray_modifier_face" => vec![
                 tray(false),
@@ -529,12 +529,12 @@ impl RcadApp {
                     a.select_face(g);
                 }),
             ],
-            // Run 5: finished variant (finger notch, corner chamfers).
+            // Finished variant (finger notch, corner chamfers).
             "tray_finished" => vec![
                 tray(true),
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],
-            // Run 5: placed 3MF export of the tray for the P1S.
+            // Placed 3MF export of the tray for the P1S.
             "tray_export" => vec![
                 tray(true),
                 Ui(|a| {
@@ -550,8 +550,8 @@ impl RcadApp {
                     a.dialog = Some(Dialog::Export3mf(form));
                 }),
             ],
-            // Run 5: an impossible divider count refused, model unchanged.
-            // Run 6: raised "B8" (each glyph region joined 1 mm; counters stay open).
+            // An impossible divider count refused, model unchanged.
+            // Raised "B8" (each glyph region joined 1 mm; counters stay open).
             "sketch_text" => {
                 let mut v = text_plate();
                 v.push(Ui(|a| {
@@ -583,7 +583,7 @@ impl RcadApp {
                 v.push(Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)));
                 v
             }
-            // Run 6: the sketch editor with the Text tool's dialog on "B8".
+            // The sketch editor with the Text tool's dialog on "B8".
             "sketch_text_edit" => {
                 let mut v = text_plate();
                 v.push(Ui(|a| {

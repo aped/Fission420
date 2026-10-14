@@ -1,4 +1,4 @@
-//! SESSION_3 scenarios C (external STEP -> model -> export) and D (mesh and
+//! Interchange scenarios C (external STEP -> model -> export) and D (mesh and
 //! sketch interchange), headless, through [`Session::execute`] only.
 //!
 //! Inputs are independently generated fixtures (FreeCAD 1.1.4 / OpenCascade

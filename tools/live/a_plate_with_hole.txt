@@ -1,4 +1,4 @@
-# SESSION_2 scenario A through real compositor input (see tools/live_walkthrough.sh)
+# Scenario A through real compositor input (see tools/live_walkthrough.sh)
 clickw New Sketch on XY
 wait_idle
 key r

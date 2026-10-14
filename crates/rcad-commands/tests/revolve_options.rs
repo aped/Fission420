@@ -1,5 +1,5 @@
-//! Revolve axis and direction (run 6, SESSION_6 §B / coverage SO02):
-//! about the sketch Y axis (runs 1-5), the sketch X axis, a sketch line, a
+//! Revolve axis and direction:
+//! about the sketch Y axis (the default), the sketch X axis, a sketch line, a
 //! profile on the negative side, partial angles in both directions; the axis
 //! line follows sketch edits; a profile crossing the axis is refused;
 //! save/reopen (format v6). Volumes by Pappus (area × 2π × centroid radius).
@@ -88,7 +88,7 @@ fn axes_sides_and_partial_angles() {
             && (b.max[1] - 15.0).abs() < 1e-6
             && (b.max[2] - 15.0).abs() < 1e-6
     );
-    // About Y with the profile on the negative side (refused before run 6).
+    // About Y with the profile on the negative side.
     let mut s = fresh();
     let r = revolve(
         &mut s,
@@ -106,8 +106,8 @@ fn axes_sides_and_partial_angles() {
     let r = revolve(&mut s, sk, 360.0, RevolveAxis::Line(axis_line), false);
     assert!(r.ok, "{:?}", r.error);
     assert!((tray::volume(&s) - PI * (625.0 - 225.0) * 30.0).abs() < 1e-6);
-    // Quarter turn about Y, both directions: the default leaves toward −Z
-    // (the run-1 sense), reverse toward +Z.
+    // Quarter turn about Y, both directions: the default leaves toward −Z,
+    // reverse toward +Z.
     for (rev, z) in [(false, -1.0), (true, 1.0)] {
         let mut s = fresh();
         let r = revolve(
@@ -182,7 +182,7 @@ fn revolve_op(s: &mut Session, sketch: Sketch, op: &str) -> rcad_commands::Respo
 #[test]
 fn revolve_cut_is_exact_or_refused_unchanged() {
     // Known limit (Truck 0.6): revolved Join/Cut tools fail in Truck for the
-    // cases tried in run 6 (a coaxial groove on a cylinder on four seam
+    // cases tried (a coaxial groove on a cylinder on four seam
     // angles; a ring groove in a block: Truck panics). Whatever Truck does,
     // the result is either exact (independent membership check) or refused
     // with nothing changed.

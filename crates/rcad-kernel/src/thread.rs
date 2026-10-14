@@ -1,4 +1,4 @@
-//! Modeled screw threads as real solid geometry (run 6, ADR 0011): a threaded
+//! Modeled screw threads as real solid geometry (ADR 0011): a threaded
 //! rod (external thread) and a square nut (internal thread), **faceted** with a
 //! declared chord tolerance (the helicoid flanks are not rational surfaces;
 //! Truck has no exact helical sweep). Every face is an exact plane through

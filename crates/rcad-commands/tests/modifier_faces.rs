@@ -1,4 +1,4 @@
-//! Sketches on faces made by patterns, mirrors and chamfers (SESSION_5 §5):
+//! Sketches on faces made by patterns, mirrors and chamfers:
 //! semantic references `FaceRole::Copy { instance, tool, of }` and
 //! `FaceRole::Chamfer`; coplanar faces told apart by the generating tool's
 //! footprint (never by index or nearest centroid); occurrence identity across
@@ -293,7 +293,7 @@ fn count_one_is_the_seed_only() {
     tray::assert_occupancy(&s, &t, false);
 }
 
-/// Review run 5 #2: when an occurrence's floor is cut away the plane may
+/// When an occurrence's floor is cut away the plane may
 /// still hold one face (the seed's floor); the occurrence reference must not
 /// attach to it.
 #[test]
@@ -344,7 +344,7 @@ fn occurrence_reference_never_attaches_to_another_occurrences_face() {
     );
 }
 
-/// Review run 5 #5: a chamfer between faces sharing their plane with other
+/// A chamfer between faces sharing their plane with other
 /// faces (pattern occurrences) is refused up front with the reason.
 #[test]
 fn chamfer_between_shared_plane_faces_is_refused() {

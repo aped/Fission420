@@ -10,11 +10,11 @@
 #   filament: Generic PLA                (compatible_printers includes "Bambu Lab P1S 0.4 nozzle")
 # Override with env MACHINE_JSON / PROCESS_JSON / FILAMENT_JSON (vendor file names or paths).
 #
-# CLI flags used (all from `bambu-studio --help`, see artifacts/run4/print/slicer/bambu_help.txt):
+# CLI flags used (all from `bambu-studio --help`, see artifacts/print/slicer/bambu_help.txt):
 #   --datadir <outdir>/datadir  isolated settings dir: the user's real Bambu config is never read/written
 #   --slice 0 --orient 0 --arrange ${ARRANGE:-0} --load-settings --load-filaments --outputdir --export-3mf
 # --orient 0: never auto-orient (keep our export orientation).
-# --arrange 0 (default): no re-arrange. See artifacts/run4/print/slicer/profiles.md for what the
+# --arrange 0 (default): no re-arrange. See artifacts/print/slicer/profiles.md for what the
 # CLI does with positions (STL vs 3MF).
 #
 # Outputs in <outdir>: slice.log (version, profile paths + inheritance chains, command line, exit

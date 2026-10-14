@@ -1,4 +1,4 @@
-//! SESSION_2 acceptance scenarios A, B and C driven through the real UI code:
+//! Sketch-to-solid scenarios A, B and C driven through the real UI code:
 //! toolbar/inspector widgets by label (AccessKit) and real egui pointer and
 //! keyboard events over the 3D view rect. Without wgpu the app uses its
 //! fallback camera with the real view rect, so pointer → ray → sketch-plane
@@ -19,7 +19,7 @@ use rcad::{ExecMode, Guarded, RcadApp};
 use rcad_document::{FaceRole, SketchPlane};
 use rcad_sketch::SolveStatus;
 
-/// Volume tolerance: max(1e-3, V × 1e-7) analytic target (GOAL.md) relaxed to the
+/// Volume tolerance: max(1e-3, V × 1e-7) analytic target relaxed to the
 /// repository's UI-test tolerance for the boundary-integral estimate.
 const VOL_TOL: f64 = 0.005;
 
@@ -809,7 +809,7 @@ fn blind_pocket_through_cut_dialog() {
     assert!(owned.iter().all(|f| f.reference.is_none()));
 }
 
-/// Template sketches (run 1 dialogs / old files) open in the same editor; a
+/// Template sketches (template dialogs / old files) open in the same editor; a
 /// dimension edited there keeps the template's parameters and references.
 #[test]
 fn template_sketch_is_editable_in_the_sketch_editor() {

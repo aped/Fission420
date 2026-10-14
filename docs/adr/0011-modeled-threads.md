@@ -1,11 +1,11 @@
 # ADR 0011: Modeled threads as faceted solid geometry
 
-Status: accepted (run 6, 2026-10-13).
+Status: accepted (2026-10-13).
 
 ## Context
 
-SESSION_6 asks for modeled external and internal threads as real solid geometry (not a
-cosmetic texture), for a stated nonproprietary test profile: 60° symmetric V, nominal
+The requirement is modeled external and internal threads as real solid geometry (not a
+cosmetic texture), for a nonproprietary test profile: 60° symmetric V, nominal
 Ø20, pitch 2, length 12, handedness, lead-in/runout, clearance; exact, or faceted with a
 declared chord tolerance and clearly labelled.
 
@@ -14,7 +14,7 @@ Exact options considered:
 * A helicoid (thread flank) is not a rational surface, so it has no exact NURBS form;
   Truck 0.6 has no helical sweep primitive. Any NURBS helicoid is itself an approximation.
 * Building the thread as a boolean of a helical tool with a cylinder: Truck 0.6 booleans
-  fail on revolved cones (run-4 spike) and on many-faced coplanar-heavy tools; a thread
+  fail on revolved cones (observed in a spike) and on many-faced coplanar-heavy tools; a thread
   cut by boolean would need thousands of intersection curves. Not viable.
 
 ## Decision

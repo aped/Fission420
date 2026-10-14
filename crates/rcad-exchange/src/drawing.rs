@@ -1,4 +1,4 @@
-//! 2-D drawing sheets (run 6, docs/DRAWINGS.md): a neutral list of plotted
+//! 2-D drawing sheets (docs/DRAWINGS.md): a neutral list of plotted
 //! primitives in sheet millimetres and its SVG writer. The PDF writer is
 //! [`crate::pdf`]. Projection, hidden lines and dimensions are computed by
 //! `rcad_document::drawing`; this module only writes what it is given.

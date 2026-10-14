@@ -1,4 +1,4 @@
-# Run 4: create the parametric enclosure from Templates, change the wall in the
+# Create the parametric enclosure from Templates, change the wall in the
 # Parameters panel, and export placed separate STL files (base on its floor,
 # lid as modelled) -- real pointer/keyboard input.
 key ctrl+n

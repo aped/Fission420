@@ -1,4 +1,4 @@
-//! Direct editing of B-rep bodies without feature history (run 6, ADR 0010):
+//! Direct editing of B-rep bodies without feature history (ADR 0010):
 //! offset a planar face, resize or remove a cylindrical hole or boss. Meant for
 //! imported (STEP) bodies, but it works on any single-shell body.
 //!

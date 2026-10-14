@@ -57,7 +57,7 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 | **Inspection** | Exact face measurements (distances, angles, radii, axes), per-body volume, materials and mass properties (mass, centre of mass, inertia), bounds and topology, section view |
 | **Print export** | STL / 3MF with chord control, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.rcad.json` (v6; v4/v5 written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
+| **Native format** | Versioned `.rcad.json` (v7; v4 to v6 written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
 
 ## Screenshots
 

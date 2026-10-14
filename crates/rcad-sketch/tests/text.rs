@@ -1,4 +1,4 @@
-//! Sketch text (run 6, SK04): glyph outlines from an installed font become
+//! Sketch text: glyph outlines from an installed font become
 //! profile loops with counters as holes. Oracles: the font's own glyph boxes
 //! read directly with ttf-parser, the exact Bézier curves, rectangle areas.
 //!

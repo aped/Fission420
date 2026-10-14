@@ -1,4 +1,4 @@
-//! SKETCH corner fillet: round the corner where two lines (or, since run 5, a
+//! SKETCH corner fillet: round the corner where two lines (or a
 //! line and an arc; see `fillet_line_arc`) share a point with
 //! a tangent arc of a given radius (2D sketch geometry only; solid-edge
 //! fillets are not available — Truck 0.6 has no fillet operation).
@@ -234,7 +234,7 @@ impl Sketch {
         })
     }
 
-    /// Line–arc corner (run 5). Corner `P` shared by line `P–A` and an arc
+    /// Line–arc corner. Corner `P` shared by line `P–A` and an arc
     /// (centre `O`, radius `R`). With `u` the unit direction `P→A` and `v` the
     /// arc's unit tangent at `P` pointing along the arc, the fillet lies in
     /// the corner between them: its centre `F` is on the line offset by `r`
@@ -306,7 +306,7 @@ impl Sketch {
         };
         // Interior of the corner: inside or outside the arc's circle? Moving
         // from P along the bisector u + v changes |q − O| at the rate
-        // (u + v)·r̂ = u·r̂ (v ⟂ r̂): exact to first order (review run 5).
+        // (u + v)·r̂ = u·r̂ (v ⟂ r̂): exact to first order.
         let inside = dot(u, rv) < 0.0;
         let d = if inside {
             if radius >= big_r - tol {
@@ -389,7 +389,7 @@ impl Sketch {
         // Fillet arc: the one through the corner side (towards P), counter-
         // clockwise from start to end. Decided by angles, not by the sign of
         // (T1 − F) × (T2 − F), which vanishes at the largest radius that fits
-        // (half circle; review run 5).
+        // (half circle).
         let ang_f = |x: [f64; 2]| (x[1] - f[1]).atan2(x[0] - f[0]);
         let tau = std::f64::consts::TAU;
         let sweep12 = (ang_f(t2) - ang_f(t1)).rem_euclid(tau);

@@ -147,7 +147,7 @@ a `CIRCLE` (torus), and the same edge appears twice in the face's loop.
   partial are removed too. That leaves no dangling references and the file
   is valid Part 21. OCC accepts it and silently assumes mm.
 
-## Direct-edit fixture (run 6)
+## Direct-edit fixture
 
 `direct_edit_block_mm.step` is made by `tools/fixtures/step/direct_edit.py`
 (FreeCADCmd 1.1.4, OCC 7.8.1; run `tools/heavy.sh tools/fixtures/step/direct_edit.sh`),
@@ -159,7 +159,7 @@ floor), fused with `makeCylinder(5,6,(45,25,19))` (Ø10 boss, top at z = 25),
 splits each cylinder at its seam). FreeCAD's own re-import: 1 valid solid, volume
 47161.19476149152.
 
-## Surface / open-shell fixtures (run 7)
+## Surface / open-shell fixtures
 
 Made by `tools/fixtures/step/open_shells.py` (FreeCADCmd 1.1.4, OCC 7.8.1; run
 `tools/heavy.sh tools/fixtures/step/open_shells.sh`) from `Part.makeBox(40,30,20)`

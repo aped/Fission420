@@ -1,5 +1,5 @@
-//! Configuration table editor and variant export (run 7, SESSION_7 §3;
-//! docs/CONFIGURATIONS.md). A grid with one column per
+//! Configuration table editor and variant export
+//! (docs/CONFIGURATIONS.md). A grid with one column per
 //! configuration and one row per part number, user parameter, feature
 //! (suppressed?) and component occurrence (included?). Edits stay in a draft
 //! until **Apply table** sends one `set_configuration_table` (one undo step,
@@ -19,7 +19,7 @@ pub struct ConfigTableUi {
     pub draft: Option<(u64, u64, Vec<Configuration>)>,
     /// Whether the draft differs from the document (kept across revisions).
     pub dirty: bool,
-    /// The table sent by the last Apply, until its reply (review round 2 #18).
+    /// The table sent by the last Apply, until its reply.
     pub pending: Option<Vec<Configuration>>,
     pub export_dir: String,
     pub export_stem: String,
@@ -46,7 +46,7 @@ impl Default for ConfigTableUi {
 }
 
 impl ConfigTableUi {
-    /// Review run 7 #18: the draft is replaced only after a successful apply;
+    /// The draft is replaced only after a successful apply;
     /// a refused table keeps the user's cells (and stays "unapplied").
     pub(crate) fn on_reply(&mut self, response: &rcad_commands::Response) {
         if response.command != "set_configuration_table" {

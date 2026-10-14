@@ -40,7 +40,7 @@ for script in "$ROOT"/tools/live/*.txt; do
   pkill -f -- "--shot-dir $dir/shots"
   for _ in $(seq 1 50); do kill -0 "$session" 2>/dev/null || break; sleep 0.1; done
   kill "$session" 2>/dev/null
-  # Run 4: killing the wrapper can orphan its mutter (it then lived on and,
+  # Killing the wrapper can orphan its mutter (it then lived on and,
   # under tools/heavy.sh, kept the build lock); stop it by its private socket.
   sock=$(cat "$dir/wayland" 2>/dev/null)
   [ -n "$sock" ] && pkill -f -- "--wayland-display $sock"

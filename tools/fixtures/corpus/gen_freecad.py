@@ -1,4 +1,4 @@
-# FreeCAD (FreeCADCmd) producer of the run-8 qualification corpus parts and
+# FreeCAD (FreeCADCmd) producer of the qualification corpus parts and
 # assemblies (tools/fixtures/corpus/MANIFEST.md). Writes the files into
 # $RCAD_OUT and prints "RCAD_CORPUS {json}" with FreeCAD's own measurement of
 # each file *read back* (solids, volume, bbox), the independent reference.
@@ -88,7 +88,7 @@ back = Part.read(p("p6_open_shell_mm.step"))
 res["p6_open_shell_mm.step"] = {"solids": len(back.Solids), "faces": len(back.Faces),
                                 "area": round(back.Area, 6)}
 
-# P7-P12 (run 7, second slice): closed-form volumes.
+# P7-P12: closed-form volumes.
 # P7: 40x30x20 block, one vertical edge chamfered 5 mm: 24000 - 12.5*20 = 23750.
 blk = Part.makeBox(40, 30, 20)
 e = [x for x in blk.Edges if abs(x.Vertexes[0].X - 40) < 1e-9 and abs(x.Vertexes[0].Y - 30) < 1e-9

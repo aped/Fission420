@@ -1,5 +1,5 @@
-//! Direct editing of an imported STEP body through the command API (run 6,
-//! ADR 0010). Input: the independent FreeCAD fixture `direct_edit_block_mm.step`
+//! Direct editing of an imported STEP body through the command API
+//! (ADR 0010). Input: the independent FreeCAD fixture `direct_edit_block_mm.step`
 //! (block [0,60]x[0,40]x[0,20], Ø8 through hole at (15,20), Ø6 x 8 blind hole
 //! at (30,12), Ø10 x 5 boss at (45,25); provenance in the fixtures README).
 //! Expected values are analytic.

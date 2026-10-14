@@ -1,6 +1,6 @@
 # ADR 0001 — Geometry kernel: Truck 0.6 (pure Rust B-rep)
 
-Status: accepted (run 1, 2026-10-10)
+Status: accepted (2026-10-10)
 
 ## Decision
 Use the Truck crates from crates.io (Apache-2.0): truck-modeling 0.6.0, truck-shapeops 0.4.0,
@@ -30,7 +30,7 @@ tolerance, which bounds this method's accuracy (~1e-4 mm³ worst case for these 
 Real analytic B-rep with Cylinder surfaces and genuine STEP output via `vcad-kernel`, but: pulls
 `clipper-sys` (C++ via `cc`) through `vcad-kernel-cam` -> violates the pure-Rust kernel policy;
 volume only from f32 tessellation; the `vcad` facade fails to compile with `step` on;
-`difference()` silently degrades to mesh CSG. Rejected for tonight; revisit if Truck blocks.
+`difference()` silently degrades to mesh CSG. Rejected; revisit if Truck blocks.
 
 ## Limitations observed
 - Coplanar boolean faces fail (handled by overshoot for through-all; blind cuts flush with faces would fail).
@@ -49,7 +49,7 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
   49214.6018371 (err 5e-7 mm³) for the 100x50x10 plate (`tools/external_validation.sh`).
   Cylinder faces are exported as rational B-spline surfaces (exact circle representation), not
   CYLINDRICAL_SURFACE.
-  Run 2: the same rebuild (generalised to any plane normal, with stronger verification) now runs
+  The same rebuild (generalised to any plane normal, with stronger verification) now runs
   once after every boolean, so stored bodies carry exact explicit curves; see ADR 0002.
 - No persistent topological naming in Truck; the document layer resolves semantic references
   from feature parameters and validates them against the B-rep (see docs/behavior/plate-workflow.md).

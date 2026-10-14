@@ -1,11 +1,11 @@
-//! Run 7 sheet metal (docs/SHEET_METAL.md): base face + edge flanges, sheet
-//! rule, flat pattern state and DXF. Acceptance project 6 (U-channel) built
+//! Sheet metal (docs/SHEET_METAL.md): base face + edge flanges, sheet
+//! rule, flat pattern state and DXF. The U-channel acceptance project built
 //! as a 60 × 40 base face with two 90° up flanges of length 20 on its 40 mm
 //! edges, t 1, inside radius 2, K 0.4.
 //!
 //! Length convention (stated): a flange's `length` is the straight leg
 //! beyond the bend, from the bend's tangent line to the flange end — the
-//! "between tangent points" convention of SESSION_7 acceptance 6. So the
+//! "between tangent points" convention of the U-channel project. So the
 //! channel's straights are 60 + 20 + 20 and its neutral-axis flat length is
 //! 100 + 2·(π/2)·(2 + 0.4·1) = 107.539822 mm (closed form here; the DXF is
 //! parsed independently below and checked by FreeCAD in
@@ -583,7 +583,7 @@ fn open_hem_folds_back_over_the_plate() {
     assert!(!r.ok, "colliding hems accepted");
 }
 
-/// Review #5: a flange added after the flat pattern was first shown is in the
+/// A flange added after the flat pattern was first shown is in the
 /// displayed flat body too (it matches the DXF).
 #[test]
 fn flat_pattern_follows_later_flanges() {
@@ -633,7 +633,7 @@ fn flat_pattern_follows_later_flanges() {
     assert!(!r.ok, "flange moved after the flat pattern");
 }
 
-/// Review S1: flat strips from the two walls of a 20 mm notch overlap only
+/// Flat strips from the two walls of a 20 mm notch overlap only
 /// along collinear / touching edges of the outline polygon; refused.
 #[test]
 fn flat_strips_overlapping_in_a_notch_are_refused() {
@@ -681,7 +681,7 @@ fn flat_strips_overlapping_in_a_notch_are_refused() {
     );
 }
 
-/// Review S3: a cut into the sheet after its last flange is not in the flat
+/// A cut into the sheet after its last flange is not in the flat
 /// pattern, so the DXF export is refused instead of silently omitting it.
 #[test]
 fn flat_export_refuses_later_non_sheet_edits() {
@@ -709,7 +709,7 @@ fn flat_export_refuses_later_non_sheet_edits() {
     assert!(format!("{:?}", r.error).contains("after its last sheet feature"));
 }
 
-/// Review S4: a relief notch crossing a plate hole is refused.
+/// A relief notch crossing a plate hole is refused.
 #[test]
 fn relief_into_a_hole_is_refused() {
     let mut s = Session::new();
@@ -752,7 +752,7 @@ fn relief_into_a_hole_is_refused() {
     );
 }
 
-/// Review #16: the flat-pattern display body never joins the active component.
+/// The flat-pattern display body never joins the active component.
 #[test]
 fn flat_body_does_not_join_the_active_component() {
     let mut s = channel();
@@ -783,7 +783,7 @@ fn flat_body_does_not_join_the_active_component() {
     );
 }
 
-/// Review run 7 S12: a hem up on one edge and a hem down on the opposite edge
+/// A hem up on one edge and a hem down on the opposite edge
 /// of a narrow plate overlap in plan but lie on opposite sides of the plate:
 /// accepted, with the closed-form volume and the two legs on their sides.
 /// Both up is still refused (they really collide above the plate).
@@ -838,7 +838,7 @@ fn up_and_down_hems_over_and_under_a_narrow_plate() {
     );
 }
 
-/// Review run 7 S12: a whole-outline check failing after an upstream rule edit
+/// A whole-outline check failing after an upstream rule edit
 /// names the flange that causes it (the first flange's relief now reaches the
 /// hole), not the last flange in history. (Regeneration builds each flange
 /// with the flanges before it, so this held before the fix too; `sheet::build`
@@ -915,7 +915,7 @@ fn circle_sketch(s: &mut Session, x: f64) -> u32 {
     r.feature.unwrap().0
 }
 
-/// Review run 7 #4: adding a flange while the timeline is rolled back keeps
+/// Adding a flange while the timeline is rolled back keeps
 /// the marker's meaning. The flange goes before an active flat pattern and
 /// the marker stays where it was (the features after it stay rolled back,
 /// those before it stay active); a flat that is already rolled back is not
@@ -1000,7 +1000,7 @@ fn flange_added_while_rolled_back_keeps_the_marker() {
     assert!((body_volume(&s, 2) - flat_len * 40.0).abs() < 1e-6);
 }
 
-/// Review run 7 #48: a relief corner inside a Ø10 hole by 5e-4 mm (less
+/// A relief corner inside a Ø10 hole by 5e-4 mm (less
 /// than the 7.6e-4 mm sagitta of the 2° polygon that used to stand in for
 /// the circle, on a chord midpoint direction) is refused; 5e-4 mm outside
 /// is accepted.

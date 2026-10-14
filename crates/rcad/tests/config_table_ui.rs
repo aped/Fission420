@@ -1,5 +1,5 @@
 //! Configuration table editor and variant export through the real widgets
-//! (egui_kittest, run 7; docs/CONFIGURATIONS.md).
+//! (egui_kittest; docs/CONFIGURATIONS.md).
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -52,7 +52,7 @@ fn request(h: &mut Harness<'_, RcadApp>, c: Command) {
 }
 
 fn out(name: &str) -> PathBuf {
-    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/run7/config_ui");
+    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/config_ui");
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }

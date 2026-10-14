@@ -85,15 +85,15 @@ impl Model {
     /// [`Model::from_document`], but a document whose expressions no longer
     /// evaluate (e.g. a hand-edited file) still opens with its stored values
     /// (the last committed definition) when those regenerate; the expression
-    /// error is reported so the client can show it (review run 4 #15: such a
-    /// file could not be opened to repair it). The next edit re-derives every
+    /// error is reported so the client can show it (otherwise such a file
+    /// could not be opened to repair it). The next edit re-derives every
     /// bound value, so it is refused until the named parameter is fixed.
     ///
     /// Stale configuration entries an older build left behind (exclusions of
-    /// deleted occurrences, review run 7 #6; values for parameters that no
-    /// longer exist, review run 7 #19) are dropped and listed in
+    /// deleted occurrences; values for parameters that no longer exist) are
+    /// dropped and listed in
     /// [`LoadReport::cleaned`]; the model is then dirty, so saving keeps the
-    /// cleaned state (review run 7 #30).
+    /// cleaned state.
     pub fn from_document_reporting(mut doc: Document) -> Result<(Self, LoadReport)> {
         let mut cleaned = Vec::new();
         let pruned = doc.prune_configuration_occurrences();

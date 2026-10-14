@@ -1,4 +1,4 @@
-//! Run-6 acceptance project 1: a rounded, labelled enclosure built from New
+//! Acceptance project: a rounded, labelled enclosure built from New
 //! with general tools only (no template loader): parameters; a block with
 //! solid-filleted vertical edges; a cavity whose outline is the projected top
 //! face offset inward by the wall (associative: it follows the block and the

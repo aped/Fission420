@@ -503,7 +503,7 @@ pub fn measure(body: &Body) -> Result<Measurements> {
             edge_count: s.edge_iter().count() / 2,
             vertex_count: unique_vertices(s),
             bounds: raw_bounds(s)?,
-            // Run 7: an open shell (surface body) encloses nothing.
+            // An open shell (surface body) encloses nothing.
             volume: if closed {
                 volume(body)
             } else {

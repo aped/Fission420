@@ -1,4 +1,4 @@
-//! Entity-id rule for trimmed circles (review run 3 #15): a circle may become
+//! Entity-id rule for trimmed circles: a circle may become
 //! an arc with the SAME id when the arc keeps the circle's centre point (the
 //! Trim result); any other kind change of an existing id stays refused.
 use rcad_commands::{Command, Session, SketchTemplate};

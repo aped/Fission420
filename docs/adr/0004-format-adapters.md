@@ -1,6 +1,6 @@
 # ADR 0004 — Format adapters, units, import diagnostics
 
-Status: accepted (run 3, 2026-10-10)
+Status: accepted (2026-10-10)
 
 ## Decision
 * Adapters are pure functions from bytes to typed results, with no document access:

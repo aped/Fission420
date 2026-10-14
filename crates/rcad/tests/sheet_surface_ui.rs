@@ -1,4 +1,4 @@
-//! Run 7 sheet-metal and surface inspector through the real widgets
+//! Sheet-metal and surface inspector through the real widgets
 //! (egui_kittest; docs/SHEET_METAL.md, docs/SURFACES.md): base face from a
 //! sketch, edge flange picked from the base lines, folded/flat toggle, rule
 //! edit and a refused rule; surface body analysis, fill and thicken.
@@ -197,8 +197,8 @@ fn surface_body_analyse_fill_and_thicken_from_the_inspector() {
     assert!((volume(&h, b).unwrap() - 3000.0).abs() < 1e-6);
 }
 
-/// Review S8: an obround base keeps its relief when only the thickness is
-/// edited through the rule editor; review S13: an invalid gap search shows
+/// An obround base keeps its relief when only the thickness is
+/// edited through the rule editor; an invalid gap search shows
 /// why Analyse is unavailable.
 #[test]
 fn rule_editor_sends_only_changes() {
@@ -298,7 +298,7 @@ fn extrude_surface_from_the_sketch_inspector() {
     assert!((volume(&h, 2).unwrap() - 24000.0).abs() < 1e-6);
 }
 
-/// Review run 7 #44: the inspector's reverse checkbox sends `reverse`, so
+/// The inspector's reverse checkbox sends `reverse`, so
 /// the surface lies below the sketch plane.
 #[test]
 fn extrude_surface_reverse_from_the_sketch_inspector() {
@@ -329,7 +329,7 @@ fn extrude_surface_reverse_from_the_sketch_inspector() {
     );
 }
 
-/// Review run 7 #49: the rule editor loads the base's relief shape from the
+/// The rule editor loads the base's relief shape from the
 /// summary, not from its regeneration note. A rolled-back base has no notes;
 /// switching its Obround relief to Rectangular must still be sent.
 #[test]

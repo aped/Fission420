@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the run-5 slab-construction fixtures
+# Independent FreeCAD (OpenCascade) validation of the slab-construction fixtures
 # (ADR 0007) written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test slab_arcs --test rim_notch
 # usage: tools/heavy.sh tools/check_slab_arcs.sh DIR

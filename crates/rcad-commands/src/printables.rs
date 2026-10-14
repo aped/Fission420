@@ -1,4 +1,4 @@
-//! SESSION_4 §4 printable examples as plain command data: a parametric
+//! Printable examples as plain command data: a parametric
 //! enclosure base with a mating lid, a clearance-test coupon and a mounting
 //! bracket. Every size is a named user parameter and every dimension that
 //! depends on one is bound to an expression, so the documents are revised by
@@ -102,7 +102,7 @@ fn modify(name: &str, sketch: u32, d: f64, op: ExtrudeOp, target: u32, through: 
 
 // ------------------------------------------------------------------ enclosure
 
-/// Baseline enclosure parameters (SESSION_4 §6.A), mm.
+/// Baseline enclosure parameters, mm.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Enclosure {
     pub outer_length: f64,
@@ -130,7 +130,7 @@ pub const ENCLOSURE_BASELINE: Enclosure = Enclosure {
     lid_gap: 10.0,
 };
 
-/// SESSION_4 §6.B regeneration variant.
+/// Enclosure regeneration variant.
 pub const ENCLOSURE_VARIANT: Enclosure = Enclosure {
     outer_length: 100.0,
     outer_width: 65.0,
@@ -618,7 +618,7 @@ pub fn bracket_workflow(doc: &Path) -> Vec<Step> {
 
 // ------------------------------------------------------------ organizer tray
 
-/// Organizer tray parameters (SESSION_5 §7), mm; `dividers` is a count.
+/// Organizer tray parameters, mm; `dividers` is a count.
 /// A generic demonstrator with explicit dimensions, not a fit claim for any
 /// commercial carrier.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -634,7 +634,7 @@ pub struct Tray {
     pub notch_depth: f64,
 }
 
-/// SESSION_5 §7 baseline: 120 x 80 x 30, walls/floor/dividers 2, 2 dividers,
+/// Organizer tray baseline: 120 x 80 x 30, walls/floor/dividers 2, 2 dividers,
 /// notch 16 x 8 centred on the first compartment.
 pub const TRAY_BASELINE: Tray = Tray {
     length: 120.0,
@@ -648,7 +648,7 @@ pub const TRAY_BASELINE: Tray = Tray {
     notch_depth: 8.0,
 };
 
-/// SESSION_5 §7 variant 1: 160 x 90 x 35, 2.4 everywhere, 3 dividers.
+/// Organizer tray variant 1: 160 x 90 x 35, 2.4 everywhere, 3 dividers.
 pub const TRAY_VARIANT: Tray = Tray {
     length: 160.0,
     width: 90.0,
@@ -757,7 +757,7 @@ fn notch_sketch(w: f64, d: f64, c: [f64; 2], finger: Option<f64>) -> Step {
     })
 }
 
-/// The organizer tray from New (SESSION_5 §7), the command-level twin of
+/// The organizer tray from New, the command-level twin of
 /// the live UI walkthrough `tools/live/t_organizer_tray.txt`: named
 /// parameters; outline bound to `tray_length`/`tray_width`; blank bound to
 /// `tray_height`; one compartment pocket from the top face (corner at

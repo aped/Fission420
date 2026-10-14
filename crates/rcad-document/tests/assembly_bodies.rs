@@ -1,4 +1,4 @@
-//! Run 7 body ownership with an active component (review #16): ordinary new
+//! Body ownership with an active component: ordinary new
 //! bodies join the active component; unowned (display) bodies never do;
 //! derived bodies replace their source in the source's component.
 use rcad_document::Document;

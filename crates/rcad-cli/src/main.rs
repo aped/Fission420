@@ -1,7 +1,7 @@
 //! Headless command-line front end over the shared command API.
 //!
 //! ```text
-//! rcad-cli acceptance [--out DIR]     run the GOAL.md workflow with analytic checks
+//! rcad-cli acceptance [--out DIR]     run the acceptance workflow with analytic checks
 //! rcad-cli run SCRIPT.json            execute a JSON array of commands, print JSON lines
 //! ```
 use rcad_commands::{Command, Session, acceptance};

@@ -1,11 +1,11 @@
 //! Native format compatibility evidence for docs/FORMAT_SUPPORT.md.
 //!
-//! * v1: `crates/rcad-document/tests/fixtures/plate_v1.rcad.json` (run 1).
-//! * v2: `tests/fixtures/native_v2/*.rcad.json`, frozen copies of the run-2 example
+//! * v1: `crates/rcad-document/tests/fixtures/plate_v1.rcad.json`.
+//! * v2: `tests/fixtures/native_v2/*.rcad.json`, frozen copies of the v2 example
 //!   documents (the `examples/*_workflow.json` replays in `cargo xtask check` re-save the
 //!   examples themselves as v3, so they cannot serve as v2 evidence).
-//! * v3: the committed run-3 examples, and whatever version the other examples are in.
-//! * v4: `tests/fixtures/native_v4/*.rcad.json`, frozen copies of the run-4 printable
+//! * v3: frozen copies of the v3 examples, and whatever version the other examples are in.
+//! * v4: `tests/fixtures/native_v4/*.rcad.json`, frozen copies of the v4 printable
 //!   examples (named parameters and expressions); the committed examples are re-saved by
 //!   the xtask replays, so they are checked separately.
 //!
@@ -56,7 +56,7 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("resaved.rcad.json");
     assert!(s.execute(&Command::Save { path: out.clone() }).ok);
-    // Run-5 features absent: written as v4 (readable by run-4 builds).
+    // No v5 features: written as v4 (readable by v4 readers).
     assert_eq!(version(&out), 4);
     let mut t = Session::new();
     assert!(t.execute(&Command::Open { path: out }).ok);
@@ -84,7 +84,7 @@ fn v1_plate_fixture() {
 }
 
 #[test]
-fn v2_run2_documents() {
+fn v2_documents() {
     let d = "crates/rcad-commands/tests/fixtures/native_v2";
     check(&format!("{d}/plate.rcad.json"), Some(2), PLATE);
     check(&format!("{d}/scenario_a.rcad.json"), Some(2), SCENARIO_A);
@@ -102,9 +102,9 @@ fn committed_examples() {
     check("examples/bracket.rcad.json", None, BRACKET);
 }
 
-/// Frozen copies of the run-3 (v3) documents: they load into v4 unchanged.
+/// Frozen copies of the v3 documents: they load into v4 unchanged.
 #[test]
-fn v3_run3_examples() {
+fn v3_examples() {
     let d = "crates/rcad-commands/tests/fixtures/native_v3";
     for (name, v) in [
         ("plate", PLATE),
@@ -129,7 +129,7 @@ fn v3_run3_examples() {
     );
 }
 
-/// Run-4 enclosure base + lid (`Enclosure::{base,lid}_volume` restate the box formulas).
+/// Enclosure base + lid (`Enclosure::{base,lid}_volume` restate the box formulas).
 fn enclosure(p: &rcad_commands::printables::Enclosure) -> f64 {
     p.base_volume() + p.lid_volume()
 }
@@ -151,10 +151,9 @@ fn mounting_bracket() -> f64 {
     60.0 * 40.0 * 5.0 + 50.0 * 5.0 * 35.0 - 0.5 * 60.0 - 4.0 * PI * (5.5f64 / 2.0).powi(2) * 5.0
 }
 
-/// The bracket's holes run along Z and along Y. Before run 5 the kernel could only
-/// estimate that volume (it must then hold within 3x its own error estimate, as in
-/// printable_examples.rs); run 5's surface-of-revolution path measures it exactly, and
-/// an exact method must then match to 1e-9 relative.
+/// The bracket's holes run along Z and along Y. An estimated volume must hold within
+/// 3x its own error estimate (as in printable_examples.rs); the surface-of-revolution
+/// path measures it exactly, and an exact method must then match to 1e-9 relative.
 fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
     let path = repo().join(rel);
     if let Some(v) = want_version {
@@ -182,10 +181,10 @@ fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
     }
 }
 
-/// Frozen run-4 (v4) documents: parameters and expressions load, regenerate to the
+/// Frozen v4 documents: parameters and expressions load, regenerate to the
 /// analytic volume and re-save identically.
 #[test]
-fn v4_run4_printable_documents() {
+fn v4_printable_documents() {
     let d = "crates/rcad-commands/tests/fixtures/native_v4";
     check(
         &format!("{d}/enclosure.rcad.json"),
@@ -234,12 +233,12 @@ fn committed_printable_examples() {
     );
 }
 
-/// Frozen run-5 (v5) documents, saved before run 6 changed the format: a
+/// Frozen v5 documents, saved before the v6 format changes: a
 /// 40 x 30 x 10 box with two r 3 vertical edge fillets and a suppressed Ø6 cut,
 /// and a loft between 40 x 30 and 60 x 50 at 20 mm. They open, regenerate to
-/// the analytic volume and re-save as v5, identical (no run-6 feature used).
+/// the analytic volume and re-save as v5, identical (no v6 feature used).
 #[test]
-fn v5_run5_documents() {
+fn v5_documents() {
     let d = repo().join("crates/rcad-commands/tests/fixtures/native_v5");
     let rounded = 12000.0 - 2.0 * (9.0 - 9.0 * PI / 4.0) * 10.0;
     let loft = 20.0 * (40.0 * 30.0 + (40.0 * 20.0 + 30.0 * 20.0) / 2.0 + 400.0 / 3.0);
@@ -261,14 +260,14 @@ fn v5_run5_documents() {
     }
 }
 
-/// Frozen run-6 (format v6) documents, written by the run-6 build (73a6184)
+/// Frozen format v6 documents, written by a v6 build (73a6184)
 /// before the v7 schema changes: the rounded enclosure example and an
 /// assembly with materials, components, a grounded occurrence, a revolute
 /// joint at 30°, a configuration excluding an occurrence and a drawing
 /// (`fixtures/native_v6/assembly_v6_workflow.json`). They must open unchanged,
 /// regenerate, and re-save as v6 byte-compatible documents.
 #[test]
-fn v6_run6_documents() {
+fn v6_documents() {
     let d = repo().join("crates/rcad-commands/tests/fixtures/native_v6");
     for name in ["rounded_enclosure", "assembly"] {
         let path = d.join(format!("{name}.rcad.json"));

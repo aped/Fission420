@@ -1,3 +1,3 @@
-//! Shared helpers for the run-5 organizer-tray and modifier-face tests.
+//! Shared helpers for the organizer-tray and modifier-face tests.
 #![allow(dead_code)]
 pub mod tray;

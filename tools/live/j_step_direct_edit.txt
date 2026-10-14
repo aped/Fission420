@@ -1,4 +1,4 @@
-# Run 6 (SESSION_6 acceptance 6): direct editing of an independently generated
+# Direct editing of an independently generated
 # STEP body (FreeCAD fixture tools/fixtures/step/direct_edit.py: block 60x40x20,
 # D8 through hole at (15,20), D6x8 blind hole at (30,12), D10x5 boss at (45,25);
 # V = 48000 - 267 pi) through real pointer/keyboard input: pick the top face ->

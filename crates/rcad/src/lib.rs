@@ -38,7 +38,7 @@ pub use app::{
 };
 pub use engine::{ExecMode, Reply};
 
-/// "side face (…)" naming of a sketch entity, or of a sketch text edge (run 6).
+/// "side face (…)" naming of a sketch entity, or of a sketch text edge.
 fn side_label(entity: u32) -> String {
     match rcad_sketch::text::text_edge_parts(rcad_sketch::EntityId(entity)) {
         Some((t, g, c, e)) => format!(

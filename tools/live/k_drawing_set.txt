@@ -1,4 +1,4 @@
-# Run 7 (SESSION_7 acceptance 3/5 UI): drawings and configurations through real
+# Drawings and configurations through real
 # pointer/keyboard input on examples/drawing_set.rcad.json (holed plate part drawing
 # with section/detail/toleranced dimensions/note; pinned-plate assembly sheet with
 # BOM and balloons; configurations Std (hole_d 8) and Large (hole_d 10)).

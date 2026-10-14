@@ -1,12 +1,12 @@
 # Components, occurrences and joints
 
-Status: run 6 flat model, run 7 nesting, more joint types, UI tree, exploded view and
-hierarchical STEP. Code: `crates/rcad-document/src/assembly.rs` (model, validation, tree
+Status: flat and nested assemblies, joints, UI tree, exploded view and hierarchical STEP.
+Code: `crates/rcad-document/src/assembly.rs` (model, validation, tree
 solver, instance expansion), `crates/rcad-commands/src/assembly.rs` (commands, BOM,
 interference, export), `crates/rcad/src/assembly_ui.rs` (browser tree and actions, display
 placement), `crates/rcad/src/joint_ui.rs` (joint dialog), `crates/rcad-kernel/src/step.rs`
-(`export_step_assembly`). Formats: v6 for the run-6 subset (`io::v6_feature`), v7 as soon as a
-run-7 addition is used (`io::assembly_v7_feature`: nesting, empty components, independent
+(`export_step_assembly`). Formats: v6 for the flat subset (`io::v6_feature`), v7 as soon as a
+v7 addition is used (`io::assembly_v7_feature`: nesting, empty components, independent
 copies, hidden occurrences, an active component, exploded offsets, the new joint kinds). A
 document without them still saves as v6 (frozen fixtures in
 `crates/rcad-commands/tests/fixtures/native_v6/`).
@@ -14,7 +14,7 @@ document without them still saves as v6 (frozen fixtures in
 ## Model
 
 * **Component** = a definition: a named set of this document's bodies (its *definition
-  bodies*, modeled by the ordinary feature history) and, since run 7, **child occurrences** of
+  bodies*, modeled by the ordinary feature history) and **child occurrences** of
   other components (a sub-assembly). A body belongs to at most one component. A component may
   be empty (made to be activated and modeled into). Optional part number.
 * **Occurrence** = a placement `{id, component, name, placement, owner, grounded, suppressed,
@@ -38,7 +38,7 @@ document without them still saves as v6 (frozen fixtures in
   features added to the source after the copy; **parameter edits of features before the copy
   point do propagate** (the copy is history-based, not a frozen snapshot). Sub-assemblies
   cannot be made independent (refused). The UI and `ComponentSummary` label linked
-  components (`linked ×N`) and copies (`independent copy of …`). The run-6 `move_body {copy}`
+  components (`linked ×N`) and copies (`independent copy of …`). The `move_body {copy}`
   body copy remains a separate, non-component thing.
 * **Suppression** (`set_occurrence_suppressed`, configurations): the occurrence and everything
   below it leave display, BOM, mass, interference and export; the definition is not deleted.
@@ -50,9 +50,8 @@ document without them still saves as v6 (frozen fixtures in
   instances outside the active component and loose bodies are drawn dimmed. Display and derived
   bodies are not auto-joined: `Document::add_body_unowned` (display bodies such as flat
   patterns) never joins; `Document::add_derived_body(name, source)` (stitch/fill/thicken/repair
-  results) takes the source's place in the source's component, or stays loose. *As of this run
-  the sheet-metal/surface commands still call `add_body` (owners: sheet/surface work) — until
-  they switch, their outputs join the active component.*
+  results) takes the source's place in the source's component, or stays loose. The sheet-metal,
+  surface and mesh-repair commands use these.
 * **Deleting** an occurrence or component also removes it from every configuration's excluded
   occurrences; ids that an older build left behind are dropped (and reported) on open. Deleting
   the feature that creates a component body removes the body from the definition.
@@ -171,11 +170,11 @@ interference and export are unchanged. Persisted (v7) and undoable.
   FreeCAD rebuilds the `Wing` App::Part under `Assembly` with leaf B and three screws, placed
   at the hinge angle). Evidence: `artifacts/step_assembly/hinge_tree_freecad.txt`.
 * **STEP import, flattened** (`import_step`): placements of every instance are composed
-  (including the simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link, fixed in run 7) and
+  (including the simple `SHAPE_REPRESENTATION_RELATIONSHIP` part link) and
   bodies are named by product, but no components/occurrences are recreated; the import notes
   say so ("assembly structure flattened: … import_step_assembly does"). A flattened import is
   not assembly fidelity.
-* **STEP import with hierarchy** (`import_step_assembly {path}`, run 7): the product structure
+* **STEP import with hierarchy** (`import_step_assembly {path}`): the product structure
   (`PRODUCT_DEFINITION`s, `NEXT_ASSEMBLY_USAGE_OCCURRENCE` + `CONTEXT_DEPENDENT_SHAPE_REPRESENTATION`
   placements) becomes components (one per product reachable from a root; its solids, in the
   product's own coordinates, embedded as a STEP copy behind an import feature), sub-assemblies
@@ -222,9 +221,9 @@ materials** (flattened), **Structured BOM**, **Check interference** (selectable 
 
 ## Evidence
 
-`crates/rcad-commands/tests/assembly.rs` (run 6 flat model), `nested_assembly.rs` (nesting,
+`crates/rcad-commands/tests/assembly.rs` (flat model), `nested_assembly.rs` (nesting,
 paths, cyclic refusal, BOM, mass, joints inside sub-assemblies, activation, hidden, explode,
 independent copy, alignment, cylindrical/pin-slot/planar/ball joints, v7 save/reopen),
-`hinge_acceptance.rs` (acceptance 1, flat and nested, plus the committed
-`examples/hinge_assembly_workflow.json` replay), `slider_acceptance.rs` (acceptance 2),
+`hinge_acceptance.rs` (hinge acceptance, flat and nested, plus the committed
+`examples/hinge_assembly_workflow.json` replay), `slider_acceptance.rs` (slider acceptance),
 `crates/rcad-kernel/tests/step_export_assembly.rs`, `tools/check_step_assembly.sh` (FreeCAD).

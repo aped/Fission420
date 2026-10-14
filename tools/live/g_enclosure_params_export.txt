@@ -1,4 +1,4 @@
-# Run 4: open the parametric enclosure, change the fit clearance in the
+# Open the parametric enclosure, change the fit clearance in the
 # Parameters panel (one undo step), select the lid's top face in the view, and
 # export a placed multi-object 3MF (lid face down so the lip points up, side by
 # side, P1S bed) -- all through real pointer/keyboard input.

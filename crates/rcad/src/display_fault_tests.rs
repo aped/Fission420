@@ -1,7 +1,6 @@
-//! Fault injection at the display boundaries (SESSION_5 §10; run-3 app
-//! findings #13 `set_mesh` failure and #16 failing display tessellation, both
-//! untested until now). Test doubles stand in for the GPU upload and the
-//! kernel's display tessellator; the model must stay valid and current, the
+//! Fault injection at the display boundaries: a `set_mesh` failure and a
+//! failing display tessellation. Test doubles stand in for the GPU upload and
+//! the kernel's display tessellator; the model must stay valid and current, the
 //! view must keep a mesh consistent with what is drawn, and the user must see
 //! an actionable error.
 use crate::app::RcadApp;

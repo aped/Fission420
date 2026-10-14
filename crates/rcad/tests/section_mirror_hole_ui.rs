@@ -1,5 +1,5 @@
-//! Run-5 controls through the real widgets (egui_kittest): the display-only
-//! section view (picking ignores hidden material, flip, selected-face plane;
+//! Section, mirror and hole controls through the real widgets (egui_kittest):
+//! the display-only section view (picking ignores hidden material, flip, selected-face plane;
 //! the model never changes), Mirror across a picked face with a plane offset,
 //! and a Hole started from an offset plane. Volumes are analytic.
 use std::f64::consts::PI;
@@ -260,7 +260,7 @@ fn hole_from_an_offset_plane_on_a_stepped_block() {
     assert!(f.parameters.contains(&("plane_offset".to_string(), 5.0)));
 }
 
-/// Review run 4 #17: Apply with a new name and a refused expression: the
+/// Apply with a new name and a refused expression: the
 /// rename lands, the typed expression stays in the open edit with the error.
 #[test]
 fn parameter_rename_then_refused_value_keeps_the_typed_edit() {
@@ -283,7 +283,7 @@ fn parameter_rename_then_refused_value_keeps_the_typed_edit() {
     assert!(expr.contains("1 / 0"), "{expr}");
 }
 
-/// Review run 4 #20: a Cut sketched on a plane holding target faces facing
+/// A Cut sketched on a plane holding target faces facing
 /// both ways gets no guessed preview direction, and the dialog says why.
 #[test]
 fn ambiguous_face_side_has_no_preview() {
@@ -381,7 +381,7 @@ fn suppress_and_restore_from_the_inspector() {
     assert!((h.state().volume().unwrap() - v).abs() < 1e-6);
 }
 
-/// Review run 5 #12: a refused rename must not let the value change through
+/// A refused rename must not let the value change through
 /// under the new name (it used to create a second parameter).
 #[test]
 fn refused_rename_sends_no_value_change() {

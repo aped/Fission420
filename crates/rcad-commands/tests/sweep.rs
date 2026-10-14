@@ -1,4 +1,4 @@
-//! Exact sweep as a feature (run 5, ADR 0009): the closed profile of one
+//! Exact sweep as a feature (ADR 0009): the closed profile of one
 //! sketch along the open line/arc chain of another. Expected volume by Pappus:
 //! profile area × length of the centroid's path (the profile centroid is on
 //! the path here).

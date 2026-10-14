@@ -1,6 +1,5 @@
-//! Run-6 acceptance oracles for edge finishing, lofts and sweeps
-//! (SESSION_6 acceptance projects 2–4). Expected values are derived from the
-//! dimensions alone, never from the kernel's own output:
+//! Acceptance oracles for edge finishing, lofts and sweeps. Expected values
+//! are derived from the dimensions alone, never from the kernel's own output:
 //!
 //! * fillet: a 40×30×10 prism with its four vertical edges rounded r has
 //!   V = (40·30 − (4 − π)·r²)·10;
@@ -508,7 +507,7 @@ fn loft_through_three_sections() {
     assert!(!r.ok);
 }
 
-/// Review run 6 #1: a concave edge interrupted by a notch (two collinear
+/// A concave edge interrupted by a notch (two collinear
 /// edges with a gap) is refused instead of filling the notch.
 #[test]
 fn fillet_of_an_interrupted_edge_is_refused() {

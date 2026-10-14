@@ -1,4 +1,4 @@
-//! Split Body by a plane (run 6, SESSION_6 §B "Split Body", coverage SO04):
+//! Split Body by a plane:
 //! a holed block split by world and offset planes on two orientations into
 //! two exact solids whose volumes add up; the plane offset is a parameter;
 //! upstream edits regenerate both parts; a plane missing the body and a side
@@ -134,7 +134,7 @@ fn split_refusals_leave_the_document_unchanged() {
     assert_eq!(u.model().unwrap().document(), &before);
 }
 
-/// Run 7: the drawing-set plate (80 × 50 × 10, Ø8 hole at (22, 25), Ø6 at
+/// The drawing-set plate (80 × 50 × 10, Ø8 hole at (22, 25), Ø6 at
 /// (60, 25)) split by the plane x = 20, which crosses the Ø8 hole 2 mm off
 /// its axis. Truck's boolean panics on this cut; the half-space tool extruded
 /// along an in-plane axis parallel to the holes (Z) uses the exact slab

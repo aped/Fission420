@@ -4,7 +4,7 @@
 # usage: tools/bench/imports.sh
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-OUT="${RCAD_BENCH_OUT:-$REPO/artifacts/run3/bench}"
+OUT="${RCAD_BENCH_OUT:-$REPO/artifacts/bench}"
 mkdir -p "$OUT"
 cargo build -q --release -p rcad-cli || exit 1
 CLI="$REPO/target/release/rcad-cli"

@@ -1,7 +1,6 @@
 # Configurations
 
-Status: run 6 (named configurations, pull-forward of SESSION_7 §3), run 7 (table editor,
-variant export UI, table semantics). Code: `rcad_document::Configuration`,
+Status: named configurations, table editor, variant export UI, table semantics. Code: `rcad_document::Configuration`,
 `Document::apply_configuration` (`crates/rcad-document/src/model.rs`), commands in
 `crates/rcad-commands/src/lib.rs`, UI in `crates/rcad/src/panels.rs` (Configurations section)
 and `crates/rcad/src/config_ui.rs` (table and export). Format v6.
@@ -30,14 +29,14 @@ configuration, and a file naming a missing feature is refused on load.
 
 * `set_configuration {name, values, suppressed, part_number, excluded_occurrences}`: create
   or replace one (re-applied when active).
-* `set_configuration_table {configurations}` (run 7): replace the whole list in one undo
+* `set_configuration_table {configurations}`: replace the whole list in one undo
   step. Every row is checked (name characters, expression syntax, parameters, features and
   occurrences exist), names must be unique; the active configuration is re-applied, or
   cleared when it was removed. Features and occurrences that no configuration controls after
   the edit are **restored** (unsuppressed / included) rather than left in whatever state the
   last activation gave them. When the table removes (or renames) the active configuration, the
   document keeps the parameter values and suppression it had (nothing is reset) and no
-  configuration is active until one is activated (review run 7 #17: documented, not changed).
+  configuration is active until one is activated.
 * `activate_configuration {name}`, `delete_configuration {name}`.
 * `export_configurations {dir, stem, configurations?, step, stl, 3mf, overwrite}`: for each
   configuration (all by default) activate, regenerate and write
@@ -50,13 +49,13 @@ configuration, and a file naming a missing feature is refused on load.
 
 * Browser **Configurations**: list (● active), Activate, Delete, "Save current as
   configuration" (all user-parameter expressions and the features suppressed now).
-* Browser **Configuration table** (run 7): one column per configuration, rows: name, part
+* Browser **Configuration table**: one column per configuration, rows: name, part
   number, every user parameter (expression; empty = not set by that configuration), every
   non-sketch feature ("suppressed" check box), every occurrence ("included" check box).
   "+ Column" adds a configuration from the current state, "− Last column" removes one.
   Edits are a draft until **Apply table** (`set_configuration_table`); **Revert** discards
   them. An invalid table is refused with the reason and the document is unchanged.
-* **Variant export** (run 7, under the table): folder, stem, STEP/STL/3MF, Overwrite,
+* **Variant export** (under the table): folder, stem, STEP/STL/3MF, Overwrite,
   **Export variants** (`export_configurations`).
 
 ## Not supported
@@ -66,9 +65,9 @@ appearance or sketch dimensions not bound to a user parameter, nested configurat
 sub-assemblies, configuration-specific drawings (a drawing shows the active configuration;
 export it once per configuration).
 
-Evidence: `crates/rcad-commands/tests/configurations.rs` (run 6: two variants, shared edit,
-batch export, refusals, reopen), `crates/rcad-commands/tests/product_configurations.rs` (run 7
-acceptance 3: 80/100 mm enclosure assembly with an optional fan occurrence and drain hole;
+Evidence: `crates/rcad-commands/tests/configurations.rs` (two variants, shared edit,
+batch export, refusals, reopen), `crates/rcad-commands/tests/product_configurations.rs`
+(80/100 mm enclosure assembly with an optional fan occurrence and drain hole;
 per variant assembly volume/mass, BOM and drawing dimensions; shared height edit; export
 names; no silent overwrite; table edit + undo; reopen), `crates/rcad/tests/extrude_history_ui.rs`,
 `crates/rcad/tests/config_table_ui.rs` (table editing, one undo step, duplicate refused,

@@ -1,4 +1,4 @@
-//! Named user parameters and expressions (SESSION_4 §3, docs/PARAMETERS.md).
+//! Named user parameters and expressions (docs/PARAMETERS.md).
 //!
 //! A document holds named scalar [`Parameter`]s whose definitions are
 //! expressions (`outer_length - 2 * wall`), and features may bind any of their
@@ -748,8 +748,8 @@ pub fn apply_expressions(doc: &mut Document) -> Result<()> {
             .collect();
         // Evaluate every bound slot of this feature first, then apply the
         // changed ones together: coupled values (a hole's depth and its
-        // counterbore depth) are validated in their final combination (review
-        // run 4 #4), not one at a time against stale partners.
+        // counterbore depth) are validated in their final combination, not
+        // one at a time against stale partners.
         let mut changed: Vec<(String, String, f64)> = Vec::new();
         for (slot, src) in bound {
             let label = format!("{fname}.{slot}");

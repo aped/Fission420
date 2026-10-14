@@ -1,6 +1,5 @@
 //! Components, occurrences, joints, BOM, interference and assembly export
-//! (run 6 pull-forward of Run-7 §1-2 and acceptance projects 1/2/4; values
-//! closed-form).
+//! (values closed-form).
 mod support;
 use rcad_commands::assembly::{AssemblyOut, InterferenceStatus};
 use rcad_commands::{Response, Session};
@@ -168,12 +167,12 @@ fn ownership_and_edit_refusals() {
     for bad in [
         json!({"cmd": "create_component", "name": "Again", "bodies": [b]}),
         json!({"cmd": "create_component", "name": "Block", "bodies": [b]}),
-        // (Run 7: an empty component is allowed (active-component editing);
+        // (An empty component is allowed (active-component editing);
         // tests/nested_assembly.rs covers it.)
         json!({"cmd": "create_component", "name": "Ghost", "bodies": [9]}),
         json!({"cmd": "add_occurrence", "component": 7}),
         json!({"cmd": "set_occurrence_transform", "occurrence": 9, "translate": [1.0, 0.0, 0.0]}),
-        // (Run 7: deleting the definition body's creator is allowed; the body
+        // (Deleting the definition body's creator is allowed; the body
         // leaves the component's definition, see below.)
     ] {
         let r = tray::exec(&mut s, &bad);
@@ -190,7 +189,7 @@ fn ownership_and_edit_refusals() {
     );
     assert!(!r.ok, "a grounded occurrence cannot be moved");
     assert_eq!(s.summary().assembly.total_dof, 0);
-    // Run 7 (review): deleting the creator of a definition body removes the
+    // Deleting the creator of a definition body removes the
     // body from the definition (the component and its occurrence stay).
     ok(&mut s, json!({"cmd": "delete_feature", "feature": 2}));
     let a = s.summary().assembly;
@@ -274,7 +273,7 @@ fn interference_and_assembly_export() {
     );
 }
 
-/// Run-7 acceptance 2 (slider fixture): rail 200 × 20 × 10 grounded, carriage
+/// Slider fixture: rail 200 × 20 × 10 grounded, carriage
 /// 30 × 20 × 10 on top; slider along X with limits 0–40, then travel 60.
 #[test]
 fn slider_fixture_limits_travel_and_reopen() {
@@ -608,7 +607,7 @@ fn joint_axis_from_an_edge_and_from_a_hole() {
     );
 }
 
-/// Run-7 §3 pull-forward: a configuration excludes a component occurrence;
+/// A configuration excludes a component occurrence;
 /// BOM quantity and assembly mass follow the active configuration.
 #[test]
 fn configurations_include_or_exclude_occurrences() {

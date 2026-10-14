@@ -1,4 +1,4 @@
-# Sketch editing behaviour (run 2)
+# Sketch editing behaviour
 
 This is the behaviour implemented in `crates/rcad/src/sketch_edit.rs` (logic),
 `sketch_view.rs` (drawing) and `view3d.rs` / `panels.rs` (input routing and panels). It is an
@@ -103,7 +103,7 @@ chains, extra curves, self-intersections, zero-length edges — are **kept** whe
 marked `open` in the browser, and are refused by Extrude / Cut / Revolve with the reason. Nothing
 is auto-closed.
 
-## Regions (several loops, islands) — run 4
+## Regions (several loops, islands)
 
 A sketch may hold several disjoint closed loops (loops may not touch or cross; each connected
 group of curves, and each circle, must close on its own). Every loop bounds one **region**: the
@@ -111,7 +111,7 @@ loop minus the loops directly inside it. Loops nest to any depth and there may b
 loops, e.g. two concentric rectangles with a circle inside the inner one give three regions: the
 ring (outer minus inner rectangle), the inner rectangle minus the circle, and the circle.
 
-* **Default (no region picked):** unchanged from run 3: one outer loop with one level of holes is
+* **Default (no region picked):** one outer loop with one level of holes is
   extruded whole; islands inside holes and several separate outer loops are refused with a
   reason ("pick one region").
 * **Picked region:** Extrude can take one region. Its identity (`RegionRef`) is the sorted
@@ -134,7 +134,7 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
   `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
 
-## Sketch text — run 6
+## Sketch text
 
 A sketch can hold text items (`Sketch.texts`) next to its lines/arcs/circles. Each glyph contour
 is a closed loop of the sketch and takes part in region extraction like any other loop.
@@ -176,7 +176,7 @@ is a closed loop of the sketch and takes part in region extraction like any othe
   (need the installed font Liberation Sans;
   `RCAD_SKIP_FONT_TESTS=1` skips them explicitly).
 
-## Slot and regular polygon (Slot / Polygon tools) — run 6
+## Slot and regular polygon (Slot / Polygon tools)
 
 Both tools add ordinary lines/arcs with constraints, so the result stays editable like drawn
 geometry (`crates/rcad-sketch/src/shapes.rs`).
@@ -194,9 +194,9 @@ geometry (`crates/rcad-sketch/src/shapes.rs`).
   construction circle (`PointOnCircle`) and N−1 `EqualLength`; circumscribed adds an inner
   construction circle carrying the dimension and the first edge's midpoint on it. 3 DOF remain
   (centre and rotation). Areas (N/2)R² sin(2π/N) and N a² tan(π/N) are checked in the tests.
-* Center rectangle already existed (Center Rect tool, run 2).
+* Center rectangle already existed (Center Rect tool).
 
-## Sketch patterns (Pattern… action) — run 6
+## Sketch patterns (Pattern… action)
 
 Select curves (lines, arcs, circles) and press **Pattern…** in the sketch toolbar: *Rectangular*
 (instances and a step vector, optionally a second direction for a grid) or *Circular* (instances,
@@ -221,7 +221,7 @@ geometry tied to their sources (`crates/rcad-sketch/src/pattern.rs`):
   `crates/rcad-commands/tests/sketch_patterns.rs` (bolt circle, analytic volume, v6, parameter
   edit and refused overlap), `crates/rcad/tests/sketch_pattern_ui.rs` (dialog).
 
-## Offset (Offset tool, `O`) — run 4
+## Offset (Offset tool, `O`)
 
 Offsets a closed loop of lines and arcs, or a circle, by a signed distance (+ outward, away from
 the enclosed area; − inward). In the editor: Offset tool (`O`), click any curve of the loop, type
@@ -260,7 +260,7 @@ Enter. One undo step.
   (enclosure lip opening = lip outline offset by −`lip_wall`; lid volume = `lid_volume()` for the
   baseline and the variant), `crates/rcad/tests/sketch_offset_ui.rs`.
 
-## Sketch corner fillet (Fillet tool) — run 4
+## Sketch corner fillet (Fillet tool)
 
 A **sketch** corner fillet: it rounds a 2D corner of a sketch. It is not a solid-edge fillet
 (Truck 0.6 has no fillet operation; solid fillets remain unavailable). Fillet tool (toolbar),
@@ -284,7 +284,7 @@ of the arc, or the refusal reason), Enter. One undo step.
   `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
 
-## Offset construction planes — run 4
+## Offset construction planes
 
 "Sketch on offset plane…" (toolbar): choose the base (World XY / XZ / YZ, or the face selected
 when the dialog opened — the default when one is selected) and the distance; OK opens the sketch
@@ -306,7 +306,7 @@ form through the command API. Tests: `crates/rcad-commands/tests/offset_plane.rs
 
 ## Template sketches and old files
 
-Run-1 template sketches (dimensioned rectangle / circle, and old `.rcad.json` files) open in the
+Legacy template sketches (dimensioned rectangle / circle, and old `.rcad.json` files) open in the
 same editor. They keep their fixed anchor point, so after an edit they still expose `center_x` /
 `center_y` next to their dimensions; feature ids and downstream references are unchanged.
 Editor-made sketches have an explicit fixed origin point instead (no `center_*` parameters).

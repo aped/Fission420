@@ -1,5 +1,5 @@
 //! Regression probe: the first pointer click after dismissing the unsaved-changes
-//! dialog must act (observed once in a live session during run 2).
+//! dialog must act (observed once in a live session).
 
 use std::time::{Duration, Instant};
 

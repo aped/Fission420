@@ -1,4 +1,4 @@
-//! Slot and Polygon tools through the real sketch UI (run 6, SK02): a slot by
+//! Slot and Polygon tools through the real sketch UI: a slot by
 //! three clicks (centres, then width) extrudes to L·W + π(W/2)² × depth; a
 //! hexagon by two clicks keeps 3 DOF and its diameter dimension edits the
 //! size (area (3√3/2)R²).

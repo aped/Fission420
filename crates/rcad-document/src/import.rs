@@ -9,7 +9,7 @@ pub use rcad_kernel::{ImportedPlanarFace, ImportedSolid, LengthUnit, StepStats};
 
 pub struct StepResult {
     pub solids: Vec<ImportedSolid>,
-    /// Surface models (open shells) of the file, as one surface body (run 7).
+    /// Surface models (open shells) of the file, as one surface body.
     pub surfaces: Option<rcad_kernel::ImportedSurfaces>,
     pub unit: LengthUnit,
     pub stats: StepStats,
@@ -22,8 +22,8 @@ pub fn step(bytes: &[u8], unit_override_to_mm: Option<f64>) -> Result<StepResult
     step_opts(bytes, unit_override_to_mm, false)
 }
 
-/// [`step`] that also reads the file's surface models (run 7,
-/// `import_surfaces`); without `surfaces` they are ignored with a warning.
+/// [`step`] that also reads the file's surface models
+/// (`import_surfaces`); without `surfaces` they are ignored with a warning.
 pub fn step_opts(
     bytes: &[u8],
     unit_override_to_mm: Option<f64>,
@@ -158,7 +158,7 @@ fn mesh_body(positions: &[[f64; 3]], tris: &[[u32; 3]], diagnostics: MeshDiagnos
     }
 }
 
-/// Run 7: repaired copy of a mesh body (`rcad_exchange::mesh_repair`). The
+/// Repaired copy of a mesh body (`rcad_exchange::mesh_repair`). The
 /// display mesh's unshared corners are welded first (exact), then repaired.
 pub fn repaired(
     m: &MeshBody,

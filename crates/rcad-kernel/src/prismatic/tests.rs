@@ -266,7 +266,7 @@ fn grid_snapping_is_consistent_across_calls() {
     }
 }
 
-/// Review run 5 #9: a pocket covered by a joined plate encloses a void. Not
+/// A pocket covered by a joined plate encloses a void. Not
 /// supported (one shell per body); the refusal says so instead of reporting
 /// disconnected solids.
 #[test]

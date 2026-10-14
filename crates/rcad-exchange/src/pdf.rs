@@ -1,4 +1,4 @@
-//! Minimal vector PDF writer for drawing sheets (run 6, docs/DRAWINGS.md).
+//! Minimal vector PDF writer for drawing sheets (docs/DRAWINGS.md).
 //!
 //! One page, PDF 1.4, no compression, no embedded fonts: text uses the
 //! standard Type 1 font Helvetica with WinAnsiEncoding (every conforming

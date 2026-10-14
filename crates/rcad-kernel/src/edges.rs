@@ -1,4 +1,4 @@
-//! Sharp B-rep edges as exact 3-D curves, for drawings (run 6, docs/DRAWINGS.md).
+//! Sharp B-rep edges as exact 3-D curves, for drawings (docs/DRAWINGS.md).
 //!
 //! Every edge of the body is returned once as a straight segment, a circle or
 //! circular arc (recognised from samples lying on one circle within

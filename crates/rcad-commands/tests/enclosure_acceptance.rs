@@ -1,5 +1,5 @@
-//! SESSION_4 §6.A / §6.B: the parametric enclosure and lid, baseline and
-//! variant, checked against hand-derived geometry: volumes, bounds, point
+//! The parametric enclosure and lid, baseline and variant, checked against
+//! hand-derived geometry: volumes, bounds, point
 //! probes (walls, floor, open cavity, lip, opening), exact wall/floor/clearance
 //! distances from the regenerated face planes, connectivity; then undo/redo of
 //! a parameter change, save/reopen, illegal edits, and a notch variant.
@@ -107,7 +107,7 @@ fn check(s: &Session, p: &Enclosure) {
     // below the kernel's 1e-6); volumes: 1e-9 relative.
     let lin = 1e-7;
     let tol = 1e-6_f64.max(1e-9 * p.base_volume());
-    // Volumes (analytic, SESSION_4 §6.B formulas).
+    // Volumes (analytic, the enclosure box formulas).
     assert!(
         (vol(s, 1) - p.base_volume()).abs() < tol,
         "base {}",

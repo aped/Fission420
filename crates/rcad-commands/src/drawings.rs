@@ -1,4 +1,4 @@
-//! Drawing commands (run 6; docs/DRAWINGS.md): create/edit/delete drawings,
+//! Drawing commands (docs/DRAWINGS.md): create/edit/delete drawings,
 //! add/edit/remove views and hole callouts (each one undo step), and export a
 //! drawing rendered from the current geometry as SVG or vector PDF.
 use crate::{Command, Response, Session};
@@ -23,7 +23,7 @@ pub enum ViewSpec {
         scale: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         position: Option<[f64; 2]>,
-        /// Run 7: show the evaluated assembly (placed occurrences) too.
+        /// Show the evaluated assembly (placed occurrences) too.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         assembly: bool,
     },

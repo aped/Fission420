@@ -256,7 +256,7 @@ fn nested_loops_make_a_plate_with_holes_in_one_feature() {
     });
     let wall = wall.expect("slot wall at x=50");
     assert!((wall.frame.z[0] - 1.0).abs() < 1e-12, "{:?}", wall.frame);
-    // Cut with inner loops (ADR 0007, run 5): the same region cut 5 mm into
+    // Cut with inner loops (ADR 0007): the same region cut 5 mm into
     // the body from its bottom face is built exactly by the slab construction
     // (the region's holes are already empty): the top half remains. Refusals
     // of inner-loop tools elsewhere: tests/slab_arcs.rs.

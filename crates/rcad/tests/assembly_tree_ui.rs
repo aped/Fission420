@@ -1,4 +1,4 @@
-//! Run 7 assembly UI through the real widgets (egui_kittest): the occurrence
+//! Assembly UI through the real widgets (egui_kittest): the occurrence
 //! tree with a sub-assembly, component activation (new bodies join the active
 //! component, the rest is dimmed), the joint-creation dialog (kind, child,
 //! explicit axis, limits, DOF feedback) and joint editing with a refused
@@ -426,7 +426,7 @@ fn part_number_delete_component_and_joint_axis() {
     assert_eq!(world(&h), before, "nothing moves");
 }
 
-/// Review run 7: a nudge keeps a non-Z rotation axis; the joint dialog stays
+/// A nudge keeps a non-Z rotation axis; the joint dialog stays
 /// open (inputs kept) when the engine refuses the joint, and closes on success.
 #[test]
 fn nudge_keeps_axis_and_dialog_survives_refusal() {
@@ -607,7 +607,7 @@ fn two_blocks_with_slider(h: &mut Harness<'_, RcadApp>, limits: Option<(f64, f64
     click(h, "Edit Joint1");
 }
 
-/// Review run 7 #6: one pointer drag on the drive slider commits one value
+/// One pointer drag on the drive slider commits one value
 /// (one undo step), at release.
 #[test]
 fn drive_slider_drag_commits_once() {
@@ -650,7 +650,7 @@ fn drive_slider_drag_commits_once() {
     assert!(v > 0.0, "{v}");
 }
 
-/// Review run 7 #33: a joint without limits says why drive and sweep are
+/// A joint without limits says why drive and sweep are
 /// unavailable; a bad axis field names itself; a refused sweep clears the
 /// previous result.
 #[test]
@@ -684,7 +684,7 @@ fn joint_editor_explains_unavailable_controls() {
     assert!(h.query_by_label_contains("Joint1 sweep:").is_none());
 }
 
-/// Review run 7 #34: a STEP assembly without a length unit imports once a
+/// A STEP assembly without a length unit imports once a
 /// unit is chosen in the browser.
 #[test]
 fn import_step_assembly_with_chosen_units() {

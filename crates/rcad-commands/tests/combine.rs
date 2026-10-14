@@ -1,4 +1,4 @@
-//! Body Combine (run 6, SESSION_6 §B SO04): join / cut / intersect of existing
+//! Body Combine: join / cut / intersect of existing
 //! bodies with closed-form volumes, keeping or consuming the tools, a
 //! coplanar-touching case (exact or refused, never wrong), upstream edits,
 //! undo and save/reopen (format v6), refusals leaving the document unchanged.

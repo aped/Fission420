@@ -4,7 +4,7 @@
 //! [`crate::SketchTemplate::Custom`], so documents built from them are
 //! editor sketches (with an `origin` point), not templates.
 //!
-//! Used by the run-2 acceptance scenarios and to generate the replayable
+//! Used by the core acceptance scenarios and to generate the replayable
 //! example workflows; the app's editor produces the same structure.
 
 use rcad_sketch::{Constraint, Dimension, Entity, EntityId, PointId, Sketch, SketchError};

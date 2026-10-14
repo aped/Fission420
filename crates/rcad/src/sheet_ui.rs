@@ -1,4 +1,4 @@
-//! Run 7 sheet-metal and surface inspector UI (docs/SHEET_METAL.md,
+//! Sheet-metal and surface inspector UI (docs/SHEET_METAL.md,
 //! docs/SURFACES.md). Everything goes through the typed commands of
 //! `rcad_commands::sheet_surface`; refusals are shown by the usual command
 //! error path.
@@ -216,7 +216,7 @@ impl RcadApp {
                         }));
                     }
                 });
-                // Review run 7 #44: the side of the sketch plane (the
+                // The side of the sketch plane (the
                 // normal does not change; docs/SURFACES.md).
                 ui.checkbox(&mut form.surface_reverse, "Reverse (below the sketch plane)")
                     .probe("Surface reverse")
@@ -278,7 +278,7 @@ impl RcadApp {
         let form = &mut self.sheet_surface;
         if form.rule_for != Some((base, rev)) {
             form.rule_for = Some((base, rev));
-            // Review S8 / run 7 #49: the relief shape of this base, from
+            // The relief shape of this base, from
             // its rule in the summary (not from note text).
             form.loaded_relief = bf.sheet_relief.unwrap_or_default();
             form.edit_relief = form.loaded_relief;
@@ -326,7 +326,7 @@ impl RcadApp {
                     .on_hover_text("One undo step; every flange and the flat pattern regenerate")
                     .clicked()
                 {
-                    // Only what the user changed (review S8).
+                    // Only what the user changed.
                     let ch = |i: usize| {
                         v[i].filter(|x| {
                             form.loaded[i].is_none_or(|l| {
