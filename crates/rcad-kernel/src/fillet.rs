@@ -15,7 +15,7 @@
 //! (no other feature within reach). The result also passes the independent
 //! result check (ADR 0005).
 mod cap;
-pub use cap::fillet_cap_loop;
+pub use cap::{chamfer_cap_loop, fillet_cap_loop};
 
 use crate::chamfer::{ConvexEdge, on_face, straight_edge};
 use crate::ops::through_all_margin;
@@ -113,7 +113,8 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
         return Err(KernelError::InvalidInput(format!(
             "fillet: the body is not prismatic along the edge ({why}); only edges whose \
              ends meet faces perpendicular to them, on bodies with no other faces across \
-             the edge direction, are supported"
+             the edge direction, are supported. To round every edge of a face's outer \
+             boundary (meeting at corners) use the fillet_loop command (Fillet edge loop…)"
         )));
     }
     let len = smax - smin + 2.0 * m;

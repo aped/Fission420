@@ -126,6 +126,7 @@ fn bounded_revolution_generatrix(surface: &mut Surface, samples: &[Point3]) {
     let Curve::Line(line) = rev.entity_curve() else {
         return;
     };
+    let line = *line;
     // The transform is affine, so a point's line parameter is the same in world coordinates.
     let t = *p.transform();
     let (w0, w1) = (t.transform_point(line.0), t.transform_point(line.1));
@@ -134,12 +135,54 @@ fn bounded_revolution_generatrix(surface: &mut Surface, samples: &[Point3]) {
     if len2 < 1e-24 || samples.is_empty() {
         return;
     }
+    // A boundary sample's generatrix parameter comes from its meridian
+    // coordinates (axial z, radius rho): the face's points lie at other
+    // rotation angles, so projecting them onto the line itself is only right
+    // for a generatrix parallel to the axis.
+    let wo = t.transform_point(rev.origin());
+    let wa = t.transform_vector(rev.axis());
+    if wa.magnitude2() < 1e-24 {
+        return;
+    }
+    let wa = wa.normalize();
+    let meridian = |q: Point3| {
+        let r = q - wo;
+        let z = r.dot(wa);
+        [z, (r - wa * z).magnitude()]
+    };
+    let (m0, m1) = (meridian(w0), meridian(w1));
+    let dm = [m1[0] - m0[0], m1[1] - m0[1]];
+    let dm2 = dm[0] * dm[0] + dm[1] * dm[1];
+    if dm2 < 1e-24 || (dm2 - len2).abs() > 1e-9 * len2 {
+        // Not a line in a plane through the axis (a skew line sweeps a
+        // hyperboloid): keep the projection onto the line.
+        let (lo, hi) = samples
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| {
+                let s = (q - w0).dot(d) / len2;
+                (lo.min(s), hi.max(s))
+            });
+        return bound_line(p, line, t, lo, hi);
+    }
     let (lo, hi) = samples
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| {
-            let s = (q - w0).dot(d) / len2;
+            let m = meridian(*q);
+            let s = ((m[0] - m0[0]) * dm[0] + (m[1] - m0[1]) * dm[1]) / dm2;
             (lo.min(s), hi.max(s))
         });
+    bound_line(p, line, t, lo, hi);
+}
+
+/// Replace the revolution's line generatrix by its segment over [lo, hi].
+fn bound_line(
+    p: &mut Processor<RevolutedCurve<Curve>, Matrix4>,
+    line: Line<Point3>,
+    t: Matrix4,
+    lo: f64,
+    hi: f64,
+) {
+    let rev = p.entity();
     if !(lo.is_finite() && hi.is_finite()) || hi - lo < 1e-12 {
         return;
     }
@@ -924,6 +967,42 @@ pub fn export_step_assembly(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cone whose generatrix is drawn at one angle while the face lies at
+    /// others: the bounded generatrix must span the face's axial extent
+    /// (z in [10, 12]), not the projections of its points onto the line.
+    #[test]
+    fn cone_generatrix_is_bounded_by_the_meridian_extent() {
+        let gen_line = Line(Point3::new(3.0, 0.0, 10.0), Point3::new(1.0, 0.0, 12.0));
+        let mut surface = Surface::RevolutedCurve(Processor::new(RevolutedCurve::by_revolution(
+            Curve::Line(gen_line),
+            Point3::origin(),
+            Vector3::unit_z(),
+        )));
+        // Face samples at 60°–120° around the axis, on the cone.
+        let samples: Vec<Point3> = (0..=8)
+            .flat_map(|i| {
+                let a = (60.0 + 7.5 * i as f64).to_radians();
+                [(3.0, 10.0), (2.0, 11.0), (1.0, 12.0)]
+                    .map(|(r, z)| Point3::new(r * a.cos(), r * a.sin(), z))
+            })
+            .collect();
+        bounded_revolution_generatrix(&mut surface, &samples);
+        let Surface::RevolutedCurve(p) = &surface else {
+            panic!("not a revolution")
+        };
+        let c = p.entity().entity_curve();
+        let (t0, t1) = c.range_tuple();
+        let (a, b) = (c.subs(t0), c.subs(t1));
+        assert!(
+            (a.z - 10.0).abs() < 1e-5 && (b.z - 12.0).abs() < 1e-5,
+            "{a:?} {b:?}"
+        );
+        assert!(
+            (a.x - 3.0).abs() < 1e-5 && (b.x - 1.0).abs() < 1e-5,
+            "{a:?} {b:?}"
+        );
+    }
 
     #[test]
     fn header_time_and_reals_are_canonical() {

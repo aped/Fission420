@@ -339,7 +339,7 @@ fn mesh_moments(m: &TriMesh, fr: &MomFrame) -> Mom {
 }
 
 /// Volume properties of `body`: exact by the same method the volume uses (Z, X, Y
-/// axis integrals, then the surface-of-revolution integral), else the labelled
+/// axis integrals, the surface-of-revolution integral, then the parametric one), else the labelled
 /// tessellation estimate. Err when none applies.
 pub fn volume_properties(body: &Body) -> Result<VolumeProperties> {
     let solid = &body.solid;
@@ -377,6 +377,13 @@ pub fn volume_properties(body: &Body) -> Result<VolumeProperties> {
                 Ok(p) => return Ok(p),
                 Err(e) => reasons.push(format!("revolution: {e}")),
             }
+        }
+        match super::parametric::center_frame(solid).and_then(|fr| {
+            let (b, o) = super::parametric::parametric_moments(solid, &fr)?;
+            properties(&fr, &b, &o, VolumeMethod::BrepBoundaryIntegralParametric)
+        }) {
+            Ok(p) => return Ok(p),
+            Err(e) => reasons.push(format!("parametric: {e}")),
         }
         tessellated(body, center).map_err(|e| {
             reasons.push(format!("tessellation fallback: {e}"));

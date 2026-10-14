@@ -42,6 +42,8 @@ area and first moment, Pappus for arcs, miter setbacks).
   semantic references resolve by plane and footprint as before.
 - Only prisms are in scope. A cap loop on a body with other blends, drafts or steps under
   the cap is refused. A general rolling-ball blend remains future work.
-- The measured volume of the result is a tessellation estimate, because the existing exact
-  boundary integrals do not cover tori about different axes or spheres. The closed form is
-  the oracle.
+- The existing exact boundary integrals do not cover tori about different axes or spheres.
+  A general method was therefore added: `BrepBoundaryIntegralParametric`, Green's theorem in
+  each face's own parameters (`measure/parametric.rs`). It gives these bodies an exact
+  volume and exact mass properties, and the self-check compares it with the closed form
+  to 1e-9.

@@ -2,8 +2,7 @@
 //! rounded R = 4, pick the top face, "Fillet edge loop…", radius 2, OK; then
 //! set the radius to 4 (sphere corners) from the inspector. Volumes are
 //! closed forms (spandrel area r²(1 − π/4), first moment r³(5/6 − π/4),
-//! Pappus around the corners); the measured volume of the torus / sphere
-//! faces is a tessellation estimate, hence the relative tolerance.
+//! Pappus around the corners), matched to 1e-9 relative.
 
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};
@@ -63,7 +62,7 @@ fn want(r: f64) -> f64 {
 }
 
 fn close(v: f64, w: f64) {
-    assert!((v - w).abs() < 1e-3 * w, "volume {v} vs closed form {w}");
+    assert!((v - w).abs() < 1e-9 * w, "volume {v} vs closed form {w}");
 }
 
 #[test]

@@ -64,6 +64,12 @@ Frame and units: **world** coordinates and axes; mm, mm³, g/cm³, g, g·mm².
   reduce to line integrals over their exact edges (Stokes; Gauss–Legendre along the
   meridian / ruling). Three chord levels with Richardson extrapolation; the reported errors
   are the differences of the two extrapolants (near rounding for exact methods).
+* **Parametric boundary integral** (`BrepBoundaryIntegralParametric`, e.g. a filleted box
+  with torus or sphere corners): the same fields F = G a over each face's own (u, v)
+  parametrisation. Green's theorem turns the flux into a line integral along the face's exact
+  edges, located on the surface point by point. Gauss–Legendre is used in both directions,
+  on 4 and 8 panels per edge; the error is their difference. Refused (estimate fallback) for
+  seam edges, poles on a boundary or implicit intersection edges.
 * **Tessellation estimate** (`TessellationEstimate`, e.g. a sphere): the same integrals over
   the welded watertight tessellation at two chord tolerances; the finer is reported and the
   difference is the error estimate (an estimate, not a bound; see `tessellation_volume` in

@@ -1050,6 +1050,13 @@ fn regen_impl(
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
+            FeatureKind::ChamferLoop { face, distance } => {
+                let fa = resolve_face(id, face, &st)?;
+                let body = brep_target(&st, id, fa.body)?;
+                let out = k::chamfer_cap_loop(&body, &fa.frame, *distance).map_err(kernel(id))?;
+                replace_body(&mut st, id, fa.body, out);
+                r.body = Some(fa.body);
+            }
             FeatureKind::Hole {
                 plane,
                 center,

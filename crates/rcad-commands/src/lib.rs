@@ -247,6 +247,16 @@ pub enum Command {
         face: FaceRef,
         radius: f64,
     },
+    /// Equal-distance chamfer of every edge of the outer boundary loop of the
+    /// planar face `face`, `distance` mm along both faces: 45° planes along
+    /// lines, cones along arcs, straight miters at sharp corners. Same scope
+    /// as [`Command::FilletLoop`]. Parameter `distance`.
+    ChamferLoop {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        distance: f64,
+    },
     /// Direct edit (ADR 0010) of an imported STEP body at imported face
     /// `face` (`FaceRole::Imported`, stable import index; see
     /// [`Command::ImportedFaces`]): offset a planar face, resize or remove the
@@ -1256,6 +1266,7 @@ impl Command {
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
             Command::FilletLoop { .. } => "fillet_loop",
+            Command::ChamferLoop { .. } => "chamfer_loop",
             Command::DirectEdit { .. } => "direct_edit",
             Command::Countersink { .. } => "countersink",
             Command::Thread { .. } => "thread",
@@ -2258,6 +2269,23 @@ impl Session {
                 let id = self.model_mut()?.transact("Fillet loop", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Fillet"));
                     Ok(d.push(n, FeatureKind::FilletLoop { face, radius }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ChamferLoop {
+                name,
+                face,
+                distance,
+            } => {
+                let (name, face, distance) = (name.clone(), *face, *distance);
+                if !distance.is_finite() || distance <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "chamfer distance must be > 0 mm, got {distance}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Chamfer loop", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Chamfer"));
+                    Ok(d.push(n, FeatureKind::ChamferLoop { face, distance }))
                 })?;
                 r.feature = Some(id);
             }
@@ -4284,6 +4312,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
                 FeatureKind::Fillet { .. } => ("fillet", None),
                 FeatureKind::FilletLoop { .. } => ("fillet_loop", None),
+                FeatureKind::ChamferLoop { .. } => ("chamfer_loop", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),

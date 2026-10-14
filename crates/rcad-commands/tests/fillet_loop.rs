@@ -5,9 +5,8 @@
 //! dimensions alone: the removed spandrel has area A = r²(1 − π/4) and first
 //! moment M = r³(5/6 − π/4) about a wall; along the straight sides it removes
 //! A per unit length, around each quarter-turn corner of radius R it removes
-//! (π/2)(A·R − M) (Pappus). The measured volume of torus/sphere faces is a
-//! tessellation estimate; it must agree within its own reported error bound
-//! (and that bound must be small).
+//! (π/2)(A·R − M) (Pappus). The measured volume is the exact parametric
+//! boundary integral and must agree to 1e-9 relative.
 mod support;
 use rcad_commands::Session;
 use serde_json::json;
@@ -62,9 +61,9 @@ fn close(s: &Session, v: f64) {
     else {
         panic!("no volume");
     };
-    assert!(error_estimate <= 1e-3 * v, "error bound {error_estimate}");
+    assert!(error_estimate <= 1e-9 * v, "error bound {error_estimate}");
     assert!(
-        (volume - v).abs() <= 3.0 * error_estimate + 1e-9 * v,
+        (volume - v).abs() <= 1e-9 * v,
         "volume {volume} (±{error_estimate}) vs closed form {v}"
     );
 }
@@ -203,4 +202,156 @@ fn downstream_features_on_the_top_face_keep_resolving() {
     );
     assert!(!r.ok && r.error.is_some());
     assert_eq!(s.model().unwrap().document(), &before);
+}
+
+/// Volume of body 1 (exact method required).
+fn exact_volume(s: &Session) -> f64 {
+    let b = s
+        .summary()
+        .bodies
+        .into_iter()
+        .find(|b| b.id == rcad_document::BodyId(1))
+        .expect("body");
+    match b.measurements.expect("measured").volume {
+        rcad_kernel::VolumeResult::Value { volume, method, .. } => {
+            assert_ne!(method, rcad_kernel::VolumeMethod::TessellationEstimate);
+            volume
+        }
+        v => panic!("{v:?}"),
+    }
+}
+
+#[test]
+fn chamfer_loop_of_a_box_and_loops_of_a_hexagon_prism() {
+    // Box 40 × 30 × 10, top loop chamfered d: the band is the prismatoid
+    // between the rectangle at depth d and its d-inset at the top.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 40.0, "height": 30.0, "center": [20.0, 15.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let band = |a: f64, b: f64, d: f64| {
+        d / 6.0 * (a * b + 4.0 * (a - d) * (b - d) + (a - 2.0 * d) * (b - 2.0 * d))
+    };
+    let want = |d: f64| 1200.0 * (10.0 - d) + band(40.0, 30.0, d);
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "chamfer_loop", "face": top(), "distance": 2.0}),
+    );
+    let f = r.feature.unwrap().0;
+    assert!((exact_volume(&s) - want(2.0)).abs() < 1e-9 * want(2.0));
+    assert!(set(&mut s, f, "distance", 3.0).ok);
+    assert!((exact_volume(&s) - want(3.0)).abs() < 1e-9 * want(3.0));
+    // Save / reopen keeps it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chamfer.rcad.json");
+    tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
+    let mut s2 = Session::new();
+    tray::ok(&mut s2, &json!({"cmd": "open", "path": path}));
+    assert_eq!(
+        s2.model().unwrap().document(),
+        s.model().unwrap().document()
+    );
+    assert!((exact_volume(&s2) - want(3.0)).abs() < 1e-9 * want(3.0));
+
+    // Regular hexagon, apothem 4, height 20 (120° corners, mitered).
+    let hex: Vec<[f64; 2]> = (0..6)
+        .map(|k| {
+            let t = PI / 3.0 * k as f64;
+            let c = 8.0 / 3f64.sqrt();
+            [c * t.cos(), c * t.sin()]
+        })
+        .collect();
+    let area = |ap: f64| 2.0 * 3f64.sqrt() * ap * ap;
+    let new_hex = |s: &mut Session| {
+        for v in [
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "polygon",
+                   "vertices": hex}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 20.0}),
+        ] {
+            tray::ok(s, &v);
+        }
+    };
+    let mut s = Session::new();
+    new_hex(&mut s);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "chamfer_loop", "face": top(), "distance": 0.5}),
+    );
+    let want = area(4.0) * 19.5 + 0.5 / 6.0 * (area(4.0) + 4.0 * area(3.75) + area(3.5));
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want);
+    // Then a Ø3 hole down the axis from the (smaller) top face.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch", "plane": {"Face": top()},
+                "template": "centered_circle", "diameter": 3.0, "center": [0.0, 0.0]}),
+    );
+    tray::ok(&mut s, &json!({"cmd": "cut_through_all", "sketch": 4}));
+    let want = want - PI * 2.25 * 20.0;
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want);
+    // Fillet loop r = 1 instead: each of the 12 corner ends loses M·tan 30°.
+    let mut s = Session::new();
+    new_hex(&mut s);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "fillet_loop", "face": top(), "radius": 1.0}),
+    );
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let side = 8.0 / 3f64.sqrt();
+    let want = area(4.0) * 20.0 - a * 6.0 * side + 12.0 * m * (PI / 6.0).tan();
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want);
+}
+
+#[test]
+fn single_edge_blends_meeting_at_a_corner_are_refused_by_name() {
+    // Box 60 × 40 × 30: chamfer the top/front edge, then the adjacent
+    // top/right edge on its own. It is refused with a reason that points at the
+    // loop command (it used to surface as a kernel panic), and the document is unchanged.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 60.0, "height": 40.0, "center": [30.0, 20.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}),
+        json!({"cmd": "chamfer", "a": top(), "b": side(1), "distance": 2.0}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "chamfer", "a": top(), "b": side(2), "distance": 2.0}),
+    );
+    assert!(!r.ok);
+    let e = r.error.unwrap().to_string();
+    assert!(!e.contains("panicked"), "{e}");
+    assert!(
+        e.contains("chamfer_loop") || e.contains("within reach"),
+        "{e}"
+    );
+    assert_eq!(s.model().unwrap().document(), &before);
+    // Fillets: after the top/front edge, the adjacent edge is refused and
+    // the reason names the loop command.
+    let mut s = Session::new();
+    for v in [
+        json!({"cmd": "new_document"}),
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 60.0, "height": 40.0, "center": [30.0, 20.0]}),
+        json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}),
+        json!({"cmd": "fillet", "a": top(), "b": side(1), "radius": 2.0}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "fillet", "a": top(), "b": side(2), "radius": 2.0}),
+    );
+    assert!(!r.ok);
+    let e = r.error.unwrap().to_string();
+    assert!(e.contains("fillet_loop"), "{e}");
 }

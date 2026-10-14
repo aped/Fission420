@@ -391,8 +391,13 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
 fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
     doc.features
         .iter()
-        .any(|f| matches!(f.kind, crate::FeatureKind::FilletLoop { .. }))
-        .then_some("face edge-loop fillets")
+        .any(|f| {
+            matches!(
+                f.kind,
+                crate::FeatureKind::FilletLoop { .. } | crate::FeatureKind::ChamferLoop { .. }
+            )
+        })
+        .then_some("face edge-loop fillets and chamfers")
 }
 
 /// v8 mesh and print additions.
