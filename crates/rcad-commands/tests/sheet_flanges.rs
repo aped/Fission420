@@ -782,3 +782,113 @@ fn flat_body_does_not_join_the_active_component() {
         "flat display body joined the component"
     );
 }
+
+/// Review run 7 S12: a hem up on one edge and a hem down on the opposite edge
+/// of a narrow plate overlap in plan but lie on opposite sides of the plate:
+/// accepted, with the closed-form volume and the two legs on their sides.
+/// Both up is still refused (they really collide above the plate).
+#[test]
+fn up_and_down_hems_over_and_under_a_narrow_plate() {
+    let build = |top_down: bool| {
+        let mut s = Session::new();
+        tray::ok(&mut s, &json!({"cmd": "new_document"}));
+        rect_sketch(&mut s, 60.0, 20.0);
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 1.0,
+                    "k_factor": 0.5}),
+        );
+        let bottom = line_id(&s, 1, |p| p[1].abs() < 1e-9);
+        let top = line_id(&s, 1, |p| (p[1] - 20.0).abs() < 1e-9);
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "angle_deg": 180.0,
+                    "length": 15.0}),
+        );
+        let r = tray::exec(
+            &mut s,
+            &json!({"cmd": "sheet_flange", "base": 2, "edge": top, "angle_deg": 180.0,
+                    "length": 15.0, "down": top_down}),
+        );
+        (s, r.ok, format!("{:?}", r.error))
+    };
+    let (_, ok, err) = build(false);
+    assert!(!ok, "two up hems overlapping above the plate accepted");
+    assert!(err.contains("overlaps"), "{err}");
+    let (s, ok, err) = build(true);
+    assert!(ok, "up + down hems refused: {err}");
+    let want = 1200.0 + 2.0 * folded(60.0, 1.0, 1.0, 15.0, &[PI]);
+    let v = body_volume(&s, 1);
+    assert!((v - want).abs() < 1e-6, "{v} vs {want}");
+    // Up leg z 3..4 above, down leg z -3..-2 below, plate z 0..1, gaps empty.
+    let p = probe(
+        &s,
+        1,
+        &[
+            [30.0, 10.0, 3.5],
+            [30.0, 10.0, -2.5],
+            [30.0, 10.0, 0.5],
+            [30.0, 10.0, 2.0],
+            [30.0, 10.0, -1.0],
+        ],
+    );
+    assert_eq!(
+        p,
+        vec![Some(true), Some(true), Some(true), Some(false), Some(false)]
+    );
+}
+
+/// Review run 7 S12: a whole-outline check failing after an upstream rule edit
+/// names the flange that causes it (the first flange's relief now reaches the
+/// hole), not the last flange in history. (Regeneration builds each flange
+/// with the flanges before it, so this held before the fix too; `sheet::build`
+/// now also re-checks prefixes for whole-model builds such as the flat state.)
+#[test]
+fn rule_edit_failure_names_the_responsible_flange() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    let mut sk = rcad_sketch::Sketch::default();
+    let p: Vec<_> = [[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [0.0, 40.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..4 {
+        sk.add_line(p[i], p[(i + 1) % 4]);
+    }
+    // Ø4 hole at (9.5, 4.5): y 2.5..6.5, across the relief at x 9..10.
+    let c = sk.add_point(9.5, 4.5);
+    sk.add_circle(c, 2.0);
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 1.0,
+                "relief_depth": 1.5}),
+    );
+    let bottom = line_id(&s, 1, |p| p[1].abs() < 1e-9);
+    let top = line_id(&s, 1, |p| (p[1] - 40.0).abs() < 1e-9);
+    // F3: bottom flange with reliefs (clear of the hole at depth 1.5).
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "length": 5.0,
+                "start_offset": 10.0, "end_offset": 10.0}),
+    );
+    // F4: top flange, unrelated.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": top, "length": 5.0}),
+    );
+    let rev = s.summary().revision;
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "edit_sheet_rule", "base": 2, "relief_depth": 4.0}),
+    );
+    assert!(!r.ok, "relief into the hole accepted");
+    assert_eq!(s.summary().revision, rev);
+    let e = format!("{:?}", r.error);
+    assert!(e.contains("F3") && !e.contains("F4"), "{e}");
+}

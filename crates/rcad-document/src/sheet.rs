@@ -907,7 +907,28 @@ fn seg_hits_box(a: P, u: P, n: P, p: P, q: P, s0: f64, s1: f64, x0: f64, x1: f64
 
 /// Exact folded B-rep and flat pattern of `m`; impossible geometry is refused
 /// with the feature responsible and the reason.
+///
+/// Review run 7 S12: checks on the whole outline (relief through the plate
+/// or a hole, flat-pattern overlap) cannot tell which flange caused them by
+/// themselves; on such a refusal the flanges are re-checked in history order
+/// and the first one whose addition fails is named.
 pub fn build(m: &SheetModel) -> Result<SheetBuild> {
+    match build_all(m) {
+        Err(DocError::Validation(msg)) if m.flanges.len() > 1 => {
+            for k in 1..m.flanges.len() {
+                let mut part = m.clone();
+                part.flanges.truncate(k);
+                if let Err(DocError::Validation(first)) = build_all(&part) {
+                    return Err(DocError::Validation(first));
+                }
+            }
+            Err(DocError::Validation(msg))
+        }
+        r => r,
+    }
+}
+
+fn build_all(m: &SheetModel) -> Result<SheetBuild> {
     let rule = &m.rule;
     rule.validate(m.base)?;
     let t = rule.thickness;
@@ -963,7 +984,8 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
     let mut flat: Vec<KSeg> = Vec::new();
     let mut bends = Vec::new();
     let mut prisms = Vec::new();
-    let mut footprints: Vec<(FeatureId, [P; 4])> = Vec::new();
+    // (flange, plan footprint, down?, bend-zone footprint: 0..R+t outward).
+    let mut footprints: Vec<(FeatureId, [P; 4], bool, [P; 4])> = Vec::new();
     let mut strip_areas: Vec<f64> = Vec::new();
     let mut outward: Vec<(FeatureId, P, P, P, f64, f64, f64)> = Vec::new();
     let bottom = if m.flip { m.frame.offset(-t) } else { m.frame };
@@ -1134,7 +1156,12 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
                     }
                 })?;
             prisms.push(prism);
-            footprints.push((f.id, rect(a, u, nn, s0, s1, xmin, xmax)));
+            footprints.push((
+                f.id,
+                rect(a, u, nn, s0, s1, xmin, xmax),
+                f.down,
+                rect(a, u, nn, s0, s1, 0.0, rule.radius + t),
+            ));
             outward.push((f.id, a, u, nn, s0, s1, xmax));
         }
         let _ = cursor;
@@ -1177,7 +1204,16 @@ pub fn build(m: &SheetModel) -> Result<SheetBuild> {
     // Flanges against each other and against the plate.
     for i in 0..footprints.len() {
         for j in i + 1..footprints.len() {
-            if quads_overlap(&footprints[i].1, &footprints[j].1, 1e-7) {
+            // Review run 7 S12: an up and a down flange are separated by the
+            // plate except in their bend zones (outside the plate edge, up to
+            // R + t); only those are compared across sides.
+            let (fi, fj) = (&footprints[i], &footprints[j]);
+            let clash = if fi.2 == fj.2 {
+                quads_overlap(&fi.1, &fj.1, 1e-7)
+            } else {
+                quads_overlap(&fi.3, &fj.3, 1e-7)
+            };
+            if clash {
                 return Err(DocError::Validation(format!(
                     "{}: flange overlaps flange {} (their footprints on the base plane intersect); shorten, reduce the angle or offset them",
                     footprints[j].0, footprints[i].0
