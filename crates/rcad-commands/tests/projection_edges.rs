@@ -336,3 +336,56 @@ fn face_with_an_elliptical_hole_projects_the_exact_ellipse() {
         area(&s)
     );
 }
+
+/// Regression: a projected top edge must stay the top edge when a large
+/// upstream edit moves it farther than another edge's distance to the old
+/// pins (here the right edge would be nearer). The edge keeps its identity
+/// (the generating sketch line), so it is the new top edge, y = 30.
+#[test]
+fn projected_edge_keeps_its_identity_under_large_edits() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 20.0, "height": 10.0, "center": [10.0, 5.0]}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 5.0}),
+            json!({"cmd": "create_sketch",
+                   "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+            json!({"cmd": "project", "sketch": 3,
+                   "source": {"Edge": {"feature": 2, "role": "ExtrudeEndCap"}},
+                   "at": [10.0, 9.5, 5.0]}),
+        ],
+    );
+    let top = |s: &Session| {
+        let sk = solved(s, 2);
+        lines(&sk)
+            .into_iter()
+            .filter(|(a, _)| a[0] < 50.0)
+            .collect::<Vec<_>>()
+    };
+    let l = top(&s);
+    assert_eq!(l.len(), 1);
+    assert!(
+        (l[0].0[1] - 10.0).abs() < 1e-9 && (l[0].1[1] - 10.0).abs() < 1e-9,
+        "{l:?}"
+    );
+    // 0..10 → 0..30: the top edge moves 20 mm; the right edge's ends would be
+    // nearer to the old pins.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "height", "value": 30.0}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "center_y", "value": 15.0}),
+    );
+    let l = top(&s);
+    assert_eq!(l.len(), 1);
+    assert!(
+        (l[0].0[1] - 30.0).abs() < 1e-9 && (l[0].1[1] - 30.0).abs() < 1e-9,
+        "the projection must follow the top edge: {l:?}"
+    );
+}

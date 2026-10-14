@@ -2922,8 +2922,31 @@ impl Session {
                 construction,
                 at,
             } => {
-                let (sk_id, source, construction) = (*sketch, *source, *construction);
+                let (sk_id, mut source, construction) = (*sketch, *source, *construction);
                 let m = self.model_mut()?;
+                // A section depends on the feature that last shaped its body
+                // before the sketch: derived here, never taken from the caller.
+                if let rcad_document::ProjectSource::Section { body, .. } = source {
+                    let doc = m.document();
+                    let at = doc
+                        .features
+                        .iter()
+                        .position(|f| f.id == sk_id)
+                        .ok_or_else(|| DocError::Validation(format!("unknown feature {sk_id}")))?;
+                    let after = doc.features[..at]
+                        .iter()
+                        .rev()
+                        .find(|f| {
+                            f.created_bodies().contains(&body) || f.target_body() == Some(body)
+                        })
+                        .map(|f| f.id)
+                        .ok_or_else(|| {
+                            DocError::Validation(format!(
+                                "body {body} does not exist before {sk_id}"
+                            ))
+                        })?;
+                    source = rcad_document::ProjectSource::Section { body, after };
+                }
                 let mut curves = rcad_document::projection_curves(m.document(), sk_id, &source)?;
                 if let rcad_document::ProjectSource::Edge(_) = source {
                     let frame = m
