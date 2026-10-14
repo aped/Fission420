@@ -7,7 +7,7 @@
 
 use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{Command, FeatureSummary};
+use rcad_commands::{Command, ExtrudeOp, FeatureSummary};
 use rcad_document::{FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::SolveStatus;
@@ -309,7 +309,7 @@ impl RcadApp {
         // The world origin planes, whatever is selected (Fusion's Create
         // Sketch offers the origin planes too).
         let planes = ui.add_enabled_ui(open, |ui| {
-            ui.menu_button("▾", |ui| {
+            ui.menu_button("Planes", |ui| {
                 for (label, plane) in [
                     ("Sketch on XY", SketchPlane::WorldXY),
                     ("Sketch on XZ", SketchPlane::WorldXZ),
@@ -354,23 +354,41 @@ impl RcadApp {
                 self, sketch,
             )));
         }
+        // Circles keep the hole-style Cut dialog (through all or blind
+        // pocket); any other closed profile opens Extrude preset to Cut,
+        // Through All (the general cut).
+        let circle_block = sketch_sel.as_ref().and_then(|s| self.cut_blocker(s));
+        let general = circle_block.is_some()
+            && extrude_block.is_none()
+            && sketch_sel
+                .as_ref()
+                .is_some_and(|s| s.profile_error.is_none() && self.consumer_of(s.id).is_none());
         let cut_block = if !has_sketch {
-            Some("Create a circle sketch on a cap face first".to_string())
+            Some("Create a closed sketch profile first".to_string())
         } else if !self.has_body() {
             Some("Create a body first (Extrude)".to_string())
+        } else if general {
+            None
         } else {
-            sketch_sel.as_ref().and_then(|s| self.cut_blocker(s))
+            circle_block
         };
         if action(ui, "Cut through all…", cut_block.as_deref()) {
             let sketch = sketch_sel
                 .as_ref()
                 .map(|s| s.id)
                 .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Cut {
-                sketch,
-                blind: false,
-                depth: "5".into(),
-            });
+            if general {
+                let mut form = crate::extrude::ExtrudeForm::new(self, sketch);
+                form.op = ExtrudeOp::Cut;
+                form.through_all = true;
+                self.dialog = Some(Dialog::Extrude(form));
+            } else {
+                self.dialog = Some(Dialog::Cut {
+                    sketch,
+                    blind: false,
+                    depth: "5".into(),
+                });
+            }
         }
         let revolve_block = if !has_sketch {
             Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())

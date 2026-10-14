@@ -99,7 +99,8 @@ fn sk_click(h: &mut Harness<'_, RcadApp>, p: [f64; 2]) {
 
 /// A rectangle drawn past the body's outline in a second sketch on the
 /// body's bottom plane while zoomed out (the drawn grid is coarser than
-/// the rectangle): both corners keep their own positions.
+/// the rectangle): both corners keep their own positions. Then Cut through
+/// all of that rectangle splits the block into two bodies.
 #[test]
 fn narrow_rectangle_in_a_second_sketch_keeps_its_width() {
     let mut h = harness();
@@ -131,4 +132,23 @@ fn narrow_rectangle_in_a_second_sketch_keeps_its_width() {
         .entities
         .len();
     assert_eq!(n, 4, "rectangle not drawn");
+    // Cut through all with a non-circular profile opens Extrude preset to
+    // Cut + Through All; OK splits the block into two bodies (x 0..28 and
+    // 32..60, each 40 deep and 10 thick).
+    click(&mut h, "Finish Sketch");
+    click(&mut h, "Cut through all…");
+    click(&mut h, "OK");
+    let vols: Vec<f64> = h
+        .state()
+        .summary()
+        .bodies
+        .iter()
+        .map(|b| match b.measurements.clone().expect("measured").volume {
+            rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+            v => panic!("{v:?}"),
+        })
+        .collect();
+    assert_eq!(vols.len(), 2, "{vols:?}");
+    assert!((vols[0] - 28.0 * 400.0).abs() < 1e-6, "{vols:?}");
+    assert!((vols[1] - 28.0 * 400.0).abs() < 1e-6, "{vols:?}");
 }
