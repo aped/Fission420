@@ -519,7 +519,8 @@ fn check_part(name: &str, s: &Session) {
         "split_bar" => {
             let [l, w, h, slot] = BAR;
             let piece = (l - slot) / 2.0;
-            assert_eq!(s.summary().bodies.len(), 2, "two pieces");
+            let names: Vec<String> = s.summary().bodies.iter().map(|b| b.name.clone()).collect();
+            assert_eq!(names, ["Bar", "Bar (2)"], "pieces named after the source");
             rel_close(volume(s, 1), piece * w * h, 1e-9, "piece 1");
             rel_close(volume(s, 2), piece * w * h, 1e-9, "piece 2");
             bounds_close(bounds(s, 1), [0.0, 0.0, 0.0, piece, w, h], tol, "piece 1");
