@@ -146,6 +146,13 @@ fn inspect_cut_and_transform_a_mesh_body_from_the_inspector() {
     assert_eq!(pv.result_bounds.len(), 2);
     assert_eq!(pv.result_bounds[0].1[2], 5.0);
     assert_eq!(pv.result_bounds[1].0[2], 5.0);
+    // Editing a field makes the preview stale: report and boxes are hidden.
+    type_into(&mut h, "Mesh at (mm)", "6");
+    assert!(h.query_by_label_contains("2 cut loops (2 capped").is_none());
+    let pv = h.state().mesh_edit_preview().expect("viewport preview");
+    assert!(pv.result_bounds.is_empty(), "stale result boxes shown");
+    assert!(pv.plane.unwrap().iter().all(|p| p[2] == 6.0));
+    type_into(&mut h, "Mesh at (mm)", "5");
     click(&mut h, "Apply as new body");
     assert_eq!(h.state().summary().bodies.len(), 3);
     assert!(

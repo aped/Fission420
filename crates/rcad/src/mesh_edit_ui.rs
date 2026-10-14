@@ -368,10 +368,13 @@ impl RcadApp {
                         }
                     }
                 });
+                // A preview describes the fields it was made from: once they
+                // change (or no longer parse) it is not shown.
                 if let Some((d, r, b, preview, rep)) = &st.report
                     && *d == doc
                     && *b == body
                     && *r == rev
+                    && (!*preview || op.as_ref().ok() == Some(&rep.op))
                 {
                     let t = rcad_document::mesh_edit::summary(rep);
                     let closed = rep.after.iter().all(|a| a.closed);
@@ -454,6 +457,7 @@ impl RcadApp {
             && *d == self.summary.doc_id
             && *r == self.summary.revision
             && *b == body
+            && st.op().ok() == Some(rep.op)
         {
             pv.result_bounds = rep.after.iter().filter_map(|a| a.bounds).collect();
         }

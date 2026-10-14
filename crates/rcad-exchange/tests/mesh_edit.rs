@@ -420,3 +420,64 @@ fn decimation_preserves_open_boundaries() {
     let after = diagnose(&out.0, &out.1);
     assert!((after.surface_area - before.surface_area).abs() < 1e-9);
 }
+
+/// A fan of 20 000 triangles around one vertex (all pairs are neighbours and
+/// skipped): the visit budget still bounds the work and the result is partial.
+#[test]
+fn self_intersection_budget_counts_skipped_pairs() {
+    let n = 20_000u32;
+    let mut p = vec![[0.0, 0.0, 0.0]];
+    for i in 0..=n {
+        let a = 2.0 * std::f64::consts::PI * f64::from(i) / f64::from(n + 1);
+        p.push([a.cos(), a.sin(), 0.01 * (f64::from(i) % 3.0)]);
+    }
+    let t: Vec<[u32; 3]> = (1..=n).map(|i| [0, i, i + 1]).collect();
+    let start = std::time::Instant::now();
+    let r = self_intersections(
+        &p,
+        &t,
+        &SelfIntersectionLimits {
+            max_pair_tests: 100_000,
+            ..Default::default()
+        },
+    );
+    assert!(!r.complete, "{r:?}");
+    assert_eq!(r.pairs_visited, 100_000);
+    assert!(r.pairs_tested <= r.pairs_visited);
+    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+}
+
+/// An inside-out closed mesh is refused for a capped cut with a clear reason
+/// (not "orientation is inconsistent"); a two-sided cut counts each clipped
+/// triangle once.
+#[test]
+fn capped_cut_refuses_inside_out_meshes_and_counts_once() {
+    let (p, t) = voxels(&block(2, 2, 2));
+    let inv: Vec<[u32; 3]> = t.iter().map(|f| [f[0], f[2], f[1]]).collect();
+    let e = cut(
+        &(p.clone(), inv),
+        [0.0, 0.0, 0.5],
+        [0.0, 0.0, 1.0],
+        CutKeep::Below,
+        true,
+    )
+    .unwrap_err();
+    assert!(e.contains("inside out"), "{e}");
+    let one = |keep| {
+        edit(
+            &p,
+            &t,
+            &MeshEditOp::PlaneCut(PlaneCut {
+                origin: [0.0, 0.0, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                offset: 0.0,
+                keep,
+                cap: true,
+            }),
+        )
+        .unwrap()
+        .1
+        .triangles_cut
+    };
+    assert_eq!(one(CutKeep::Both), one(CutKeep::Below));
+}

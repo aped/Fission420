@@ -176,7 +176,7 @@ pub fn inspection_summary(s: &SelfIntersectionReport) -> String {
         (n, false) => format!("at least {n} intersecting triangle pairs (partial check)"),
     };
     format!(
-        "self-intersection: {verdict}; {} of {} triangles, {} pair tests",
-        s.triangles_checked, s.triangles_total, s.pairs_tested
+        "self-intersection: {verdict}; {} of {} triangles, {} pair tests ({} candidate pairs)",
+        s.triangles_checked, s.triangles_total, s.pairs_tested, s.pairs_visited
     )
 }

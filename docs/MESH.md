@@ -29,7 +29,7 @@ once. **Scope / limits:**
 
 * pairs that share a vertex (after merging identical coordinates) are not tested, so a fold
   between neighbouring triangles is not detected;
-* at most 2 000 000 triangles are indexed and 50 000 000 pair tests run; beyond that the
+* at most 2 000 000 triangles are indexed and 50 000 000 candidate pairs visited (tested or skipped as neighbours, so a fan around one vertex is bounded too); beyond that the
   report says `complete: false` and the UI labels the result "PARTIAL check (bounded; not a
   proof)";
 * a complete check that finds nothing is floating-point evidence to the stated tolerance,

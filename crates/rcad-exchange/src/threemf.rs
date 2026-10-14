@@ -243,11 +243,19 @@ pub fn write_items(
         ));
     }
     for (i, m) in items.iter().enumerate() {
+        // Same singularity threshold as the reader (`parse_matrix`), so every
+        // file written here reads back.
+        let scale = m.map_or(0.0, |m| {
+            m[..3].iter().flatten().map(|x| x.abs()).fold(0.0, f64::max)
+        });
         if let Some(m) = m
-            && (m.iter().flatten().any(|v| !v.is_finite()) || det(m) <= 0.0)
+            && (m.iter().flatten().any(|v| !v.is_finite())
+                || scale == 0.0
+                || det(m) <= 1e-12 * scale.powi(3))
         {
             return Err(ExchangeError::InvalidOption(format!(
-                "3MF export: item {} transform must be finite with a positive determinant",
+                "3MF export: item {} transform must be finite with a positive, non-negligible \
+                 determinant",
                 i + 1
             )));
         }
@@ -1065,6 +1073,26 @@ fn fixed(v: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn written_item_transforms_read_back() {
+        // A near-singular transform the reader would refuse is refused on write.
+        let near = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1e-13],
+            [0.0; 3],
+        ];
+        assert!(write_items(&[cube(1.0)], &[Some(near)], ThreeMfUnit::Millimeter).is_err());
+        let ok = [
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [5.0, 0.0, 0.0],
+        ];
+        let b = write_items(&[cube(1.0)], &[Some(ok)], ThreeMfUnit::Millimeter).unwrap();
+        assert!(read(&b, &ThreeMfLimits::default()).is_ok());
+    }
 
     fn cube(s: f64) -> MeshObject {
         let p = |x: f64, y: f64, z: f64| [x * s, y * s, z * s];

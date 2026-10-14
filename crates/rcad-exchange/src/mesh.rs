@@ -268,7 +268,9 @@ pub fn diagnose(positions: &[[f64; 3]], triangles: &[[u32; 3]]) -> MeshDiagnosti
 pub struct SelfIntersectionLimits {
     /// Triangles indexed; a larger mesh is checked on its first `max_triangles` only.
     pub max_triangles: usize,
-    /// Triangle-pair tests; the check stops (incomplete) when they are used up.
+    /// Candidate pairs visited (tested or skipped as neighbours / tested in
+    /// another cell); the check stops (incomplete) when they are used up, so
+    /// the work is bounded even for a fan of many triangles around one vertex.
     pub max_pair_tests: u64,
     /// Intersecting pairs listed in `examples`.
     pub max_examples: usize,
@@ -292,6 +294,9 @@ pub struct SelfIntersectionReport {
     pub triangles_total: usize,
     pub triangles_checked: usize,
     pub pairs_tested: u64,
+    /// Candidate pairs visited (bounded by `max_pair_tests`).
+    #[serde(default)]
+    pub pairs_visited: u64,
     /// Pairs of non-adjacent triangles that properly intersect.
     pub intersecting_pairs: usize,
     /// Up to `max_examples` intersecting pairs (triangle indices).
@@ -314,7 +319,8 @@ pub struct SelfIntersectionReport {
 ///
 /// Method: a uniform grid of triangle bounding boxes ([`TriGrid`]); every pair registered
 /// in a common cell with overlapping bounding boxes is tested once (in its lowest common
-/// cell). Bounded by [`SelfIntersectionLimits`]; when a bound is hit `complete` is false.
+/// cell). Bounded by [`SelfIntersectionLimits`] (every visited candidate pair counts);
+/// when a bound is hit `complete` is false.
 /// Floating-point tests with a tolerance: a found pair is reliable to that tolerance, but
 /// a complete check finding none is evidence, not an exact proof.
 pub fn self_intersections(
@@ -361,6 +367,7 @@ pub fn self_intersections(
         triangles_total: triangles.len(),
         triangles_checked: checked,
         pairs_tested: 0,
+        pairs_visited: 0,
         intersecting_pairs: 0,
         examples: vec![],
         tolerance: eps,
@@ -380,6 +387,12 @@ pub fn self_intersections(
         let cc = grid.cell_coord(c);
         for (k, &a) in items.iter().enumerate() {
             for &b in &items[k + 1..] {
+                // Every visited pair counts, skipped ones included.
+                if report.pairs_visited >= limits.max_pair_tests {
+                    report.complete = false;
+                    break 'cells;
+                }
+                report.pairs_visited += 1;
                 let (ra, rb) = (ranges[a as usize], ranges[b as usize]);
                 // Test each pair once: in the lowest cell both occupy.
                 let first = [0, 1, 2].map(|i| ra.0[i].max(rb.0[i]));
@@ -389,10 +402,6 @@ pub fn self_intersections(
                 let (ta, tb) = (tris[a as usize], tris[b as usize]);
                 if ta.iter().any(|v| tb.contains(v)) {
                     continue;
-                }
-                if report.pairs_tested >= limits.max_pair_tests {
-                    report.complete = false;
-                    break 'cells;
                 }
                 report.pairs_tested += 1;
                 if triangles_cross(tri_pts(&ta), tri_pts(&tb), eps) {
