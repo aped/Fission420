@@ -373,6 +373,14 @@ fn prepare(
             .body_by_id(*id)
             .ok_or_else(|| invalid(format!("unknown body {id}")))?;
         let (mesh, check, kind, used_chord, angle) = match &b.geometry {
+            BodyGeometry::Brep(body) if body.is_open_shell() => {
+                return Err(invalid(format!(
+                    "{} is an open surface body (no enclosed volume): it cannot be printed; \
+                     stitch, fill or thicken it into a solid first, or export it to STEP as a \
+                     surface",
+                    b.name
+                )));
+            }
             BodyGeometry::Brep(body) => {
                 let (mesh, c, a) = tessellate_body(body, &b.name, chord, opts.angle_deg)?;
                 // Same document, same bytes: canonical vertex/triangle order.

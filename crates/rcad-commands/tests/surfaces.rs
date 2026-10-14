@@ -110,6 +110,20 @@ fn open_box_stays_open_then_fills_to_a_solid() {
         .unwrap();
     assert!(!a.closed);
     assert_eq!((a.free_edges.len(), a.boundary_loops.len()), (4, 1));
+    // STL/3MF of the open surface: refused by name (not a "tessellation defect").
+    for cmd in ["export_stl", "export_3mf"] {
+        let ext = if cmd == "export_stl" { "stl" } else { "3mf" };
+        let r = tray::exec(
+            &mut t,
+            &json!({"cmd": cmd, "path": dir.path().join(format!("open.{ext}")), "bodies": [1]}),
+        );
+        assert!(!r.ok);
+        assert!(
+            format!("{:?}", r.error).contains("open surface body"),
+            "{:?}",
+            r.error
+        );
+    }
     // Solids and surfaces in one file: refused with the reason.
     let r = tray::exec(
         &mut t,
