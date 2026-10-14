@@ -380,15 +380,18 @@ impl PrismTest {
 struct Winding {
     tris: Vec<[[f64; 3]; 3]>,
     /// Ray-crossing acceleration (closed, consistently oriented meshes only):
-    /// triangles by the (y, z) cells their bounds touch.
-    grid: Option<RayGrid>,
+    /// one grid per ray axis (+X, +Y, +Z); a ray that grazes an edge or
+    /// vertex is retried along the next axis before the exact sum is used.
+    grids: Vec<RayGrid>,
 }
 
 /// Most triangle entries in a [`RayGrid`] (memory bound).
 const MAX_GRID_ENTRIES: usize = 20_000_000;
 
-/// Uniform (y, z) grid of triangle indices for +X ray casting.
+/// Uniform grid of triangle indices over the two coordinates other than
+/// `axis`, for ray casting along +`axis`.
 struct RayGrid {
+    axis: usize,
     lo: [f64; 2],
     cell: [f64; 2],
     n: usize,
@@ -407,14 +410,16 @@ impl Winding {
         // Run 7 (performance qualification): for a watertight mesh the winding
         // number equals the signed count of +X ray crossings; a grid makes a
         // probe cost O(triangles per cell) instead of O(all triangles).
-        let grid = (tris.len() >= 256 && crate::check_mesh(m).watertight)
-            .then(|| -> Option<RayGrid> {
+        let closed = tris.len() >= 256 && crate::check_mesh(m).watertight;
+        let build = |axis: usize| -> Option<RayGrid> {
+            let ax = [(axis + 1) % 3, (axis + 2) % 3];
+            {
                 let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
                 for t in &tris {
                     for p in t {
                         for k in 0..2 {
-                            lo[k] = lo[k].min(p[k + 1]);
-                            hi[k] = hi[k].max(p[k + 1]);
+                            lo[k] = lo[k].min(p[ax[k]]);
+                            hi[k] = hi[k].max(p[ax[k]]);
                         }
                     }
                 }
@@ -431,8 +436,8 @@ impl Winding {
                     let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
                     for p in t {
                         for k in 0..2 {
-                            a[k] = a[k].min(p[k + 1]);
-                            b[k] = b[k].max(p[k + 1]);
+                            a[k] = a[k].min(p[ax[k]]);
+                            b[k] = b[k].max(p[ax[k]]);
                         }
                     }
                     let (y0, y1, z0, z1) = (idx(a[0], 0), idx(b[0], 0), idx(a[1], 1), idx(b[1], 1));
@@ -448,15 +453,22 @@ impl Winding {
                 }
                 let size = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
                 Some(RayGrid {
+                    axis,
                     lo,
                     cell,
                     n,
                     cells,
                     eps: 1e-9 * size,
                 })
-            })
-            .flatten();
-        Self { tris, grid }
+            }
+        };
+        // At most one grid per axis; each is bounded (#26).
+        let grids = if closed {
+            (0..3).filter_map(build).collect()
+        } else {
+            Vec::new()
+        };
+        Self { tris, grids }
     }
 
     /// Exact solid-angle sum over all triangles.
@@ -477,7 +489,8 @@ impl Winding {
     /// Signed +X ray crossings, or None when the ray grazes a candidate
     /// (then the caller uses the exact sum).
     fn crossings(&self, g: &RayGrid, p: [f64; 3]) -> Option<f64> {
-        let (y, z) = (p[1], p[2]);
+        let ax = [(g.axis + 1) % 3, (g.axis + 2) % 3];
+        let (y, z) = (p[ax[0]], p[ax[1]]);
         // Outside the mesh's (y, z) bounds (with margin): no crossing at all.
         let hi = [0, 1].map(|k| g.lo[k] + g.cell[k] * g.n as f64);
         if y < g.lo[0] - g.eps || z < g.lo[1] - g.eps || y > hi[0] + g.eps || z > hi[1] + g.eps {
@@ -497,16 +510,17 @@ impl Winding {
         for &ti in &g.cells[iy * g.n + iz] {
             let [a, b, c] = self.tris[ti as usize];
             // Edge functions of (y, z) in the triangle's projection.
+            let (i, j) = (ax[0], ax[1]);
             let e =
-                |u: [f64; 3], v: [f64; 3]| (v[1] - u[1]) * (z - u[2]) - (v[2] - u[2]) * (y - u[1]);
+                |u: [f64; 3], v: [f64; 3]| (v[i] - u[i]) * (z - u[j]) - (v[j] - u[j]) * (y - u[i]);
             let (w0, w1, w2) = (e(b, c), e(c, a), e(a, b));
             let area = w0 + w1 + w2;
             let scale = g.eps * (norm(sub(b, a)) + norm(sub(c, b)) + norm(sub(a, c)));
             if area.abs() <= scale * scale {
                 // Triangle seen edge-on by the ray: only a problem if the ray
                 // lies in its plane within its extent.
-                let (ymin, ymax) = (a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]));
-                let (zmin, zmax) = (a[2].min(b[2]).min(c[2]), a[2].max(b[2]).max(c[2]));
+                let (ymin, ymax) = (a[i].min(b[i]).min(c[i]), a[i].max(b[i]).max(c[i]));
+                let (zmin, zmax) = (a[j].min(b[j]).min(c[j]), a[j].max(b[j]).max(c[j]));
                 if y >= ymin - g.eps && y <= ymax + g.eps && z >= zmin - g.eps && z <= zmax + g.eps
                 {
                     return None;
@@ -523,11 +537,12 @@ impl Winding {
                 return None; // through (or very near) an edge or vertex
             }
             // Hit point x along the ray.
-            let x = (w0 * a[0] + w1 * b[0] + w2 * c[0]) / (w0 + w1 + w2);
-            if (x - p[0]).abs() <= g.eps {
+            let k = g.axis;
+            let x = (w0 * a[k] + w1 * b[k] + w2 * c[k]) / (w0 + w1 + w2);
+            if (x - p[k]).abs() <= g.eps {
                 return None; // the probe lies on the triangle
             }
-            if x > p[0] {
+            if x > p[k] {
                 // Normal x component: positive = the ray exits the solid.
                 count += if area > 0.0 { 1 } else { -1 };
             }
@@ -536,10 +551,10 @@ impl Winding {
     }
 
     fn number(&self, p: [f64; 3]) -> f64 {
-        if let Some(g) = &self.grid
-            && let Some(w) = self.crossings(g, p)
-        {
-            return w;
+        for g in &self.grids {
+            if let Some(w) = self.crossings(g, p) {
+                return w;
+            }
         }
         self.brute(p)
     }

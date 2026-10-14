@@ -472,7 +472,7 @@ fn ray_crossing_winding_matches_the_exact_sum() {
     }
     let m = crate::tessellate(&b, 0.005).unwrap();
     let w = Winding::new(&m);
-    assert!(w.grid.is_some(), "watertight mesh gets the grid");
+    assert_eq!(w.grids.len(), 3, "watertight mesh gets a grid per axis");
     let mut seed = 0x2545_f491_4f6c_dd1du64;
     let mut rnd = || {
         seed ^= seed << 13;
@@ -494,17 +494,18 @@ fn ray_crossing_winding_matches_the_exact_sum() {
             _ => {}
         }
         let exact = w.brute(q);
-        if let Some(g) = &w.grid
-            && let Some(c) = w.crossings(g, q)
-        {
-            fast += 1;
-            if (exact - 1.0).abs() < 0.1 || exact.abs() < 0.1 {
-                assert_eq!(
-                    c,
-                    exact.round(),
-                    "probe {q:?}: crossings {c} vs exact {exact}"
-                );
-                agree += 1;
+        for g in &w.grids {
+            if let Some(c) = w.crossings(g, q) {
+                fast += 1;
+                if (exact - 1.0).abs() < 0.1 || exact.abs() < 0.1 {
+                    assert_eq!(
+                        c,
+                        exact.round(),
+                        "probe {q:?} axis {}: crossings {c} vs exact {exact}",
+                        g.axis
+                    );
+                    agree += 1;
+                }
             }
         }
     }
@@ -528,7 +529,7 @@ fn ray_crossing_winding_matches_the_exact_sum() {
             if !((exact - 1.0).abs() < 0.1 || exact.abs() < 0.1) {
                 continue; // not decisive (p on a surface)
             }
-            let Some(g) = &w.grid else { continue };
+            let Some(g) = w.grids.first() else { continue };
             match w.crossings(g, p) {
                 Some(c) => {
                     assert_eq!(c, exact.round(), "vertex-aimed probe {p:?}");
