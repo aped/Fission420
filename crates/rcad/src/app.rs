@@ -388,6 +388,9 @@ pub struct RcadApp {
     pub(crate) selected: Option<FeatureId>,
     /// Selected face (display group id) in the 3D view.
     pub(crate) selected_face: Option<u32>,
+    /// "Project edge" pick mode: the next click in the 3D view on a planar
+    /// face projects the face edge nearest to the click into this sketch.
+    pub(crate) edge_pick_for: Option<FeatureId>,
     pub(crate) inspector: Option<Inspector>,
     pub(crate) dialog: Option<Dialog>,
     /// Title of the dialog shown last frame (detects a newly opened dialog).
@@ -512,6 +515,7 @@ impl RcadApp {
             measurements: None,
             selected: None,
             selected_face: None,
+            edge_pick_for: None,
             inspector: None,
             dialog: None,
             last_dialog: None,

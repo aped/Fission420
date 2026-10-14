@@ -369,6 +369,41 @@ impl RcadApp {
             .map(|(_, r)| *r)
     }
 
+    /// Display-mesh face under a screen position and the picked point
+    /// (world, from the display mesh: only a pick hint, never geometry).
+    pub fn face_hit(&self, p: Pos2) -> Option<(u32, [f64; 3])> {
+        let rect = self.view_rect?;
+        let ray = self.ray_at(rect, p)?;
+        let (t, _, g) = self.scene.mesh.pick_section(&ray, self.section_plane())?;
+        let q = |i: usize| f64::from(ray.origin[i] + ray.dir[i] * t);
+        Some((g, [q(0), q(1), q(2)]))
+    }
+
+    /// Edge pick mode click: project the edge of the clicked planar face
+    /// nearest to the click into sketch `sk` (the command refuses with the
+    /// reason when the face cannot be referenced or the pick is ambiguous).
+    fn project_edge_click(&mut self, sk: FeatureId, p: Pos2) {
+        // A click on empty space or a face without a semantic reference
+        // (curved, mesh) ends the pick mode without a change.
+        let Some((g, at)) = self.face_hit(p) else {
+            return;
+        };
+        let Some(face) = self
+            .faces
+            .iter()
+            .find(|f| f.group == g)
+            .and_then(|f| f.reference)
+        else {
+            return;
+        };
+        self.request(Command::Project {
+            sketch: sk,
+            source: rcad_document::ProjectSource::Edge(face),
+            construction: false,
+            at: Some(at),
+        });
+    }
+
     /// Display-mesh face under a screen position.
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
@@ -496,6 +531,10 @@ impl RcadApp {
     /// the selected sketch → inline edit; otherwise select the face under the
     /// cursor (or clear the selection on empty space).
     pub fn view_click(&mut self, p: Pos2) {
+        if let Some(sk) = self.edge_pick_for.take() {
+            self.project_edge_click(sk, p);
+            return;
+        }
         // Extrude dialog open: a click inside a sketch region picks it.
         if self.extrude_region_click(p) {
             return;

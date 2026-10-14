@@ -8,7 +8,7 @@
 use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
 use rcad_commands::{Command, ExtrudeOp, FeatureSummary};
-use rcad_document::{FeatureId, SketchPlane};
+use rcad_document::{BodyId, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::SolveStatus;
 
@@ -2706,6 +2706,28 @@ impl RcadApp {
                 ));
             }
         }
+        // Intersect: bodies that exist before this sketch, at their last
+        // change before it.
+        let mut bodies: Vec<(BodyId, FeatureId, String)> = Vec::new();
+        for g in &self.summary.features {
+            if pos(g.id) >= me {
+                continue;
+            }
+            for b in g.creates.iter().copied().chain(g.body) {
+                match bodies.iter_mut().find(|(x, _, _)| *x == b) {
+                    Some(e) => e.1 = g.id,
+                    None => {
+                        let name = self
+                            .summary
+                            .bodies
+                            .iter()
+                            .find(|x| x.id == b)
+                            .map_or_else(|| b.to_string(), |x| x.name.clone());
+                        bodies.push((b, g.id, name));
+                    }
+                }
+            }
+        }
         let header = egui::CollapsingHeader::new("Project geometry into this sketch")
             .id_salt(("project_into", f.id.0))
             .show(ui, |ui| {
@@ -2736,6 +2758,37 @@ impl RcadApp {
                             });
                         }
                     });
+                }
+                ui.separator();
+                let picking = self.edge_pick_for == Some(f.id);
+                if ui
+                    .add(egui::Button::new("Project edge (pick in view)").selected(picking))
+                    .on_hover_text(
+                        "Then click a planar face next to the edge to project: the face edge \
+                         nearest to the click is projected along the sketch normal (a circle on an \
+                         oblique face becomes an exact ellipse)",
+                    )
+                    .clicked()
+                {
+                    self.edge_pick_for = if picking { None } else { Some(f.id) };
+                }
+                for (b, after, name) in bodies {
+                    if ui
+                        .small_button(format!("Intersect {name}"))
+                        .named(&format!("Intersect {name}"))
+                        .on_hover_text(
+                            "Add the section of this body by the sketch plane (lines, arcs, \
+                             circles), kept associative",
+                        )
+                        .clicked()
+                    {
+                        self.request(Command::Project {
+                            sketch: f.id,
+                            source: rcad_document::ProjectSource::Section { body: b, after },
+                            construction: false,
+                            at: None,
+                        });
+                    }
                 }
                 ui.small(
                     "Projected lines/arcs follow their source at every regeneration; if the source \

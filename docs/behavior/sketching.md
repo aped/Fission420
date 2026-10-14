@@ -329,6 +329,24 @@ of the arc, or the refusal reason), Enter. One undo step.
   `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
 
+## Projected edges and sections (Project edge / Intersect)
+
+Sketch inspector, **Project geometry into this sketch** (commands: docs/COMMANDS.md `project`):
+
+* **Project edge (pick in view)**, then click a planar face next to the edge: the face edge whose
+  projection passes nearest to the click is projected along the sketch normal and stays
+  associative. Parallel faces: lines, arcs and circles exactly (a hole rim made of arcs projects as
+  one circle). Oblique faces: lines stay lines, a full circle becomes the exact ellipse (its major
+  axis along the planes' intersection direction, semi-axes r and r·|cos φ|); an arc there would be
+  an elliptical arc and is refused, as is a circle on a face perpendicular to the sketch. An
+  upstream edit moves the curve; when the face no longer has a matching edge, or two edges match
+  equally well, the sketch reports a broken reference naming the projection.
+* **Intersect ‹body›**: the section of the body by the sketch plane at that point of history
+  (outline and holes as lines, arcs and circles), associative like face projections. Sections
+  that need other curves (an ellipse from a cylinder oblique to the plane, free-form faces) are
+  refused by name, as are planes that hold a face of the body (project that face) or miss it.
+* **Unlink** freezes either kind where the last regeneration put it. Format v8.
+
 ## Offset construction planes
 
 "Sketch on offset plane…" (toolbar): choose the base (World XY / XZ / YZ, or the face selected
