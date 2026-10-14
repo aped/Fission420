@@ -18,13 +18,23 @@ use truck_modeling::*;
 
 const MAX_DEPTH: usize = 32;
 const MAX_PATHS: usize = 10_000;
+/// Deepest product structure read by [`Placements::structure`]: an instance
+/// path from a root product down holds at most this many usages (root
+/// included), the same bound as the document's assembly (review run 7 #42:
+/// deeper files are refused before the solids are built, not after).
+pub const MAX_STRUCTURE_DEPTH: usize = 16;
 
 pub(super) struct Placements<'a> {
     idx: &'a Index,
-    /// representation -> items (refs)
-    rep_items: HashMap<u64, Vec<u64>>,
-    /// identity links between representations (undirected)
-    same: HashMap<u64, Vec<u64>>,
+    /// Review run 7 #37: item -> representations containing it (sorted).
+    item_reps: HashMap<u64, Vec<u64>>,
+    /// Review run 7 #37: representation -> its identity group's
+    /// representative (the smallest id; absent = a group of its own).
+    group: HashMap<u64, u64>,
+    /// Representative -> members (sorted), for groups of two or more.
+    members: HashMap<u64, Vec<u64>>,
+    /// Representative -> (first SDR in file order, PRODUCT name).
+    group_product_name: HashMap<u64, (usize, String)>,
     /// child representation -> (parent representation, child-to-parent transform)
     up: HashMap<u64, Vec<(u64, Matrix4)>>,
     /// Run 7: relationship entity -> child-to-parent transform.
@@ -142,41 +152,122 @@ impl<'a> Placements<'a> {
                 )));
             }
         }
-        Ok(Placements {
+        // Review run 7 #37: the lookups below are built once (they were
+        // searched per solid: O(solids x products x representations)).
+        let mut item_reps: HashMap<u64, Vec<u64>> = HashMap::new();
+        for (&r, items) in &rep_items {
+            for &i in items {
+                item_reps.entry(i).or_default().push(r);
+            }
+        }
+        for v in item_reps.values_mut() {
+            v.sort_unstable();
+            v.dedup();
+        }
+        // Identity groups (connected components of `same`).
+        let mut group: HashMap<u64, u64> = HashMap::new();
+        let mut members: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut starts: Vec<u64> = same.keys().copied().collect();
+        starts.sort_unstable();
+        for s in starts {
+            if group.contains_key(&s) {
+                continue;
+            }
+            let mut seen = HashSet::from([s]);
+            let mut stack = vec![s];
+            let mut comp = Vec::new();
+            while let Some(r) = stack.pop() {
+                comp.push(r);
+                for &n in same.get(&r).into_iter().flatten() {
+                    if seen.insert(n) {
+                        stack.push(n);
+                    }
+                }
+            }
+            comp.sort_unstable();
+            let root = comp[0];
+            for &r in &comp {
+                group.insert(r, root);
+            }
+            members.insert(root, comp);
+        }
+        let mut p = Placements {
             idx,
-            rep_items,
-            same,
+            item_reps,
+            group,
+            members,
+            group_product_name: HashMap::new(),
             up,
             rel,
-        })
+        };
+        p.group_product_name = p.product_names();
+        Ok(p)
+    }
+
+    /// Identity group representative of `rep`.
+    pub fn group_of(&self, rep: u64) -> u64 {
+        self.group.get(&rep).copied().unwrap_or(rep)
     }
 
     /// Representations reachable from `rep` through identity links (incl. itself).
     fn closure(&self, rep: u64) -> Vec<u64> {
-        let mut seen = HashSet::from([rep]);
-        let mut stack = vec![rep];
-        let mut out = Vec::new();
-        while let Some(r) = stack.pop() {
-            out.push(r);
-            for &n in self.same.get(&r).into_iter().flatten() {
-                if seen.insert(n) {
-                    stack.push(n);
-                }
-            }
+        match self.members.get(&self.group_of(rep)) {
+            Some(m) => m.clone(),
+            None => vec![rep],
         }
-        out.sort_unstable();
-        out
     }
 
     fn reps_containing(&self, item: u64) -> Vec<u64> {
+        self.item_reps.get(&item).cloned().unwrap_or_default()
+    }
+
+    /// Identity groups (representatives) of the representations holding `item`.
+    pub fn item_groups(&self, item: u64) -> Vec<u64> {
         let mut v: Vec<u64> = self
-            .rep_items
-            .iter()
-            .filter(|(_, items)| items.contains(&item))
-            .map(|(&r, _)| r)
+            .reps_containing(item)
+            .into_iter()
+            .map(|r| self.group_of(r))
             .collect();
         v.sort_unstable();
+        v.dedup();
         v
+    }
+
+    /// Group representative -> (SDR position, PRODUCT name) of the first
+    /// SHAPE_DEFINITION_REPRESENTATION (file order) with a non-empty name.
+    fn product_names(&self) -> HashMap<u64, (usize, String)> {
+        let idx = self.idx;
+        let mut out: HashMap<u64, (usize, String)> = HashMap::new();
+        for (k, sdr) in idx
+            .all_simple("SHAPE_DEFINITION_REPRESENTATION")
+            .into_iter()
+            .enumerate()
+        {
+            let name = (|| {
+                let (_, p) = idx.simple(sdr, &["SHAPE_DEFINITION_REPRESENTATION"]).ok()?;
+                let rep = p.r(1).ok()?;
+                let (_, pds) = idx
+                    .simple(p.r(0).ok()?, &["PRODUCT_DEFINITION_SHAPE"])
+                    .ok()?;
+                let (_, pd) = idx.simple(pds.r(2).ok()?, &["PRODUCT_DEFINITION"]).ok()?;
+                let (_, pdf) = idx
+                    .simple(
+                        pd.r(2).ok()?,
+                        &[
+                            "PRODUCT_DEFINITION_FORMATION",
+                            "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE",
+                        ],
+                    )
+                    .ok()?;
+                let (_, prod) = idx.simple(pdf.r(2).ok()?, &["PRODUCT"]).ok()?;
+                let name = prod.opt_s(1).or(prod.opt_s(0))?.trim();
+                (!name.is_empty()).then(|| (rep, name.to_string()))
+            })();
+            if let Some((rep, name)) = name {
+                out.entry(self.group_of(rep)).or_insert((k, name));
+            }
+        }
+        out
     }
 
     /// World placements of a top-level representation item: `None` = identity.
@@ -231,12 +322,59 @@ impl<'a> Placements<'a> {
         Ok(())
     }
 
-    /// Representations (identity groups) containing `item`.
-    pub fn item_reps(&self, item: u64) -> HashSet<u64> {
-        self.reps_containing(item)
+    /// Review run 7 #8: products an item reaches from its representation
+    /// through representation relationships with transformation (e.g. an
+    /// ADVANCED_BREP_SHAPE_REPRESENTATION placed in a part's shape
+    /// representation by a REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION
+    /// rather than an identity link): the nearest level at which a product
+    /// group (`product_of`: group representative -> product) is met, as
+    /// (product, item-to-product transform) per path. Empty when no product
+    /// is reached.
+    pub fn products_above(
+        &self,
+        item: u64,
+        product_of: &HashMap<u64, usize>,
+    ) -> Result<Vec<(usize, Matrix4)>, StepError> {
+        let mut frontier: Vec<(u64, Option<Matrix4>)> = self
+            .item_groups(item)
             .into_iter()
-            .flat_map(|r| self.closure(r))
-            .collect()
+            .map(|g| (g, None))
+            .collect();
+        let mut seen: HashSet<u64> = HashSet::new();
+        let mut found = Vec::new();
+        for _ in 0..=MAX_DEPTH {
+            let mut next = Vec::new();
+            for (rep, acc) in frontier {
+                let g = self.group_of(rep);
+                if !seen.insert(g) {
+                    continue;
+                }
+                if let Some(&p) = product_of.get(&g) {
+                    found.push((p, acc.unwrap_or_else(Matrix4::identity)));
+                    continue;
+                }
+                for r in self.closure(g) {
+                    for &(parent, m) in self.up.get(&r).into_iter().flatten() {
+                        check_rigid(&m)?;
+                        next.push((
+                            parent,
+                            Some(match acc {
+                                Some(a) => m * a,
+                                None => m,
+                            }),
+                        ));
+                    }
+                }
+                if next.len() > MAX_PATHS {
+                    return Err(fail("too many assembly instances".into()));
+                }
+            }
+            if !found.is_empty() || next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        Ok(found)
     }
 
     /// Run 7: the product structure, when the file has assembly usages
@@ -353,8 +491,10 @@ impl<'a> Placements<'a> {
                 1 => return Err(fail("cyclic product usage".into())),
                 _ => {}
             }
-            if level > MAX_DEPTH {
-                return Err(fail("assembly nesting too deep".into()));
+            if level > MAX_STRUCTURE_DEPTH {
+                return Err(fail(format!(
+                    "assembly nesting deeper than {MAX_STRUCTURE_DEPTH} levels"
+                )));
             }
             state[i] = 1;
             let mut best = 0;
@@ -365,49 +505,32 @@ impl<'a> Placements<'a> {
             memo[i] = best;
             Ok(best)
         }
-        let roots: Vec<usize> = (0..products.len())
-            .filter(|&i| !is_child[i] && !products[i].children.is_empty())
-            .collect();
+        // Review run 7 #7: every product used by no other is a root,
+        // including a free-standing part (it becomes a top-level occurrence);
+        // products without solids or children are dropped by the caller.
+        let roots: Vec<usize> = (0..products.len()).filter(|&i| !is_child[i]).collect();
         let mut state = vec![0u8; products.len()];
         let mut memo = vec![0usize; products.len()];
         for i in 0..products.len() {
-            if longest(&products, i, &mut state, &mut memo, 0)? > MAX_DEPTH {
-                return Err(fail("assembly nesting too deep".into()));
+            // `longest` counts usages below `i`; a path from a root holds one
+            // more occurrence (the root's own).
+            if longest(&products, i, &mut state, &mut memo, 0)? >= MAX_STRUCTURE_DEPTH {
+                return Err(fail(format!(
+                    "assembly nesting deeper than {MAX_STRUCTURE_DEPTH} levels"
+                )));
             }
         }
         Ok(Some(Structure { products, roots }))
     }
 
-    /// PRODUCT name owning the representation that contains `item`, if found.
+    /// PRODUCT name owning the representation that contains `item`, if found
+    /// (the first SHAPE_DEFINITION_REPRESENTATION in file order).
     pub fn product_name_of_item(&self, item: u64) -> Option<String> {
-        let idx = self.idx;
-        let reps = self.reps_containing(item);
-        let group: HashSet<u64> = reps.iter().flat_map(|&r| self.closure(r)).collect();
-        for sdr in idx.all_simple("SHAPE_DEFINITION_REPRESENTATION") {
-            let (_, p) = idx.simple(sdr, &["SHAPE_DEFINITION_REPRESENTATION"]).ok()?;
-            if !group.contains(&p.r(1).ok()?) {
-                continue;
-            }
-            let (_, pds) = idx
-                .simple(p.r(0).ok()?, &["PRODUCT_DEFINITION_SHAPE"])
-                .ok()?;
-            let (_, pd) = idx.simple(pds.r(2).ok()?, &["PRODUCT_DEFINITION"]).ok()?;
-            let (_, pdf) = idx
-                .simple(
-                    pd.r(2).ok()?,
-                    &[
-                        "PRODUCT_DEFINITION_FORMATION",
-                        "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE",
-                    ],
-                )
-                .ok()?;
-            let (_, prod) = idx.simple(pdf.r(2).ok()?, &["PRODUCT"]).ok()?;
-            let name = prod.opt_s(1).or(prod.opt_s(0))?.trim();
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
-        }
-        None
+        self.item_groups(item)
+            .into_iter()
+            .filter_map(|g| self.group_product_name.get(&g))
+            .min_by_key(|(k, _)| *k)
+            .map(|(_, n)| n.clone())
     }
 }
 

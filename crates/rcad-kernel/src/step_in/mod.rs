@@ -16,6 +16,9 @@ pub(crate) mod geom;
 mod topo;
 mod units;
 
+/// Deepest STEP product structure read (usages per path, root included).
+pub use assembly::MAX_STRUCTURE_DEPTH as STEP_MAX_ASSEMBLY_DEPTH;
+
 use crate::{Body, Frame, KernelError, Result, guarded};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -46,6 +49,15 @@ pub struct StepImportOptions {
     /// model never breaks a solid import.
     #[serde(default)]
     pub surfaces: bool,
+    /// Run 7 (review #2, #36): read the product structure into
+    /// [`StepImport::assembly`] (`import_step_assembly`). Structure errors are
+    /// then fatal, and when the file has one the flattened `solids` are not
+    /// built (nor limited by their instance count): every product's
+    /// definition solids are read once. Off (plain import and regeneration
+    /// of an embedded file): the structure is not read at all, so it can
+    /// neither fail nor slow the import.
+    #[serde(default)]
+    pub assembly: bool,
 }
 
 impl Default for StepImportOptions {
@@ -55,6 +67,7 @@ impl Default for StepImportOptions {
             max_entities: 2_000_000,
             unit_override_to_mm: None,
             surfaces: false,
+            assembly: false,
         }
     }
 }
@@ -111,7 +124,9 @@ pub struct ImportedSolid {
 #[derive(Debug, Clone)]
 pub struct ImportedAssembly {
     pub products: Vec<ImportedProduct>,
-    /// Top products (used by no other product and using at least one).
+    /// Top products: every product used by no other (review #7: a
+    /// free-standing part is a root too). Products without solids or
+    /// children may be listed; they hold nothing to place.
     pub roots: Vec<usize>,
 }
 
@@ -140,14 +155,22 @@ pub struct ImportedSurfaces {
 
 #[derive(Debug, Clone)]
 pub struct StepImport {
+    /// The flattened, placed solids (empty when `assembly` holds the
+    /// structure: see [`StepImportOptions::assembly`]).
     pub solids: Vec<ImportedSolid>,
-    /// Run 7: the product structure (assembly files): every product's solids
-    /// in its own coordinates and its usages with placements. `solids` stays
-    /// the flattened, placed view.
+    /// Run 7: the product structure (assembly files, only when
+    /// [`StepImportOptions::assembly`] is set): every product's solids in its
+    /// own coordinates and its usages with placements. Every
+    /// MANIFOLD_SOLID_BREP of the file is in it exactly once per placement
+    /// path: one outside any product's shape is folded into the product its
+    /// representation is placed in, else placed under an extra root product
+    /// (with a warning either way, review #8).
     pub assembly: Option<ImportedAssembly>,
     /// Surface models (open shells), if the file has any (run 7).
     pub surfaces: Option<ImportedSurfaces>,
     pub length_unit: LengthUnit,
+    /// Notes: what was approximated, skipped or restructured (always read
+    /// them: e.g. solids outside the product structure, review #8).
     pub warnings: Vec<String>,
     pub stats: StepStats,
 }
@@ -301,8 +324,17 @@ fn import_parsed(
     };
     // Scale-aware consistency tolerance (docs/formats/step.md).
     let tol = consistency_tol(&geo)?;
+    // Review run 7 #2: the structure only on request (and then fatal).
+    let structure = if opts.assembly {
+        placements.structure()?
+    } else {
+        None
+    };
     let mut solids = Vec::new();
-    for brep in breps {
+    // Review run 7 #36: with the structure, the flattened view (and its
+    // instance limit) is not built.
+    let flat: &[u64] = if structure.is_some() { &[] } else { &breps };
+    for &brep in flat {
         let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
         // OpenCascade labels every solid "Open CASCADE STEP translator <ver> <n>";
         // that is not a user name, so it is ignored.
@@ -314,6 +346,7 @@ fn import_parsed(
         let built = topo::build_shell(&geo, shell_id, tol, false)
             .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
         let instances = placements.instances_of_item(brep)?;
+        let mut revolution_checked = false;
         if solids.len() + instances.len() > MAX_INSTANCES {
             return Err(fail(format!("more than {MAX_INSTANCES} solid instances")));
         }
@@ -348,6 +381,10 @@ fn import_parsed(
                 ))
             })?;
             let body = orient_outward(Body { solid }, brep)?;
+            if !revolution_checked {
+                check_revolution_mesh(&body, brep, &built.surface_types)?;
+                revolution_checked = true;
+            }
             let planar_faces = planar_faces(&body)
                 .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
             stats.faces += body.solid.face_iter().count();
@@ -360,76 +397,23 @@ fn import_parsed(
     }
     stats.solids = solids.len();
     // Run 7: the product structure as definitions + usages.
-    let assembly = match placements.structure()? {
+    let assembly = match structure {
         None => None,
-        Some(st) => {
-            let mut products: Vec<ImportedProduct> = st
-                .products
-                .iter()
-                .map(|p| ImportedProduct {
-                    name: p.name.clone(),
-                    solids: vec![],
-                    children: p
-                        .children
-                        .iter()
-                        .map(|(c, n, m)| {
-                            (
-                                *c,
-                                n.clone(),
-                                crate::Rigid {
-                                    r: std::array::from_fn(|i| std::array::from_fn(|j| m[j][i])),
-                                    t: [m[3][0], m[3][1], m[3][2]],
-                                },
-                            )
-                        })
-                        .collect(),
-                })
-                .collect();
-            for &brep in &idx.all_simple("MANIFOLD_SOLID_BREP") {
-                let reps = placements.item_reps(brep);
-                let Some(pi) = st
-                    .products
-                    .iter()
-                    .position(|p| p.reps.iter().any(|r| reps.contains(r)))
-                else {
-                    continue;
-                };
-                let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
-                let label = p
-                    .opt_s(0)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"))
-                    .map(String::from);
-                let built = topo::build_shell(&geo, p.r(1)?, tol, false)
-                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-                let solid = Solid::extract(CompressedSolid {
-                    boundaries: vec![built.shell],
-                })
-                .map_err(|e| {
-                    fail(format!(
-                        "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
-                    ))
-                })?;
-                let body = orient_outward(Body { solid }, brep)?;
-                let planar_faces = planar_faces(&body)
-                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-                let fallback = products[pi].name.clone();
-                products[pi].solids.push(ImportedSolid {
-                    name: label.or(Some(fallback)),
-                    body,
-                    planar_faces,
-                });
-            }
-            Some(ImportedAssembly {
-                products,
-                roots: st.roots,
-            })
-        }
+        Some(st) => Some(structured(
+            &idx,
+            &geo,
+            &placements,
+            st,
+            &breps,
+            tol,
+            &mut stats,
+            &mut warnings,
+        )?),
     };
     // Run 7: the product structure is read only for placements and names; say
     // so rather than present the placed bodies as a preserved assembly.
     let usages = idx.all_with("NEXT_ASSEMBLY_USAGE_OCCURRENCE").len();
-    if usages > 0 {
+    if usages > 0 && assembly.is_none() {
         warnings.push(format!(
             "assembly structure flattened: {usages} component usage(s) \
              (NEXT_ASSEMBLY_USAGE_OCCURRENCE) became {} placed solid bodies named by product; \
@@ -446,6 +430,224 @@ fn import_parsed(
         warnings,
         stats,
     })
+}
+
+/// Run 7: faces on SURFACE_OF_REVOLUTION are accepted only when the solid
+/// tessellates watertight and consistently oriented. Observed: a face whose
+/// angular range reaches the surface's own seam angle (e.g. the last third
+/// of a full 360° revolve written by R-CAD) reads back with the exact volume
+/// but a broken tessellation; such files are refused, never shown wrongly.
+fn check_revolution_mesh(
+    body: &Body,
+    brep: u64,
+    surface_types: &[String],
+) -> std::result::Result<(), StepError> {
+    if !surface_types.iter().any(|t| t == "SURFACE_OF_REVOLUTION") {
+        return Ok(());
+    }
+    let b = crate::bounds(body).map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {e}")))?;
+    let diag = (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let chord = (diag * 1e-3).max(1e-6);
+    let m = crate::tessellate(body, chord)
+        .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {e}")))?;
+    let c = crate::check_mesh(&m);
+    if !(c.watertight && c.orientation_consistent) {
+        return Err(fail(format!(
+            "MANIFOLD_SOLID_BREP #{brep}: its SURFACE_OF_REVOLUTION faces do not tessellate \
+             watertight ({} boundary, {} misoriented edges); a face reaching the surface's seam \
+             angle is unsupported",
+            c.boundary_edges, c.misoriented_edges
+        )));
+    }
+    Ok(())
+}
+
+/// MANIFOLD_SOLID_BREP label (OpenCascade's generated labels ignored).
+fn brep_label(p: &ast::P) -> Option<String> {
+    p.opt_s(0)
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"))
+        .map(String::from)
+}
+
+/// One MANIFOLD_SOLID_BREP as a closed, outward solid, optionally moved by
+/// `m`; counts it into `stats`.
+fn brep_solid(
+    idx: &ast::Index,
+    geo: &geom::Geo,
+    brep: u64,
+    m: Option<Matrix4>,
+    tol: f64,
+    stats: &mut StepStats,
+) -> std::result::Result<(Body, Vec<ImportedPlanarFace>), StepError> {
+    let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
+    let shell_id = p.r(1)?;
+    let built = topo::build_shell(geo, shell_id, tol, false)
+        .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+    stats.step_faces += count_step_faces(idx, shell_id)?;
+    for t in &built.surface_types {
+        *stats.surfaces.entry(t.clone()).or_default() += 1;
+    }
+    for c in &built.curve_types {
+        *stats.curves.entry(c.clone()).or_default() += 1;
+    }
+    let types = built.surface_types;
+    let mut shell = built.shell;
+    if let Some(m) = m {
+        transform_shell(&mut shell, m)?;
+    }
+    let solid = Solid::extract(CompressedSolid {
+        boundaries: vec![shell],
+    })
+    .map_err(|e| {
+        fail(format!(
+            "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
+        ))
+    })?;
+    let body = orient_outward(Body { solid }, brep)?;
+    check_revolution_mesh(&body, brep, &types)?;
+    let planar_faces =
+        planar_faces(&body).map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+    stats.faces += body.solid.face_iter().count();
+    stats.solids += 1;
+    Ok((body, planar_faces))
+}
+
+/// Rigid placement from a (checked rigid) column-major matrix.
+fn rigid_of(m: &Matrix4) -> crate::Rigid {
+    crate::Rigid {
+        r: std::array::from_fn(|i| std::array::from_fn(|j| m[j][i])),
+        t: [m[3][0], m[3][1], m[3][2]],
+    }
+}
+
+/// The product structure with every product's definition solids (each
+/// MANIFOLD_SOLID_BREP built once per definition, review #36). Every solid of
+/// the file lands somewhere (review #7/#8): in the product whose shape holds
+/// it; else folded into the one product its representation is placed in
+/// (moved into that product's coordinates); else under an extra root
+/// product "Unstructured solids" at each of its world placements. The last
+/// two are reported in `warnings`.
+#[allow(clippy::too_many_arguments)]
+fn structured(
+    idx: &ast::Index,
+    geo: &geom::Geo,
+    placements: &assembly::Placements,
+    st: assembly::Structure,
+    breps: &[u64],
+    tol: f64,
+    stats: &mut StepStats,
+    warnings: &mut Vec<String>,
+) -> std::result::Result<ImportedAssembly, StepError> {
+    let mut products: Vec<ImportedProduct> = st
+        .products
+        .iter()
+        .map(|p| ImportedProduct {
+            name: p.name.clone(),
+            solids: vec![],
+            children: p
+                .children
+                .iter()
+                .map(|(c, n, m)| (*c, n.clone(), rigid_of(m)))
+                .collect(),
+        })
+        .collect();
+    let mut roots = st.roots;
+    // Review #37: identity group -> first product holding it, built once.
+    let mut product_of: std::collections::HashMap<u64, usize> = Default::default();
+    for (i, p) in st.products.iter().enumerate() {
+        for &r in &p.reps {
+            product_of.entry(placements.group_of(r)).or_insert(i);
+        }
+    }
+    let mut loose_root: Option<usize> = None;
+    for &brep in breps {
+        let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
+        let label = brep_label(&p);
+        let direct = placements
+            .item_groups(brep)
+            .iter()
+            .filter_map(|g| product_of.get(g).copied())
+            .min();
+        if let Some(pi) = direct {
+            let (body, planar_faces) = brep_solid(idx, geo, brep, None, tol, stats)?;
+            let fallback = products[pi].name.clone();
+            products[pi].solids.push(ImportedSolid {
+                name: label.or(Some(fallback)),
+                body,
+                planar_faces,
+            });
+            continue;
+        }
+        let above = placements.products_above(brep, &product_of)?;
+        if let Some(&(pi, _)) = above.first()
+            && above.iter().all(|(q, _)| *q == pi)
+        {
+            let pname = products[pi].name.clone();
+            for (_, m) in &above {
+                let (body, planar_faces) = brep_solid(idx, geo, brep, Some(*m), tol, stats)?;
+                products[pi].solids.push(ImportedSolid {
+                    name: label.clone().or(Some(pname.clone())),
+                    body,
+                    planar_faces,
+                });
+            }
+            warnings.push(format!(
+                "MANIFOLD_SOLID_BREP #{brep}: not in a shape representation of a product; \
+                 placed into product '{pname}' through its representation relationship \
+                 ({} instance(s))",
+                above.len()
+            ));
+            continue;
+        }
+        // Outside the structure (or placed into several products): its world
+        // placements, under an extra root.
+        let inst = placements.instances_of_item(brep)?;
+        let name = placements
+            .product_name_of_item(brep)
+            .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
+            .or(label.clone())
+            .unwrap_or_else(|| format!("Solid #{brep}"));
+        let (body, planar_faces) = brep_solid(idx, geo, brep, None, tol, stats)?;
+        let own = products.len();
+        products.push(ImportedProduct {
+            name: name.clone(),
+            solids: vec![ImportedSolid {
+                name: label.or(Some(name.clone())),
+                body,
+                planar_faces,
+            }],
+            children: vec![],
+        });
+        let root = *loose_root.get_or_insert_with(|| {
+            products.push(ImportedProduct {
+                name: "Unstructured solids".into(),
+                solids: vec![],
+                children: vec![],
+            });
+            roots.push(products.len() - 1);
+            products.len() - 1
+        });
+        let n = inst.len();
+        for m in inst {
+            let t = m.as_ref().map_or(crate::Rigid::IDENTITY, rigid_of);
+            products[root].children.push((own, String::new(), t));
+        }
+        warnings.push(format!(
+            "MANIFOLD_SOLID_BREP #{brep} ('{name}'): outside the product structure (in no \
+             product's shape{}); imported under 'Unstructured solids' at its {n} world \
+             placement(s)",
+            if above.len() > 1 {
+                ", or placed into several products"
+            } else {
+                ""
+            }
+        ));
+    }
+    Ok(ImportedAssembly { products, roots })
 }
 
 /// All shells of the SHELL_BASED_SURFACE_MODELs `models` as one surface body.
