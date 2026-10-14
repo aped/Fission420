@@ -246,6 +246,9 @@ pub enum Command {
         name: Option<String>,
         face: FaceRef,
         radius: f64,
+        /// Also every hole loop of the face (all of its edges).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        holes: bool,
     },
     /// Equal-distance chamfer of every edge of the outer boundary loop of the
     /// planar face `face`, `distance` mm along both faces: 45° planes along
@@ -256,6 +259,9 @@ pub enum Command {
         name: Option<String>,
         face: FaceRef,
         distance: f64,
+        /// Also every hole loop of the face (all of its edges).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        holes: bool,
     },
     /// Direct edit (ADR 0010) of an imported STEP body at imported face
     /// `face` (`FaceRole::Imported`, stable import index; see
@@ -2259,8 +2265,13 @@ impl Session {
                 })?;
                 r.feature = Some(id);
             }
-            Command::FilletLoop { name, face, radius } => {
-                let (name, face, radius) = (name.clone(), *face, *radius);
+            Command::FilletLoop {
+                name,
+                face,
+                radius,
+                holes,
+            } => {
+                let (name, face, radius, holes) = (name.clone(), *face, *radius, *holes);
                 if !radius.is_finite() || radius <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "fillet radius must be > 0 mm, got {radius}"
@@ -2268,7 +2279,14 @@ impl Session {
                 }
                 let id = self.model_mut()?.transact("Fillet loop", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Fillet"));
-                    Ok(d.push(n, FeatureKind::FilletLoop { face, radius }))
+                    Ok(d.push(
+                        n,
+                        FeatureKind::FilletLoop {
+                            face,
+                            radius,
+                            holes,
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }
@@ -2276,8 +2294,9 @@ impl Session {
                 name,
                 face,
                 distance,
+                holes,
             } => {
-                let (name, face, distance) = (name.clone(), *face, *distance);
+                let (name, face, distance, holes) = (name.clone(), *face, *distance, *holes);
                 if !distance.is_finite() || distance <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "chamfer distance must be > 0 mm, got {distance}"
@@ -2285,7 +2304,14 @@ impl Session {
                 }
                 let id = self.model_mut()?.transact("Chamfer loop", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Chamfer"));
-                    Ok(d.push(n, FeatureKind::ChamferLoop { face, distance }))
+                    Ok(d.push(
+                        n,
+                        FeatureKind::ChamferLoop {
+                            face,
+                            distance,
+                            holes,
+                        },
+                    ))
                 })?;
                 r.feature = Some(id);
             }

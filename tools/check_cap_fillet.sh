@@ -86,4 +86,11 @@ check cap_fillet_enclosure_base.step "$SHELL_V - $RM" "[0,0,0,60,40,25]" \
   "[[30,20,10],[30,20,1],[0.05,20,0.05]]" "[False, True, False]"
 check cap_fillet_enclosure_both.step "$SHELL_V - 2*$RM" "[0,0,0,60,40,25]" \
   "[[30,20,10],[30,20,1],[0.05,20,0.05],[0.05,20,24.95]]" "[False, True, False, False]"
+# Plate 40x30x10 with a centred Ø10 through hole, every top-face edge: box loop and hole rim
+# (Pappus at the hole: 2 pi (A R + M); chamfer d 1: the countersink ring 2 pi (R + d/3) d^2/2).
+PLATE="(12000 - pi*25*10)"
+check cap_fillet_face_with_hole.step "$PLATE - (A(1.5)*140 - 8*M(1.5)) - 2*pi*(A(1.5)*5 + M(1.5))" \
+  "[0,0,0,40,30,10]" "[[25.1,15,9.9],[26.5,15,9.5],[20,15,5]]" "[False, True, False]"
+check cap_chamfer_face_with_hole.step "$PLATE - (0.5*140 - 8/6) - 2*pi*(5 + 1/3)*0.5" \
+  "[0,0,0,40,30,10]" "[[25.3,15,9.9],[26.5,15,9.5],[20,15,5]]" "[False, True, False]"
 exit $status

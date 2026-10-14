@@ -509,3 +509,63 @@ fn enclosure_rim_and_base_loops_keep_the_cavity() {
         .to_string();
     assert!(e.contains("hole"), "{e}");
 }
+
+/// Every edge of a plate's top face, the Ø10 through hole's rim included.
+/// Hole rim (traversed with material on the left, total turn −2π): removed
+/// 2π (A R + M) (Pappus with the section's centroid at R + M/A); for the
+/// chamfer that is the countersink ring 2π (R + d/3) d²/2.
+#[test]
+fn face_edges_include_the_hole_rims() {
+    let (a, b, h) = (40.0, 30.0, 10.0);
+    let hole = Profile::Circle {
+        center: [20.0, 15.0],
+        radius: 5.0,
+    };
+    let body = extrude_region(&rect(a, b), &[hole], &Frame::XY, h).unwrap();
+    let plate = a * b * h - PI * 25.0 * h;
+    // Fillet r 1.5: box loop (4 convex 90° corners) and the hole.
+    let r = 1.5;
+    let (sa, m) = spandrel(r);
+    let out = fillet_cap_face_edges(&body, &top(h), r).unwrap();
+    let want = plate - (sa * 2.0 * (a + b) - 8.0 * m) - 2.0 * PI * (sa * 5.0 + m);
+    let (v, e) = volume_of(&out).unwrap();
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    // The rim is rounded into the hole: torus about the hole axis, tube
+    // centre at radius 5 + r, height h − r; probe at 45° up the section.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let rad = 5.0 + r - r * s;
+    let p = [20.0 + rad, 15.0, h - r + r * s];
+    let n = [-s, 0.0, s];
+    probe(&out, p, n);
+    evidence(&out, "cap_fillet_face_with_hole");
+    // Chamfer d 1: countersink-like cone at the hole.
+    let d = 1.0;
+    let out = chamfer_cap_face_edges(&body, &top(h), d).unwrap();
+    let tri = d * d / 2.0;
+    let want =
+        plate - (tri * 2.0 * (a + b) - 8.0 * d.powi(3) / 6.0) - 2.0 * PI * (5.0 + d / 3.0) * tri;
+    let (v, e) = volume_of(&out).unwrap();
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    evidence(&out, "cap_chamfer_face_with_hole");
+    // Outer loop only (the existing operation) leaves the hole sharp.
+    let out = fillet_cap_loop(&body, &top(h), r).unwrap();
+    let (v, _) = volume_of(&out).unwrap();
+    let want = plate - (sa * 2.0 * (a + b) - 8.0 * m);
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    // Hole too close to the rim for both bands: refused by name.
+    let hole = Profile::Circle {
+        center: [8.0, 15.0],
+        radius: 5.0,
+    };
+    let body = extrude_region(&rect(a, b), &[hole], &Frame::XY, h).unwrap();
+    let e = fillet_cap_face_edges(&body, &top(h), 1.6)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("would meet"), "{e}");
+}
