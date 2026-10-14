@@ -265,8 +265,9 @@ fn edits_compose_and_export() {
     let want = V0 + 3.0 * TOP_AREA - PI * (25.0 - 16.0) * 23.0 + PI * 9.0 * 11.0;
     assert_volume(&e3, want);
     // Exported exactly (re-read independently by tools/check_direct_edit.sh in
-    // FreeCAD; our own importer does not read the SURFACE_OF_REVOLUTION the
-    // writer uses for imported cylinders).
+    // FreeCAD; since run 7 our own importer reads the SURFACE_OF_REVOLUTION
+    // the writer uses for imported cylinders, within the limits of
+    // docs/formats/step.md).
     let step = crate::export_step(&e3, "R-CAD test").unwrap();
     assert!(step.contains("MANIFOLD_SOLID_BREP"));
     if let Ok(dir) = std::env::var("RCAD_EVIDENCE_DIR") {

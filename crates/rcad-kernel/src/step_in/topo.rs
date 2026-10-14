@@ -29,6 +29,7 @@ pub(super) type CShell = CompressedShell<Point3, Curve, Surface>;
 /// Upper bound on faces/edges per shell after splitting (allocation guard).
 const MAX_ITEMS: usize = 4_000_000;
 
+#[derive(Clone)]
 pub(super) struct Built {
     pub shell: CShell,
     /// STEP surface entity type per face (for statistics).

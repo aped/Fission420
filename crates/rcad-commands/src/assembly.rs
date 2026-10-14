@@ -138,6 +138,24 @@ fn v(m: impl Into<String>) -> DocError {
     DocError::Validation(m.into())
 }
 
+/// Review run 7 #35: a name read from a file (STEP PRODUCT / usage /
+/// solid labels) made valid like a typed one: control characters dropped,
+/// whitespace trimmed, at most `MAX_FILE_NAME_CHARS` characters; empty ->
+/// `fallback`. Room is left for a " 99" de-duplication suffix.
+pub(crate) fn file_name_part(n: &str, fallback: &str) -> String {
+    let clean: String = n.chars().filter(|c| !c.is_control()).collect();
+    let t: String = clean.trim().chars().take(MAX_FILE_NAME_CHARS).collect();
+    let t = t.trim_end();
+    if t.is_empty() {
+        fallback.to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Longest name taken from a file (64 minus room for " 9999").
+const MAX_FILE_NAME_CHARS: usize = 59;
+
 fn valid_name(n: &str, what: &str) -> Result<String, DocError> {
     let t = n.trim();
     if t.is_empty() || t.chars().count() > 64 || t.chars().any(char::is_control) {
@@ -562,7 +580,7 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             let (kind, parent, child) = (*kind, *parent, *child);
             let (origin, axis) = match axis_from {
                 Some(f) => {
-                    let (o, a) = axis_from_faces(m, parent, f)?;
+                    let (o, a) = axis_from_faces(m, parent, f, "parent")?;
                     (o, Some(a))
                 }
                 None => (*origin, *axis),
@@ -606,6 +624,9 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
                     kind.dof()
                 )));
             }
+            // Review run 7 #32: a zero axis is refused here, before the snap
+            // divides by its length.
+            check_axis(&j)?;
             // Optional snap of the child's own axis onto the joint axis.
             let snapped = match child_axis_from {
                 Some(f) => Some(snap_child_axis(m, &j, f, *flip)?),
@@ -630,10 +651,23 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
             if occurrences.len() < 2 {
                 return Err(v("a rigid group needs at least two occurrences"));
             }
+            // Review run 7 #50: the joint limit is checked before any
+            // per-joint work.
+            let have = m.document().assembly.joints.len();
+            let max = rcad_document::assembly::MAX_JOINTS;
+            if have.saturating_add(occurrences.len() - 1) > max {
+                return Err(v(format!(
+                    "a rigid group of {} occurrences adds {} joints to {have}: more than \
+                     {max} joints",
+                    occurrences.len(),
+                    occurrences.len() - 1
+                )));
+            }
             let first = occurrences[0];
             let mut joints = Vec::new();
-            for (i, c) in occurrences.iter().enumerate().skip(1) {
-                if occurrences[..i].contains(c) {
+            let mut listed = std::collections::BTreeSet::from([first]);
+            for c in occurrences.iter().skip(1) {
+                if !listed.insert(*c) {
                     return Err(v(format!("{c} is listed twice")));
                 }
                 let j = Joint {
@@ -701,19 +735,19 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
         } => {
             let id = *joint;
             let old = m.document().assembly.joint(id)?.clone();
+            // Review run 7 #31: an omitted field keeps the joint's current
+            // value (it no longer resets the axis to Z or clears dir2).
             let (origin, axis) = match axis_from {
-                Some(f) => {
-                    let (o, a) = axis_from_faces(m, old.parent, f)?;
-                    (o, a)
-                }
-                None => (*origin, axis.unwrap_or([0.0, 0.0, 1.0])),
+                Some(f) => axis_from_faces(m, old.parent, f, "parent")?,
+                None => (origin.unwrap_or(old.origin), axis.unwrap_or(old.axis)),
             };
             let mut j = Joint {
                 origin,
                 axis,
-                dir2: *dir2,
+                dir2: dir2.or(old.dir2),
                 ..old.clone()
             };
+            check_axis(&j)?;
             if j.kind != JointKind::Rigid {
                 j.frame()?;
             }
@@ -955,30 +989,16 @@ pub(crate) fn run(m: &mut Model, cmd: &Command, r: &mut Response) -> Result<(), 
 /// by instance path / body name), with the source bytes' identity.
 /// The bytes of a regular file of at most `MAX_FILE_BYTES` (one bounded read).
 fn read_source(path: &std::path::Path) -> Result<Vec<u8>, DocError> {
-    use std::io::Read as _;
-    let e =
-        |x: std::io::Error| DocError::File(format!("external component {}: {x}", path.display()));
-    let meta = std::fs::metadata(path).map_err(e)?;
+    let meta = std::fs::metadata(path)
+        .map_err(|x| DocError::File(format!("external component {}: {x}", path.display())))?;
     if !meta.is_file() {
         return Err(DocError::File(format!(
             "external component {}: not a regular file",
             path.display()
         )));
     }
-    let max = rcad_document::MAX_FILE_BYTES;
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .map_err(e)?
-        .take(max + 1)
-        .read_to_end(&mut bytes)
-        .map_err(e)?;
-    if bytes.len() as u64 > max {
-        return Err(DocError::File(format!(
-            "external component {}: file larger than {max} bytes",
-            path.display()
-        )));
-    }
-    Ok(bytes)
+    rcad_document::read_bounded(path)
+        .map_err(|e| DocError::File(format!("external component {}: {e}", path.display())))
 }
 
 fn source_identity(bytes: &[u8]) -> String {
@@ -988,15 +1008,11 @@ fn source_identity(bytes: &[u8]) -> String {
 fn external_step(
     path: &std::path::Path,
 ) -> Result<(String, rcad_document::assembly::ExternalSource, usize), DocError> {
+    // Review run 7 #16: one bounded read; the bytes hashed are the bytes
+    // parsed.
     let bytes = read_source(path)?;
-    let nf = rcad_document::load_file(path)?;
-    // The parsed document must be the bytes that were hashed.
-    if read_source(path)? != bytes {
-        return Err(DocError::File(format!(
-            "external component {}: the file changed while it was read; try again",
-            path.display()
-        )));
-    }
+    let nf = rcad_document::parse_native(&bytes)
+        .map_err(|e| DocError::File(format!("external component {}: {e}", path.display())))?;
     let model = Model::from_document(nf.document)?;
     let ev = model.evaluation();
     let mut items: Vec<(String, Body)> = Vec::new();
@@ -1004,6 +1020,15 @@ fn external_step(
         let bodies = placed(&model, i)?;
         let multi = bodies.len() > 1;
         for (b, id) in bodies.into_iter().zip(o.bodies.iter()) {
+            // Review run 7 #41: an open surface body is not a solid.
+            if b.is_open_shell() {
+                return Err(DocError::ProductLimit(format!(
+                    "external component {}: {} holds an open surface body; only closed \
+                     solids can be embedded",
+                    path.display(),
+                    o.path_name
+                )));
+            }
             let n = if multi {
                 let bn = model
                     .document()
@@ -1016,11 +1041,23 @@ fn external_step(
             items.push((n, b));
         }
     }
+    // Review run 7 #40: one rule for occurrences and loose bodies: every
+    // evaluated solid is included, hidden or not (visibility is display
+    // state; toggling it in the source must not change the solid count).
     for b in &ev.bodies {
-        if !b.visible || model.document().assembly.component_of(b.id).is_some() {
+        if model.document().assembly.component_of(b.id).is_some() {
             continue;
         }
         match &b.geometry {
+            // Review run 7 #41: an open surface body is not a solid.
+            BodyGeometry::Brep(g) if g.is_open_shell() => {
+                return Err(DocError::ProductLimit(format!(
+                    "external component {}: '{}' is an open surface body; only closed solids \
+                     can be embedded (stitch, fill or thicken it in the source, or delete it)",
+                    path.display(),
+                    b.name
+                )));
+            }
             BodyGeometry::Brep(g) => items.push((b.name.clone(), g.clone())),
             BodyGeometry::Mesh(_) => {
                 return Err(DocError::ProductLimit(format!(
@@ -1033,7 +1070,7 @@ fn external_step(
     }
     if items.is_empty() {
         return Err(v(format!(
-            "external component {}: the document has no visible solid",
+            "external component {}: the document has no solid",
             path.display()
         )));
     }
@@ -1149,9 +1186,11 @@ fn import_step_assembly(
     let opts = k::StepImportOptions {
         max_bytes: rcad_document::MAX_FILE_BYTES as usize,
         unit_override_to_mm: unit,
+        assembly: true,
         ..Default::default()
     };
     let imp = k::import_step(text, &opts).map_err(|e| v(e.to_string()))?;
+    let warnings = imp.warnings;
     let Some(asm) = imp.assembly else {
         return Err(v(format!(
             "{}: no assembly structure (NEXT_ASSEMBLY_USAGE_OCCURRENCE); use import_step",
@@ -1171,7 +1210,22 @@ fn import_step_assembly(
             stack.push(*c);
         }
     }
+    // Review run 7 #7/#8: every product holding solids is reachable (the
+    // kernel makes every unused product a root and places solids outside
+    // the structure under an extra root); refuse rather than drop one.
+    if let Some(p) =
+        (0..asm.products.len()).find(|p| !seen.contains(p) && !asm.products[*p].solids.is_empty())
+    {
+        return Err(DocError::ProductLimit(format!(
+            "{}: product '{}' with {} solid(s) is not reachable from a top product; \
+             not imported (import_step reads its placed solids)",
+            path.display(),
+            file_name_part(&asm.products[p].name, "?"),
+            asm.products[p].solids.len()
+        )));
+    }
     // Embedded STEP copy per product with solids (own coordinates).
+    let pname = |p: usize| file_name_part(&asm.products[p].name, &format!("Product{}", p + 1));
     let mut texts: BTreeMap<usize, (String, Vec<String>)> = BTreeMap::new();
     for &p in &order {
         let pr = &asm.products[p];
@@ -1183,9 +1237,8 @@ fn import_step_assembly(
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                s.name
-                    .clone()
-                    .unwrap_or_else(|| format!("{}-{}", pr.name, i + 1))
+                let fallback = format!("{}-{}", pname(p), i + 1);
+                file_name_part(s.name.as_deref().unwrap_or(""), &fallback)
             })
             .collect();
         let refs: Vec<(&str, &Body)> = names
@@ -1212,12 +1265,7 @@ fn import_step_assembly(
             if empty.contains(&p) {
                 continue;
             }
-            let pr = &asm.products[p];
-            let base = if pr.name.trim().is_empty() {
-                format!("Product{}", p + 1)
-            } else {
-                pr.name.trim().to_string()
-            };
+            let base = pname(p);
             let cname = (1..)
                 .map(|i| {
                     if i == 1 {
@@ -1266,10 +1314,9 @@ fn import_step_assembly(
                          t: &Rigid|
          -> Result<(), DocError> {
             let cn = d.assembly.component(c)?.name.clone();
-            let n = if !name.trim().is_empty()
-                && !d.assembly.occurrences.iter().any(|o| o.name == name.trim())
-            {
-                name.trim().to_string()
+            let name = file_name_part(name, "");
+            let n = if !name.is_empty() && !d.assembly.occurrences.iter().any(|o| o.name == name) {
+                name
             } else {
                 d.assembly.default_occurrence_name(&cn)
             };
@@ -1294,10 +1341,15 @@ fn import_step_assembly(
         d.assembly.active = active;
         Ok((comp.len(), occ))
     })?;
-    Ok(format!(
+    let mut msg = format!(
         "imported {file} with its product structure: {nc} components, {no} occurrences \
          (definitions embedded as STEP copies; placements from the file)"
-    ))
+    );
+    // Review run 7 #36: the import's notes are reported, not dropped.
+    if !warnings.is_empty() {
+        msg += &format!("; {} note(s): {}", warnings.len(), warnings.join("; "));
+    }
+    Ok(msg)
 }
 
 /// The import feature (and its blob) that holds an external component's copy.
@@ -1444,7 +1496,9 @@ fn snap_child_axis(m: &Model, j: &Joint, f: &AxisFrom, flip: bool) -> Result<Rig
     if a.occurrence(j.child)?.grounded {
         return Err(v("the child is grounded"));
     }
-    let (c0, cd) = axis_from_faces(m, j.child, f)?;
+    // Review run 7 #32: refuse a zero joint axis before normalizing it.
+    check_axis(j)?;
+    let (c0, cd) = axis_from_faces(m, j.child, f, "child")?;
     let l = locals(m)?;
     let lp = l.get(&j.parent).copied().unwrap_or(Rigid::IDENTITY);
     let lc = l.get(&j.child).copied().unwrap_or(Rigid::IDENTITY);
@@ -1695,20 +1749,38 @@ pub enum AxisFrom {
     },
 }
 
+/// Review run 7 #32: a joint axis must have a finite, non-zero length
+/// (every kind: the axis is normalized by the snap and the motion).
+fn check_axis(j: &Joint) -> Result<(), DocError> {
+    let n = j.axis.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if !(n.is_finite() && n > 1e-12) {
+        return Err(v(format!(
+            "the joint axis {:?} has zero length; give a direction",
+            j.axis
+        )));
+    }
+    if j.origin.iter().any(|x| !x.is_finite()) {
+        return Err(v("the joint origin must be finite"));
+    }
+    Ok(())
+}
+
+/// `role` names the occurrence in errors ("parent" / "child").
 fn axis_from_faces(
     m: &Model,
-    parent: OccurrenceId,
+    occurrence: OccurrenceId,
     f: &AxisFrom,
+    role: &str,
 ) -> Result<([f64; 3], [f64; 3]), DocError> {
     use rcad_kernel::DirectFace;
     let a = &m.document().assembly;
-    let comp = a.component(a.occurrence(parent)?.component)?;
+    let comp = a.component(a.occurrence(occurrence)?.component)?;
     let own = |p: &crate::measure_faces::FacePick| {
         if comp.bodies.contains(&p.body) {
             Ok(())
         } else {
             Err(v(format!(
-                "face {} of body {} is not on the parent's component '{}'",
+                "face {} of body {} is not on the {role}'s component '{}'",
                 p.face, p.body, comp.name
             )))
         }
@@ -1779,7 +1851,9 @@ fn material_names(m: &Model, bodies: &[BodyId]) -> String {
                 .map_or("—".to_string(), |x| x.name.clone())
         })
         .collect();
-    names.dedup();
+    // Review run 7 #38: every repeat removed, first-use order kept.
+    let mut seen = std::collections::BTreeSet::new();
+    names.retain(|n| seen.insert(n.clone()));
     if names.is_empty() {
         "—".to_string()
     } else {
@@ -1922,13 +1996,29 @@ pub fn structured_bom(m: &Model) -> Result<Vec<StructuredBomRow>, DocError> {
     Ok(out)
 }
 
-/// One CSV field (RFC 4180 quoting).
+/// One CSV text field: RFC 4180 quoting, and (review run 7 #17) a leading
+/// `'` when the text starts like a spreadsheet formula (`=`, `+`, `-`, `@`,
+/// TAB or CR), so names from files (STEP products, external documents) are
+/// shown as text, never evaluated.
 fn csv(s: &str) -> String {
+    let guarded;
+    let s = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        guarded = format!("'{s}");
+        guarded.as_str()
+    } else {
+        s
+    };
     if s.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
     }
+}
+
+/// A structured item number ("1.10"), always quoted (review run 7 #39) so it
+/// is read as text by importers that honour quoting, not as the number 1.1.
+fn csv_item(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\"\""))
 }
 
 /// The BOM as CSV text: flattened (`item,name,part_number,quantity,material,
@@ -1941,7 +2031,7 @@ pub fn bom_csv(m: &Model, structured: bool) -> Result<String, DocError> {
         for r in structured_bom(m)? {
             out.push_str(&format!(
                 "{},{},{},{},{},{},{}\n",
-                csv(&r.item),
+                csv_item(&r.item),
                 r.level,
                 csv(&r.name),
                 csv(&r.part_number),
@@ -2121,16 +2211,33 @@ fn joint_sweep(
     if !(2..=200).contains(&steps) {
         return Err(v("a sweep takes 2 to 200 samples"));
     }
+    if !(from.is_finite() && to.is_finite()) {
+        return Err(v("the sweep range must be finite"));
+    }
     let a = &m.document().assembly;
     let j = a.joint(id)?;
     let base = j.values();
     if index >= base.len() {
         return Err(v(format!("{} has no value {index}", j.name)));
     }
+    // Review run 7 #5: only pairs with at least one part that moves with the
+    // joint are checked (its child, every occurrence jointed below it, and
+    // everything inside them); static pairs are the same at every sample.
+    let moving = moving_with(a, id)?;
+    let (lo, hi) = (from.min(to), from.max(to));
+    let mut cache = BTreeMap::new();
     let mut out = Vec::with_capacity(steps);
     for k in 0..steps {
+        // Review run 7 #29: a convex combination (no `to - from` overflow),
+        // the ends exact, every sample clamped into the range.
         let t = k as f64 / (steps - 1) as f64;
-        let x = from + (to - from) * t;
+        let x = if k == 0 {
+            from
+        } else if k + 1 == steps {
+            to
+        } else {
+            (from * (1.0 - t) + to * t).clamp(lo, hi)
+        };
         let mut vals = base.clone();
         vals[index] = x;
         // Limits are enforced for every sample (no motion beyond them).
@@ -2139,12 +2246,43 @@ fn joint_sweep(
         let jm = asm.joint_mut(id)?;
         jm.set_value(index, x);
         let inst = asm.evaluate()?;
+        if k == 0
+            && !inst
+                .iter()
+                .any(|i| !i.bodies.is_empty() && i.path.iter().any(|o| moving.contains(o)))
+        {
+            return Err(v(format!(
+                "nothing with bodies moves with {} (its child is suppressed or empty): \
+                 there is nothing to sweep",
+                j.name
+            )));
+        }
         out.push(SweepStep {
             value: x,
-            interference: interference_with(m, &inst, list)?,
+            interference: pairs_with(m, &inst, list, Some((&moving, &mut cache)))?,
         });
     }
     Ok(out)
+}
+
+/// Occurrences moved by joint `id`: its child and, transitively, the child
+/// of every joint whose parent moves (instances inside them follow).
+fn moving_with(
+    a: &rcad_document::assembly::Assembly,
+    id: JointId,
+) -> Result<std::collections::BTreeSet<OccurrenceId>, DocError> {
+    let mut set = std::collections::BTreeSet::from([a.joint(id)?.child]);
+    loop {
+        let before = set.len();
+        for j in &a.joints {
+            if set.contains(&j.parent) {
+                set.insert(j.child);
+            }
+        }
+        if set.len() == before {
+            return Ok(set);
+        }
+    }
 }
 
 /// [`interference`] for the instances `inst` (current geometry, given
@@ -2153,6 +2291,21 @@ fn interference_with(
     m: &Model,
     inst: &[rcad_document::assembly::EvalOccurrence],
     list: Option<&[OccurrenceId]>,
+) -> Result<Vec<Interference>, DocError> {
+    pairs_with(m, inst, list, None)
+}
+
+/// Placed bodies of instances that do not move during a sweep, by path.
+type StaticCache = BTreeMap<Vec<OccurrenceId>, Vec<Body>>;
+
+/// [`interference_with`]; with `moving`, only pairs where at least one
+/// instance's path passes through a moving occurrence, and the static
+/// instances' placed bodies are kept in the cache across samples.
+fn pairs_with(
+    m: &Model,
+    inst: &[rcad_document::assembly::EvalOccurrence],
+    list: Option<&[OccurrenceId]>,
+    mut moving: Option<(&std::collections::BTreeSet<OccurrenceId>, &mut StaticCache)>,
 ) -> Result<Vec<Interference>, DocError> {
     if let Some(l) = list {
         for o in l {
@@ -2175,13 +2328,29 @@ fn interference_with(
             }
         }
     }
+    let set = moving.as_ref().map(|(set, _)| *set);
+    let moves = |i: usize| set.is_none_or(|set| inst[i].path.iter().any(|o| set.contains(o)));
     let mut cache: BTreeMap<usize, Vec<Body>> = BTreeMap::new();
     for i in &ids {
-        cache.insert(*i, placed_instance(m, &inst[*i])?);
+        let placed = match &mut moving {
+            Some((_, keep)) if !moves(*i) => match keep.get(&inst[*i].path) {
+                Some(b) => b.clone(),
+                None => {
+                    let b = placed_instance(m, &inst[*i])?;
+                    keep.insert(inst[*i].path.clone(), b.clone());
+                    b
+                }
+            },
+            _ => placed_instance(m, &inst[*i])?,
+        };
+        cache.insert(*i, placed);
     }
     let mut out = Vec::new();
     for (n, a) in ids.iter().enumerate() {
         for b in &ids[n + 1..] {
+            if !moves(*a) && !moves(*b) {
+                continue;
+            }
             let mut total: Option<(f64, f64, bool)> = None;
             let mut unknown: Option<String> = None;
             for x in &cache[a] {

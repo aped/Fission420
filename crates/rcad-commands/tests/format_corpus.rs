@@ -201,7 +201,6 @@ fn corpus_imports_match_their_references() {
 /// `import_step_assembly`: one placed occurrence per solid and the total
 /// volume FreeCAD measured.
 #[test]
-#[ignore = "pending fix: import_step_assembly refuses SURFACE_OF_REVOLUTION faces that import_step accepts (a1)"]
 fn corpus_assemblies_import_with_hierarchy() {
     let reference: Value = serde_json::from_str(
         &std::fs::read_to_string(corpus().join("freecad_reference.json")).unwrap(),

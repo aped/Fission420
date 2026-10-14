@@ -24,6 +24,9 @@ pub(super) struct Geo<'a> {
     pub k: f64,
     /// File plane-angle unit -> rad.
     pub angle: f64,
+    /// Run 7: read SURFACE_OF_REVOLUTION with the opposite normal (the
+    /// writers' conventions differ; see `build_checked` in mod.rs).
+    pub invert_revolution: bool,
 }
 
 /// Analytic description of a face surface, used for exact distance checks and for
@@ -388,6 +391,9 @@ impl Geo<'_> {
                     )?);
                     return Ok((revolved(generatrix, &pl, a)?, a));
                 }
+                "SURFACE_OF_REVOLUTION" => {
+                    return self.surface_of_revolution(sid, &p);
+                }
                 "B_SPLINE_SURFACE_WITH_KNOTS" => {
                     // ('', ud, vd, ((pts)), form, uc, vc, si, (um), (vm), (uk), (vk), spec)
                     let (ud, vd) = (p.int(1)?, p.int(2)?);
@@ -408,6 +414,71 @@ impl Geo<'_> {
             "unsupported surface entity {} #{sid}",
             e.type_name()
         )))
+    }
+
+    /// SURFACE_OF_REVOLUTION('', swept_curve, AXIS1_PLACEMENT): the swept
+    /// curve (LINE or B-spline, full parametrisation) revolved about the axis.
+    /// Run 7: R-CAD's writer (truck-stepio) uses it for every revolved
+    /// surface, so embedded copies of imported cylinders, cones, spheres and
+    /// tori must read back. STEP's normal of a surface of revolution is
+    /// d(rotation) x d(curve) (ISO 10303-42: u = angle, v = curve), the
+    /// opposite of Truck's d(curve) x d(rotation); the generatrix is
+    /// reversed (exact) so the Truck normal is the STEP normal.
+    fn surface_of_revolution(&self, sid: u64, p: &P) -> Result<(Surface, Analytic), StepError> {
+        let cid = p.r(1)?;
+        let (_, ax) = self.idx.simple(p.r(2)?, &["AXIS1_PLACEMENT"])?;
+        let o = self.point(ax.r(1)?)?;
+        let z = if ax.is_unset(2) {
+            Vector3::unit_z()
+        } else {
+            self.direction(ax.r(2)?)?
+        };
+        let e = self.idx.get(cid)?;
+        let mut analytic = Analytic::Freeform;
+        let generatrix = if let [(name, params)] = e.parts.as_slice() {
+            let c = P::new(cid, name, params);
+            match name.as_str() {
+                "LINE" => {
+                    let a = self.point(c.r(1)?)?;
+                    let (_, vp) = self.idx.simple(c.r(2)?, &["VECTOR"])?;
+                    let d = self.direction(vp.r(1)?)?;
+                    let mag = self.length(&vp, 2)?;
+                    let b = a + d * mag;
+                    // A line parallel to the axis: a cylinder.
+                    let off = (a - o) - z * (a - o).dot(z);
+                    if d.cross(z).magnitude() < 1e-12 && off.magnitude() > 0.0 {
+                        analytic = Analytic::Cylinder {
+                            o,
+                            z,
+                            r: off.magnitude(),
+                        };
+                    }
+                    Curve::Line(Line(a, b))
+                }
+                "B_SPLINE_CURVE_WITH_KNOTS" => Curve::BSplineCurve(self.bspline_curve_simple(&c)?),
+                _ => {
+                    return Err(fail(format!(
+                        "SURFACE_OF_REVOLUTION #{sid}: swept curve {} #{cid} unsupported",
+                        e.type_name()
+                    )));
+                }
+            }
+        } else if e.has("B_SPLINE_CURVE") && e.has("RATIONAL_B_SPLINE_CURVE") {
+            Curve::NurbsCurve(self.nurbs_curve_complex(cid)?)
+        } else if e.has("B_SPLINE_CURVE") && e.has("B_SPLINE_CURVE_WITH_KNOTS") {
+            Curve::BSplineCurve(self.bspline_curve_complex(cid)?)
+        } else {
+            return Err(fail(format!(
+                "SURFACE_OF_REVOLUTION #{sid}: swept curve {} #{cid} unsupported",
+                e.type_name()
+            )));
+        };
+        let mut generatrix = generatrix;
+        if self.invert_revolution {
+            generatrix.invert();
+        }
+        let s = Processor::new(RevolutedCurve::by_revolution(generatrix, o, z));
+        Ok((Surface::RevolutedCurve(s), analytic))
     }
 
     fn net(&self, id: u64, grid: &[Vec<u64>]) -> Result<Vec<Vec<Point3>>, StepError> {

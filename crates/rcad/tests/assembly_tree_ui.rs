@@ -578,3 +578,140 @@ fn assembly_mass_and_bom_csv() {
     let t = std::fs::read_to_string(&p).unwrap();
     assert!(t.lines().nth(1).unwrap().starts_with("1,Cube,,1,"), "{t}");
 }
+
+fn two_blocks_with_slider(h: &mut Harness<'_, RcadApp>, limits: Option<(f64, f64)>) {
+    click(h, "New");
+    let a = block(h, 10.0, 10.0, 10.0, [0.0, 0.0]);
+    let b = block(h, 4.0, 4.0, 4.0, [20.0, 0.0]);
+    component(h, "A", a);
+    component(h, "B", b);
+    send(
+        h,
+        Command::AddJoint {
+            name: None,
+            kind: JointKind::Slider,
+            parent: OccurrenceId(1),
+            child: OccurrenceId(2),
+            origin: [0.0; 3],
+            axis: Some([1.0, 0.0, 0.0]),
+            axis_from: None,
+            value: 0.0,
+            min: limits.map(|l| l.0),
+            max: limits.map(|l| l.1),
+            extra: vec![],
+            dir2: None,
+            child_axis_from: None,
+            flip: false,
+        },
+    );
+    click(h, "Edit Joint1");
+}
+
+/// Review run 7 #6: one pointer drag on the drive slider commits one value
+/// (one undo step), at release.
+#[test]
+fn drive_slider_drag_commits_once() {
+    let mut h = harness();
+    two_blocks_with_slider(&mut h, Some((0.0, 40.0)));
+    let r = h.get_by_label("Drive Joint1").rect();
+    let rev = h.state().summary().revision;
+    let (a, b) = (
+        Pos2::new(r.left() + 6.0, r.center().y),
+        Pos2::new(r.left() + 60.0, r.center().y),
+    );
+    h.event(egui::Event::PointerMoved(a));
+    let _ = h.try_run();
+    h.event(egui::Event::PointerButton {
+        pos: a,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    let _ = h.try_run();
+    for k in 1..=8 {
+        h.event(egui::Event::PointerMoved(a + (b - a) * (k as f32 / 8.0)));
+        let _ = h.try_run();
+    }
+    assert_eq!(
+        h.state().summary().revision,
+        rev,
+        "nothing committed mid-drag"
+    );
+    h.event(egui::Event::PointerButton {
+        pos: b,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    settle(&mut h);
+    settle(&mut h);
+    let v = h.state().summary().assembly.joints[0].value;
+    assert_eq!(h.state().summary().revision, rev + 1, "one commit");
+    assert!(v > 0.0, "{v}");
+}
+
+/// Review run 7 #33: a joint without limits says why drive and sweep are
+/// unavailable; a bad axis field names itself; a refused sweep clears the
+/// previous result.
+#[test]
+fn joint_editor_explains_unavailable_controls() {
+    let mut h = harness();
+    two_blocks_with_slider(&mut h, None);
+    h.get_by_label_contains("set both limits");
+    type_into(&mut h, "Joint axis Y", "x");
+    h.get_by_label_contains("Not a number: axis Y");
+    type_into(&mut h, "Joint axis Y", "0");
+    send(
+        &mut h,
+        Command::SetJointLimits {
+            joint: rcad_document::assembly::JointId(1),
+            min: Some(0.0),
+            max: Some(20.0),
+            index: 0,
+        },
+    );
+    click(&mut h, "Sweep check Joint1");
+    h.get_by_label_contains("Joint1 sweep:");
+    h.state_mut().request(Command::JointSweep {
+        joint: rcad_document::assembly::JointId(1),
+        index: 0,
+        from: 0.0,
+        to: 20.0,
+        steps: 1,
+        occurrences: None,
+    });
+    settle(&mut h);
+    assert!(h.query_by_label_contains("Joint1 sweep:").is_none());
+}
+
+/// Review run 7 #34: a STEP assembly without a length unit imports once a
+/// unit is chosen in the browser.
+#[test]
+fn import_step_assembly_with_chosen_units() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rcad-kernel/tests/fixtures/step/two_boxes_assembly_mm.step");
+    let text = std::fs::read_to_string(f)
+        .unwrap()
+        .replace("(#24,#25,#26)", "(#25,#26)")
+        .replace("(#188,#189,#190)", "(#189,#190)")
+        .replace("(#357,#358,#359)", "(#358,#359)");
+    let p = dir.path().join("unitless.step");
+    std::fs::write(&p, text).unwrap();
+    let mut h = harness();
+    click(&mut h, "New");
+    type_into(&mut h, "External document", p.to_str().unwrap());
+    click(&mut h, "Import STEP assembly");
+    assert!(h.state().summary().assembly.components.is_empty());
+    assert!(h.state().diagnostics().last().unwrap().error);
+    click(&mut h, "STEP assembly units");
+    click(&mut h, "cm");
+    click(&mut h, "Import STEP assembly");
+    let a = h.state().summary().assembly.clone();
+    assert_eq!(
+        a.components.len(),
+        3,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+}

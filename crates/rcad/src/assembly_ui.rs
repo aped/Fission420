@@ -128,10 +128,16 @@ pub struct AssemblyUi {
     /// BOM CSV path; whether an assembly mass report was requested.
     pub bom_path: String,
     pub mass_requested: bool,
-    /// Last joint sweep: (doc, revision, joint, samples).
-    pub sweep: Option<(u64, u64, JointId, Vec<rcad_commands::assembly::SweepStep>)>,
-    /// Joint of the sweep request in flight.
-    pub sweep_joint: Option<JointId>,
+    /// Last joint sweep: (doc, revision, joint, value index, samples).
+    pub sweep: Option<SweepResult>,
+    /// Joint and value index of the sweep request in flight.
+    pub sweep_joint: Option<(JointId, usize)>,
+    /// Review run 7 #6: drive-slider value while the pointer is held on it
+    /// (joint, value index, value); committed once on release.
+    pub drive_pending: Option<(JointId, usize, f64)>,
+    /// Review run 7 #34: index into `exchange::UNITS` used when an imported
+    /// STEP assembly declares no length unit (None: ask by refusing).
+    pub assembly_units: Option<usize>,
     /// Instance path of the last viewport face pick (a new pick selects its
     /// tree row).
     pub last_pick: Option<String>,
@@ -141,6 +147,15 @@ pub struct AssemblyUi {
     /// Last external status reply.
     pub external_status: Option<(u64, u64, Vec<rcad_commands::assembly::ExternalStatus>)>,
 }
+
+/// (doc, revision, joint, value index, samples) of a joint sweep.
+pub type SweepResult = (
+    u64,
+    u64,
+    JointId,
+    usize,
+    Vec<rcad_commands::assembly::SweepStep>,
+);
 
 impl AssemblyUi {
     /// Engine hook in `handle_reply`.
@@ -157,6 +172,12 @@ impl AssemblyUi {
                 d.pending = false;
             }
         }
+        // Review run 7 #33: a refused sweep does not leave the previous
+        // result on screen as if it were the answer.
+        if response.command == "joint_sweep" && !response.ok {
+            self.sweep = None;
+            self.sweep_joint = None;
+        }
         let Some(a) = &response.assembly else {
             return;
         };
@@ -168,8 +189,8 @@ impl AssemblyUi {
                 a.structured_bom.clone().unwrap_or_default(),
             ));
         }
-        if let (Some(sw), Some(j)) = (&a.sweep, self.sweep_joint.take()) {
-            self.sweep = Some((summary.doc_id, summary.revision, j, sw.clone()));
+        if let (Some(sw), Some((j, i))) = (&a.sweep, self.sweep_joint.take()) {
+            self.sweep = Some((summary.doc_id, summary.revision, j, i, sw.clone()));
         }
         if let Some(x) = &a.external {
             self.external_status = Some((summary.doc_id, summary.revision, x.clone()));
@@ -472,6 +493,32 @@ impl RcadApp {
             let p = self.assembly_ui.external_path.trim().to_string();
             let tip = "Import a STEP file with its product structure: components, \
                        sub-assemblies and linked occurrences with their placements";
+            // Review run 7 #34: the length unit for a file that declares
+            // none (a declared unit always wins).
+            let units = crate::exchange::UNITS;
+            let shown = self
+                .assembly_ui
+                .assembly_units
+                .and_then(|i| units.get(i))
+                .map_or("declared only", |u| u.0);
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("STEP assembly units")
+                    .selected_text(format!("Undeclared units: {shown}"))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.assembly_ui.assembly_units,
+                            None,
+                            "declared only",
+                        )
+                        .on_hover_text("Refuse a file without a length unit");
+                        for (i, (n, _)) in units.iter().enumerate() {
+                            ui.selectable_value(&mut self.assembly_ui.assembly_units, Some(i), *n);
+                        }
+                    })
+                    .response
+                    .named("STEP assembly units")
+                    .on_hover_text("Length unit used only when the STEP file declares none");
+            });
             if ui
                 .add_enabled(!p.is_empty(), egui::Button::new("Import STEP assembly"))
                 .on_hover_text(tip)
@@ -480,7 +527,11 @@ impl RcadApp {
             {
                 send.push(Command::ImportStepAssembly {
                     path: p.into(),
-                    units_to_mm: None,
+                    units_to_mm: self
+                        .assembly_ui
+                        .assembly_units
+                        .and_then(|i| units.get(i))
+                        .map(|u| u.1),
                 });
             }
         }
@@ -1142,19 +1193,37 @@ impl RcadApp {
                 });
                 {
                     let nums: Vec<Option<f64>> = ax.iter().map(|t| parse(t)).collect();
-                    if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..]
-                        && ui
+                    if let [Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)] = nums[..] {
+                        if ui
                             .small_button("Set axis")
                             .on_hover_text("Redefine the joint axis; nothing moves now, later values move about the new axis")
                             .probe("Set axis")
                             .clicked()
-                    {
-                        send.push(Command::SetJointAxis {
-                            joint: j.id,
-                            origin: [a, b, c],
-                            axis: Some([d, e, f]),
-                            axis_from: None,
-                            dir2: j.dir2,
+                        {
+                            send.push(Command::SetJointAxis {
+                                joint: j.id,
+                                origin: Some([a, b, c]),
+                                axis: Some([d, e, f]),
+                                axis_from: None,
+                                dir2: j.dir2,
+                            });
+                        }
+                    } else {
+                        // Review run 7 #33: say why the button is unavailable.
+                        let bad: Vec<&str> = [
+                            "origin X", "origin Y", "origin Z", "axis X", "axis Y", "axis Z",
+                        ]
+                        .iter()
+                        .zip(&nums)
+                        .filter(|(_, n)| n.is_none())
+                        .map(|(l, _)| *l)
+                        .collect();
+                        ui.horizontal(|ui| {
+                            ui.add_enabled(false, egui::Button::new("Set axis").small());
+                            ui.colored_label(
+                                Color32::from_rgb(255, 190, 90),
+                                format!("Not a number: {}", bad.join(", ")),
+                            );
                         });
                     }
                 }
@@ -1186,18 +1255,30 @@ impl RcadApp {
                     } else {
                         j.extra.get(i - 1).map_or((None, None), |d| (d.min, d.max))
                     };
+                    let limited = matches!((smin, smax), (Some(a), Some(b)) if a < b);
+                    if !limited {
+                        // Review run 7 #33: the controls stay visible with the
+                        // reason they are unavailable.
+                        let why = "Set both limits (min < max) to drive or sweep this value";
+                        ui.horizontal(|ui| {
+                            ui.add_enabled(false, egui::Button::new("Sweep check").small())
+                                .on_disabled_hover_text(why);
+                            ui.small(format!("Drive and sweep{sfx}: {}", why.to_lowercase()));
+                        });
+                    }
                     if let (Some(a), Some(b)) = (smin, smax)
                         && a < b
                     {
                         let l = format!("Sweep check{sfx} {}", j.name);
                         if ui
                             .small_button("Sweep check")
-                            .on_hover_text("Static interference at 21 samples across the limits (contacts between samples are not detected)")
+                            .on_hover_text("Static interference at 21 samples across the limits, for the parts that move with the joint (contacts between samples are not detected)")
                             .named(&l)
                             .probe(&l)
                             .clicked()
                         {
-                            self.assembly_ui.sweep_joint = Some(j.id);
+                            self.assembly_ui.sweep = None;
+                            self.assembly_ui.sweep_joint = Some((j.id, i));
                             send.push(Command::JointSweep {
                                 joint: j.id,
                                 index: i,
@@ -1222,13 +1303,27 @@ impl RcadApp {
                         if r.changed() {
                             vals[i] = fmt(x);
                         }
-                        // Commit at drag end, or at once for keyboard steps.
-                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            send.push(Command::SetJointValue {
-                                joint: j.id,
-                                value: x,
-                                index: i,
-                            });
+                        // Review run 7 #6: one commit per gesture. While the
+                        // pointer is held on the slider the value is only
+                        // remembered; it is committed once when the pointer is
+                        // released. Keyboard steps commit at once.
+                        let pending = &mut self.assembly_ui.drive_pending;
+                        if r.is_pointer_button_down_on() {
+                            if r.changed() {
+                                *pending = Some((j.id, i, x));
+                            }
+                        } else {
+                            let held = pending.filter(|p| (p.0, p.1) == (j.id, i)).map(|p| p.2);
+                            if held.is_some() {
+                                *pending = None;
+                            }
+                            if let Some(value) = r.changed().then_some(x).or(held) {
+                                send.push(Command::SetJointValue {
+                                    joint: j.id,
+                                    value,
+                                    index: i,
+                                });
+                            }
                         }
                     }
                     ui.horizontal(|ui| {
@@ -1253,7 +1348,7 @@ impl RcadApp {
             }
         }
         let (doc, rev) = (self.summary.doc_id, self.summary.revision);
-        if let Some((d, r, jid, steps)) = &self.assembly_ui.sweep
+        if let Some((d, r, jid, idx, steps)) = &self.assembly_ui.sweep
             && (*d, *r) == (doc, rev)
         {
             let hits: Vec<String> = steps
@@ -1261,11 +1356,19 @@ impl RcadApp {
                 .filter(|s| !s.interference.is_empty())
                 .map(|s| fmt(s.value))
                 .collect();
+            // Review run 7 #33: name the swept value on multi-DOF joints.
             let name = asm
                 .joints
                 .iter()
                 .find(|j| j.id == *jid)
-                .map_or(jid.to_string(), |j| j.name.clone());
+                .map_or(jid.to_string(), |j| {
+                    if j.kind.dof() > 1 {
+                        let v = j.kind.value_names().get(*idx).copied().unwrap_or("value");
+                        format!("{} {v} (value {})", j.name, idx + 1)
+                    } else {
+                        j.name.clone()
+                    }
+                });
             let t = if hits.is_empty() {
                 format!("{name} sweep: no interference at {} samples", steps.len())
             } else {

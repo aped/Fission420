@@ -63,9 +63,19 @@ Unsupported (explicit error): `BREP_WITH_VOIDS` (voids would be lost), `OPEN_SHE
 solid's shell, `FACETED_BREP` and other non-solid models (reported as "no MANIFOLD_SOLID_BREP
 ... unsupported content"), `HYPERBOLA`, `PARABOLA`, `POLYLINE`,
 `TRIMMED_CURVE`, `PCURVE`-only edges, `BEZIER_*`/`UNIFORM_*`/`QUASI_UNIFORM_*` B-spline
-subtypes, `SURFACE_OF_LINEAR_EXTRUSION`, `SURFACE_OF_REVOLUTION`, offset surfaces,
+subtypes, `SURFACE_OF_LINEAR_EXTRUSION`, `SURFACE_OF_REVOLUTION` swept by anything but a
+`LINE` or B-spline curve, offset surfaces,
 `MAPPED_ITEM`, non-rigid placements, self-intersecting tori, periodic B-spline edges whose
 vertices are out of parameter order, B-spline degree > 25.
+
+`SURFACE_OF_REVOLUTION` (run 7; R-CAD's own writer uses it for every revolved surface, so
+embedded copies of imported cylinders must read back): the swept `LINE`/B-spline curve revolved
+about the `AXIS1_PLACEMENT`; a line parallel to the axis is treated as a cylinder. The normal
+convention differs between solids written by R-CAD's own writer (observed), so both normals are
+tried per solid and the one whose solid tessellates watertight and consistently oriented is
+kept; with neither the solid is refused
+(observed: a face reaching the surface's seam angle, e.g. the last sector of a full 360° revolve,
+and R-CAD-written spheres with poles, do not read back yet).
 
 Geometry is exact: no fitting, no sampling, no tessellation. Lengths are multiplied by the
 unit factor when points and radii are read (B-spline weights untouched); placements are

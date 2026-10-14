@@ -524,11 +524,13 @@ pub enum Command {
     },
     /// Run 7: redefine a joint's axis (`origin`/`axis`, or `axis_from` faces of
     /// the parent, and `dir2`), keeping its values and the child's current pose
-    /// (as-built: the rest pose is recaptured, nothing moves).
+    /// (as-built: the rest pose is recaptured, nothing moves). An omitted
+    /// `origin`, `axis` or `dir2` keeps the joint's current one; a zero axis
+    /// is refused.
     SetJointAxis {
         joint: rcad_document::assembly::JointId,
-        #[serde(default)]
-        origin: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<[f64; 3]>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis: Option<[f64; 3]>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -545,9 +547,13 @@ pub enum Command {
     },
     /// Run 7: sampled motion check (read-only): value `index` of `joint` is
     /// stepped from `from` to `to` (both within its limits) in `steps`
-    /// samples (2–200); at each sample the static interference check runs on
-    /// the solved placements (`Response.assembly.sweep`). Contacts between
-    /// samples are not detected; the document is unchanged.
+    /// samples (2–200; the first is `from` and the last `to` exactly); at
+    /// each sample the static interference check runs on the solved
+    /// placements (`Response.assembly.sweep`) for the pairs where at least
+    /// one part moves with the joint (its child, occurrences jointed below
+    /// it, and their contents): interference between parts that stay put is
+    /// not repeated per sample (the `interference` command reports it).
+    /// Contacts between samples are not detected; the document is unchanged.
     JointSweep {
         joint: rcad_document::assembly::JointId,
         #[serde(default, skip_serializing_if = "assembly::is_zero_usize")]
@@ -2452,6 +2458,24 @@ impl Session {
                         detail: "another parameter already has this name".into(),
                     });
                 }
+                // Review run 7 #19: a configuration value already stored
+                // under the new name would be overwritten by the renamed one.
+                if old != new
+                    && let Some(c) = m
+                        .document()
+                        .configurations
+                        .iter()
+                        .find(|c| c.values.contains_key(&new))
+                {
+                    return Err(DocError::Expression {
+                        name: new,
+                        detail: format!(
+                            "configuration '{}' already sets a value under this name; \
+                             remove it from the configuration first",
+                            c.name
+                        ),
+                    });
+                }
                 let users = params::users_of(m.document(), &old);
                 m.transact(&format!("Rename parameter {old} to {new}"), |d| {
                     for p in &mut d.parameters {
@@ -2703,11 +2727,15 @@ impl Session {
                             ));
                         }
                     }
+                    let removed = d.feature(feature)?.clone();
                     d.features.retain(|f| f.id != feature);
                     // Review run 6 #4: configurations stop controlling it.
                     for c in d.configurations.iter_mut() {
                         c.suppressed.remove(&feature);
                     }
+                    // Review run 7 #3: a derived body's source returns to its
+                    // component.
+                    d.restore_derived_source(&removed);
                     d.prune_bodies();
                     d.prune_blobs();
                     Ok(())
@@ -3884,31 +3912,21 @@ impl Session {
             }
             Command::OpenCopy { path } => {
                 let nf = load_file(path)?;
-                let (mut model, warning) = Model::from_document_reporting(nf.document)?;
+                let (mut model, report) = Model::from_document_reporting(nf.document)?;
                 model.dirty = true;
                 self.model = Some(model);
                 self.path = None;
                 self.doc_id += 1;
                 self.fresh_model_settings();
                 let mut msg = format!("opened a copy of {} as an unsaved document", path.display());
-                if let Some(w) = warning {
-                    msg += &format!(
-                        "; WARNING: the parameter expressions do not evaluate ({w}); showing the \
-                         stored values. Fix the named parameter or expression before editing"
-                    );
-                }
+                msg += &load_notes(&report);
                 r.message = Some(msg);
             }
             Command::Open { path } => {
                 let nf = load_file(path)?;
-                let (model, warning) = Model::from_document_reporting(nf.document)?;
+                let (model, report) = Model::from_document_reporting(nf.document)?;
                 let mut msg = format!("opened {}", path.display());
-                if let Some(w) = warning {
-                    msg += &format!(
-                        "; WARNING: the parameter expressions do not evaluate ({w}); showing the \
-                         stored values. Fix the named parameter or expression before editing"
-                    );
-                }
+                msg += &load_notes(&report);
                 if let (Some(c), Some(m)) = (&nf.cache, &model.evaluation().measurements)
                     && let (Some(v0), k::VolumeResult::Value { volume, .. }) = (c.volume, &m.volume)
                 {
@@ -4421,6 +4439,26 @@ pub(crate) fn export_selection(m: &Model, ids: Option<&[BodyId]>) -> Result<Vec<
 }
 
 /// 1-128 printable characters, trimmed.
+/// The open message's notes: an expression error (stored values shown) and,
+/// separately, stale entries cleaned on load (review run 7 #30).
+fn load_notes(r: &rcad_document::LoadReport) -> String {
+    let mut msg = String::new();
+    if let Some(w) = &r.expression_error {
+        msg += &format!(
+            "; WARNING: the parameter expressions do not evaluate ({w}); showing the \
+             stored values. Fix the named parameter or expression before editing"
+        );
+    }
+    if !r.cleaned.is_empty() {
+        msg += &format!(
+            "; NOTE: cleaned stale configuration entries ({}); the document is marked \
+             changed: save it to keep the cleanup",
+            r.cleaned.join("; ")
+        );
+    }
+    msg
+}
+
 fn valid_name(name: &str, what: &str) -> Result<String, DocError> {
     let name = name.trim().to_string();
     if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
