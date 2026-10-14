@@ -1,0 +1,97 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "Knob profile",
+    "plane": "WorldXZ",
+    "template": "polygon",
+    "vertices": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        20.0,
+        0.0
+      ],
+      [
+        20.0,
+        6.0
+      ],
+      [
+        15.0,
+        14.0
+      ],
+      [
+        0.0,
+        14.0
+      ]
+    ]
+  },
+  {
+    "angle_deg": 360.0,
+    "cmd": "revolve",
+    "sketch": 1
+  },
+  {
+    "body": 1,
+    "cmd": "rename_body",
+    "name": "Knob"
+  },
+  {
+    "cmd": "create_sketch",
+    "name": "D shaft",
+    "plane": "WorldXY",
+    "sketch": {
+      "constraints": [],
+      "entities": [
+        {
+          "Line": {
+            "a": 0,
+            "b": 1,
+            "id": 1
+          }
+        },
+        {
+          "Arc": {
+            "center": 2,
+            "end": 0,
+            "id": 2,
+            "start": 1
+          }
+        }
+      ],
+      "points": [
+        {
+          "id": 0,
+          "x": 1.5,
+          "y": -2.598076211353316
+        },
+        {
+          "id": 1,
+          "x": 1.5,
+          "y": 2.598076211353316
+        },
+        {
+          "id": 2,
+          "x": 0.0,
+          "y": 0.0
+        }
+      ]
+    },
+    "template": "custom"
+  },
+  {
+    "cmd": "extrude",
+    "distance": 10.0,
+    "op": "cut",
+    "sketch": 3,
+    "target": 1
+  },
+  {
+    "cmd": "save",
+    "path": "examples/everyday_knob.rcad.json"
+  }
+]

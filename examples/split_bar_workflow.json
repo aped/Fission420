@@ -1,0 +1,46 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "center": [
+      50.0,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "height": 20.0,
+    "name": "Bar",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 100.0
+  },
+  {
+    "body_name": "Bar",
+    "cmd": "extrude",
+    "distance": 10.0,
+    "sketch": 1
+  },
+  {
+    "center": [
+      50.0,
+      10.0
+    ],
+    "cmd": "create_sketch",
+    "height": 30.0,
+    "name": "Slot",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 4.0
+  },
+  {
+    "cmd": "extrude",
+    "op": "cut",
+    "sketch": 3,
+    "target": 1,
+    "through_all": true
+  },
+  {
+    "cmd": "save",
+    "path": "examples/split_bar.rcad.json"
+  }
+]

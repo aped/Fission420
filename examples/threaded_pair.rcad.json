@@ -1,0 +1,78 @@
+{
+  "format": "r-cad",
+  "version": 6,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Thread1",
+        "kind": {
+          "type": "Thread",
+          "plane": "WorldXY",
+          "center": [
+            0.0,
+            0.0
+          ],
+          "diameter": 20.0,
+          "pitch": 2.0,
+          "length": 12.0,
+          "chord_tol": 0.01,
+          "body": 1
+        }
+      },
+      {
+        "id": 2,
+        "name": "Nut1",
+        "kind": {
+          "type": "Thread",
+          "plane": "WorldXY",
+          "center": [
+            0.0,
+            0.0
+          ],
+          "diameter": 20.0,
+          "pitch": 2.0,
+          "length": 12.0,
+          "chord_tol": 0.01,
+          "nut": {
+            "width": 30.0,
+            "clearance": 0.1
+          },
+          "body": 2
+        }
+      }
+    ],
+    "next_id": 3,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Rod M20x2",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Nut M20x2",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 7515.001734,
+    "bounds": {
+      "min": [
+        -15.0,
+        -15.0,
+        0.0
+      ],
+      "max": [
+        15.0,
+        15.0,
+        12.0
+      ]
+    },
+    "face_count": 2988
+  }
+}
