@@ -793,16 +793,16 @@ impl RcadApp {
             frame: s.frame,
         };
         let shift = ui.input(|i| i.modifiers.shift);
-        // Snap step: the finest 1-2-5 step at least SNAP_CELL_PX apart on
-        // screen, finer than the drawn grid (cells >= MIN_CELL_PX), so a
-        // feature smaller than one drawn cell (a 4 mm slot when zoomed out)
-        // can still be drawn without its corners snapping together.
+        // Snap step: a power of ten (1, 10, 0.1 mm, ...) at least
+        // SNAP_CELL_PX / 2 apart on screen, so a feature smaller than one
+        // drawn grid cell (a 4 mm slot when zoomed out) can still be drawn,
+        // and round values (25, 40) stay exactly reachable: a 2 mm or 5 mm
+        // step would round 25 to 26 or 40 to 40 but 22 to 20.
         let grid = {
-            let ppm = rcad_viewport::pixels_per_mm(&cam, rect.height());
-            Some(f64::from(rcad_viewport::adaptive_grid_spacing(
-                ppm,
-                crate::sketch_edit::SNAP_CELL_PX,
-            )))
+            let ppm = f64::from(rcad_viewport::pixels_per_mm(&cam, rect.height()));
+            let need = f64::from(crate::sketch_edit::SNAP_CELL_PX) / 2.0 / ppm.max(1e-9);
+            let step = 10f64.powf(need.log10().ceil());
+            (step.is_finite() && step > 0.0).then_some(step)
         };
         let view_at = |p: [f64; 2]| View {
             px_per_mm: pr.px_per_mm(p),

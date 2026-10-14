@@ -114,6 +114,37 @@ impl DisplayScene {
         self.bodies.iter().find(|b| b.groups.contains(&g))
     }
 
+    /// Only body `keep` (display isolation, view state only): its
+    /// triangles with their original group ids (picking and tints still
+    /// apply), vertices compacted so Fit frames it alone. `None` when the
+    /// body is not in the scene.
+    pub fn isolated(&self, keep: rcad_document::BodyId) -> Option<DisplayScene> {
+        let b = self.bodies.iter().find(|b| b.id == keep)?.clone();
+        let m = &self.mesh;
+        let mut map = vec![u32::MAX; m.positions.len()];
+        let mut out = RenderMesh::default();
+        for (t, g) in m.tri_group.iter().enumerate() {
+            if !b.groups.contains(g) {
+                continue;
+            }
+            for k in 0..3 {
+                let v = m.indices[3 * t + k] as usize;
+                if map[v] == u32::MAX {
+                    map[v] = out.positions.len() as u32;
+                    out.positions.push(m.positions[v]);
+                    out.normals.push(m.normals[v]);
+                }
+                out.indices.push(map[v]);
+            }
+            out.tri_group.push(*g);
+        }
+        Some(DisplayScene {
+            mesh: out,
+            bodies: vec![b],
+            skipped: vec![],
+        })
+    }
+
     /// Tint table for the viewport.
     pub fn tints(&self) -> Vec<(std::ops::Range<u32>, u8)> {
         self.bodies

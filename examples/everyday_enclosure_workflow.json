@@ -1,0 +1,298 @@
+[
+  {
+    "cmd": "new_document"
+  },
+  {
+    "cmd": "set_user_parameter",
+    "comment": "outside X of base and lid",
+    "expression": "80",
+    "name": "width",
+    "unit": "mm"
+  },
+  {
+    "cmd": "create_sketch",
+    "height": 50.0,
+    "name": "Base outline",
+    "plane": "WorldXY",
+    "template": "centered_rectangle",
+    "width": 80.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "width",
+    "feature": 1,
+    "name": "width"
+  },
+  {
+    "body_name": "Enclosure base",
+    "cmd": "extrude",
+    "distance": 30.0,
+    "sketch": 1
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "b": {
+      "feature": 2,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "cmd": "shell_face",
+    "face": {
+      "feature": 2,
+      "role": "ExtrudeEndCap"
+    },
+    "thickness": 2.0
+  },
+  {
+    "cmd": "fillet_loop",
+    "face": {
+      "feature": 2,
+      "role": "ExtrudeStartCap"
+    },
+    "radius": 1.5
+  },
+  {
+    "cmd": "create_sketch",
+    "height": 50.0,
+    "name": "Lid outline",
+    "plane": {
+      "Offset": {
+        "base": "WorldXY",
+        "distance": 35.0
+      }
+    },
+    "template": "centered_rectangle",
+    "width": 80.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "width",
+    "feature": 9,
+    "name": "width"
+  },
+  {
+    "body_name": "Enclosure lid",
+    "cmd": "extrude",
+    "distance": 3.0,
+    "sketch": 9
+  },
+  {
+    "a": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "b": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 2
+        }
+      }
+    },
+    "b": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 3
+        }
+      }
+    },
+    "b": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "a": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 4
+        }
+      }
+    },
+    "b": {
+      "feature": 10,
+      "role": {
+        "ExtrudeSide": {
+          "entity": 1
+        }
+      }
+    },
+    "cmd": "fillet",
+    "radius": 6.0
+  },
+  {
+    "cmd": "fillet_loop",
+    "face": {
+      "feature": 10,
+      "role": "ExtrudeEndCap"
+    },
+    "radius": 1.5
+  },
+  {
+    "center": [
+      32.0,
+      17.0
+    ],
+    "cmd": "create_sketch",
+    "diameter": 3.4,
+    "name": "Screw hole",
+    "plane": {
+      "Offset": {
+        "base": "WorldXY",
+        "distance": 38.0
+      }
+    },
+    "template": "centered_circle"
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "width / 2 - 8",
+    "feature": 16,
+    "name": "center_x"
+  },
+  {
+    "cmd": "extrude",
+    "op": "cut",
+    "sketch": 16,
+    "target": 2,
+    "through_all": true
+  },
+  {
+    "cmd": "linear_pattern",
+    "count": 2,
+    "direction": [
+      -1.0,
+      0.0
+    ],
+    "feature": 17,
+    "second": {
+      "count": 2,
+      "direction": [
+        0.0,
+        -1.0
+      ],
+      "spacing": 34.0
+    },
+    "spacing": 64.0
+  },
+  {
+    "cmd": "set_expression",
+    "expression": "width - 16",
+    "feature": 18,
+    "name": "spacing"
+  },
+  {
+    "cmd": "save",
+    "path": "examples/everyday_enclosure.rcad.json"
+  }
+]

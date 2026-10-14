@@ -1,0 +1,669 @@
+{
+  "format": "r-cad",
+  "version": 8,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Base outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -40.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 40.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 40.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -40.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "width": "width"
+        }
+      },
+      {
+        "id": 2,
+        "name": "Extrude1",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 30.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Fillet1",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 4,
+        "name": "Fillet2",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 5,
+        "name": "Fillet3",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 6,
+        "name": "Fillet4",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "b": {
+            "feature": 2,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 7,
+        "name": "Shell1",
+        "kind": {
+          "type": "ShellFace",
+          "face": {
+            "feature": 2,
+            "role": "ExtrudeEndCap"
+          },
+          "thickness": 2.0
+        }
+      },
+      {
+        "id": 8,
+        "name": "Fillet5",
+        "kind": {
+          "type": "FilletLoop",
+          "face": {
+            "feature": 2,
+            "role": "ExtrudeStartCap"
+          },
+          "radius": 1.5
+        }
+      },
+      {
+        "id": 9,
+        "name": "Lid outline",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 35.0
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -40.0,
+                "y": -25.0
+              },
+              {
+                "id": 2,
+                "x": 40.0,
+                "y": -25.0
+              },
+              {
+                "id": 3,
+                "x": 40.0,
+                "y": 25.0
+              },
+              {
+                "id": 4,
+                "x": -40.0,
+                "y": 25.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 80.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 50.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "width": "width"
+        }
+      },
+      {
+        "id": 10,
+        "name": "Extrude2",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 9,
+          "distance": 3.0,
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 11,
+        "name": "Fillet6",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "b": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 12,
+        "name": "Fillet7",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 2
+              }
+            }
+          },
+          "b": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 13,
+        "name": "Fillet8",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 3
+              }
+            }
+          },
+          "b": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 14,
+        "name": "Fillet9",
+        "kind": {
+          "type": "Fillet",
+          "a": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 4
+              }
+            }
+          },
+          "b": {
+            "feature": 10,
+            "role": {
+              "ExtrudeSide": {
+                "entity": 1
+              }
+            }
+          },
+          "radius": 6.0
+        }
+      },
+      {
+        "id": 15,
+        "name": "Fillet10",
+        "kind": {
+          "type": "FilletLoop",
+          "face": {
+            "feature": 10,
+            "role": "ExtrudeEndCap"
+          },
+          "radius": 1.5
+        }
+      },
+      {
+        "id": 16,
+        "name": "Screw hole",
+        "kind": {
+          "type": "Sketch",
+          "plane": {
+            "Offset": {
+              "base": "WorldXY",
+              "distance": 38.0
+            }
+          },
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "id": 1,
+                  "center": 1,
+                  "radius": 1.7
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 32.0,
+                  "y": 17.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 3.4
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expressions": {
+          "center_x": "width / 2 - 8"
+        }
+      },
+      {
+        "id": 17,
+        "name": "Extrude3",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 16,
+          "distance": 0.0,
+          "operation": {
+            "Cut": {
+              "target": 2
+            }
+          },
+          "extent": "ThroughAll",
+          "reverse": false
+        }
+      },
+      {
+        "id": 18,
+        "name": "Pattern1",
+        "kind": {
+          "type": "LinearPattern",
+          "seed": 17,
+          "count": 2,
+          "spacing": 64.0,
+          "direction": [
+            -1.0,
+            0.0
+          ],
+          "second": {
+            "count": 2,
+            "spacing": 34.0,
+            "direction": [
+              0.0,
+              -1.0
+            ]
+          }
+        },
+        "expressions": {
+          "spacing": "width - 16"
+        }
+      }
+    ],
+    "next_id": 19,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Enclosure base",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Enclosure lid",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1,
+    "parameters": [
+      {
+        "name": "width",
+        "expression": "80",
+        "unit": "mm",
+        "comment": "outside X of base and lid"
+      }
+    ]
+  },
+  "cache": {
+    "volume": 11678.789827,
+    "bounds": {
+      "min": [
+        -40.0,
+        -25.0,
+        35.0
+      ],
+      "max": [
+        40.0,
+        25.0,
+        38.0
+      ]
+    },
+    "face_count": 30
+  }
+}

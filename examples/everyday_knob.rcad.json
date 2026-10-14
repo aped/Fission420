@@ -1,0 +1,195 @@
+{
+  "format": "r-cad",
+  "version": 4,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Knob profile",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXZ",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": 0.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 6.0
+              },
+              {
+                "id": 4,
+                "x": 15.0,
+                "y": 14.0
+              },
+              {
+                "id": 5,
+                "x": 0.0,
+                "y": 14.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 5
+                }
+              },
+              {
+                "Line": {
+                  "id": 5,
+                  "a": 5,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              }
+            ],
+            "origin": 0
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Revolve1",
+        "kind": {
+          "type": "Revolve",
+          "sketch": 1,
+          "angle": 6.283185307179586,
+          "body": 1
+        }
+      },
+      {
+        "id": 3,
+        "name": "D shaft",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 1.5,
+                "y": -2.598076211353316
+              },
+              {
+                "id": 1,
+                "x": 1.5,
+                "y": 2.598076211353316
+              },
+              {
+                "id": 2,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Arc": {
+                  "id": 2,
+                  "center": 2,
+                  "start": 1,
+                  "end": 0
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Extrude1",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 10.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      }
+    ],
+    "next_id": 5,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Knob",
+        "visible": true
+      }
+    ],
+    "next_body_id": 2,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 15061.617545,
+    "bounds": {
+      "min": [
+        -20.0,
+        -20.0,
+        0.0
+      ],
+      "max": [
+        20.0,
+        20.0,
+        14.0
+      ]
+    },
+    "face_count": 13
+  }
+}
