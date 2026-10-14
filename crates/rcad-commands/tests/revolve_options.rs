@@ -180,12 +180,10 @@ fn revolve_op(s: &mut Session, sketch: Sketch, op: &str) -> rcad_commands::Respo
 }
 
 #[test]
-fn revolve_cut_is_exact_or_refused_unchanged() {
-    // Known limit (Truck 0.6): revolved Join/Cut tools fail in Truck for the
-    // cases tried in run 6 (a coaxial groove on a cylinder on four seam
-    // angles; a ring groove in a block: Truck panics). Whatever Truck does,
-    // the result is either exact (independent membership check) or refused
-    // with nothing changed.
+fn revolve_cut_groove_is_exact() {
+    // A coaxial ring groove (r 9..11, z 10..12) cut from a Ø20 x 30 cylinder. Truck 0.6 failed
+    // here on every seam angle (run 6); the truck-shapeops fork fixes the periodic face division
+    // (third_party/truck-shapeops/R-CAD-CHANGES.md). Exact volume: 3000π - 38π.
     let mut s = fresh();
     tray::ok(
         &mut s,
@@ -197,11 +195,12 @@ fn revolve_cut_is_exact_or_refused_unchanged() {
         &json!({"cmd": "extrude", "sketch": 1, "distance": 30.0}),
     );
     let r = revolve_op(&mut s, rect_sketch(9.0, 10.0, 11.0, 12.0, None), "cut");
-    if r.ok {
-        // Should Truck ever build it, the result must be exact.
-        assert!((tray::volume(&s) - (PI * 3000.0 - PI * 38.0)).abs() < 1e-3);
-    } else {
-        assert!(s.summary().bodies.len() == 1);
-        assert!((tray::volume(&s) - PI * 3000.0).abs() < 1e-6);
-    }
+    assert!(r.ok, "{:?}", r.error);
+    assert_eq!(s.summary().bodies.len(), 1);
+    assert!((tray::volume(&s) - (PI * 3000.0 - PI * 38.0)).abs() < 1e-6 * PI * 3000.0);
+    // Undo restores the uncut cylinder; redo the groove.
+    tray::ok(&mut s, &json!({"cmd": "undo"}));
+    assert!((tray::volume(&s) - PI * 3000.0).abs() < 1e-6 * PI * 3000.0);
+    tray::ok(&mut s, &json!({"cmd": "redo"}));
+    assert!((tray::volume(&s) - (PI * 3000.0 - PI * 38.0)).abs() < 1e-6 * PI * 3000.0);
 }
