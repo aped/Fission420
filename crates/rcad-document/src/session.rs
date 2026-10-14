@@ -235,8 +235,20 @@ impl Model {
                     pieces,
                     assigned,
                 }) if pieces > assigned + 1 && pieces <= MAX_PIECES => {
+                    // Named after the body that was split: "Bar (2)", "Bar (3)", ...
+                    let source = doc
+                        .feature(feature)?
+                        .target_body()
+                        .and_then(|b| doc.body(b).ok())
+                        .map(|b| b.name.clone());
                     for _ in assigned + 1..pieces {
-                        let name = doc.default_body_name();
+                        let name = match &source {
+                            Some(src) => (2..)
+                                .map(|k| format!("{src} ({k})"))
+                                .find(|n| !doc.bodies.iter().any(|b| &b.name == n))
+                                .unwrap_or_else(|| doc.default_body_name()),
+                            None => doc.default_body_name(),
+                        };
                         let b = doc.add_body(name);
                         match &mut doc.feature_mut(feature)?.kind {
                             crate::FeatureKind::Extrude { pieces, .. }
