@@ -37,6 +37,17 @@ wait_idle
 sclick 50 0
 sclick 60 20
 expect editing.entities 4
+# Dimension it (clicked corners alone depend on the zoom's snap step).
+key d
+sclick 55 0
+type 10
+key Return
+key f
+wait_idle
+key d
+sclick 60 10
+type 20
+key Return
 clickw Finish Sketch
 wait_idle
 clickw Extrude…
