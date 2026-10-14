@@ -853,7 +853,8 @@ fn regen_impl(
                     .map_err(|m| DocError::ProductLimit(format!("{id}: sweep path: {m}")))?;
                 let solid = k::sweep(&prof, &sp.frame, &segs).map_err(|e| match e {
                     k::KernelError::InvalidInput(m) => {
-                        DocError::ProductLimit(format!("{id}: sweep: {m}"))
+                        // The kernel message already starts with "sweep: ".
+                        DocError::ProductLimit(format!("{id}: {m}"))
                     }
                     other => DocError::Kernel {
                         feature: id,
@@ -1009,9 +1010,10 @@ fn regen_impl(
                 // occurrences, split faces) that line spans several edges.
                 if fa.sample.is_some() || fb.sample.is_some() {
                     return Err(DocError::ProductLimit(format!(
-                        "{id}: a chamfer between faces that share their plane with other faces \
-                         of the body (pattern occurrences, split faces) is not supported: the \
-                         edge is found along the whole intersection of the two planes"
+                        "{id}: this chamfer edge lies on a plane that other faces of the body \
+                         share (pattern copies, split faces), so the edge between the two picked \
+                         faces is not unique (product limit). For patterned pockets, round the \
+                         seed sketch's corners (sketch fillet) so every copy is rounded"
                     )));
                 }
                 let body = brep_target(&st, id, fa.body)?;
@@ -1033,9 +1035,10 @@ fn regen_impl(
                 }
                 if fa.sample.is_some() || fb.sample.is_some() {
                     return Err(DocError::ProductLimit(format!(
-                        "{id}: a fillet between faces that share their plane with other faces \
-                         of the body (pattern occurrences, split faces) is not supported: the \
-                         edge is found along the whole intersection of the two planes"
+                        "{id}: this fillet edge lies on a plane that other faces of the body \
+                         share (pattern copies, split faces), so the edge between the two picked \
+                         faces is not unique (product limit). For patterned pockets, round the \
+                         seed sketch's corners (sketch fillet) so every copy is rounded"
                     )));
                 }
                 let body = brep_target(&st, id, fa.body)?;

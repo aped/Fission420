@@ -360,7 +360,7 @@ fn chamfer_between_shared_plane_faces_is_refused() {
     );
     assert!(!r.ok);
     assert!(
-        format!("{:?}", r.error).contains("share their plane"),
+        format!("{:?}", r.error).contains("not unique"),
         "{:?}",
         r.error
     );
