@@ -100,6 +100,8 @@ fn open_box_stays_open_then_fills_to_a_solid() {
     let text = std::fs::read_to_string(&open).unwrap();
     assert!(text.contains("SHELL_BASED_SURFACE_MODEL") && text.contains("OPEN_SHELL"));
     assert!(!text.contains("MANIFOLD_SOLID_BREP"));
+    assert!(text.contains("MANIFOLD_SURFACE_SHAPE_REPRESENTATION"));
+    assert!(!text.contains("ADVANCED_BREP_SHAPE_REPRESENTATION"));
     let mut u = Session::new();
     tray::ok(&mut u, &json!({"cmd": "new_document"}));
     tray::ok(&mut u, &json!({"cmd": "import_surfaces", "path": open}));

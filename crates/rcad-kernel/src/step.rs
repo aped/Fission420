@@ -18,7 +18,7 @@ pub fn export_step(body: &Body, organization_system: &str) -> Result<String> {
     guarded("export_step", || -> Result<String> {
         let cs = canonical_compressed(exact_compressed(body)?);
         let text = if body.is_open_shell() {
-            surface_text(&cs, organization_system)?
+            surface_representation(&surface_text(&cs, organization_system)?)
         } else {
             out::CompleteStepDisplay::new(out::StepModel::from(&cs), header(organization_system))
                 .to_string()
@@ -75,7 +75,9 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
             // Surface bodies: one SHELL_BASED_SURFACE_MODEL (OPEN_SHELL) each.
             let shells: Vec<_> = solids.iter().map(one_shell).collect::<Result<_>>()?;
             let models: out::StepModels<_, _, _> = shells.iter().collect();
-            out::CompleteStepDisplay::new(models, header(organization_system)).to_string()
+            surface_representation(
+                &out::CompleteStepDisplay::new(models, header(organization_system)).to_string(),
+            )
         } else {
             let models: out::StepModels<_, _, _> = solids.iter().collect();
             out::CompleteStepDisplay::new(models, header(organization_system)).to_string()
@@ -133,6 +135,17 @@ fn one_shell(
             other.len()
         ))),
     }
+}
+
+/// Surface models belong in a `MANIFOLD_SURFACE_SHAPE_REPRESENTATION`
+/// (ISO 10303-42), not the `ADVANCED_BREP_SHAPE_REPRESENTATION` truck-stepio
+/// writes for every model; strict readers drop surface models listed in the
+/// latter.
+fn surface_representation(text: &str) -> String {
+    text.replace(
+        "ADVANCED_BREP_SHAPE_REPRESENTATION(",
+        "MANIFOLD_SURFACE_SHAPE_REPRESENTATION(",
+    )
 }
 
 /// STEP text of one surface body (SHELL_BASED_SURFACE_MODEL with an OPEN_SHELL).

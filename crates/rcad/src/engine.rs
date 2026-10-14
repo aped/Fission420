@@ -123,12 +123,23 @@ impl DisplayScene {
     /// apply), vertices compacted so Fit frames it alone. `None` when the
     /// body is not in the scene.
     pub fn isolated(&self, keep: rcad_document::BodyId) -> Option<DisplayScene> {
-        let b = self.bodies.iter().find(|b| b.id == keep)?.clone();
+        // Every displayed copy of the body (one per placed assembly
+        // occurrence), not only the first.
+        let bodies: Vec<DisplayBody> = self
+            .bodies
+            .iter()
+            .filter(|b| b.id == keep)
+            .cloned()
+            .collect();
+        if bodies.is_empty() {
+            return None;
+        }
         let m = &self.mesh;
+        let normals = m.normals.len() == m.positions.len();
         let mut map = vec![u32::MAX; m.positions.len()];
         let mut out = RenderMesh::default();
         for (t, g) in m.tri_group.iter().enumerate() {
-            if !b.groups.contains(g) {
+            if !bodies.iter().any(|b| b.groups.contains(g)) {
                 continue;
             }
             for k in 0..3 {
@@ -136,7 +147,9 @@ impl DisplayScene {
                 if map[v] == u32::MAX {
                     map[v] = out.positions.len() as u32;
                     out.positions.push(m.positions[v]);
-                    out.normals.push(m.normals[v]);
+                    if normals {
+                        out.normals.push(m.normals[v]);
+                    }
                 }
                 out.indices.push(map[v]);
             }
@@ -144,7 +157,7 @@ impl DisplayScene {
         }
         Some(DisplayScene {
             mesh: out,
-            bodies: vec![b],
+            bodies,
             skipped: vec![],
         })
     }
@@ -921,6 +934,41 @@ impl Drop for Engine {
 
 #[cfg(test)]
 mod tests {
+    /// Isolation keeps every displayed copy of a body (linked assembly
+    /// occurrences share the body id) and survives a mesh without normals.
+    #[test]
+    fn isolation_keeps_every_copy_and_tolerates_missing_normals() {
+        let tri = |o: f32| [[o, 0.0, 0.0], [o + 1.0, 0.0, 0.0], [o, 1.0, 0.0]];
+        let mut mesh = RenderMesh::default();
+        for (k, o) in [0.0f32, 10.0, 20.0].into_iter().enumerate() {
+            for p in tri(o) {
+                mesh.positions.push(p);
+            }
+            let b = 3 * k as u32;
+            mesh.indices.extend([b, b + 1, b + 2]);
+            mesh.tri_group.push(k as u32);
+        }
+        let body = |id: u32, g: u32| DisplayBody {
+            id: rcad_document::BodyId(id),
+            mesh_body: false,
+            groups: g..g + 1,
+            tint: 0,
+            instance: None,
+            inactive: false,
+        };
+        let scene = DisplayScene {
+            mesh,
+            bodies: vec![body(1, 0), body(2, 1), body(1, 2)],
+            skipped: vec![],
+        };
+        let iso = scene.isolated(rcad_document::BodyId(1)).unwrap();
+        assert_eq!(iso.bodies.len(), 2);
+        assert_eq!(iso.mesh.tri_group, vec![0, 2]);
+        assert_eq!(iso.mesh.positions.len(), 6);
+        assert!(iso.mesh.normals.is_empty());
+        assert!(scene.isolated(rcad_document::BodyId(9)).is_none());
+    }
+
     use super::*;
     use rcad_commands::SketchTemplate;
     use rcad_document::{FeatureId, SketchPlane};
