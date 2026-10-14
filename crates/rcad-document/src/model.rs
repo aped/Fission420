@@ -989,6 +989,18 @@ impl Feature {
         }
     }
 
+    /// (source, derived body) of a feature whose new body replaces its
+    /// source in the source's component (see [`Document::add_derived_body`]).
+    pub fn derived_body(&self) -> Option<(BodyId, BodyId)> {
+        match &self.kind {
+            FeatureKind::SurfaceStitch { source, body, .. }
+            | FeatureKind::SurfaceFill { source, body, .. }
+            | FeatureKind::Thicken { source, body, .. }
+            | FeatureKind::MeshRepair { source, body, .. } => Some((*source, *body)),
+            _ => None,
+        }
+    }
+
     /// Body this feature modifies (Join/Cut target), if any.
     pub fn target_body(&self) -> Option<BodyId> {
         match &self.kind {
@@ -2061,6 +2073,36 @@ impl Document {
         self.check_suppression()
     }
 
+    /// Review run 7 #19: drop configuration values for parameters that do
+    /// not exist (left by a parameter rename or delete before configurations
+    /// followed them); such a configuration could not be activated. One line
+    /// per configuration with the dropped names.
+    pub fn prune_configuration_values(&mut self) -> Vec<String> {
+        let names: std::collections::BTreeSet<&str> =
+            self.parameters.iter().map(|p| p.name.as_str()).collect();
+        let mut out = Vec::new();
+        for c in &mut self.configurations {
+            let stale: Vec<String> = c
+                .values
+                .keys()
+                .filter(|k| !names.contains(k.as_str()))
+                .cloned()
+                .collect();
+            if stale.is_empty() {
+                continue;
+            }
+            for k in &stale {
+                c.values.remove(k);
+            }
+            out.push(format!(
+                "configuration '{}': removed values for missing parameter(s) {}",
+                c.name,
+                stale.join(", ")
+            ));
+        }
+        out
+    }
+
     /// Drop configuration exclusions of occurrences that no longer exist;
     /// returns how many were removed (run 7, review #6).
     pub fn prune_configuration_occurrences(&mut self) -> usize {
@@ -2436,6 +2478,33 @@ impl Document {
         let used: std::collections::HashSet<BlobId> =
             self.features.iter().filter_map(Feature::blob).collect();
         self.blobs.retain(|b| used.contains(&b.id));
+    }
+
+    /// Review run 7 #3: after deleting `removed`, a body it derived from a
+    /// source (and that replaced the source in a component) gives the source
+    /// its place back, so the component keeps its geometry. Call before
+    /// [`Document::prune_bodies`].
+    pub fn restore_derived_source(&mut self, removed: &Feature) {
+        let Some((source, derived)) = removed.derived_body() else {
+            return;
+        };
+        if self.body(source).is_err() {
+            return;
+        }
+        for c in &mut self.assembly.components {
+            if !c.bodies.contains(&derived) {
+                continue;
+            }
+            if c.bodies.contains(&source) {
+                c.bodies.retain(|b| *b != derived);
+            } else {
+                for b in &mut c.bodies {
+                    if *b == derived {
+                        *b = source;
+                    }
+                }
+            }
+        }
     }
 
     /// Drop body entries no feature creates (after deleting a body's creator).

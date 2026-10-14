@@ -1204,7 +1204,8 @@ fn bom_csv_export() {
         tl[0],
         "item,level,name,part_number,quantity,assembly,material"
     );
-    assert_eq!(tl[1], "1,0,Module,MOD-1,2,true,—");
-    assert!(tl[3].starts_with("1.2,1,Bolt,"), "{}", tl[3]);
+    // Item numbers are quoted text (review run 7 #39: "1.10" is not 1.1).
+    assert_eq!(tl[1], "\"1\",0,Module,MOD-1,2,true,—");
+    assert!(tl[3].starts_with("\"1.2\",1,Bolt,"), "{}", tl[3]);
     assert_eq!(tl.len(), 4);
 }

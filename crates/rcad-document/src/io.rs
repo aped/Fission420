@@ -435,16 +435,37 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// Load and validate a native file. Does not regenerate (see `Model::from_document`).
 pub fn load_file(path: &Path) -> Result<NativeFile> {
+    parse(&read_bounded(path)?)
+}
+
+/// The bytes of a file of at most [`MAX_FILE_BYTES`], in one bounded read
+/// (review run 7 #16: the size is enforced on what is read, so a file that
+/// grows or is swapped after a size check cannot make the read unbounded).
+pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read as _;
     let ferr = |e: std::io::Error| DocError::File(format!("open {}: {e}", path.display()));
     let meta = std::fs::metadata(path).map_err(ferr)?;
+    let too_large =
+        |n: u64| DocError::File(format!("file too large ({n} bytes, max {MAX_FILE_BYTES})"));
     if meta.len() > MAX_FILE_BYTES {
-        return Err(DocError::File(format!(
-            "file too large ({} bytes, max {MAX_FILE_BYTES})",
-            meta.len()
-        )));
+        return Err(too_large(meta.len()));
     }
-    let bytes = std::fs::read(path).map_err(ferr)?;
-    parse(&bytes)
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(ferr)?
+        .take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(ferr)?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(too_large(bytes.len() as u64));
+    }
+    Ok(bytes)
+}
+
+/// Parse and validate native-file bytes (what [`load_file`] does after
+/// reading). Does not regenerate.
+pub fn parse_native(bytes: &[u8]) -> Result<NativeFile> {
+    parse(bytes)
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {

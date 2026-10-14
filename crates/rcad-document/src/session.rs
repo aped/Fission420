@@ -35,6 +35,16 @@ pub struct Model {
     measure_failed: Option<u64>,
 }
 
+/// What [`Model::from_document_reporting`] found while opening a document.
+#[derive(Debug, Default)]
+pub struct LoadReport {
+    /// The parameter expressions do not evaluate: the stored values are shown.
+    pub expression_error: Option<DocError>,
+    /// Stale entries removed on load (one line each); the model is dirty
+    /// when this is non-empty.
+    pub cleaned: Vec<String>,
+}
+
 /// Cap on undo depth; documents are small, so this is generous.
 const MAX_UNDO: usize = 256;
 
@@ -75,30 +85,35 @@ impl Model {
     /// [`Model::from_document`], but a document whose expressions no longer
     /// evaluate (e.g. a hand-edited file) still opens with its stored values
     /// (the last committed definition) when those regenerate; the expression
-    /// error is returned so the client can show it (review run 4 #15: such a
+    /// error is reported so the client can show it (review run 4 #15: such a
     /// file could not be opened to repair it). The next edit re-derives every
     /// bound value, so it is refused until the named parameter is fixed.
-    pub fn from_document_reporting(mut doc: Document) -> Result<(Self, Option<DocError>)> {
-        // Run 7 (review #6): ids of deleted occurrences that an older build
-        // left in configurations are dropped on load (reported below).
+    ///
+    /// Stale configuration entries an older build left behind (exclusions of
+    /// deleted occurrences, review run 7 #6; values for parameters that no
+    /// longer exist, review run 7 #19) are dropped and listed in
+    /// [`LoadReport::cleaned`]; the model is then dirty, so saving keeps the
+    /// cleaned state (review run 7 #30).
+    pub fn from_document_reporting(mut doc: Document) -> Result<(Self, LoadReport)> {
+        let mut cleaned = Vec::new();
         let pruned = doc.prune_configuration_occurrences();
+        if pruned > 0 {
+            cleaned.push(format!(
+                "removed {pruned} reference(s) to deleted occurrences from configurations"
+            ));
+        }
+        cleaned.extend(doc.prune_configuration_values());
         let stored = doc.clone();
-        let warning = match crate::params::apply_expressions(&mut doc) {
+        let expression_error = match crate::params::apply_expressions(&mut doc) {
             Ok(()) => None,
             Err(e) => {
                 doc = stored;
                 Some(e)
             }
         };
-        let warning = warning.or_else(|| {
-            (pruned > 0).then(|| {
-                DocError::Validation(format!(
-                    "removed {pruned} reference(s) to deleted occurrences from configurations"
-                ))
-            })
-        });
         let mut cache = RegenCache::default();
         let eval = regenerate_cached(&doc, Some(&mut cache))?;
+        let dirty = !cleaned.is_empty();
         Ok((
             Self {
                 doc,
@@ -106,12 +121,15 @@ impl Model {
                 undo: vec![],
                 redo: vec![],
                 revision: 0,
-                dirty: false,
+                dirty,
                 cache,
                 defer_measurements: false,
                 measure_failed: None,
             },
-            warning,
+            LoadReport {
+                expression_error,
+                cleaned,
+            },
         ))
     }
 
