@@ -81,6 +81,20 @@ fn ellipse_new_body_upstream_edit_undo_and_reopen() {
     ok(&mut t, json!({"cmd": "open", "path": path}));
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert!(close(vol(&t, 1), v1));
+    // A file claiming an older version cannot hold sketch ellipses: refused
+    // with the reason instead of being misread.
+    let mut old = v.clone();
+    old["version"] = json!(7);
+    let old_path = dir.path().join("ellipse_v7.rcad.json");
+    std::fs::write(&old_path, serde_json::to_string(&old).unwrap()).unwrap();
+    let mut u = Session::new();
+    let r = tray::exec(&mut u, &json!({"cmd": "open", "path": old_path}));
+    assert!(!r.ok);
+    assert!(
+        format!("{:?}", r.error).contains("sketch ellipses and splines"),
+        "{:?}",
+        r.error
+    );
 }
 
 #[test]
