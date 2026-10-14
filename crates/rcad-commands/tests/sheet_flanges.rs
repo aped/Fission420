@@ -892,3 +892,110 @@ fn rule_edit_failure_names_the_responsible_flange() {
     let e = format!("{:?}", r.error);
     assert!(e.contains("F3") && !e.contains("F4"), "{e}");
 }
+
+/// Feature ids in history order and the ids after the timeline marker.
+fn order_and_rolled(s: &Session) -> (Vec<u32>, Vec<u32>) {
+    let f = s.summary().features;
+    (
+        f.iter().map(|x| x.id.0).collect(),
+        f.iter().filter(|x| x.rolled_back).map(|x| x.id.0).collect(),
+    )
+}
+
+fn circle_sketch(s: &mut Session, x: f64) -> u32 {
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredCircle {
+            diameter: 2.0,
+            center: Some([x, 100.0]),
+        },
+    });
+    assert!(r.ok, "{:?}", r.error);
+    r.feature.unwrap().0
+}
+
+/// Review run 7 #4: adding a flange while the timeline is rolled back keeps
+/// the marker's meaning. The flange goes before an active flat pattern and
+/// the marker stays where it was (the features after it stay rolled back,
+/// those before it stay active); a flat that is already rolled back is not
+/// crossed, so nothing is rolled forward.
+#[test]
+fn flange_added_while_rolled_back_keeps_the_marker() {
+    // (a) Base, Flat, X, Y, Z with the marker at Y.
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    rect_sketch(&mut s, 60.0, 40.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 2.0, "k_factor": 0.4}),
+    );
+    let left = line_id(&s, 1, |p| p[0].abs() < 1e-9);
+    let right = line_id(&s, 1, |p| (p[0] - 60.0).abs() < 1e-9);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": left, "length": 20.0}),
+    );
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": true}),
+    );
+    let flat = s
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.kind == "sheet_flat")
+        .unwrap()
+        .id
+        .0;
+    let x = circle_sketch(&mut s, 0.0);
+    let y = circle_sketch(&mut s, 10.0);
+    let z = circle_sketch(&mut s, 20.0);
+    tray::ok(&mut s, &json!({"cmd": "set_rollback", "at": y}));
+    let f = tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": right, "length": 20.0}),
+    )
+    .feature
+    .unwrap()
+    .0;
+    let (order, rolled) = order_and_rolled(&s);
+    assert_eq!(order, vec![1, 2, 3, f, flat, x, y, z]);
+    assert_eq!(rolled, vec![z], "marker moved: {order:?}");
+    // The flat pattern includes the new flange (both flanges unfolded).
+    let flat_len = 100.0 + 2.0 * (PI / 2.0) * 2.4;
+    assert!((body_volume(&s, 2) - flat_len * 40.0).abs() < 1e-6);
+
+    // (b) Base, X, Y, Flat with the marker at the base.
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    rect_sketch(&mut s, 60.0, 40.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 2.0, "k_factor": 0.4}),
+    );
+    let x = circle_sketch(&mut s, 0.0);
+    let y = circle_sketch(&mut s, 10.0);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flat_state", "base": 2, "flat": true}),
+    );
+    let (before, _) = order_and_rolled(&s);
+    let flat = *before.last().unwrap();
+    let left = line_id(&s, 1, |p| p[0].abs() < 1e-9);
+    tray::ok(&mut s, &json!({"cmd": "set_rollback", "at": 2}));
+    let f = tray::ok(
+        &mut s,
+        &json!({"cmd": "sheet_flange", "base": 2, "edge": left, "length": 20.0}),
+    )
+    .feature
+    .unwrap()
+    .0;
+    let (order, rolled) = order_and_rolled(&s);
+    assert_eq!(order, vec![1, 2, f, x, y, flat]);
+    assert_eq!(rolled, vec![x, y, flat], "rolled forward: {order:?}");
+    // Rolling forward to the end: the flat includes the flange.
+    tray::ok(&mut s, &json!({"cmd": "set_rollback", "at": null}));
+    let flat_len = 60.0 + 20.0 + (PI / 2.0) * 2.4;
+    assert!((body_volume(&s, 2) - flat_len * 40.0).abs() < 1e-6);
+}
