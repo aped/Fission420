@@ -19,6 +19,8 @@ pub struct ConfigTableUi {
     pub draft: Option<(u64, u64, Vec<Configuration>)>,
     /// Whether the draft differs from the document (kept across revisions).
     pub dirty: bool,
+    /// The table sent by the last Apply, until its reply (review round 2 #18).
+    pub pending: Option<Vec<Configuration>>,
     pub export_dir: String,
     pub export_stem: String,
     pub step: bool,
@@ -32,6 +34,7 @@ impl Default for ConfigTableUi {
         Self {
             draft: None,
             dirty: false,
+            pending: None,
             export_dir: "variants".into(),
             export_stem: "part".into(),
             step: true,
@@ -46,7 +49,16 @@ impl ConfigTableUi {
     /// Review run 7 #18: the draft is replaced only after a successful apply;
     /// a refused table keeps the user's cells (and stays "unapplied").
     pub(crate) fn on_reply(&mut self, response: &rcad_commands::Response) {
-        if response.command == "set_configuration_table" && response.ok {
+        if response.command != "set_configuration_table" {
+            return;
+        }
+        let sent = self.pending.take();
+        // Replace the draft only when it still holds exactly what was
+        // applied; cells edited while the request was in flight are kept.
+        if response.ok
+            && let (Some(sent), Some((_, _, table))) = (sent, &self.draft)
+            && *table == sent
+        {
             self.dirty = false;
             self.draft = None;
         }
@@ -234,11 +246,15 @@ impl RcadApp {
                         changed = true;
                     }
                     if ui
-                        .add_enabled(st.dirty || changed, egui::Button::new("Apply table"))
+                        .add_enabled(
+                            (st.dirty || changed) && st.pending.is_none(),
+                            egui::Button::new("Apply table"),
+                        )
                         .named("Apply configuration table")
                         .on_hover_text("One undo step; refused unchanged when a row is invalid")
                         .clicked()
                     {
+                        st.pending = Some(table.clone());
                         send.push(Command::SetConfigurationTable {
                             configurations: table.clone(),
                         });
