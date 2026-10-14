@@ -1019,7 +1019,7 @@ impl RcadApp {
         }
         ui.checkbox(&mut form.allow_open_meshes, "Allow open reference meshes")
             .probe("Allow open reference meshes");
-        ui.small("Off: every body must export as a closed, manifold, outward solid mesh, or nothing is written. Self-intersection is not checked.");
+        ui.small("Off: every body must export as a closed, manifold, outward solid mesh, or nothing is written. Self-intersection is checked (bounded) and only warned about.");
         if !form.allow_open_meshes
             && chosen
                 .iter()
@@ -1081,7 +1081,14 @@ fn print_report_ui(ui: &mut egui::Ui, r: &ExportReport) {
                     yes(c.nonmanifold_vertices == 0 && c.nonmanifold_edges == 0),
                     yes(c.orientation_consistent && c.outward),
                     c.mesh_volume,
-                    c.self_intersection
+                    match &b.self_intersection {
+                        Some(si) => match (si.intersecting_pairs, si.complete) {
+                            (0, true) => "none found (bounded check, not a proof)".to_string(),
+                            (0, false) => "none found in a partial check".to_string(),
+                            (n, _) => format!("{n} crossing pairs"),
+                        },
+                        None => c.self_intersection.clone(),
+                    }
                 ));
                 ui.label(b.fit.as_ref().map_or("-", |f| f.detail.as_str()));
                 ui.end_row();

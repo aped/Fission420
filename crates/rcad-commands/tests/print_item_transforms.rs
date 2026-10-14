@@ -189,3 +189,74 @@ fn placement_as_item_transforms_reads_back_placed() {
     assert!(!r.ok);
     assert!(!dir.join("x.stl").exists());
 }
+
+/// Two interpenetrating closed cubes in one STL: a valid closed, outward mesh by
+/// the edge/vertex checks, exported, but the bounded self-intersection check
+/// finds the crossing pairs and the export warns.
+#[test]
+fn interpenetrating_shells_export_with_a_self_intersection_warning() {
+    let cube = |o: f64| {
+        let v: Vec<[f64; 3]> = (0..8)
+            .map(|i| {
+                [
+                    o + (i & 1) as f64 * 10.0,
+                    o + ((i >> 1) & 1) as f64 * 10.0,
+                    o + (i >> 2) as f64 * 10.0,
+                ]
+            })
+            .collect();
+        let t = [
+            [0, 2, 3],
+            [0, 3, 1],
+            [4, 5, 7],
+            [4, 7, 6],
+            [0, 1, 5],
+            [0, 5, 4],
+            [2, 6, 7],
+            [2, 7, 3],
+            [0, 4, 6],
+            [0, 6, 2],
+            [1, 3, 7],
+            [1, 7, 5],
+        ];
+        t.map(|f: [usize; 3]| f.map(|i| v[i]))
+    };
+    let mut stl = String::from("solid two\n");
+    for tri in cube(0.0).iter().chain(cube(5.0).iter()) {
+        stl.push_str("facet normal 0 0 0\nouter loop\n");
+        for p in tri {
+            stl.push_str(&format!("vertex {} {} {}\n", p[0], p[1], p[2]));
+        }
+        stl.push_str("endloop\nendfacet\n");
+    }
+    stl.push_str("endsolid two\n");
+    let dir = out_dir("self_intersection");
+    let src = dir.join("overlap.stl");
+    std::fs::write(&src, stl).unwrap();
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    ok(
+        &mut s,
+        Command::ImportStl {
+            path: src,
+            units_to_mm: Some(1.0),
+        },
+    );
+    let r = ok(
+        &mut s,
+        Command::ExportStl {
+            path: dir.join("out.stl"),
+            chord: None,
+            bodies: None,
+            print: PrintOptions::default(),
+        },
+    );
+    let rep = r.export.unwrap();
+    let si = rep.bodies[0].self_intersection.as_ref().unwrap();
+    assert!(si.complete && si.intersecting_pairs > 0, "{si:?}");
+    assert!(
+        rep.warnings.iter().any(|w| w.contains("self-intersecting")),
+        "{:?}",
+        rep.warnings
+    );
+}

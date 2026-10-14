@@ -167,7 +167,7 @@ export and Cut of a mesh body are refused and nothing is written; the mesh body 
 684-byte binary STL validated by a Python reader and FreeCAD (V 1000, solid).
 
 **Print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
-manifold vertices, orientation, positive volume; self-intersection not checked), `angle_deg`,
+manifold vertices, orientation, positive volume; bounded self-intersection check as a warning), `angle_deg`,
 export-only placement/layout, P1S/manual bed fit, `separate_files`, `allow_open_meshes`,
 per-body report. Evidence: `crates/rcad-commands/tests/print_export.rs`,
 `crates/rcad-kernel/tests/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,

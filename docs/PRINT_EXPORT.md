@@ -76,9 +76,18 @@ Performed (topology by vertex index; imported meshes are first welded on exact c
 | `invalid_triangles` | repeated or out-of-range vertex index |
 | `degenerate_triangles` | zero area (`|ab × ac| ≤ 1e-12 · longest²`); warning only |
 | `shells` | edge-connected components |
-| `self_intersection` | always `"not checked"`: no triangle-triangle test is done. FreeCAD's `hasSelfIntersections` is run on the exports by `tools/print/validate_print_exports.sh` as an external check |
+| `self_intersection` | `MeshCheck.self_intersection` stays `"not checked"`; the bounded check runs per body as `BodyExport.self_intersection` (below). FreeCAD's `hasSelfIntersections` is still run on the exports by `tools/print/validate_print_exports.sh` as an external check |
 
-Not checked: self-intersection (in the app), minimum wall thickness, overhangs, printability.
+**Self-intersection** (`BodyExport.self_intersection`, every exported body): the bounded
+triangle-pair check of docs/MESH.md (uniform grid; pairs sharing a vertex not tested; at most
+2 M triangles / 50 M pair tests, else labelled partial). Crossing pairs or a partial check
+add a warning; the export is **not** refused for them. None found is evidence, not a proof.
+The dialog's per-body report shows the result. Test:
+`print_item_transforms.rs::interpenetrating_shells_export_with_a_self_intersection_warning`
+(two overlapping closed cubes in one STL: valid by the edge/vertex checks, crossing pairs
+found, warning); the enclosure bodies report none (complete).
+
+Not checked: minimum wall thickness, overhangs, printability.
 A valid closed mesh can still be the wrong shape; the acceptance checks compare volumes,
 bounds and slicer toolpaths against analytic values for that reason.
 
@@ -290,9 +299,9 @@ base on its floor, 10 mm gap, analytic volumes, document unchanged).
 * App dialogs: no live pre-export preview of placed sizes/triangle counts (modeled sizes are
   shown before export, the exact per-body report after it); one selected face at a time is
   used for "Selected face down".
-* Minimum-thickness checks are not implemented. Self-intersection: the export check does
-  not run it; mesh bodies can be checked on demand in the inspector (`inspect_mesh`,
-  docs/MESH.md), bounded and not a proof.
+* Minimum-thickness checks are not implemented. Self-intersection is checked (bounded,
+  warning only, not a proof); mesh bodies can also be checked on demand in the inspector
+  (`inspect_mesh`, docs/MESH.md).
 * Truck's isotropic lateral-face grid makes curved parts heavier than necessary (see above).
 * Layout is a single row along X; no rotation about Z, no packing; it may not fit even when a
   different arrangement would (reported, not fixed).

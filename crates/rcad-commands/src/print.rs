@@ -196,6 +196,11 @@ pub struct BodyExport {
     pub dims: [f64; 3],
     /// Checks of the exported mesh (topology by index after exact welding).
     pub mesh_check: MeshCheck,
+    /// Bounded self-intersection check of the exported mesh
+    /// (`rcad_exchange::mesh::self_intersections`; docs/MESH.md). Found pairs or a
+    /// partial check are warnings, not refusals; none found is not a proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_intersection: Option<rcad_exchange::mesh::SelfIntersectionReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
     /// STL `separate_files`: the file this body went to.
@@ -416,6 +421,27 @@ fn prepare(
                 b.name, check.degenerate_triangles
             ));
         }
+        // Rigid placement does not change self-intersection: checked once here.
+        let si = rcad_exchange::mesh::self_intersections(
+            &mesh.positions,
+            &mesh.triangles,
+            &Default::default(),
+        );
+        if si.intersecting_pairs > 0 {
+            warnings.push(format!(
+                "{}: {} self-intersecting triangle pairs{} (the slicer may misprint; repair \
+                 the model)",
+                b.name,
+                si.intersecting_pairs,
+                if si.complete { "" } else { " (partial check)" }
+            ));
+        } else if !si.complete {
+            warnings.push(format!(
+                "{}: self-intersection check was partial ({} of {} triangles, {} pair tests); \
+                 none found, not a proof",
+                b.name, si.triangles_checked, si.triangles_total, si.pairs_tested
+            ));
+        }
         let (lo, hi) = bounds(&mesh);
         out.push(Prepared {
             report: BodyExport {
@@ -432,6 +458,7 @@ fn prepare(
                 bounds_max: hi,
                 dims: std::array::from_fn(|i| hi[i] - lo[i]),
                 mesh_check: check,
+                self_intersection: Some(si),
                 fit: None,
                 file: None,
             },
