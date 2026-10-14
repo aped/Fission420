@@ -156,10 +156,10 @@ fn torus_is_exact_by_revolution() {
 }
 
 #[test]
-fn tori_about_two_axes_use_tessellation_estimate() {
+fn tori_about_two_axes_are_exact_by_the_parametric_integral() {
     // Ø6 disc swept along an S-bend: line 10, then 90° arcs R 15 about two different
-    // axes (parallel, distinct): no common revolution axis, so the labelled
-    // tessellation estimate applies and must contain Pappus' value.
+    // axes (parallel, distinct): no common revolution axis; the parametric
+    // boundary integral (split at the sweep's knots) gives Pappus' value.
     let disc = Profile::Circle {
         center: [0.0, 0.0],
         radius: 3.0,
@@ -188,12 +188,11 @@ fn tori_about_two_axes_use_tessellation_estimate() {
         v - expected,
         (v - expected) / expected
     );
-    assert_eq!(method, VolumeMethod::TessellationEstimate);
+    assert_eq!(method, VolumeMethod::BrepBoundaryIntegralParametric);
     assert!(
-        (v - expected).abs() <= est,
+        (v - expected).abs() <= 1e-9 * expected && est <= 1e-9 * expected,
         "S-bend: {v} vs {expected}, estimate {est}"
     );
-    assert!(est < 0.01 * expected, "estimate {est} too loose");
 }
 
 #[test]
