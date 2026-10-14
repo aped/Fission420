@@ -59,6 +59,11 @@ check revolved_collar.step "3384*pi" "[-14,-14,0,14,14,30]" \
 check revolved_countersink.step "4000 - 50.625*pi" "[-10,-10,-10,10,10,0]" \
   "[[0,0,-1],[3,0,-0.5],[5.3,0,-0.5],[2,0,-4],[1.2,0,-4],[0,0,-9]]" \
   "[True, False, True, True, False, True]"
+# Cup drawn against the axis (new body, written by crates/rcad-commands/tests/revolve_options.rs
+# when RCAD_EVIDENCE_DIR is set): outer R 25 x 60 on world Y, wall 2, floor 5.
+check revolved_cup_floor5.step "pi*(625*60 - 529*55)" "[-25,0,-25,25,60,25]" \
+  "[[24,30,0],[0,30,0],[0,2,0],[26,30,0],[0,4,0],[0,6,0],[0,30,24]]" \
+  "[True, False, True, False, True, False, True]"
 # Ring boss r 8..12, z 28..34 joined to a 40 x 40 x 30 block.
 check revolved_boss.step "48000 + 320*pi" "[-20,-20,0,20,20,34]" \
   "[[10,0,32],[5,0,32],[13,0,32],[10,0,29],[0,10,33.9],[0,0,31]]" \
@@ -92,6 +97,8 @@ expected revolved_countersink.step \
   "b=Part.makeBox(20,20,10,V(-10,-10,-10)); t=Part.makeCone(1,6.5,5.5,V(0,0,-4.5)).cut(Part.makeCylinder(1,5.5,V(0,0,-4.5))); exp=b.cut(t)" 0 $TOL
 expected revolved_boss.step \
   "b=Part.makeBox(40,40,30,V(-20,-20,0)); exp=b.fuse(Part.makeCylinder(12,6,V(0,0,28)).cut(Part.makeCylinder(8,6,V(0,0,28)))).removeSplitter()" 0 $TOL
+expected revolved_cup_floor5.step \
+  "exp=Part.makeCylinder(25,60,V(0,0,0),V(0,1,0)).cut(Part.makeCylinder(23,55,V(0,5,0),V(0,1,0)))" 0 $TOL
 # Control: a groove export against the plain cylinder differs by 38 pi = 119.38 mm^3.
 expected revolved_groove_seam_0.step "$CYL; exp=c" 118 121
 exit $status

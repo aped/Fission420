@@ -455,10 +455,13 @@ pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
         Profile::Circle { center, radius } => center[0] - radius,
         Profile::Loop(segs) => loop_min_x(segs),
     };
-    if min_x < tol::MIN_LENGTH {
+    if min_x <= -tol::KERNEL_LINEAR {
         return Err(KernelError::InvalidInput(format!(
-            "profile must lie strictly on the +X side of the revolve axis (min x = {min_x} mm)"
+            "profile must lie on the +X side of the revolve axis (min x = {min_x} mm)"
         )));
+    }
+    if min_x < tol::MIN_LENGTH {
+        return revolve_touching_axis(profile, frame, angle);
     }
     // Truck treats >= 2*pi as a closed sweep; clamp tiny overshoot to exactly 2*pi.
     let angle = angle.min(2.0 * std::f64::consts::PI);
@@ -475,6 +478,110 @@ pub fn revolve(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
     check_single_closed(&body, "revolve")?;
     // Sweep orientation depends on the profile normal vs. the rotation sense; make the
     // shell outward-oriented (positive enclosed volume).
+    if let Ok(m) = measure::measure(&body)
+        && let measure::VolumeResult::Value { volume, .. } = m.volume
+        && volume < 0.0
+    {
+        body.solid.not();
+    }
+    Ok(body)
+}
+
+/// Full revolve of a profile that touches the axis along one straight edge
+/// (a cup, knob or spindle section drawn against the axis). Truck's face
+/// sweep would keep the axis edge as zero-area faces that other readers
+/// reject, so the solid is built without them: the profile wire minus the
+/// axis edge is swept (one revolved face per edge), and the two circles left
+/// open where the wire leaves the axis are closed by planar disks. Supported
+/// when the edges next to the axis edge are lines perpendicular to the axis
+/// (their sweeps are exactly those disks) and no other point of the profile
+/// lies on the axis; a full turn only. Otherwise refused by name (a profile
+/// meeting the axis at a point or at an angle makes a cone tip or pole).
+fn revolve_touching_axis(profile: &Profile, frame: &Frame, angle: f64) -> Result<Body> {
+    let refuse = |m: &str| {
+        Err(KernelError::InvalidInput(format!(
+            "revolve: the profile touches the axis; {m}"
+        )))
+    };
+    if (angle - 2.0 * std::f64::consts::PI).abs() > 1e-9 {
+        return refuse("only a full 360° revolve is supported when the profile touches the axis");
+    }
+    let wire = profile_wire(profile, frame, 0.0)?;
+    let o = p3(frame.origin);
+    let ax = v3(frame.y).normalize();
+    let dist = |p: Point3| {
+        let d = p - o;
+        (d - ax * d.dot(ax)).magnitude()
+    };
+    let on_axis = |p: Point3| dist(p) <= tol::KERNEL_LINEAR;
+    let n = wire.len();
+    let axis_edges: Vec<usize> = (0..n)
+        .filter(|&i| {
+            let e = &wire[i];
+            let mid = e.oriented_curve().subs(
+                0.5 * (e.oriented_curve().range_tuple().0 + e.oriented_curve().range_tuple().1),
+            );
+            on_axis(e.front().point()) && on_axis(e.back().point()) && on_axis(mid)
+        })
+        .collect();
+    let [k] = axis_edges[..] else {
+        return refuse(
+            "it must touch the axis along exactly one straight edge (a profile meeting the \
+             axis at a single point makes a cone tip or pole, not supported yet)",
+        );
+    };
+    let order: Vec<usize> = (1..n).map(|j| (k + j) % n).collect();
+    let (first, last) = (order[0], order[n - 2]);
+    for &i in &order[1..n - 2] {
+        if on_axis(wire[i].front().point()) || on_axis(wire[i].back().point()) {
+            return refuse("no other point of the profile may lie on the axis");
+        }
+    }
+    for i in [first, last] {
+        let e = &wire[i];
+        let (a, b) = (e.front().point(), e.back().point());
+        let d = b - a;
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let mid = c.subs(0.5 * (t0 + t1));
+        let straight = ((mid - a).cross(d)).magnitude() <= tol::KERNEL_LINEAR * d.magnitude();
+        if !straight || d.normalize().dot(ax).abs() > 1e-9 {
+            return refuse(
+                "the edges leaving the axis must be lines perpendicular to it (a flat end); \
+                 an edge meeting the axis at an angle makes a cone tip, not supported yet",
+            );
+        }
+    }
+    if n < 4 {
+        return refuse(
+            "the profile needs at least one edge besides the axis edge and its neighbours",
+        );
+    }
+    let middle: Wire = order[1..n - 2].iter().map(|&i| wire[i].clone()).collect();
+    let solid = guarded("revolve", || -> Result<Solid> {
+        let side: Shell = builder::rsweep(&middle, o, ax, Rad(angle));
+        let rims = side.extract_boundaries();
+        if rims.len() != 2 {
+            return Err(KernelError::Internal(format!(
+                "revolve: the swept side has {} boundary loops, expected 2",
+                rims.len()
+            )));
+        }
+        let disks: Vec<Face> = rims
+            .iter()
+            .map(|w| {
+                builder::try_attach_plane(std::slice::from_ref(&w.inverse()))
+                    .map_err(|e| KernelError::Internal(format!("revolve: end disk: {e:?}")))
+            })
+            .collect::<Result<_>>()?;
+        let mut faces: Vec<Face> = side.face_iter().cloned().collect();
+        faces.extend(disks);
+        let shell: Shell = faces.into();
+        Solid::try_new(vec![shell])
+            .map_err(|e| KernelError::Internal(format!("revolve: closed shell: {e:?}")))
+    })??;
+    let mut body = Body { solid };
+    check_single_closed(&body, "revolve")?;
     if let Ok(m) = measure::measure(&body)
         && let measure::VolumeResult::Value { volume, .. } = m.volume
         && volume < 0.0

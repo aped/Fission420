@@ -4533,13 +4533,16 @@ fn revolve_about(
             let v = side(*q);
             (l.min(v), h.max(v))
         });
-    let s = if lo > 0.0 {
+    // Touching the axis (within the kernel tolerance) is allowed: the kernel
+    // revolves such profiles when they meet the axis along a straight edge.
+    let eps = k::tol::KERNEL_LINEAR;
+    let s = if lo > -eps && hi > eps {
         1.0
-    } else if hi < 0.0 {
+    } else if hi < eps && lo < -eps {
         -1.0
     } else {
         return Err(invalid(
-            "the profile crosses or touches the axis; it must lie on one side of it".into(),
+            "the profile crosses the axis; it must lie on one side of it".into(),
         ));
     };
     // New 2-D frame: x' = s·(d.y, −d.x) (toward the profile), y' = s·d: a
