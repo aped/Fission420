@@ -230,8 +230,9 @@ No polyline ever stands in for the geometry.
   Cut use Truck's boolean with the independent result check instead, ADR 0005); side-face
   references to their curved faces; R12 DXF export (no ELLIPSE/SPLINE entity in R12; SVG export
   writes exact paths).
-* **Volume**: extrusions use the exact boundary integral (πab·h to ~1e-9 relative); a revolved
-  ellipse falls back to the tessellation estimate with its stated error.
+* **Volume**: extrusions use the exact boundary integral (πab·h to ~1e-9 relative).
+* **Revolve** of an ellipse or spline profile is refused by name: Truck's mesher fails on many
+  revolved rational cubic faces, so the body could not be displayed or exported.
 * **Import**: DXF full `ELLIPSE` and `SPLINE`s that are exactly sketch splines (open,
   non-rational, degree 3, clamped uniform knots); SVG `<ellipse>` with rx ≠ ry under similarity
   transforms. Everything else stays refused (docs/formats/dxf.md, svg.md).

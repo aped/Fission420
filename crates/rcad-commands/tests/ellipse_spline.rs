@@ -243,7 +243,7 @@ fn closed_spline_prism_volume_and_refusals() {
 }
 
 #[test]
-fn elliptical_cut_patterns_and_mirrors_and_ellipse_revolves() {
+fn elliptical_cut_patterns_and_mirrors_and_ellipse_revolve_refusal() {
     let mut s = Session::new();
     ok(&mut s, json!({"cmd": "new_document"}));
     ok(
@@ -291,33 +291,25 @@ fn elliptical_cut_patterns_and_mirrors_and_ellipse_revolves() {
     } else {
         assert_eq!(s.model().unwrap().document(), &before, "{:?}", r.error);
     }
-    // Revolve: ellipse centred 30 mm from the axis in the XZ plane, full turn
-    // about the sketch Y axis: torus-like ring, V = 2π·30·πab (Pappus). The
-    // volume is the tessellation estimate; its stated error must cover the
-    // true error.
+    // Revolve of an ellipse profile: refused by name (its revolved faces
+    // cannot be tessellated reliably), the document unchanged.
     let mut t = Session::new();
     ok(&mut t, json!({"cmd": "new_document"}));
     ok(
         &mut t,
         json!({"cmd": "create_sketch", "plane": "WorldXZ", "template": "centered_ellipse",
-               "major_radius": 8.0, "minor_radius": 5.0, "center": [30.0, 0.0]}),
+               "major_radius": 10.0, "minor_radius": 5.0, "center": [60.0, 0.0]}),
     );
-    ok(
+    let before = t.model().unwrap().document().clone();
+    let r = tray::exec(
         &mut t,
-        json!({"cmd": "revolve", "sketch": 1, "angle_deg": 360.0}),
+        &json!({"cmd": "revolve", "sketch": 1, "angle_deg": 360.0}),
     );
-    let b = t.summary().bodies[0].measurements.clone().unwrap();
-    let rcad_kernel::VolumeResult::Value {
-        volume,
-        error_estimate,
-        ..
-    } = b.volume
-    else {
-        panic!("{:?}", b.volume)
-    };
-    let want = 2.0 * PI * 30.0 * PI * 8.0 * 5.0;
+    assert!(!r.ok);
     assert!(
-        (volume - want).abs() <= error_estimate,
-        "{volume} vs {want} ± {error_estimate}"
+        format!("{:?}", r.error).contains("revolving ellipse or spline"),
+        "{:?}",
+        r.error
     );
+    assert_eq!(t.model().unwrap().document(), &before);
 }

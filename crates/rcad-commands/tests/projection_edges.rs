@@ -389,3 +389,48 @@ fn projected_edge_keeps_its_identity_under_large_edits() {
         "the projection must follow the top edge: {l:?}"
     );
 }
+
+/// Edges projected one at a time share their end points where they meet, so
+/// four projected rectangle edges form a closed profile that extrudes.
+#[test]
+fn edges_projected_one_by_one_join_into_a_profile() {
+    let mut s = Session::new();
+    holed_block(
+        &mut s,
+        json!({"Offset": {"base": "WorldXY", "distance": 20.0}}),
+    );
+    for at in [
+        [0.0, -14.5, 10.0],
+        [19.5, 5.0, 10.0],
+        [0.0, 14.5, 10.0],
+        [-19.5, 0.0, 10.0],
+    ] {
+        tray::ok(&mut s, &top_edge(at));
+    }
+    let sk = solved(&s, 4);
+    let regions = sk.regions().unwrap();
+    let big = regions
+        .into_iter()
+        .max_by(|a, b| a.area.total_cmp(&b.area))
+        .unwrap();
+    assert!((big.area - 1200.0).abs() < 1e-6, "{}", big.area);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "extrude", "sketch": 5, "distance": 5.0, "region": big.id}),
+    );
+    assert!(
+        (body_vol(&s, 2) - 6000.0).abs() < 1e-6,
+        "{}",
+        body_vol(&s, 2)
+    );
+    // Still associative: a wider block widens the projected rectangle.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 1, "name": "width", "value": 50.0}),
+    );
+    assert!(
+        (body_vol(&s, 2) - 7500.0).abs() < 1e-6,
+        "{}",
+        body_vol(&s, 2)
+    );
+}
