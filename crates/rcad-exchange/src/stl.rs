@@ -192,7 +192,9 @@ fn read_binary(bytes: &[u8], n: u64, limits: &StlLimits) -> Result<StlMesh> {
     let mut welder = Welder::new(n / 2 + 3);
     let mut triangles = Vec::with_capacity(n);
     let mut facet_normals = Vec::with_capacity(n);
+    let mut poll = rcad_cancel::Poll::new(crate::CANCEL_POLL);
     for i in 0..n {
+        crate::poll_cancel(&mut poll, "STL")?;
         let rec = &bytes[84 + 50 * i..84 + 50 * (i + 1)];
         let f = |k: usize| {
             let o = 4 * k;
@@ -288,7 +290,9 @@ fn read_ascii(text: &str, limits: &StlLimits) -> Result<StlMesh> {
     let mut corners = [[0.0; 3]; 3];
     let mut solids = 0usize;
     let mut last_line = 0usize;
+    let mut poll = rcad_cancel::Poll::new(crate::CANCEL_POLL);
     for (idx, raw) in text.lines().enumerate() {
+        crate::poll_cancel(&mut poll, "STL")?;
         let line = idx + 1;
         last_line = line;
         let mut toks = raw.split_whitespace();

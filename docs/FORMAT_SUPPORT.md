@@ -346,14 +346,22 @@ the specifications:
 | reported losses | `c1_coloured_blocks_mm.step`, `h4_spline_unsupported.dxf` | "colours/styles ignored: 2 STYLED_ITEM …"; SPLINE refused by name, partial import names it |
 | malformed / unsupported / oversized | `x1`–`x11` (STEP, STL ×3, 3MF ×4, DXF ×2, SVG) and sparse files just over the import limit (STL, STEP, 3MF) | refused with a bounded message naming the format or cause, into a document holding a body: document and revision unchanged, within 30 s |
 
-**Bounded, not cancellable.** An import is bounded before and while it is read: files above
+**Bounded and cancellable.** An import is bounded before and while it is read: files above
 `MAX_FILE_BYTES / 2` (128 MiB) are refused before reading (tested above), and the readers
-enforce entity / triangle limits (STEP 2 M entities, STL 10 M triangles, 3MF
-limits in `ThreeMfLimits`). It is **not** interruptible: the Import dialog's Cancel only
-detaches the form (the import still commits; `crates/rcad/tests/stale_state.rs`
-`import_reply_after_cancel_does_not_resolve_the_reopened_form`), and the toolbar Cancel stops
-a regeneration between features (`crates/rcad/tests/cancel_regen_ui.rs`), so it cannot stop a
-single long file parse.
+enforce entity / triangle limits (STEP 2 M entities, STL 10 M triangles, 3MF limits in
+`ThreeMfLimits`). It is also cancellable (`rcad_cancel`, one process-wide cooperative flag):
+the STL, 3MF, DXF and SVG readers poll it every 16 384 items (and on their first item), the
+STEP import in its pre-scan, before and after the third-party parser (which itself cannot be
+interrupted) and per solid while building topology, and regeneration before each feature. A
+cancelled import fails with `DocError::ImportCancelled` and nothing is committed. In the app
+the Import dialog's Cancel cancels its own import by request token (`Engine::cancel`: still
+queued, it is answered as cancelled without running; running, the flag is set), and the
+toolbar Cancel stops whatever is running. Evidence: `crates/rcad-exchange/tests/cancel.rs`
+(every reader stops), `crates/rcad-commands/tests/import_cancel.rs` (every import command
+refused with the document unchanged; a 2 000 000-triangle STL cancelled from another thread
+mid-read), `crates/rcad/tests/import_cancel_ui.rs` (the dialog's Cancel during that read:
+no feature, no body, revision unchanged; the next import works), `stale_state.rs` (a
+cancelled queued import never commits; late replies still never resolve a newer form).
 
 ## Evidence
 

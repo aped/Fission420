@@ -545,7 +545,9 @@ fn path(em: &mut Emit, d: &str) -> Result<()> {
     let mut cur = [0.0, 0.0];
     let mut start = [0.0, 0.0];
     let mut cmd = 0u8;
+    let mut poll = rcad_cancel::Poll::new(crate::CANCEL_POLL);
     loop {
+        crate::poll_cancel(&mut poll, "SVG")?;
         // Every pass must consume input (a command letter or numbers): guard
         // against any implicit-repeat path that reads nothing.
         n.skip_sep();
