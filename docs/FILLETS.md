@@ -1,12 +1,14 @@
-# Solid fillets
+# Solid fillets and loop chamfers
 
-Two exact solid fillet operations exist. Both are features in the document history, both
+Two exact solid fillet operations and a loop chamfer exist (the single-edge chamfer is
+`chamfer`, docs/COMMANDS.md). Both are features in the document history, both
 are reachable through the typed command API, and both are offered in the face inspector.
 
 | Operation | Command | What it rounds | Faces created |
 |---|---|---|---|
 | Edge fillet | `fillet` (faces `a`, `b`, `radius`) | one straight edge between two planar faces, on a body prismatic along that edge | one cylinder |
 | Cap-loop fillet | `fillet_loop` (face `face`, `radius`) | every edge of the outer loop of a planar cap face, on a body that is a straight prism under that face | cylinders (straight edges), tori (arcs), spheres (arcs of radius = r) |
+| Cap-loop chamfer | `chamfer_loop` (face `face`, `distance`) | the same loop, 45° with equal legs | planes (straight edges), cones (arcs) |
 
 ## Cap-loop fillet (`rcad_kernel::fillet_cap_loop`, ADR 0014)
 
@@ -50,3 +52,20 @@ alpha_j (left positive), the removed volume is:
 This combines Pappus for the arcs with the miter setback d * tan(alpha/2) at depth d on
 both edges of a corner. The kernel compares the result with this value. The tests and
 `tools/check_cap_fillet.sh` (FreeCAD) use hand-derived values per case.
+
+### Loop chamfer
+`chamfer_loop` / `rcad_kernel::chamfer_cap_loop` is the same construction with a straight
+section: 45° planes along lines, cones about the arcs' axes, and straight miter lines at
+every junction. A convex arc needs R > d, because R = d would end the cone in an apex and
+is refused. The section has A = d^2/2 and M = d^3/6. The tests check it against the
+prismatoid band of convex polygons, d/6 (A0 + 4 Am + A1).
+
+Chamfering or filleting edges one at a time where they meet at a corner is refused with a
+reason that names the loop commands. Single-edge blends do not build the mitered or
+blended corner.
+
+### Exact volume
+The result's faces include tori about several axes, spheres and cones, so the volume and
+mass properties are computed by the parametric boundary integral
+(`BrepBoundaryIntegralParametric`, docs/TOLERANCES.md). It matches the closed forms
+to 1e-9 relative.

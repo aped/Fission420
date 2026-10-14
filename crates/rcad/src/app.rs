@@ -159,10 +159,12 @@ pub(crate) enum Dialog {
         /// An exact solid fillet of the edge (`distance` = radius).
         fillet: bool,
     },
-    /// Exact solid fillet of every edge of the face's outer loop.
+    /// Exact solid fillet (or, with `chamfer`, equal-distance chamfer;
+    /// `radius` = distance) of every edge of the face's outer loop.
     FilletLoop {
         face: rcad_document::FaceRef,
         radius: String,
+        chamfer: bool,
     },
     /// Start a sketch on an offset construction plane (world plane or the
     /// face selected when the dialog opened, moved along its normal).
@@ -216,6 +218,7 @@ impl Dialog {
             Dialog::Pattern { .. } => "Pattern / mirror",
             Dialog::Chamfer { fillet: true, .. } => "Fillet edge",
             Dialog::Chamfer { .. } => "Chamfer edge",
+            Dialog::FilletLoop { chamfer: true, .. } => "Chamfer edge loop",
             Dialog::FilletLoop { .. } => "Fillet edge loop",
             Dialog::Hole { .. } => "Hole",
             Dialog::Shell { .. } => "Shell (scoped)",
@@ -2524,7 +2527,16 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             b: b.ok_or_else(|| "choose the second face of the edge".to_string())?,
             radius: parse_num("radius", distance)?,
         },
-        Dialog::FilletLoop { face, radius } => Command::FilletLoop {
+        Dialog::FilletLoop {
+            face,
+            radius,
+            chamfer: true,
+        } => Command::ChamferLoop {
+            name: None,
+            face: *face,
+            distance: parse_num("distance", radius)?,
+        },
+        Dialog::FilletLoop { face, radius, .. } => Command::FilletLoop {
             name: None,
             face: *face,
             radius: parse_num("radius", radius)?,

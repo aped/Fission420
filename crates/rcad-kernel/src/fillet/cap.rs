@@ -1,5 +1,11 @@
-//! Exact constant-radius fillet of the whole outer edge loop of a planar cap
-//! face ("round the top edge" of an extruded plate, box or rounded rectangle).
+//! Exact constant-radius fillet, or equal-distance chamfer, of the whole
+//! outer edge loop of a planar cap face ("round / chamfer the top edge" of an
+//! extruded plate, box or rounded rectangle).
+//!
+//! The chamfer is the same construction with a straight 45° section of legs
+//! d: planes along lines, cones about the arcs' axes, and straight miter
+//! lines at every junction. A convex arc must have R > d, because R = d would
+//! end the cone in an apex. Its removed section has A = d²/2 and M = d³/6.
 //!
 //! Scope. The body must be a straight prism under the cap: one closed shell
 //! whose faces are the cap, one opposite cap parallel to it at depth `H`, and
@@ -54,14 +60,68 @@ pub(crate) const TANGENT_ANGLE: f64 = 1.0e-6;
 /// Largest |R − r| (mm) treated as the sphere case R = r (Truck's linear
 /// tolerance; a parametric R = r is exact).
 pub(crate) const SPHERE_MATCH: f64 = tol::KERNEL_LINEAR;
+/// Panels per edge of the exact volume self-check (and twice that).
+pub(crate) const VOLUME_PANELS: usize = 4;
+/// Relative agreement required between the result's boundary-integral volume
+/// and the closed form.
+pub(crate) const VOLUME_REL: f64 = 1e-9;
 /// Samples per segment for the clearance checks (inset loop, holes).
 const FIT_SAMPLES: usize = 256;
 /// Rotation (rad) of a revolved fillet surface's generatrix before the face
 /// start, so the face never touches the surface's v = 0 seam.
 const SEAM_OFFSET: f64 = 0.25;
 
+/// Prefix of every message of this module, renamed per operation by
+/// [`named`].
+const PREFIX: &str = "edge loop: ";
+
 fn bad(msg: impl std::fmt::Display) -> KernelError {
-    KernelError::InvalidInput(format!("fillet loop: {msg}"))
+    KernelError::InvalidInput(format!("{PREFIX}{msg}"))
+}
+
+/// Which blend the loop gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Blend {
+    /// Quarter-circle section of radius r.
+    Fillet,
+    /// Straight 45° section with both legs d (equal-distance chamfer).
+    Chamfer,
+}
+
+impl Blend {
+    fn word(self) -> &'static str {
+        match self {
+            Blend::Fillet => "fillet",
+            Blend::Chamfer => "chamfer",
+        }
+    }
+    fn size(self) -> &'static str {
+        match self {
+            Blend::Fillet => "radius",
+            Blend::Chamfer => "distance",
+        }
+    }
+    /// Area A and first moment M (about either wall) of the removed section.
+    fn section(self, r: f64) -> (f64, f64) {
+        match self {
+            Blend::Fillet => (r * r * (1.0 - PI / 4.0), r.powi(3) * (5.0 / 6.0 - PI / 4.0)),
+            Blend::Chamfer => (0.5 * r * r, r.powi(3) / 6.0),
+        }
+    }
+}
+
+/// Rewrite the module's generic message prefix for the operation.
+fn named(kind: Blend, e: KernelError) -> KernelError {
+    let fix = |m: String| match m.strip_prefix(PREFIX) {
+        Some(rest) => format!("{} loop: {rest}", kind.word()),
+        None => m,
+    };
+    match e {
+        KernelError::InvalidInput(m) => KernelError::InvalidInput(fix(m)),
+        KernelError::InvalidResult(m) => KernelError::InvalidResult(fix(m)),
+        KernelError::Internal(m) => KernelError::Internal(fix(m)),
+        other => other,
+    }
 }
 
 fn sub(a: V2, b: V2) -> V2 {
@@ -447,7 +507,8 @@ struct Plan {
     sphere: Vec<bool>,
 }
 
-fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
+fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64, kind: Blend) -> Result<Plan> {
+    let (word, size) = (kind.word(), kind.size());
     let n = segs.len();
     let mut alpha = vec![0.0; n];
     let mut q = vec![[0.0; 2]; n];
@@ -486,7 +547,7 @@ fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
                 let d = sub(qb, qa);
                 if dot(d, sub(b, a)) <= 0.0 || len(d) < tol::MIN_LENGTH {
                     return Err(bad(format!(
-                        "radius {r} mm does not fit: the straight edge of length {:.4} mm is too \
+                        "{size} {r} mm does not fit: the straight edge of length {:.4} mm is too \
                          short for its corner setbacks",
                         len(sub(b, a))
                     )));
@@ -495,18 +556,24 @@ fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
             Seg::Arc { rad, ccw, .. } => {
                 if ccw {
                     let rho = rad - r;
-                    if rho.abs() <= SPHERE_MATCH {
+                    if rho.abs() <= SPHERE_MATCH && kind == Blend::Fillet {
                         sphere[i] = true;
+                    } else if rho.abs() <= SPHERE_MATCH {
+                        return Err(bad(format!(
+                            "distance {r} mm equals the convex arc radius {rad:.6} mm: the \
+                             corner cone would end in an apex (not supported; use a smaller \
+                             distance)"
+                        )));
                     } else if rho < 0.0 {
                         return Err(bad(format!(
-                            "radius {r} mm is larger than the convex arc radius {rad:.6} mm of \
+                            "{size} {r} mm is larger than the convex arc radius {rad:.6} mm of \
                              the cap loop (corner blends of a smaller vertical radius are not \
-                             supported; use r <= R)"
+                             supported; use a {size} <= R)"
                         )));
                     } else if rho < tol::MIN_LENGTH {
                         return Err(bad(format!(
-                            "radius {r} mm is within {rho:.2e} mm of the arc radius {rad:.6} mm: \
-                             make them equal (sphere corner) or differ by at least {} mm",
+                            "{size} {r} mm is within {rho:.2e} mm of the arc radius {rad:.6} mm: \
+                             make them equal or differ by at least {} mm",
                             tol::MIN_LENGTH
                         )));
                     }
@@ -543,8 +610,8 @@ fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
             let d = min_dist(p);
             if d < r - 1e-9 * scale.max(1.0) {
                 return Err(bad(format!(
-                    "radius {r} mm does not fit: the loop's walls come within {:.4} mm of the \
-                     fillet's inset edge at ({:.4}, {:.4}) (fillet bands would overlap)",
+                    "{size} {r} mm does not fit: the loop's walls come within {:.4} mm of the \
+                     {word}'s inset edge at ({:.4}, {:.4}) (the {word} bands would overlap)",
                     d, p[0], p[1]
                 )));
             }
@@ -557,7 +624,7 @@ fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
                 let p = s.at(k as f64 / FIT_SAMPLES as f64);
                 if min_dist(p) <= r + 0.5 * step + tol::KERNEL_LINEAR {
                     return Err(bad(format!(
-                        "a hole in the cap face at ({:.4}, {:.4}) lies within the fillet radius \
+                        "a hole in the cap face at ({:.4}, {:.4}) lies within the {word} {size} \
                          {r} mm of the outer edge loop",
                         p[0], p[1]
                     )));
@@ -573,14 +640,13 @@ fn plan(segs: &[Seg], holes: &[Vec<Seg>], r: f64) -> Result<Plan> {
     })
 }
 
-/// Closed-form volume removed by the fillet (see the module docs).
-pub(crate) fn removed_volume(segs: &[Seg], alpha: &[f64], r: f64) -> f64 {
-    let area = r * r * (1.0 - PI / 4.0);
-    let dbar = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+/// Closed-form volume removed by the blend (see the module docs).
+pub(crate) fn removed_volume(segs: &[Seg], alpha: &[f64], r: f64, kind: Blend) -> f64 {
+    let (area, moment) = kind.section(r);
     let perim: f64 = segs.iter().map(|s| s.length()).sum();
     let turn: f64 = segs.iter().map(|s| s.sweep()).sum();
     let corners: f64 = alpha.iter().map(|a| 2.0 * (a / 2.0).tan()).sum();
-    area * (perim - dbar * (turn + corners))
+    area * perim - moment * (turn + corners)
 }
 
 /// Geometry builder in the cap frame.
@@ -616,7 +682,7 @@ impl Geo {
                 let mut spans = arc_spans(a, b, c, ccw, &self.frame_at(h))?;
                 if spans.len() != 1 {
                     return Err(KernelError::Internal(
-                        "fillet loop: arc piece over a quarter turn".into(),
+                        "edge loop: arc piece over a quarter turn".into(),
                     ));
                 }
                 Curve::NurbsCurve(spans.remove(0).0)
@@ -666,12 +732,12 @@ fn oriented_face(wire: Wire, surface: Surface, uv: (f64, f64), outward: Vector3)
     } else {
         Face::try_new(vec![wire.inverse()], surface).map(|f| f.inverse())
     };
-    face.map_err(|e| KernelError::InvalidResult(format!("fillet loop: face: {e:?}")))
+    face.map_err(|e| KernelError::InvalidResult(format!("{PREFIX}face: {e:?}")))
 }
 
 fn plane_face(wires: Vec<Wire>, o: Point3, u: Vector3, v: Vector3) -> Result<Face> {
     Face::try_new(wires, Surface::Plane(Plane::new(o, o + u, o + v)))
-        .map_err(|e| KernelError::InvalidResult(format!("fillet loop: planar face: {e:?}")))
+        .map_err(|e| KernelError::InvalidResult(format!("{PREFIX}planar face: {e:?}")))
 }
 
 /// Wall faces of a loop (material on the left) between heights `lo` and
@@ -735,7 +801,7 @@ fn wall_faces(
 }
 
 /// Build the filleted solid.
-fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64) -> Result<Solid> {
+fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64, kind: Blend) -> Result<Solid> {
     let segs = &p.segs;
     let n = segs.len();
     let s2 = std::f64::consts::FRAC_1_SQRT_2;
@@ -775,8 +841,14 @@ fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64) -> Result<So
     let eq: Vec<Edge> = (0..n)
         .map(|j| {
             let pj = segs[j].a();
-            let c = conic(g.w(pj, -r), g.w(pj, 0.0), g.w(p.q[j], 0.0), s2);
-            Edge::new(&vm[j], &vt[j], Curve::NurbsCurve(c))
+            match kind {
+                Blend::Fillet => {
+                    let c = conic(g.w(pj, -r), g.w(pj, 0.0), g.w(p.q[j], 0.0), s2);
+                    Edge::new(&vm[j], &vt[j], Curve::NurbsCurve(c))
+                }
+                // The two 45° planes (or cones) meet in a straight line.
+                Blend::Chamfer => builder::line(&vm[j], &vt[j]),
+            }
         })
         .collect();
     // Top (inset) edges.
@@ -807,6 +879,18 @@ fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64) -> Result<So
         edges.push(eq[i].inverse());
         let wire: Wire = edges.into();
         let face = match *s {
+            Seg::Line { a, b } if kind == Blend::Chamfer => {
+                // Plane through the edge at depth r and the inset line: normal
+                // t × (r n + r z) = r (z + right), outward.
+                let o = g.w(a, -r);
+                let nin = left(unit(sub(b, a)));
+                plane_face(
+                    vec![wire],
+                    o,
+                    g.w(b, -r) - o,
+                    g.w(add(a, mul(nin, r)), 0.0) - o,
+                )?
+            }
             Seg::Line { a, b } => {
                 let t = unit(sub(b, a));
                 let nin = left(t);
@@ -875,17 +959,19 @@ fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64) -> Result<So
                 let rot = Matrix4::from_translation(g.w(c, 0.0).to_vec())
                     * Matrix4::from_axis_angle(axis, Rad(-SEAM_OFFSET))
                     * Matrix4::from_translation(-g.w(c, 0.0).to_vec());
-                let sec = conic(
+                let (p0, p2) = (
                     rot.transform_point(g.w(a, -r)),
-                    rot.transform_point(g.w(a, 0.0)),
                     rot.transform_point(g.w(add(a, mul(nin, r)), 0.0)),
-                    s2,
                 );
-                let surf = Processor::new(RevolutedCurve::by_revolution(
-                    Curve::NurbsCurve(sec),
-                    g.w(c, 0.0),
-                    axis,
-                ));
+                // Fillet: torus (quarter-circle section); chamfer: cone
+                // (straight section).
+                let sec = match kind {
+                    Blend::Fillet => {
+                        Curve::NurbsCurve(conic(p0, rot.transform_point(g.w(a, 0.0)), p2, s2))
+                    }
+                    Blend::Chamfer => Curve::Line(Line(p0, p2)),
+                };
+                let surf = Processor::new(RevolutedCurve::by_revolution(sec, g.w(c, 0.0), axis));
                 // Outward at the arc middle: up, and away from the axis for a
                 // convex arc (towards it for a concave one).
                 let radial = g.dir(unit(sub(segs[i].at(0.5), c)));
@@ -931,55 +1017,61 @@ fn construct(g: &Geo, p: &Plan, holes: &[Vec<Seg>], h: f64, r: f64) -> Result<So
     faces.push(plane_face(bottom, g.w([0.0, 0.0], -h), g.y, g.x)?);
     let shell: Shell = faces.into();
     Solid::try_new(vec![shell])
-        .map_err(|e| KernelError::InvalidResult(format!("fillet loop: solid: {e:?}")))
+        .map_err(|e| KernelError::InvalidResult(format!("{PREFIX}solid: {e:?}")))
 }
 
 /// Fillet every edge of the outer boundary loop of the planar cap face in
 /// `cap`'s plane (outward normal `cap.z`) with radius `r` mm. See the module
 /// docs for the scope; refusals are `InvalidInput` with the reason.
 pub fn fillet_cap_loop(body: &Body, cap: &Frame, r: f64) -> Result<Body> {
+    cap_loop(body, cap, r, Blend::Fillet).map_err(|e| named(Blend::Fillet, e))
+}
+
+/// Equal-distance chamfer (`d` mm along the wall and along the cap) of every
+/// edge of the outer boundary loop of the planar cap face in `cap`'s plane:
+/// 45° planes along straight edges, cones along arcs, straight miter lines
+/// at sharp corners. Same scope as [`fillet_cap_loop`]; a convex arc must
+/// have a radius larger than `d`.
+pub fn chamfer_cap_loop(body: &Body, cap: &Frame, d: f64) -> Result<Body> {
+    cap_loop(body, cap, d, Blend::Chamfer).map_err(|e| named(Blend::Chamfer, e))
+}
+
+fn cap_loop(body: &Body, cap: &Frame, r: f64, kind: Blend) -> Result<Body> {
     cap.validate()?;
+    let size = kind.size();
     if !r.is_finite() || r < tol::MIN_LENGTH {
         return Err(bad(format!(
-            "radius must be >= {} mm, got {r}",
+            "{size} must be >= {} mm, got {r}",
             tol::MIN_LENGTH
         )));
     }
-    let (loops, h) = guarded("fillet loop", || prism_under_cap(body, cap))??;
+    let (loops, h) = guarded("edge loop", || prism_under_cap(body, cap))??;
     if r >= h - tol::MIN_LENGTH {
         return Err(bad(format!(
-            "radius {r} mm does not fit: the body is only {h:.6} mm deep under the cap face"
+            "{size} {r} mm does not fit: the body is only {h:.6} mm deep under the cap face"
         )));
     }
-    let p = plan(&loops.outer, &loops.holes, r)?;
+    let p = plan(&loops.outer, &loops.holes, r, kind)?;
     let (o, x, y, z) = cap_frame(cap)?;
     let g = Geo { o, x, y, z };
-    let solid = guarded("fillet loop", || construct(&g, &p, &loops.holes, h, r))??;
+    let solid = guarded("edge loop", || construct(&g, &p, &loops.holes, h, r, kind))??;
     let out = Body { solid };
-    crate::build::check_single_closed(&out, "fillet loop")?;
-    // Self-check against the closed form (the measured volume of curved
-    // fillet faces is a tessellation estimate; the tolerance follows it).
+    crate::build::check_single_closed(&out, "edge loop")?;
+    // Self-check against the closed form, with the exact boundary integral
+    // over each face's own parametrisation (measure/parametric.rs).
     let area = loop_area(&loops.outer) + loops.holes.iter().map(|h| loop_area(h)).sum::<f64>();
-    let want = area * h - removed_volume(&p.segs, &p.alpha, r);
-    match crate::measure(&out)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => {
-            let tol = (1e-4 * want.abs()).max(1e-6) + 3.0 * error_estimate;
-            if (volume - want).abs() > tol {
-                return Err(KernelError::InvalidResult(format!(
-                    "fillet loop: the result's volume {volume:.6} mm^3 differs from the closed \
-                     form {want:.6} mm^3"
-                )));
-            }
-        }
-        crate::VolumeResult::Unavailable { reason } => {
-            return Err(KernelError::InvalidResult(format!(
-                "fillet loop: cannot verify the result volume ({reason})"
-            )));
-        }
+    let want = area * h - removed_volume(&p.segs, &p.alpha, r, kind);
+    let (volume, err) = guarded("edge loop volume", || {
+        crate::measure::parametric_volume(&out.solid, VOLUME_PANELS)
+    })?
+    .map_err(|e| {
+        KernelError::InvalidResult(format!("{PREFIX}cannot verify the result volume ({e})"))
+    })?;
+    if (volume - want).abs() > VOLUME_REL * want.abs() + 3.0 * err {
+        return Err(KernelError::InvalidResult(format!(
+            "{PREFIX}the result's volume {volume:.9} mm^3 differs from the closed form \
+             {want:.9} mm^3"
+        )));
     }
     Ok(out)
 }

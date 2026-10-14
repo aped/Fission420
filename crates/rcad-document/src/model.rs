@@ -438,6 +438,12 @@ pub enum FeatureKind {
     /// 0014): the body is a straight prism under the face; refused otherwise
     /// with the reason. Parameter "radius".
     FilletLoop { face: FaceRef, radius: f64 },
+    /// Equal-distance chamfer (`distance` mm along both faces) of every edge
+    /// of the outer boundary loop of the planar face `face`: 45° planes along
+    /// lines, cones along arcs, straight miters at sharp corners
+    /// (`rcad_kernel::chamfer_cap_loop`, ADR 0014; same scope as
+    /// [`FeatureKind::FilletLoop`]). Parameter "distance".
+    ChamferLoop { face: FaceRef, distance: f64 },
     /// Exact loft (ADR 0008) between the closed profiles of sketches
     /// `a` and `b` on parallel planes, as new body `body`: equal-count
     /// polygons whose corresponding edges are parallel (planar sides; vertex
@@ -941,7 +947,9 @@ impl Feature {
                 }
                 v
             }
-            FeatureKind::FilletLoop { face, .. } => vec![face.feature],
+            FeatureKind::FilletLoop { face, .. } | FeatureKind::ChamferLoop { face, .. } => {
+                vec![face.feature]
+            }
             FeatureKind::Hole { plane, .. } => {
                 plane.face().map(|r| r.feature).into_iter().collect()
             }
@@ -1186,7 +1194,9 @@ impl Feature {
                 v
             }
             FeatureKind::Pocket { depth, .. } => vec![("depth".into(), *depth)],
-            FeatureKind::Chamfer { distance, .. } => vec![("distance".into(), *distance)],
+            FeatureKind::Chamfer { distance, .. } | FeatureKind::ChamferLoop { distance, .. } => {
+                vec![("distance".into(), *distance)]
+            }
             FeatureKind::Fillet { radius, .. } | FeatureKind::FilletLoop { radius, .. } => {
                 vec![("radius".into(), *radius)]
             }
@@ -1930,7 +1940,9 @@ impl Feature {
                 *radius = value;
                 Ok(())
             }
-            FeatureKind::Chamfer { distance, .. } if name == "distance" => {
+            FeatureKind::Chamfer { distance, .. } | FeatureKind::ChamferLoop { distance, .. }
+                if name == "distance" =>
+            {
                 if value <= 0.0 {
                     return Err(DocError::Validation(format!(
                         "{id}.distance: chamfer distance must be > 0 mm, got {value}"
@@ -2285,7 +2297,8 @@ impl Document {
             }
             FeatureKind::Chamfer { a, .. }
             | FeatureKind::Fillet { a, .. }
-            | FeatureKind::FilletLoop { face: a, .. } => self.face_body(a),
+            | FeatureKind::FilletLoop { face: a, .. }
+            | FeatureKind::ChamferLoop { face: a, .. } => self.face_body(a),
             FeatureKind::ShellFace { face, .. } | FeatureKind::AlignBody { from: face, .. } => {
                 self.face_body(face)
             }
@@ -2321,7 +2334,8 @@ impl Document {
                     }
                     FeatureKind::Chamfer { a, .. }
                     | FeatureKind::Fillet { a, .. }
-                    | FeatureKind::FilletLoop { face: a, .. } => {
+                    | FeatureKind::FilletLoop { face: a, .. }
+                    | FeatureKind::ChamferLoop { face: a, .. } => {
                         return self.face_body_depth(a, depth + 1);
                     }
                     _ => {}

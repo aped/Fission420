@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent FreeCAD (OpenCascade) validation of the cap-loop fillet fixtures written by
+# Independent FreeCAD (OpenCascade) validation of the cap-loop fillet and chamfer fixtures written by
 #   RCAD_EVIDENCE_DIR=DIR cargo test -p rcad-kernel --lib fillet::cap
 # usage: tools/heavy.sh tools/check_cap_fillet.sh DIR
 # Expected volumes are closed forms derived per case (spandrel area A = r^2 (1 - pi/4),
@@ -63,4 +63,17 @@ for r in 4 1.5; do
     "(1200 - (4-pi)*16)*10 - A($r)*(2*32+2*22) - 2*pi*(A($r)*4 - M($r))" "[0,0,0,40,30,10]" \
     "[[20,15,5],[20,0.02,9.98]]" "[True, False]"
 done
+# Chamfers: prismatoid bands (d/6 (A0 + 4 Am + A1)) and Pappus for the cone corners.
+check cap_chamfer_box.step "1200*8 + 2/6*(1200 + 4*38*28 + 36*26)" "[0,0,0,40,30,10]" \
+  "[[20, 1-0.02*s, 9+0.02*s], [20, 1+0.02*s, 9-0.02*s], [20,15,5]]" "[False, True, True]"
+H="(2*math.sqrt(3)*(10*math.sqrt(3))**2)"
+HI="(lambda ap: 2*math.sqrt(3)*ap*ap)"
+check cap_chamfer_hexagon.step \
+  "$H*6.5 + 1.5/6*($HI(10*math.sqrt(3)) + 4*$HI(10*math.sqrt(3)-0.75) + $HI(10*math.sqrt(3)-1.5))" \
+  "[-20, -10*math.sqrt(3), 0, 20, 10*math.sqrt(3), 8]" "[[0,0,4],[19.99,0,7.99]]" "[True, False]"
+check cap_fillet_hexagon.step "$H*8 - A(2)*120 + 12*M(2)*math.tan(pi/6)" \
+  "[-20, -10*math.sqrt(3), 0, 20, 10*math.sqrt(3), 8]" "[[0,0,4],[19.99,0,7.99]]" "[True, False]"
+check cap_chamfer_rounded_rect.step \
+  "(1200 - (4-pi)*25)*12 - 2*(2*30+2*20) - 2*pi*2*(5 - 2/3)" "[0,0,0,40,30,12]" \
+  "[[20,15,6],[20,0.02,11.99]]" "[True, False]"
 exit $status

@@ -675,7 +675,11 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         FeatureKind::Fillet { .. } | FeatureKind::FilletLoop { .. } if name == "radius" => {
             Some(SlotKind::Length)
         }
-        FeatureKind::Extrude { .. } | FeatureKind::Chamfer { .. } if name == "distance" => {
+        FeatureKind::Extrude { .. }
+        | FeatureKind::Chamfer { .. }
+        | FeatureKind::ChamferLoop { .. }
+            if name == "distance" =>
+        {
             Some(SlotKind::Length)
         }
         FeatureKind::Extrude { .. } if name == "taper_deg" => {
