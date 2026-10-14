@@ -331,6 +331,30 @@ re-saved as v3 whenever their workflows replay, e.g. in `cargo xtask check`), an
 committed example, checks the analytic volume, re-saves as v3 and reopens to an identical
 document. Size limit 256 MiB per file, 128 MiB per import source.
 
+## Qualification scenario: external exchange
+
+`crates/rcad-commands/tests/exchange_qualification.rs` (6 tests, typed command API), on files
+made by another implementation (FreeCAD 1.1.4, `tools/fixtures/corpus/`) or hand-written from
+the specifications:
+
+| step | files | checked |
+|---|---|---|
+| foreign exact solid | `p8_fillet_block_mm.step`, `p12_rotated_cylinder_inch.step` | one body; volume within 1e-4 mm³ and bounds within 1e-5 mm of FreeCAD's read-back; the reply states the unit (`1` / `25.4 mm per unit, declared in file`) |
+| foreign assembly | `a5_nested_transforms_mm.step` (two nested levels, each rotated + translated), `a4_assembly_inch.step` | flattened `import_step`: body count, total volume and bounds against FreeCAD (transforms composed); `import_step_assembly`: one placed occurrence per solid, total occurrence volume, components kept; unit stated |
+| mesh repair | `tools/fixtures/stl/broken_cube.stl` | open before; repair → closed, 8000 mm³ (analytic); unrepaired export refused, repaired export re-read closed at 8000 |
+| sketches with holes and counters | `h7_counters_mm.dxf`, `h8_counters_mm.svg` | whole-profile extrusion refused naming the island; every even-depth region extruded: `5·(4800 − 100π)` and `5·(1600 + 25π)` mm³ |
+| reported losses | `c1_coloured_blocks_mm.step`, `h4_spline_unsupported.dxf` | "colours/styles ignored: 2 STYLED_ITEM …"; SPLINE refused by name, partial import names it |
+| malformed / unsupported / oversized | `x1`–`x11` (STEP, STL ×3, 3MF ×4, DXF ×2, SVG) and sparse files just over the import limit (STL, STEP, 3MF) | refused with a bounded message naming the format or cause, into a document holding a body: document and revision unchanged, within 30 s |
+
+**Bounded, not cancellable.** An import is bounded before and while it is read: files above
+`MAX_FILE_BYTES / 2` (128 MiB) are refused before reading (tested above), and the readers
+enforce entity / triangle limits (STEP 2 M entities, STL 10 M triangles, 3MF
+limits in `ThreeMfLimits`). It is **not** interruptible: the Import dialog's Cancel only
+detaches the form (the import still commits; `crates/rcad/tests/stale_state.rs`
+`import_reply_after_cancel_does_not_resolve_the_reopened_form`), and the toolbar Cancel stops
+a regeneration between features (`crates/rcad/tests/cancel_regen_ui.rs`), so it cannot stop a
+single long file parse.
+
 ## Evidence
 
 Reproduce (from the repository root):
