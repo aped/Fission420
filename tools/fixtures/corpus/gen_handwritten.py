@@ -94,9 +94,11 @@ ents += "0\nCIRCLE\n8\n0\n10\n0.5\n20\n0.5\n30\n0.0\n40\n0.25\n"
 ents += "0\nARC\n8\n0\n10\n1.5\n20\n0.5\n30\n0.0\n40\n0.25\n50\n0.0\n51\n180.0\n"
 open(p("h3_profile_inch.dxf"), "w", newline="\n").write(dxf(ents, 1))
 
-# h4: DXF (mm) with a SPLINE: refused unless partial import is allowed.
-spl = ("0\nSPLINE\n8\n0\n70\n8\n71\n3\n72\n8\n73\n4\n"
+# h4: DXF (mm) with a rational SPLINE (weights 1, 2, 2, 1; not a sketch spline):
+# refused unless partial import is allowed.
+spl = ("0\nSPLINE\n8\n0\n70\n12\n71\n3\n72\n8\n73\n4\n"
        + "".join(f"40\n{k}\n" for k in (0, 0, 0, 0, 1, 1, 1, 1))
+       + "".join(f"41\n{w}\n" for w in (1, 2, 2, 1))
        + "".join(f"10\n{x}\n20\n{y}\n30\n0.0\n" for x, y in ((0, 0), (10, 10), (20, -10), (30, 0))))
 open(p("h4_spline_unsupported.dxf"), "w", newline="\n").write(dxf(line((0, 0), (30, 0)) + spl, 4))
 

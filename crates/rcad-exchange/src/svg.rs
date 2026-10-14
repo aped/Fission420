@@ -2,7 +2,8 @@
 //! Supported subset, units and losses: `docs/formats/svg.md`.
 //!
 //! # Import rules
-//! * Elements: `line`, `rect` (no rounded corners), `circle`, `ellipse` with equal radii,
+//! * Elements: `line`, `rect` (no rounded corners), `circle`, `ellipse` (equal radii: a
+//!   circle; otherwise an exact sketch ellipse, under similarity transforms only),
 //!   `polyline`, `polygon`, `path` with `M L H V Z A` (absolute and relative; arcs only
 //!   circular, `rx == ry` to 1e-6 relative). `g` carries transforms. Cubic/quadratic
 //!   Béziers (`C S Q T`), elliptical arcs, `use`, `text`, `image`, nested `svg`,
@@ -157,6 +158,8 @@ enum Curve {
         end: [f64; 2],
     },
     Circle([f64; 2], f64),
+    /// Full ellipse: centre, end of one axis, the other semi-axis (mm).
+    Ellipse([f64; 2], [f64; 2], f64),
 }
 
 #[derive(Default)]
@@ -446,6 +449,25 @@ impl Emit<'_> {
             .push((elem.into(), Curve::Circle(self.map.apply(c), r * k)));
         true
     }
+    /// Axis-aligned ellipse (user units) under a similarity map: an exact
+    /// sketch ellipse. A non-uniform scale or skew is refused by name.
+    fn ellipse(&mut self, elem: &str, c: [f64; 2], rx: f64, ry: f64) -> bool {
+        let Some(k) = self.map.similarity_scale() else {
+            self.rep
+                .unsupported(elem, "ellipse under a non-uniform scale or skew");
+            return false;
+        };
+        let end = if rx >= ry {
+            [c[0] + rx, c[1]]
+        } else {
+            [c[0], c[1] + ry]
+        };
+        self.out.push((
+            elem.into(),
+            Curve::Ellipse(self.map.apply(c), self.map.apply(end), rx.min(ry) * k),
+        ));
+        true
+    }
     /// SVG arc from `p` to `q` (user units), circular radius `r`.
     fn arc(&mut self, elem: &str, p: [f64; 2], q: [f64; 2], r: f64, large: bool, sweep: bool) {
         if self.map.similarity_scale().is_none() {
@@ -716,8 +738,7 @@ fn draw(e: &BytesStart, name: &str, em: &mut Emit) -> std::result::Result<bool, 
                     .degenerate(name, "zero or negative radius (not rendered)");
                 false
             } else if (rx - ry).abs() > SIMILAR_REL * rx.max(ry) {
-                em.rep.unsupported(name, "ellipse with rx != ry");
-                false
+                em.ellipse(name, c, rx, ry)
             } else {
                 em.circle(name, c, (rx + ry) / 2.0)
             }
@@ -1150,6 +1171,23 @@ fn build(
                     id,
                     center: pc,
                     radius: r,
+                });
+            }
+            Curve::Ellipse(c, m, b) => {
+                let a = (m[0] - c[0]).hypot(m[1] - c[1]);
+                if !(a > degenerate_tol && b.is_finite() && b > degenerate_tol) {
+                    *degenerate
+                        .entry((elem, "zero radius ellipse".into()))
+                        .or_default() += 1;
+                    continue;
+                }
+                let (pc, pm) = (push_point(&mut sketch, c), push_point(&mut sketch, m));
+                let id = sketch.next_entity_id_fast();
+                sketch.entities.push(Entity::Ellipse {
+                    id,
+                    center: pc,
+                    major: pm,
+                    minor: b,
                 });
             }
         }

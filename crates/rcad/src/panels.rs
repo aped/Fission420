@@ -602,6 +602,8 @@ impl RcadApp {
                     SketchTool::CornerRectangle,
                     SketchTool::Circle,
                     SketchTool::Arc,
+                    SketchTool::Ellipse,
+                    SketchTool::Spline,
                     SketchTool::Dimension,
                     SketchTool::Trim,
                     SketchTool::Extend,

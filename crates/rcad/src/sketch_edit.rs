@@ -62,6 +62,11 @@ pub enum SketchTool {
     /// Regular polygon: centre, then a vertex (inscribed) or an edge
     /// midpoint (circumscribed); sides and fit from the toolbar.
     Polygon,
+    /// Full ellipse: centre, axis end, then a point setting the other radius.
+    Ellipse,
+    /// Cubic B-spline through clicked control points (open, or closed by
+    /// clicking the first point again).
+    Spline,
 }
 
 impl SketchTool {
@@ -81,6 +86,8 @@ impl SketchTool {
             SketchTool::Text => "Text",
             SketchTool::Slot => "Slot",
             SketchTool::Polygon => "Polygon",
+            SketchTool::Ellipse => "Ellipse",
+            SketchTool::Spline => "Spline",
         }
     }
 
@@ -100,6 +107,8 @@ impl SketchTool {
             SketchTool::Text => "toolbar",
             SketchTool::Slot => "toolbar",
             SketchTool::Polygon => "toolbar",
+            SketchTool::Ellipse => "toolbar",
+            SketchTool::Spline => "toolbar",
         }
     }
 
@@ -151,6 +160,17 @@ impl SketchTool {
                 "Click to place text (on a point: the text follows it), or click a text to edit \
                  it · set string, font, height (cap height, mm), rotation and alignment, then \
                  Apply · glyph outlines become profile regions (counters are holes) · Esc cancels"
+            }
+            SketchTool::Ellipse => {
+                "Click the centre, then the end of one axis, then a point setting the other radius \
+                 (its distance from the axis) · Dimension (D) the ellipse twice for its major / \
+                 minor radii · Esc cancels"
+            }
+            SketchTool::Spline => {
+                "Click control points of a cubic B-spline · Enter/right-click finishes an open \
+                 spline (4+ points; it passes through its first and last points, which snap to \
+                 existing points) · click the first point again to close it (3+ points) · Esc \
+                 cancels"
             }
             SketchTool::Offset => {
                 "Click a curve of a closed loop, type the distance (+ outward, − inward), Enter: adds the \
@@ -242,6 +262,14 @@ enum Gesture {
         c1: Snap,
         c2: Snap,
     },
+    /// Ellipse tool: centre and axis end chosen, waiting for the other radius.
+    EllipseAxis {
+        center: Snap,
+        axis: Snap,
+    },
+    /// Spline tool: control points clicked so far (nothing is added to the
+    /// sketch until the spline is finished).
+    Spline(Vec<Snap>),
 }
 
 /// Open fillet entry: the corner point and the typed radius.
@@ -694,6 +722,8 @@ impl SketchEditor {
             Gesture::ArcEnd { start, .. } => Some(start.pos),
             Gesture::DimFirst(p) => self.sketch.point_xy(*p),
             Gesture::SlotWidth { c1, .. } => Some(c1.pos),
+            Gesture::EllipseAxis { center, .. } => Some(center.pos),
+            Gesture::Spline(pts) => pts.last().map(|s| s.pos),
             _ => None,
         }
     }
@@ -1111,6 +1141,10 @@ impl SketchEditor {
 
     /// End a polyline chain (Enter / right click), keeping what was drawn.
     pub fn finish_chain(&mut self) {
+        if matches!(self.gesture, Gesture::Spline(_)) {
+            self.finish_spline(false);
+            return;
+        }
         if matches!(self.gesture, Gesture::Line { .. } | Gesture::DimFirst(_)) {
             self.cancel_gesture();
         }
@@ -1273,6 +1307,8 @@ impl SketchEditor {
             SketchTool::Fillet => self.fillet_click(pos, screen, view),
             SketchTool::Text => self.text_click(pos, view),
             SketchTool::Slot => self.slot_click(pos, view),
+            SketchTool::Ellipse => self.ellipse_click(pos, view),
+            SketchTool::Spline => self.spline_click(pos, view),
             SketchTool::Polygon => {
                 let s = self.snap(pos, None, None, view);
                 match self.gesture.clone() {
@@ -3163,6 +3199,129 @@ fn fmt_num(v: f64) -> String {
 
 /// Slot and regular polygon tools.
 impl SketchEditor {
+    fn ellipse_click(&mut self, pos: [f64; 2], view: &View) {
+        match self.gesture.clone() {
+            Gesture::FirstClick(center) => {
+                let axis = self.snap(pos, Some(center.pos), None, view);
+                if dist(center.pos, axis.pos) <= view.mm(2.0) {
+                    self.fail("The axis end coincides with the centre: click elsewhere.".into());
+                    return;
+                }
+                self.gesture = Gesture::EllipseAxis { center, axis };
+            }
+            Gesture::EllipseAxis { center, axis } => {
+                let b = line_distance(pos, center.pos, axis.pos);
+                if b <= view.mm(2.0) {
+                    self.fail("The other radius is zero: click beside the axis.".into());
+                    return;
+                }
+                self.gesture = Gesture::Idle;
+                let a = dist(center.pos, axis.pos);
+                let ok = self.try_change(true, |sk| {
+                    let mut pid = |s: &Snap| match s.kind {
+                        SnapKind::Point(id) if sk.point(id).is_some() => id,
+                        _ => sk.add_point(s.pos[0], s.pos[1]),
+                    };
+                    let (c, m) = (pid(&center), pid(&axis));
+                    if c == m {
+                        return Err("the ellipse centre and axis end are the same point".into());
+                    }
+                    let id = sk.next_entity_id();
+                    sk.entities.push(Entity::Ellipse {
+                        id,
+                        center: c,
+                        major: m,
+                        minor: b,
+                    });
+                    Ok(())
+                });
+                if ok {
+                    self.info(format!(
+                        "Ellipse added (radii {} × {} mm). Dimension (D) it for editable radii.",
+                        rcad_sketch::fmt_mm(a),
+                        rcad_sketch::fmt_mm(b)
+                    ));
+                }
+            }
+            _ => self.gesture = Gesture::FirstClick(self.snap(pos, None, None, view)),
+        }
+    }
+
+    fn spline_click(&mut self, pos: [f64; 2], view: &View) {
+        let mut pts = match self.gesture.clone() {
+            Gesture::Spline(p) => p,
+            _ => Vec::new(),
+        };
+        let s = self.snap(pos, pts.last().map(|p| p.pos), None, view);
+        if let Some(first) = pts.first()
+            && dist(first.pos, s.pos) <= view.mm(SNAP_PX)
+        {
+            self.gesture = Gesture::Spline(pts);
+            self.finish_spline(true);
+            return;
+        }
+        if pts
+            .last()
+            .is_some_and(|l| dist(l.pos, s.pos) <= view.mm(2.0))
+        {
+            self.fail("Control point repeats the previous one: click elsewhere.".into());
+            return;
+        }
+        pts.push(s);
+        let n = pts.len();
+        self.gesture = Gesture::Spline(pts);
+        self.info(format!(
+            "{n} control point(s). Enter finishes an open spline (4+), clicking the first point \
+             closes it (3+)."
+        ));
+    }
+
+    /// Add the spline of the pending control points (`closed`: periodic).
+    fn finish_spline(&mut self, closed: bool) {
+        let Gesture::Spline(pts) = std::mem::replace(&mut self.gesture, Gesture::Idle) else {
+            return;
+        };
+        self.epoch += 1;
+        let need = if closed { 3 } else { 4 };
+        if pts.len() < need {
+            self.fail(format!(
+                "{} spline needs at least {need} control points ({} clicked); nothing added.",
+                if closed { "A closed" } else { "An open" },
+                pts.len()
+            ));
+            return;
+        }
+        let n = pts.len();
+        let ok = self.try_change(true, |sk| {
+            let ids: Vec<PointId> = pts
+                .iter()
+                .enumerate()
+                .map(|(i, s)| match s.kind {
+                    // The ends of an open spline may join existing points.
+                    SnapKind::Point(id)
+                        if !closed && (i == 0 || i + 1 == n) && sk.point(id).is_some() =>
+                    {
+                        id
+                    }
+                    _ => sk.add_point(s.pos[0], s.pos[1]),
+                })
+                .collect();
+            let id = sk.next_entity_id();
+            sk.entities.push(Entity::Spline {
+                id,
+                points: ids,
+                closed,
+            });
+            sk.validate().map_err(|e| e.to_string())
+        });
+        if ok {
+            self.info(format!(
+                "{} spline added with {n} control points (drag them to reshape).",
+                if closed { "Closed" } else { "Open" }
+            ));
+        }
+    }
+
     fn slot_click(&mut self, pos: [f64; 2], view: &View) {
         match self.gesture.clone() {
             Gesture::FirstClick(c1) => {
@@ -3245,6 +3404,22 @@ impl SketchEditor {
     pub fn shape_preview(&self) -> Option<Vec<[f64; 2]>> {
         let cur = self.cursor?.pos;
         match (&self.gesture, self.tool) {
+            (Gesture::EllipseAxis { center, axis }, SketchTool::Ellipse) => {
+                let b = line_distance(cur, center.pos, axis.pos);
+                let mut s = Sketch::default();
+                let (e, ..) = s.add_ellipse(center.pos, axis.pos, b).ok()?;
+                rcad_sketch::curves::entity_polyline(&s, s.entity(e)?, 24)
+            }
+            (Gesture::Spline(pts), SketchTool::Spline) => {
+                let mut ctrl: Vec<[f64; 2]> = pts.iter().map(|s| s.pos).collect();
+                ctrl.push(cur);
+                if ctrl.len() < 4 {
+                    return Some(ctrl);
+                }
+                let mut s = Sketch::default();
+                let (e, _) = s.add_spline(&ctrl, false).ok()?;
+                rcad_sketch::curves::entity_polyline(&s, s.entity(e)?, 24)
+            }
             (Gesture::FirstClick(c), SketchTool::Polygon) => {
                 let mut s = Sketch::default();
                 let r = s
