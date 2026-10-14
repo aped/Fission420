@@ -241,3 +241,83 @@ fn closed_spline_prism_volume_and_refusals() {
         r.error
     );
 }
+
+#[test]
+fn elliptical_cut_patterns_and_mirrors_and_ellipse_revolves() {
+    let mut s = Session::new();
+    ok(&mut s, json!({"cmd": "new_document"}));
+    ok(
+        &mut s,
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+               "width": 80.0, "height": 40.0}),
+    );
+    ok(
+        &mut s,
+        json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+    );
+    ok(
+        &mut s,
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_ellipse",
+               "major_radius": 6.0, "minor_radius": 4.0, "center": [-25.0, 0.0]}),
+    );
+    ok(
+        &mut s,
+        json!({"cmd": "extrude", "sketch": 3, "op": "cut", "target": 1, "through_all": true}),
+    );
+    let hole = PI * 6.0 * 4.0 * 10.0;
+    assert!(close(vol(&s, 1), 32_000.0 - hole));
+    // Linear pattern of the elliptical cut (centres x = -25, -10, 5; the mirror
+    // adds x = 25, clear of them): three holes in all, or refused
+    // unchanged; never a wrong volume.
+    let before = s.model().unwrap().document().clone();
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "linear_pattern", "feature": 4, "count": 3, "spacing": 15.0,
+                "direction": [1.0, 0.0]}),
+    );
+    if r.ok {
+        assert!(close(vol(&s, 1), 32_000.0 - 3.0 * hole), "{}", vol(&s, 1));
+    } else {
+        assert_eq!(s.model().unwrap().document(), &before, "{:?}", r.error);
+    }
+    let before = s.model().unwrap().document().clone();
+    let v_before = vol(&s, 1);
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "mirror", "feature": 4, "plane": "WorldYZ"}),
+    );
+    if r.ok {
+        assert!(close(vol(&s, 1), v_before - hole), "{}", vol(&s, 1));
+    } else {
+        assert_eq!(s.model().unwrap().document(), &before, "{:?}", r.error);
+    }
+    // Revolve: ellipse centred 30 mm from the axis in the XZ plane, full turn
+    // about the sketch Y axis: torus-like ring, V = 2π·30·πab (Pappus). The
+    // volume is the tessellation estimate; its stated error must cover the
+    // true error.
+    let mut t = Session::new();
+    ok(&mut t, json!({"cmd": "new_document"}));
+    ok(
+        &mut t,
+        json!({"cmd": "create_sketch", "plane": "WorldXZ", "template": "centered_ellipse",
+               "major_radius": 8.0, "minor_radius": 5.0, "center": [30.0, 0.0]}),
+    );
+    ok(
+        &mut t,
+        json!({"cmd": "revolve", "sketch": 1, "angle_deg": 360.0}),
+    );
+    let b = t.summary().bodies[0].measurements.clone().unwrap();
+    let rcad_kernel::VolumeResult::Value {
+        volume,
+        error_estimate,
+        ..
+    } = b.volume
+    else {
+        panic!("{:?}", b.volume)
+    };
+    let want = 2.0 * PI * 30.0 * PI * 8.0 * 5.0;
+    assert!(
+        (volume - want).abs() <= error_estimate,
+        "{volume} vs {want} ± {error_estimate}"
+    );
+}

@@ -219,3 +219,28 @@ fn write_curve_step_artifacts() {
         .unwrap();
     }
 }
+
+/// Cuts by elliptical prisms get explicit exact intersection edges (the
+/// cap plane meets the extruded rational cubic surface in the translated
+/// span, rebuilt and verified by `exact.rs`), so later measurement does not
+/// evaluate implicit curves: four sequential cuts, each volume closed-form.
+#[test]
+fn elliptical_cuts_get_exact_intersection_edges() {
+    let mut b = extrude(&rect(-40.0, -20.0, 40.0, 20.0), &Frame::XY, 10.0).unwrap();
+    let hole = PI * 6.0 * 4.0 * 10.0;
+    for (i, x) in [-25.0, -10.0, 5.0, 25.0].into_iter().enumerate() {
+        let e = ellipse([x, 0.0], 6.0, 4.0);
+        let start = Frame::XY.offset(-2.0);
+        let nb = cut_prism(&b, &e, &start, 14.0).unwrap();
+        assert!(!has_implicit_edges(&nb), "cut {i} kept implicit edges");
+        let prism = Prism {
+            profile: &e,
+            holes: &[],
+            start: &start,
+            length: 14.0,
+        };
+        verify_prism_boolean(&b, &nb, PrismOp::Cut, &prism, (0.0, 14.0)).unwrap();
+        assert_volume(&nb, 32_000.0 - (i + 1) as f64 * hole);
+        b = nb;
+    }
+}
