@@ -276,6 +276,7 @@ fn import_parsed(
         idx: &idx,
         k: length_unit.to_mm,
         angle,
+        invert_revolution: false,
     };
 
     let mut stats = StepStats {
@@ -335,64 +336,82 @@ fn import_parsed(
     // instance limit) is not built.
     let flat: &[u64] = if structure.is_some() { &[] } else { &breps };
     for &brep in flat {
-        let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
-        // OpenCascade labels every solid "Open CASCADE STEP translator <ver> <n>";
-        // that is not a user name, so it is ignored.
-        let label = p
-            .opt_s(0)
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"));
-        let shell_id = p.r(1)?;
-        let built = topo::build_shell(&geo, shell_id, tol, false)
-            .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-        let instances = placements.instances_of_item(brep)?;
-        let mut revolution_checked = false;
-        if solids.len() + instances.len() > MAX_INSTANCES {
-            return Err(fail(format!("more than {MAX_INSTANCES} solid instances")));
-        }
-        let name = placements
-            .product_name_of_item(brep)
-            .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
-            .or_else(|| label.map(String::from));
-        let split = built.shell.faces.len() - count_step_faces(&idx, shell_id)?;
-        if split > 0 {
-            warnings.push(format!(
-                "MANIFOLD_SOLID_BREP #{brep}: {split} face(s) added by splitting faces on periodic surfaces (exact; see docs/formats/step.md)"
-            ));
-        }
-        stats.step_faces += count_step_faces(&idx, shell_id)? * instances.len();
-        for t in &built.surface_types {
-            *stats.surfaces.entry(t.clone()).or_default() += instances.len();
-        }
-        for c in &built.curve_types {
-            *stats.curves.entry(c.clone()).or_default() += instances.len();
-        }
-        for m in instances {
-            let mut shell = built.shell.clone();
-            if let Some(m) = m {
-                transform_shell(&mut shell, m)?;
+        // Review run 7 #47: one solid is built into local copies of the
+        // stats and warnings, committed only when it succeeds, so a solid
+        // that fails while surfaces were asked for is skipped cleanly.
+        let mut st = stats.clone();
+        let mut w = Vec::new();
+        let mut got = Vec::new();
+        let mut limit = false;
+        let r = (|| -> std::result::Result<(), StepError> {
+            let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
+            // OpenCascade labels every solid "Open CASCADE STEP translator <ver> <n>";
+            // that is not a user name, so it is ignored.
+            let label = p
+                .opt_s(0)
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && !s.starts_with("Open CASCADE STEP translator"));
+            let shell_id = p.r(1)?;
+            let built = build_checked(&geo, brep, shell_id, tol)?;
+            let instances = placements.instances_of_item(brep)?;
+            if solids.len() + instances.len() > MAX_INSTANCES {
+                limit = true;
+                return Err(fail(format!("more than {MAX_INSTANCES} solid instances")));
             }
-            let solid = Solid::extract(CompressedSolid {
-                boundaries: vec![shell],
-            })
-            .map_err(|e| {
-                fail(format!(
-                    "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
-                ))
-            })?;
-            let body = orient_outward(Body { solid }, brep)?;
-            if !revolution_checked {
-                check_revolution_mesh(&body, brep, &built.surface_types)?;
-                revolution_checked = true;
+            let name = placements
+                .product_name_of_item(brep)
+                .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
+                .or_else(|| label.map(String::from));
+            let split = built.shell.faces.len() - count_step_faces(&idx, shell_id)?;
+            if split > 0 {
+                w.push(format!(
+                    "MANIFOLD_SOLID_BREP #{brep}: {split} face(s) added by splitting faces on periodic surfaces (exact; see docs/formats/step.md)"
+                ));
             }
-            let planar_faces = planar_faces(&body)
-                .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
-            stats.faces += body.solid.face_iter().count();
-            solids.push(ImportedSolid {
-                name: name.clone(),
-                body,
-                planar_faces,
-            });
+            st.step_faces += count_step_faces(&idx, shell_id)? * instances.len();
+            for t in &built.surface_types {
+                *st.surfaces.entry(t.clone()).or_default() += instances.len();
+            }
+            for c in &built.curve_types {
+                *st.curves.entry(c.clone()).or_default() += instances.len();
+            }
+            for m in instances {
+                let mut shell = built.shell.clone();
+                if let Some(m) = m {
+                    transform_shell(&mut shell, m)?;
+                }
+                let solid = Solid::extract(CompressedSolid {
+                    boundaries: vec![shell],
+                })
+                .map_err(|e| {
+                    fail(format!(
+                        "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
+                    ))
+                })?;
+                let body = orient_outward(Body { solid }, brep)?;
+                let planar_faces = planar_faces(&body)
+                    .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+                st.faces += body.solid.face_iter().count();
+                got.push(ImportedSolid {
+                    name: name.clone(),
+                    body,
+                    planar_faces,
+                });
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => {
+                stats = st;
+                warnings.extend(w);
+                solids.extend(got);
+            }
+            // Surfaces asked for: a bad solid does not fail the surface
+            // import (the converse of review #2).
+            Err(e) if opts.surfaces && !limit => {
+                warnings.push(format!("{} (solid skipped: importing surfaces)", e.0))
+            }
+            Err(e) => return Err(e),
         }
     }
     stats.solids = solids.len();
@@ -406,6 +425,7 @@ fn import_parsed(
             st,
             &breps,
             tol,
+            opts.surfaces,
             &mut stats,
             &mut warnings,
         )?),
@@ -432,33 +452,80 @@ fn import_parsed(
     })
 }
 
-/// Run 7: faces on SURFACE_OF_REVOLUTION are accepted only when the solid
-/// tessellates watertight and consistently oriented. Observed: a face whose
-/// angular range reaches the surface's own seam angle (e.g. the last third
-/// of a full 360° revolve written by R-CAD) reads back with the exact volume
-/// but a broken tessellation; such files are refused, never shown wrongly.
-fn check_revolution_mesh(
-    body: &Body,
+/// The shell of MANIFOLD_SOLID_BREP `brep`. Run 7: with faces on
+/// SURFACE_OF_REVOLUTION, the solid must tessellate watertight and
+/// consistently oriented, with Truck's normal for those surfaces or else the
+/// opposite one (writers differ: R-CAD's own writer needs either, observed per
+/// solid); otherwise it is refused. Observed refusals: a face reaching the
+/// surface's seam angle (the last sector of a full 360° revolve) and
+/// R-CAD-written spheres with poles (exact volume, broken tessellation).
+fn build_checked(
+    geo: &geom::Geo,
     brep: u64,
-    surface_types: &[String],
-) -> std::result::Result<(), StepError> {
-    if !surface_types.iter().any(|t| t == "SURFACE_OF_REVOLUTION") {
-        return Ok(());
+    shell_id: u64,
+    tol: f64,
+) -> std::result::Result<topo::Built, StepError> {
+    let build = |g: &geom::Geo| {
+        topo::build_shell(g, shell_id, tol, false)
+            .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))
+    };
+    let built = build(geo)?;
+    if !built
+        .surface_types
+        .iter()
+        .any(|t| t == "SURFACE_OF_REVOLUTION")
+    {
+        return Ok(built);
     }
-    let b = crate::bounds(body).map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {e}")))?;
+    let mut last = String::new();
+    for attempt in 0..2 {
+        let b = if attempt == 0 {
+            built.clone()
+        } else {
+            let g = geom::Geo {
+                invert_revolution: !geo.invert_revolution,
+                ..*geo
+            };
+            match build(&g) {
+                Ok(b) => b,
+                Err(e) => {
+                    last = e.0;
+                    continue;
+                }
+            }
+        };
+        match revolution_mesh_ok(&b, brep) {
+            Ok(()) => return Ok(b),
+            Err(e) => last = e.0,
+        }
+    }
+    Err(fail(last))
+}
+
+fn revolution_mesh_ok(built: &topo::Built, brep: u64) -> std::result::Result<(), StepError> {
+    let solid = Solid::extract(CompressedSolid {
+        boundaries: vec![built.shell.clone()],
+    })
+    .map_err(|e| {
+        fail(format!(
+            "MANIFOLD_SOLID_BREP #{brep}: not a closed manifold shell ({e})"
+        ))
+    })?;
+    let body = orient_outward(Body { solid }, brep)?;
+    let b = crate::bounds(&body).map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {e}")))?;
     let diag = (0..3)
         .map(|i| (b.max[i] - b.min[i]).powi(2))
         .sum::<f64>()
         .sqrt();
     let chord = (diag * 1e-3).max(1e-6);
-    let m = crate::tessellate(body, chord)
+    let m = crate::tessellate(&body, chord)
         .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {e}")))?;
     let c = crate::check_mesh(&m);
     if !(c.watertight && c.orientation_consistent) {
         return Err(fail(format!(
             "MANIFOLD_SOLID_BREP #{brep}: its SURFACE_OF_REVOLUTION faces do not tessellate \
-             watertight ({} boundary, {} misoriented edges); a face reaching the surface's seam \
-             angle is unsupported",
+             watertight with either normal ({} boundary, {} misoriented edges); a face reaching \
+             the surface's seam angle is unsupported",
             c.boundary_edges, c.misoriented_edges
         )));
     }
@@ -485,8 +552,7 @@ fn brep_solid(
 ) -> std::result::Result<(Body, Vec<ImportedPlanarFace>), StepError> {
     let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
     let shell_id = p.r(1)?;
-    let built = topo::build_shell(geo, shell_id, tol, false)
-        .map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
+    let built = build_checked(geo, brep, shell_id, tol)?;
     stats.step_faces += count_step_faces(idx, shell_id)?;
     for t in &built.surface_types {
         *stats.surfaces.entry(t.clone()).or_default() += 1;
@@ -494,7 +560,6 @@ fn brep_solid(
     for c in &built.curve_types {
         *stats.curves.entry(c.clone()).or_default() += 1;
     }
-    let types = built.surface_types;
     let mut shell = built.shell;
     if let Some(m) = m {
         transform_shell(&mut shell, m)?;
@@ -508,7 +573,6 @@ fn brep_solid(
         ))
     })?;
     let body = orient_outward(Body { solid }, brep)?;
-    check_revolution_mesh(&body, brep, &types)?;
     let planar_faces =
         planar_faces(&body).map_err(|e| fail(format!("MANIFOLD_SOLID_BREP #{brep}: {}", e.0)))?;
     stats.faces += body.solid.face_iter().count();
@@ -539,9 +603,30 @@ fn structured(
     st: assembly::Structure,
     breps: &[u64],
     tol: f64,
+    skip_bad: bool,
     stats: &mut StepStats,
     warnings: &mut Vec<String>,
 ) -> std::result::Result<ImportedAssembly, StepError> {
+    // A solid that fails to build is skipped with a warning only when
+    // surfaces were asked for (as in the flat path); otherwise it is fatal.
+    let solid = |brep: u64,
+                 m: Option<Matrix4>,
+                 stats: &mut StepStats,
+                 warnings: &mut Vec<String>|
+     -> std::result::Result<Option<(Body, Vec<ImportedPlanarFace>)>, StepError> {
+        let mut st = stats.clone();
+        match brep_solid(idx, geo, brep, m, tol, &mut st) {
+            Ok(x) => {
+                *stats = st;
+                Ok(Some(x))
+            }
+            Err(e) if skip_bad => {
+                warnings.push(format!("{} (solid skipped: importing surfaces)", e.0));
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
+    };
     let mut products: Vec<ImportedProduct> = st
         .products
         .iter()
@@ -573,7 +658,9 @@ fn structured(
             .filter_map(|g| product_of.get(g).copied())
             .min();
         if let Some(pi) = direct {
-            let (body, planar_faces) = brep_solid(idx, geo, brep, None, tol, stats)?;
+            let Some((body, planar_faces)) = solid(brep, None, stats, warnings)? else {
+                continue;
+            };
             let fallback = products[pi].name.clone();
             products[pi].solids.push(ImportedSolid {
                 name: label.or(Some(fallback)),
@@ -588,7 +675,9 @@ fn structured(
         {
             let pname = products[pi].name.clone();
             for (_, m) in &above {
-                let (body, planar_faces) = brep_solid(idx, geo, brep, Some(*m), tol, stats)?;
+                let Some((body, planar_faces)) = solid(brep, Some(*m), stats, warnings)? else {
+                    continue;
+                };
                 products[pi].solids.push(ImportedSolid {
                     name: label.clone().or(Some(pname.clone())),
                     body,
@@ -611,7 +700,9 @@ fn structured(
             .filter(|n| !n.starts_with("Open CASCADE STEP translator"))
             .or(label.clone())
             .unwrap_or_else(|| format!("Solid #{brep}"));
-        let (body, planar_faces) = brep_solid(idx, geo, brep, None, tol, stats)?;
+        let Some((body, planar_faces)) = solid(brep, None, stats, warnings)? else {
+            continue;
+        };
         let own = products.len();
         products.push(ImportedProduct {
             name: name.clone(),

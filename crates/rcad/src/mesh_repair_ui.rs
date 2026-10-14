@@ -20,12 +20,23 @@ pub struct MeshRepairUi {
     /// (doc_id, revision, body, preview?, report) of the last preview or repair.
     pub report: Option<(u64, u64, BodyId, bool, RepairReport)>,
     pending: Option<(BodyId, bool)>,
+    /// Body made by the last applied repair.
+    new_body: Option<BodyId>,
 }
 
 impl MeshRepairUi {
     pub(crate) fn on_reply(&mut self, response: &Response, summary: &DocSummary) {
         if let (Some(r), Some((b, preview))) = (&response.mesh_repair, self.pending.take()) {
             self.report = Some((summary.doc_id, summary.revision, b, preview, r.clone()));
+            // Review round 2 #25: an applied repair's report also shows on the
+            // new body (the source is hidden).
+            self.new_body = response.feature.and_then(|f| {
+                summary
+                    .bodies
+                    .iter()
+                    .find(|x| x.created_by == f)
+                    .map(|x| x.id)
+            });
         }
     }
 }
@@ -117,7 +128,7 @@ impl RcadApp {
                 // document state, so it is shown on the source until edited).
                 if let Some((d, r, b, preview, rep)) = &st.report
                     && *d == doc
-                    && *b == body
+                    && (*b == body || st.new_body == Some(body))
                     && *r == rev
                 {
                     let t = rcad_commands::mesh_repair::summary(rep, *preview);

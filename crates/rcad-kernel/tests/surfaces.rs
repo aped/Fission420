@@ -219,3 +219,99 @@ fn bad_surface_model_does_not_break_a_solid_import() {
     .to_string();
     assert!(e.contains("import_surfaces"), "{e}");
 }
+
+/// Unit normals of a surface body's planar faces (in `face_iter` order).
+fn plane_normals(b: &rcad_kernel::Body) -> Vec<[f64; 3]> {
+    rcad_kernel::classify_faces(b)
+        .unwrap()
+        .into_iter()
+        .map(|f| match f {
+            rcad_kernel::DirectFace::Plane { normal, .. } => normal,
+            f => panic!("{f:?}"),
+        })
+        .collect()
+}
+
+fn near(a: [f64; 3], b: [f64; 3]) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() < 1e-12)
+}
+
+/// Review run 7 #43: a ruled surface's normal is tangent × sketch normal
+/// (right of the travel direction seen from +z), with or without `reverse`;
+/// `reverse` only puts the surface below the sketch plane. A closed
+/// (counter-clockwise) profile faces outward either way.
+#[test]
+fn ruled_surface_normal_ignores_reverse() {
+    use rcad_kernel::{SurfacePath, extrude_surface};
+    for reverse in [false, true] {
+        let b = extrude_surface(
+            &SurfacePath::Open(vec![[0.0, 0.0], [10.0, 0.0]]),
+            &Frame::XY,
+            5.0,
+            reverse,
+        )
+        .unwrap();
+        assert!(near(plane_normals(&b)[0], [0.0, -1.0, 0.0]), "{reverse}");
+        let z = measure(&b).unwrap().bounds;
+        let want = if reverse { [-5.0, 0.0] } else { [0.0, 5.0] };
+        assert!((z.min[2] - want[0]).abs() < 1e-12 && (z.max[2] - want[1]).abs() < 1e-12);
+        // The opposite point order faces the other way.
+        let b = extrude_surface(
+            &SurfacePath::Open(vec![[10.0, 0.0], [0.0, 0.0]]),
+            &Frame::XY,
+            5.0,
+            reverse,
+        )
+        .unwrap();
+        assert!(near(plane_normals(&b)[0], [0.0, 1.0, 0.0]), "{reverse}");
+        // Closed square [0,10]²: every face points away from its centre.
+        let sq = Profile::Polygon(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]);
+        let b = extrude_surface(&SurfacePath::Closed(sq), &Frame::XY, 5.0, reverse).unwrap();
+        let faces = rcad_kernel::classify_faces(&b).unwrap();
+        assert_eq!(faces.len(), 4);
+        for f in faces {
+            let rcad_kernel::DirectFace::Plane { origin, normal } = f else {
+                panic!("{f:?}")
+            };
+            let out = (origin[0] - 5.0) * normal[0] + (origin[1] - 5.0) * normal[1];
+            assert!(
+                out > 0.0,
+                "inward face {origin:?} {normal:?} (reverse {reverse})"
+            );
+        }
+    }
+}
+
+/// Review run 7 #47: the converse of review #2. A file with a good surface
+/// model and a solid that cannot be built still imports its surfaces when
+/// surfaces are asked for (the solid is skipped with a warning naming it);
+/// a plain solid import of the same file still fails on that solid.
+#[test]
+fn bad_solid_does_not_break_a_surface_import() {
+    let path = format!(
+        "{}/tests/fixtures/step/open_box_mm.step",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    // A solid whose only face "surface" is an axis placement (#53).
+    let bad = "#90001 = MANIFOLD_SOLID_BREP('',#90002);\n#90002 = CLOSED_SHELL('',(#90003));\n#90003 = ADVANCED_FACE('',(#18),#53,.T.);\n";
+    let at = text.rfind("ENDSEC;").unwrap();
+    let text = format!("{}{bad}{}", &text[..at], &text[at..]);
+    let imp = import_step(&text, &surfaces_opts()).unwrap();
+    assert!(imp.solids.is_empty());
+    assert_eq!(imp.stats.solids, 0);
+    let s = imp.surfaces.expect("surfaces");
+    let filled = fill_planar(&s.body, 1e-6).unwrap().0;
+    assert!((vol(&filled) - 24000.0).abs() < 1e-6);
+    assert!(
+        imp.warnings
+            .iter()
+            .any(|w| w.contains("MANIFOLD_SOLID_BREP #90001") && w.contains("skipped")),
+        "{:?}",
+        imp.warnings
+    );
+    let e = import_step(&text, &StepImportOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("#90001"), "{e}");
+}

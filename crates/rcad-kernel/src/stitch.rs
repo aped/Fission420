@@ -711,6 +711,96 @@ fn inside_loop(pts: &[Point3], n: Vector3, q: Point3) -> bool {
     c
 }
 
+/// The parent of each coplanar nested boundary loop (`loops` sorted by
+/// decreasing area; each loop is its sample points and unit Newell normal).
+/// Review S5 / run 7 #46: a loop is a hole of the *smallest* coplanar loop
+/// that wholly contains it; containment is decided from every sample point
+/// and a segment-crossing test, not from one point. Loops whose boundaries
+/// cross, or that lie partly inside and partly outside each other (or
+/// coincide), are refused, as are nested loops running the same way and
+/// nesting deeper than one level (an island inside a hole).
+fn nest_loops(loops: &[(&[Point3], Vector3)], tol: f64) -> Result<Vec<Option<usize>>> {
+    let overlap = || {
+        KernelError::InvalidInput(
+            "boundary loops in one plane partially overlap (their boundaries cross or coincide): not a face with a hole (unsupported)".into(),
+        )
+    };
+    let mut parent: Vec<Option<usize>> = vec![None; loops.len()];
+    for j in 0..loops.len() {
+        // Smallest first: i < j has an area at least that of j.
+        for i in (0..j).rev() {
+            let ((pi, ni), (pj, nj)) = (loops[i], loops[j]);
+            let coplanar = ni.dot(nj).abs() > 1.0 - 1e-9
+                && pj
+                    .iter()
+                    .all(|q| (*q - pi[0]).dot(ni).abs() <= tol.max(1e-9));
+            if !coplanar {
+                continue;
+            }
+            let a = crate::step_in::least_aligned_axis(ni);
+            let b = ni.cross(a);
+            let p2 = |p: &Point3| [p.to_vec().dot(a), p.to_vec().dot(b)];
+            let (qi, qj): (Vec<[f64; 2]>, Vec<[f64; 2]>) =
+                (pi.iter().map(p2).collect(), pj.iter().map(p2).collect());
+            let near = tol.max(1e-9);
+            let o = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            };
+            let seg_dist = |q: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+                let d = [b[0] - a[0], b[1] - a[1]];
+                let l2 = d[0] * d[0] + d[1] * d[1];
+                let t = if l2 > 0.0 {
+                    (((q[0] - a[0]) * d[0] + (q[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                (q[0] - a[0] - t * d[0]).hypot(q[1] - a[1] - t * d[1])
+            };
+            let (m, k) = (qi.len(), qj.len());
+            for s in 0..m {
+                let (a, b) = (qi[s], qi[(s + 1) % m]);
+                for t in 0..k {
+                    let (c, d) = (qj[t], qj[(t + 1) % k]);
+                    if o(a, b, c) * o(a, b, d) < 0.0 && o(c, d, a) * o(c, d, b) < 0.0 {
+                        return Err(overlap());
+                    }
+                }
+            }
+            let (mut inside, mut outside) = (0, 0);
+            for (q, q3) in qj.iter().zip(pj) {
+                if (0..m).any(|s| seg_dist(*q, qi[s], qi[(s + 1) % m]) <= near) {
+                    continue;
+                }
+                if inside_loop(pi, ni, *q3) {
+                    inside += 1;
+                } else {
+                    outside += 1;
+                }
+            }
+            match (inside, outside) {
+                (0, 0) => return Err(overlap()),
+                (_, 0) => {}
+                (0, _) => continue,
+                _ => return Err(overlap()),
+            }
+            if ni.dot(nj) > 0.0 {
+                return Err(KernelError::InvalidInput(
+                    "nested boundary loops in one plane run the same way: not a face with a hole (unsupported)".into(),
+                ));
+            }
+            if parent[i].is_some() {
+                return Err(KernelError::InvalidInput(
+                    "boundary loops nested more than one level in one plane are not supported"
+                        .into(),
+                ));
+            }
+            parent[j] = Some(i);
+            break;
+        }
+    }
+    Ok(parent)
+}
+
 /// Newell normal of a closed point loop and the largest distance of the
 /// points from the plane through their centroid.
 fn best_plane(pts: &[Point3]) -> (Vector3, f64) {
@@ -925,37 +1015,15 @@ pub fn fill_planar(body: &Body, tol: f64) -> Result<(Body, FillReport)> {
         let area = newell_area(&pts);
         loops.push(L { inv, pts, n, area });
     }
-    // Review S5: coplanar nested loops form one face with holes. A loop whose
-    // first point lies inside a larger coplanar loop of opposite orientation
-    // is a hole of it; nesting with the same orientation is refused.
+    // Review S5: coplanar nested loops form one face with holes.
     loops.sort_by(|a, b| b.area.total_cmp(&a.area));
-    let mut parent: Vec<Option<usize>> = vec![None; loops.len()];
-    for j in 0..loops.len() {
-        for i in 0..j {
-            let (li, lj) = (&loops[i], &loops[j]);
-            let coplanar = li.n.dot(lj.n).abs() > 1.0 - 1e-9
-                && lj
-                    .pts
-                    .iter()
-                    .all(|q| (*q - li.pts[0]).dot(li.n).abs() <= tol.max(1e-9));
-            if !coplanar || !inside_loop(&li.pts, li.n, lj.pts[0]) {
-                continue;
-            }
-            if li.n.dot(lj.n) > 0.0 {
-                return Err(KernelError::InvalidInput(
-                    "nested boundary loops in one plane run the same way: not a face with a hole (unsupported)".into(),
-                ));
-            }
-            if parent[i].is_some() {
-                return Err(KernelError::InvalidInput(
-                    "boundary loops nested more than one level in one plane are not supported"
-                        .into(),
-                ));
-            }
-            parent[j] = Some(i);
-            break;
-        }
-    }
+    let parent = nest_loops(
+        &loops
+            .iter()
+            .map(|l| (l.pts.as_slice(), l.n))
+            .collect::<Vec<_>>(),
+        tol,
+    )?;
     for i in 0..loops.len() {
         if parent[i].is_some() {
             continue;
@@ -1093,6 +1161,79 @@ mod tests {
             }
             v => panic!("{v:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod nesting_tests {
+    use super::*;
+    use crate::{Frame, Profile};
+
+    /// The side faces (no caps) of the prism of `pts` over z 0..10.
+    fn tube(pts: &[[f64; 2]]) -> Vec<Face> {
+        let b =
+            crate::extrude_region(&Profile::Polygon(pts.to_vec()), &[], &Frame::XY, 10.0).unwrap();
+        b.solid
+            .face_iter()
+            .filter(|f| match f.surface() {
+                Surface::Plane(p) => p.normal().z.abs() < 0.5,
+                _ => true,
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Review run 7 #46: two coplanar boundary loops of opposite
+    /// orientation that only partly overlap (an outward square tube and an
+    /// inward one sticking out of it) are refused, not filled as a face
+    /// whose hole crosses its outer boundary.
+    #[test]
+    fn partially_overlapping_loops_are_refused() {
+        let mut faces = tube(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]);
+        // Starts (5, 2) inside the first square; reaches x = 15 outside it.
+        let inner = tube(&[[5.0, 2.0], [15.0, 2.0], [15.0, 8.0], [5.0, 8.0]]);
+        faces.extend(inner.into_iter().map(|f| f.inverse()));
+        let body = Body::from_shell_unchecked(Shell::from(faces));
+        let e = fill_planar(&body, 1e-6).unwrap_err().to_string();
+        assert!(e.contains("partially overlap"), "{e}");
+    }
+
+    /// The nesting rule itself: a loop inside the smaller of two containing
+    /// loops is that one's hole (here refused as a second level), and a loop
+    /// beside another is not nested.
+    #[test]
+    fn nesting_picks_the_smallest_container() {
+        let sq = |c: f64, h: f64, ccw: bool| {
+            let mut v = vec![
+                Point3::new(c - h, c - h, 0.0),
+                Point3::new(c + h, c - h, 0.0),
+                Point3::new(c + h, c + h, 0.0),
+                Point3::new(c - h, c + h, 0.0),
+            ];
+            if !ccw {
+                v.reverse();
+            }
+            v
+        };
+        let (up, down) = (Vector3::unit_z(), -Vector3::unit_z());
+        // Outer 0..20 (ccw), hole 5..15 (cw), island 8..12 (ccw).
+        let (o, h, i) = (
+            sq(10.0, 10.0, true),
+            sq(10.0, 5.0, false),
+            sq(10.0, 2.0, true),
+        );
+        let p = nest_loops(&[(&o, up), (&h, down)], 1e-6).unwrap();
+        assert_eq!(p, vec![None, Some(0)]);
+        let e = nest_loops(&[(&o, up), (&h, down), (&i, up)], 1e-6)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("more than one level"), "{e}");
+        // Side by side: not nested.
+        let far: Vec<Point3> = sq(50.0, 2.0, false);
+        assert_eq!(
+            nest_loops(&[(&o, up), (&far, down)], 1e-6).unwrap(),
+            vec![None, None]
+        );
     }
 }
 

@@ -41,6 +41,11 @@ fn corpus_imports_match_their_references() {
                 continue;
             }
             let msg = format!("{:?}", r.error);
+            // Review round 2 #15: a specific message, never a caught panic
+            // or an internal error.
+            if want.is_empty() || msg.contains("panicked") || msg.contains("Internal") {
+                bad(format!("unexpected error kind {msg}"));
+            }
             if !msg.contains(want) {
                 bad(format!("error {msg} lacks '{want}'"));
             }
@@ -66,6 +71,7 @@ fn corpus_imports_match_their_references() {
         // Stated error of estimated volumes (labelled, e.g. a sphere's
         // tessellation estimate): the comparison allows it.
         let mut vol_err = 0.0;
+        let mut estimated = false;
         let mut grow = |a: [f64; 3], b: [f64; 3]| {
             for i in 0..3 {
                 lo[i] = lo[i].min(a[i]);
@@ -77,7 +83,11 @@ fn corpus_imports_match_their_references() {
             if mesh {
                 let d = b.mesh.as_ref().expect("mesh diagnostics");
                 comps += d.components;
-                vol += d.signed_volume.unwrap_or(f64::NAN);
+                match d.signed_volume {
+                    Some(v) => vol += v,
+                    None if exp.get("volume").is_some() => bad("no mesh volume".into()),
+                    None => {}
+                }
                 if let Some((a, c)) = d.bounds {
                     grow(a, c);
                 }
@@ -98,10 +108,11 @@ fn corpus_imports_match_their_references() {
                     VolumeResult::Value {
                         volume,
                         error_estimate,
-                        ..
+                        method,
                     } => {
                         vol += volume;
                         vol_err += error_estimate;
+                        estimated |= *method == rcad_kernel::VolumeMethod::TessellationEstimate;
                     }
                     VolumeResult::Unavailable { .. } => {
                         if exp.get("volume").is_some() {
@@ -111,11 +122,27 @@ fn corpus_imports_match_their_references() {
                 }
             }
         }
+        // Review round 2 #14: exact unless the entry says "estimate"; an
+        // estimate's stated error must be finite and below `vol_err_max`.
+        let want_estimate = exp.get("method").and_then(Value::as_str) == Some("estimate");
+        if estimated && !want_estimate {
+            bad("volume fell back to a tessellation estimate (expected exact)".into());
+        }
+        let allowed = if want_estimate {
+            let cap = f(exp, "vol_err_max").unwrap_or(0.0);
+            if !(vol_err.is_finite() && vol_err <= cap) {
+                bad(format!("stated volume error {vol_err} exceeds {cap}"));
+            }
+            vol_err
+        } else {
+            0.0
+        };
         if let (Some(v), Some(t)) = (f(exp, "volume"), f(exp, "vol_tol"))
-            && (vol - v).abs() > t + vol_err
+            // NaN fails too.
+            && ((vol - v).abs() > t + allowed || vol.is_nan())
         {
             bad(format!(
-                "volume {vol} vs {v} (tol {t} + stated error {vol_err})"
+                "volume {vol} vs {v} (tol {t} + stated error {allowed})"
             ));
         }
         if let Some(n) = exp.get("components").and_then(Value::as_u64)
@@ -168,4 +195,43 @@ fn corpus_imports_match_their_references() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert!(manifest.len() >= 20);
+}
+
+/// Review round 2 #51(f): the FreeCAD assemblies through
+/// `import_step_assembly`: one placed occurrence per solid and the total
+/// volume FreeCAD measured.
+#[test]
+fn corpus_assemblies_import_with_hierarchy() {
+    let reference: Value = serde_json::from_str(
+        &std::fs::read_to_string(corpus().join("freecad_reference.json")).unwrap(),
+    )
+    .unwrap();
+    for file in [
+        "a1_nested_assembly_mm.step",
+        "a2_repeated_links_mm.step",
+        "a3_rotated_parts_mm.step",
+    ] {
+        let rf = &reference[file];
+        let mut s = Session::new();
+        assert!(s.execute(&Command::NewDocument).ok);
+        let c: Command = serde_json::from_value(
+            json!({"cmd": "import_step_assembly", "path": corpus().join(file)}),
+        )
+        .unwrap();
+        let r = s.execute(&c);
+        assert!(r.ok, "{file}: {:?}", r.error);
+        let m: Command = serde_json::from_value(json!({"cmd": "mass_properties"})).unwrap();
+        let mp = s.execute(&m).mass_properties.expect("mass properties");
+        assert_eq!(
+            mp.occurrences.len() as u64,
+            rf["solids"].as_u64().unwrap(),
+            "{file}: placed occurrences"
+        );
+        let total: f64 = mp.occurrences.iter().filter_map(|o| o.volume).sum();
+        let want = rf["volume"].as_f64().unwrap();
+        assert!(
+            (total - want).abs() <= 1e-3,
+            "{file}: assembly volume {total} vs FreeCAD {want}"
+        );
+    }
 }

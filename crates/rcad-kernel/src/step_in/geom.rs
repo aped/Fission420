@@ -24,6 +24,9 @@ pub(super) struct Geo<'a> {
     pub k: f64,
     /// File plane-angle unit -> rad.
     pub angle: f64,
+    /// Run 7: read SURFACE_OF_REVOLUTION with the opposite normal (the
+    /// writers' conventions differ; see `build_checked` in mod.rs).
+    pub invert_revolution: bool,
 }
 
 /// Analytic description of a face surface, used for exact distance checks and for
@@ -470,6 +473,10 @@ impl Geo<'_> {
                 e.type_name()
             )));
         };
+        let mut generatrix = generatrix;
+        if self.invert_revolution {
+            generatrix.invert();
+        }
         let s = Processor::new(RevolutedCurve::by_revolution(generatrix, o, z));
         Ok((Surface::RevolutedCurve(s), analytic))
     }

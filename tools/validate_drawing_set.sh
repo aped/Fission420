@@ -11,8 +11,8 @@
 #   hole: the spacing dimension is dangling ("? distance") and "38 +0.05/-0.05" is gone.
 #   DXF (part, 1:2): HIDDEN = 4 hole silhouettes in the front view + 4 in the right view,
 #   each 10 x 0.5 = 5 mm, total 40 mm; VISIBLE circles: Ø8 and Ø6 in the top view + the
-#   Ø6 in detail B = 3. CENTER: marks + cutting line 79 mm (7 lines) + hole centre lines
-#   seen side-on, 2 sheet mm past the plate: front 2 x 9, right 1 x 9 (merged) = 10 lines, 106 mm.
+#   Ø6 in detail B = 3. CENTER: marks 62 mm + cutting line 17 mm + hole centre lines seen
+#   side-on (9 mm each: front 2, right 1 merged, section 1) = 11 lines, 115 mm.
 #   assembly sheet: BOM rows "1 PL-80 Plate 1 PLA" and "2 PIN-6 Pin 2 -", balloons 1 and 2.
 # Usage: tools/validate_drawing_set.sh <rcad-cli> [out-dir]   (run from the repo root)
 set -euo pipefail
@@ -64,11 +64,12 @@ checks = {
     "hidden 8 lines": L["HIDDEN"]["lines"] == 8,
     "hidden 40 mm": abs(L["HIDDEN"]["line_length"] - 40.0) < 1e-6,
     "3 visible circles": L["VISIBLE"]["circles"] == 3,
-    # Centre marks (top view, detail) and cutting line: 7 lines, 79 mm; plus the hole
-    # centre lines seen side-on (2 sheet mm past the plate, 1:2): front view 2 x (5 + 4),
-    # right view 1 x (5 + 4) (both holes project onto one line) = 27 mm.
-    "centre layer 10 lines 106 mm": L["CENTER"]["lines"] == 10
-        and abs(L["CENTER"]["line_length"] - 106.0) < 1e-6,
+    # Centre marks: top view Ø8 2 x 8 + Ø6 2 x 7 = 30 mm, detail B (2:1) 2 x 16 = 32 mm;
+    # cutting line 17 mm; hole centre lines seen side-on (2 sheet mm past the 10 mm plate
+    # at 1:2 = 9 mm each): front x 2, right x 1 (both holes project onto one line),
+    # section A-A x 1 (hole A's axis lies on the cutting plane) = 36 mm. 11 lines, 115 mm.
+    "centre layer 11 lines 115 mm": L["CENTER"]["lines"] == 11
+        and abs(L["CENTER"]["line_length"] - 115.0) < 1e-6,
 }
 for k, v in checks.items():
     print(("PASS: " if v else "FAIL: ") + "FreeCAD " + k)

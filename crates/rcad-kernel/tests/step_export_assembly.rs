@@ -462,3 +462,33 @@ fn written_sphere_is_refused_not_misread() {
         assert!((v.0 - want).abs() <= v.1 + 1e-6 * want, "{v:?}");
     }
 }
+
+/// Handoff (sheet worker, review #47 / #2): in the structured path a solid
+/// that fails to build is skipped with a warning only when surfaces were
+/// asked for; otherwise the import fails.
+#[test]
+fn structured_bad_solid_is_skipped_only_with_surfaces() {
+    // A loose MANIFOLD_SOLID_BREP whose "shell" is not a shell.
+    let text = occt_fixture().replace(
+        "ENDSEC;\nEND-ISO",
+        "#950 = MANIFOLD_SOLID_BREP('bad',#11);\nENDSEC;\nEND-ISO",
+    );
+    assert!(text.contains("#950 ="));
+    assert!(import_step(&text, &with_structure()).is_err());
+    let both = StepImportOptions {
+        assembly: true,
+        surfaces: true,
+        ..Default::default()
+    };
+    let imp = import_step(&text, &both).unwrap();
+    assert!(
+        imp.warnings
+            .iter()
+            .any(|w| w.contains("#950") && w.contains("skipped")),
+        "{:?}",
+        imp.warnings
+    );
+    let a = imp.assembly.unwrap();
+    let total: usize = a.products.iter().map(|p| p.solids.len()).sum();
+    assert_eq!(total, 2);
+}

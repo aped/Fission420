@@ -14,8 +14,10 @@ shells) as a surface body"): every shell of every `SHELL_BASED_SURFACE_MODEL` of
 assembly placements) becomes one shell of a single surface body (`ImportSurfaces` feature, file
 embedded). `import_step` on a file with only surface models is refused with a pointer to
 `import_surfaces`; a file with solids and surface models imports the solids and notes the
-surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside a
-`MANIFOLD_SOLID_BREP` stays an error (that is a malformed solid).
+surfaces in the import report (nothing is dropped silently); a bad surface model does not fail
+that solid import. Conversely, `import_surfaces` skips a `MANIFOLD_SOLID_BREP` that cannot be
+built, with a warning naming it, instead of failing the surface import. `OPEN_SHELL` inside a
+`MANIFOLD_SOLID_BREP` stays an error for `import_step` (that is a malformed solid).
 
 ## Surfaces from sketches
 
@@ -24,7 +26,15 @@ surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside
 * `surface_extrude {sketch, distance, reverse?}` (**Extrude surface**): the closed profile, or
   else the open chain of lines, swept along the sketch normal into an open ruled surface (planar
   strips; exact cylindrical patches for arcs). No caps. Parameter `distance` (upstream edits
-  regenerate later stitch/fill/thicken).
+  regenerate later stitch/fill/thicken). UI: **Reverse (below the sketch plane)** checkbox.
+  * **Orientation** (what a later thicken's side follows): every face's normal is the path tangent
+    × the sketch normal, i.e. to the right of the direction of travel seen from the sketch's +z. A
+    closed profile is run counter-clockwise, so it faces outward. An open chain is run from its
+    end with the smaller sketch x (the smaller y when the ends' x agree within 1e-9 × the sketch
+    scale), independent of entity ids and line directions: redrawing or reversing a line never
+    flips the surface. A chain along +x faces −y.
+  * `reverse` sweeps against the sketch normal (the surface lies below the sketch plane); it does
+    **not** flip the normal.
 
 ## Analysis (before any repair)
 
@@ -61,7 +71,10 @@ refused. Tolerance range [0, 1] mm.
 `fill_surface {body, tolerance}`: every closed boundary loop (lines, arcs, any edge curves) that
 is **planar** within the tolerance (curved edges sampled at 16 points) gets an exact planar face
 bounded by the loop's own edges; coplanar nested loops of opposite orientation become one face
-with holes (e.g. the two end rings of an open tube); same-orientation or deeper nesting is refused.
+with holes (e.g. the two end rings of an open tube): a loop is a hole of the smallest coplanar
+loop that wholly contains it (every sample point inside, no boundary crossing). Same-orientation
+or deeper nesting (an island inside a hole) is refused, and so are coplanar loops that partially
+overlap (boundaries crossing, or points both inside and outside) or coincide.
 Non-planar loops are refused (not skipped); a body with several shells or orientation conflicts
 must be stitched first. If the result is closed it is a solid.
 
