@@ -3070,12 +3070,18 @@ fn apply_tool(
             (k::prismatic::SlabOp::Join, k::PrismOp::Join, e.nominal)
         };
         if let Some(why) = k::prismatic::not_applicable(body, &kp, frame) {
-            return Err(DocError::ProductLimit(format!(
-                "{id}: {prefix}the sketch region has {} inner loop(s); a Join or Cut with inner \
-                 loops is built only by the exact slab construction, which does not apply here \
-                 ({why}). Use New Body, or cut each loop separately",
-                khole.len()
-            )));
+            // Not prismatic (a countersink cone, a revolved or filleted
+            // body): Truck's boolean with the holed tool (our truck-shapeops
+            // fork builds such tools), placed as for a single loop and checked
+            // against the holed nominal tool.
+            return holed_truck(body, e, frame, &kp, &khole, &mut check).map_err(|t| {
+                DocError::ProductLimit(format!(
+                    "{id}: {prefix}the sketch region has {} inner loop(s); the exact slab \
+                         construction does not apply here ({why}) and the general boolean \
+                         failed ({t}). Use New Body, or cut each loop separately",
+                    khole.len()
+                ))
+            });
         }
         let region_boolean = if e.pieces && e.removes {
             k::prismatic::prism_region_boolean_pieces
@@ -3222,6 +3228,77 @@ fn apply_tool(
             out
         }
     };
+    Ok((out, span))
+}
+
+/// The per-application result check of [`apply_tool`]: (result, operation,
+/// nominal span, span used).
+type ResultCheck<'a> = dyn FnMut(&Body, k::PrismOp, (f64, f64), (f64, f64)) -> Result<()> + 'a;
+
+/// Join/Cut of a region with inner loops on a target where the exact slab
+/// construction does not apply: Truck's boolean of the holed prism. The span
+/// is placed as for a single loop: a Join from a face starts a little inside
+/// the support (no deeper than half the clear material under the outer
+/// loop), a cut gets the same margins as a blind/through cut. Checked against
+/// the nominal holed tool by `check`. Returns the failure text otherwise.
+#[allow(clippy::too_many_arguments)]
+fn holed_truck(
+    body: &Body,
+    e: &ExtrudeOut,
+    frame: &Frame,
+    kp: &k::Profile,
+    khole: &[k::Profile],
+    check: &mut ResultCheck<'_>,
+) -> std::result::Result<(Body, (f64, f64)), String> {
+    let text = |x: k::KernelError| x.to_string();
+    if e.removes {
+        let margin = k::through_all_margin(body).map_err(text)?;
+        let (nominal, span) = if e.extent == Extent::ThroughAll {
+            let (lo, hi) = k::extent_along(body, frame).map_err(text)?;
+            let span = (lo - margin, hi + margin);
+            (span, span)
+        } else {
+            let (span, _) =
+                blind_cut_span(body, frame, kp, e.nominal, e.dir, e.side, margin).map_err(text)?;
+            (e.nominal, span)
+        };
+        let (start, len) = (frame.offset(span.0), span.1 - span.0);
+        let out = if e.pieces {
+            k::cut_region_pieces(body, kp, khole, &start, len)
+        } else {
+            k::cut_region(body, kp, khole, &start, len)
+        }
+        .map_err(text)?;
+        check(&out, k::PrismOp::Cut, nominal, span).map_err(|x| x.to_string())?;
+        return Ok((out, span));
+    }
+    let (a, b) = e.nominal;
+    let on_face = (e.dir > 0.0 && a == 0.0) || (e.dir < 0.0 && b == 0.0);
+    let span = match e.side {
+        Some(side) if on_face => {
+            let face = Frame {
+                z: [side * frame.z[0], side * frame.z[1], side * frame.z[2]],
+                ..*frame
+            };
+            let clear = k::clear_depth(body, &face, kp, 2.0 * JOIN_OVERLAP).map_err(text)?;
+            if clear < 2.0 * k::tol::MIN_LENGTH {
+                return Err(format!(
+                    "the material under the profile is only {clear:.4} mm deep before another \
+                     surface"
+                ));
+            }
+            let delta = JOIN_OVERLAP.min((b - a) / 2.0).min(clear / 2.0);
+            if e.dir > 0.0 {
+                (-side * delta, b)
+            } else {
+                (a, -side * delta)
+            }
+        }
+        _ => (a, b),
+    };
+    let out =
+        k::join_region(body, kp, khole, &frame.offset(span.0), span.1 - span.0).map_err(text)?;
+    check(&out, k::PrismOp::Join, (a, b), span).map_err(|x| x.to_string())?;
     Ok((out, span))
 }
 

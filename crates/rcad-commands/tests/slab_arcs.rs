@@ -7,7 +7,7 @@
 //! With `RCAD_EVIDENCE_DIR` set, the results are also written as STEP there
 //! for the external FreeCAD check (tools/check_slab_arcs.sh).
 use rcad_commands::{Command, ExtrudeOp, Session, SketchTemplate};
-use rcad_document::{BodyId, DocError, FaceRef, FaceRole, FeatureId, SketchPlane};
+use rcad_document::{BodyId, FaceRef, FaceRole, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::{Constraint, Dimension, EntityId, PointId, Sketch};
 use std::f64::consts::PI;
@@ -489,7 +489,10 @@ fn remaining_refusals_leave_the_document_unchanged() {
     let m = format!("{:?}", r.error);
     assert!(m.contains("tangent"), "{m}");
     // 2. A holed region on a target with a hole across the tool axis (not
-    //    prismatic): ProductLimit naming the inner loops and the reason.
+    //    prismatic): the slab construction does not apply; the general
+    //    boolean with the holed tool builds it, checked, and exact:
+    //    40000 − π·2²·50 (side hole) − (40·30 − π·6²)·4 (ring around a
+    //    Ø12 island).
     let mut s = Session::new();
     let e = holed_plate(&mut s, false);
     let side = SketchPlane::Face(FaceRef {
@@ -506,15 +509,19 @@ fn remaining_refusals_leave_the_document_unchanged() {
         },
     );
     let c = region_cut(&mut s, sk, 4.0);
-    let before = state(&s);
     let r = s.execute(&c);
-    assert!(
-        matches!(r.error, Some(DocError::ProductLimit(ref m))
-            if m.contains("inner loop") && m.contains("not parallel to the tool axis")),
-        "{:?}",
-        r.error
+    assert!(r.ok, "{:?}", r.error);
+    let want = 40000.0 - PI * 4.0 * 50.0 - (1200.0 - 36.0 * PI) * 4.0;
+    assert!((volume(&s) - want).abs() < 1e-6 * want, "{}", volume(&s));
+    probe(
+        &s,
+        &[
+            ([25.0, 25.0, 8.0], false),
+            ([40.0, 25.0, 8.0], true),
+            ([25.0, 25.0, 5.0], true),
+            ([70.0, 25.0, 5.0], false),
+        ],
     );
-    assert_eq!(state(&s), before);
 }
 
 /// The legacy Cut Through All command (`legacy_cut`) has the slab fallback:

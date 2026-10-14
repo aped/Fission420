@@ -18,23 +18,8 @@ pub fn join_prism(target: &Body, profile: &Profile, start: &Frame, length: f64) 
     join_region(target, profile, &[], start, length)
 }
 
-/// Truck 0.6 booleans panic for tools with inner loops (annular and frame tools
-/// were all observed to fail), so Join and Cut refuse them up front with the
-/// same product limit the document reports.
-fn refuse_holes(op: &str, holes: &[Profile]) -> Result<()> {
-    if holes.is_empty() {
-        return Ok(());
-    }
-    Err(KernelError::InvalidInput(format!(
-        "{op}: the profile has {} inner loop(s); Join and Cut need a single closed loop \
-         (Truck 0.6 booleans fail for tools with inner loops); use New Body, or cut each \
-         loop separately",
-        holes.len()
-    )))
-}
-
 /// [`join_prism`] of a region with inner loops (`holes`, counter-clockwise).
-/// Non-empty `holes` are refused: Truck 0.6 booleans fail for such tools.
+/// Truck 0.6 panicked on such tools; our truck-shapeops fork builds them.
 pub fn join_region(
     target: &Body,
     profile: &Profile,
@@ -42,7 +27,6 @@ pub fn join_region(
     start: &Frame,
     length: f64,
 ) -> Result<Body> {
-    refuse_holes("join", holes)?;
     let tool = extrude_region(profile, holes, start, length)?;
     let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
     if !overlaps(&tb, &ob, tol::KERNEL_LINEAR) {
@@ -84,7 +68,7 @@ pub fn cut_prism(target: &Body, profile: &Profile, start: &Frame, length: f64) -
 }
 
 /// [`cut_prism`] of a region with inner loops (`holes`, counter-clockwise).
-/// Non-empty `holes` are refused: Truck 0.6 booleans fail for such tools.
+/// Truck 0.6 panicked on such tools; our truck-shapeops fork builds them.
 pub fn cut_region(
     target: &Body,
     profile: &Profile,
@@ -92,7 +76,6 @@ pub fn cut_region(
     start: &Frame,
     length: f64,
 ) -> Result<Body> {
-    refuse_holes("cut", holes)?;
     let tool = extrude_region(profile, holes, start, length)?;
     let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
     if !overlaps(&tb, &ob, -tol::KERNEL_LINEAR) {
@@ -119,7 +102,6 @@ pub fn cut_region_pieces(
     start: &Frame,
     length: f64,
 ) -> Result<Body> {
-    refuse_holes("cut", holes)?;
     let tool = extrude_region(profile, holes, start, length)?;
     let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
     if !overlaps(&tb, &ob, -tol::KERNEL_LINEAR) {
