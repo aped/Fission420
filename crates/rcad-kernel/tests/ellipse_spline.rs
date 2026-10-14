@@ -179,3 +179,43 @@ fn spline_span_profile_extrudes_and_sweep_refuses() {
     );
     assert!(matches!(r, Err(KernelError::InvalidInput(m)) if m.contains("spline")));
 }
+
+/// Writes artifacts/step_curves/*.step for tools/check_step_curves.sh
+/// (FreeCAD / OpenCascade reads them independently).
+#[test]
+#[ignore = "writes artifacts/ for the external FreeCAD check; run via tools/check_step_curves.sh"]
+fn write_curve_step_artifacts() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/step_curves");
+    std::fs::create_dir_all(&dir).unwrap();
+    let prism = extrude(&ellipse([0.0, 0.0], 20.0, 10.0), &Frame::XY, 15.0).unwrap();
+    let block = extrude(&rect(-30.0, -20.0, 30.0, 20.0), &Frame::XY, 10.0).unwrap();
+    let cut = cut_prism(
+        &block,
+        &ellipse([0.0, 0.0], 12.0, 6.0),
+        &Frame::XY.offset(-2.0),
+        14.0,
+    )
+    .unwrap();
+    let (w, h) = (30.0, 20.0);
+    let d = Profile::Loop(vec![
+        LoopSegment::Line { start: [0.0, 0.0] },
+        LoopSegment::Cubic {
+            start: [w, 0.0],
+            c1: [w, h],
+            c2: [0.0, h],
+            w: [1.0, 1.0],
+        },
+    ]);
+    let spline = extrude(&d, &Frame::XY, 5.0).unwrap();
+    for (name, b) in [
+        ("ellipse_prism", &prism),
+        ("ellipse_cut_block", &cut),
+        ("spline_d_prism", &spline),
+    ] {
+        std::fs::write(
+            dir.join(format!("{name}.step")),
+            export_step(b, "test").unwrap(),
+        )
+        .unwrap();
+    }
+}

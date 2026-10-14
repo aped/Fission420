@@ -30,9 +30,11 @@ implemented; listing them here is not a claim of support. Ordered roughly by val
   placements of supported representations only, see docs/formats/step.md).
 - 3MF: colours/materials kept on bodies, UI dialogs (today: command/CLI import/export of mesh
   objects with units).
-- SVG: Bézier curves (exact as sketch splines once the sketcher has them), elliptical arcs,
+- SVG: Bézier curves (sketch splines are uniform B-splines, so arbitrary Bézier paths need a
+  non-uniform spline entity), elliptical arcs,
   `use` expansion, text to outlines (today: lines/rects/circles/circular arcs, docs/formats/svg.md).
-- DXF: SPLINE/ELLIPSE, blocks/INSERT with transforms, dimension import as constraints.
+- DXF: non-uniform/rational SPLINEs and elliptical arcs (today: full ELLIPSEs and clamped
+  uniform cubic SPLINEs), R2000+ export of ellipses/splines, blocks/INSERT with transforms, dimension import as constraints.
 - IGES, OBJ: possible later; DWG and F3D/F3Z: no plan (closed formats).
 
 ## Product

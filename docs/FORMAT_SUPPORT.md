@@ -174,7 +174,9 @@ FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/print/validation/`).
 ## DXF
 
 Import: LINE, ARC, CIRCLE, LWPOLYLINE and 2D POLYLINE (bulges become exact arcs); WCS XY
-plane only (OCS (0,0,−1) handled); layers selectable; unsupported entities (SPLINE, ELLIPSE,
+plane only (OCS (0,0,−1) handled); full ELLIPSEs and exactly representable SPLINEs (open,
+non-rational, cubic, clamped uniform) become sketch ellipses/splines; unsupported entities
+(other SPLINEs, elliptical arcs,
 INSERT/blocks, TEXT, DIMENSION, HATCH, 3D entities, paper space, …) refuse the file with
 type/count/line unless `allow_partial`, which skips and lists them. Endpoints within 1e-6 mm
 are joined; no constraints are inferred, so the sketch reports `UnderConstrained`.
@@ -196,7 +198,7 @@ wins over a 1 mm override); unitless `notch_freecad_r12.dxf` refused without a u
 imported at 1 mm/unit and extruded: V = 3(800 − 12.5π). A DXF contour imported onto an
 imported STEP face cuts the imported body (`imports.rs`).
 
-**Known losses**: splines/ellipses/text/dimensions/hatches/blocks, widths, thickness,
+**Known losses**: non-uniform/rational splines, elliptical arcs, text/dimensions/hatches/blocks, widths, thickness,
 linetype and colour; design intent (constraints); sketch placement on export.
 
 ## 3MF
@@ -225,7 +227,7 @@ the Python reader (`check_3mf.py`) instead.
 
 `rcad_exchange::svg` ([`formats/svg.md`](formats/svg.md)), commands `import_svg` (new
 unconstrained sketch on a plane or planar face) and `export_svg` (one sketch). Import:
-`line`, `rect` (not rounded), `circle`/`ellipse` with `rx ≈ ry`, `polyline`/`polygon`, `path`
+`line`, `rect` (not rounded), `circle`/`ellipse` (`rx ≠ ry`: exact sketch ellipse), `polyline`/`polygon`, `path`
 `M L H V Z` and circular `A`; `g` transforms. Accepted to 1e-5 relative: `rx`/`ry` that differ
 by rounding (mean radius) and near-similarity transforms on circles/arcs. Units: root
 `width`/`height` (> 0, `mm cm in pt pc`, exponents such as `1e2mm`) with `viewBox`;
