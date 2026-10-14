@@ -384,6 +384,9 @@ struct Winding {
     grid: Option<RayGrid>,
 }
 
+/// Most triangle entries in a [`RayGrid`] (memory bound).
+const MAX_GRID_ENTRIES: usize = 20_000_000;
+
 /// Uniform (y, z) grid of triangle indices for +X ray casting.
 struct RayGrid {
     lo: [f64; 2],
@@ -404,44 +407,55 @@ impl Winding {
         // Run 7 (performance qualification): for a watertight mesh the winding
         // number equals the signed count of +X ray crossings; a grid makes a
         // probe cost O(triangles per cell) instead of O(all triangles).
-        let grid = (tris.len() >= 256 && crate::check_mesh(m).watertight).then(|| {
-            let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-            for t in &tris {
-                for p in t {
-                    for k in 0..2 {
-                        lo[k] = lo[k].min(p[k + 1]);
-                        hi[k] = hi[k].max(p[k + 1]);
+        let grid = (tris.len() >= 256 && crate::check_mesh(m).watertight)
+            .then(|| -> Option<RayGrid> {
+                let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+                for t in &tris {
+                    for p in t {
+                        for k in 0..2 {
+                            lo[k] = lo[k].min(p[k + 1]);
+                            hi[k] = hi[k].max(p[k + 1]);
+                        }
                     }
                 }
-            }
-            let n = ((tris.len() as f64).sqrt() as usize / 2).clamp(1, 512);
-            let cell = [0, 1].map(|k| ((hi[k] - lo[k]) / n as f64).max(1e-12));
-            let mut cells = vec![Vec::new(); n * n];
-            let idx =
-                |v: f64, k: usize| (((v - lo[k]) / cell[k]).floor().max(0.0) as usize).min(n - 1);
-            for (ti, t) in tris.iter().enumerate() {
-                let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-                for p in t {
-                    for k in 0..2 {
-                        a[k] = a[k].min(p[k + 1]);
-                        b[k] = b[k].max(p[k + 1]);
+                let n = ((tris.len() as f64).sqrt() as usize / 2).clamp(1, 512);
+                let cell = [0, 1].map(|k| ((hi[k] - lo[k]) / n as f64).max(1e-12));
+                let mut cells = vec![Vec::new(); n * n];
+                // Review round 2 #26: bounded total size (a triangle is listed in
+                // every cell its (y, z) box touches); beyond it, no grid.
+                let mut total = 0usize;
+                let idx = |v: f64, k: usize| {
+                    (((v - lo[k]) / cell[k]).floor().max(0.0) as usize).min(n - 1)
+                };
+                for (ti, t) in tris.iter().enumerate() {
+                    let (mut a, mut b) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+                    for p in t {
+                        for k in 0..2 {
+                            a[k] = a[k].min(p[k + 1]);
+                            b[k] = b[k].max(p[k + 1]);
+                        }
+                    }
+                    let (y0, y1, z0, z1) = (idx(a[0], 0), idx(b[0], 0), idx(a[1], 1), idx(b[1], 1));
+                    total += (y1 - y0 + 1) * (z1 - z0 + 1);
+                    if total > MAX_GRID_ENTRIES {
+                        return None;
+                    }
+                    for y in y0..=y1 {
+                        for z in z0..=z1 {
+                            cells[y * n + z].push(ti as u32);
+                        }
                     }
                 }
-                for y in idx(a[0], 0)..=idx(b[0], 0) {
-                    for z in idx(a[1], 1)..=idx(b[1], 1) {
-                        cells[y * n + z].push(ti as u32);
-                    }
-                }
-            }
-            let size = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
-            RayGrid {
-                lo,
-                cell,
-                n,
-                cells,
-                eps: 1e-9 * size,
-            }
-        });
+                let size = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
+                Some(RayGrid {
+                    lo,
+                    cell,
+                    n,
+                    cells,
+                    eps: 1e-9 * size,
+                })
+            })
+            .flatten();
         Self { tris, grid }
     }
 

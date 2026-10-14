@@ -199,6 +199,16 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> Result<Welded, String> {
                  tolerance cell); use a smaller tolerance"
             ));
         }
+        let budget: u64 = grid
+            .values()
+            .map(|v| v.len() as u64 * v.len() as u64 * 27)
+            .sum();
+        if budget > MAX_WELD_TESTS {
+            return Err(format!(
+                "weld tolerance {tol} mm is too coarse for this mesh (about {budget} vertex \
+                 pair tests); use a smaller tolerance"
+            ));
+        }
         let keys: Vec<[i64; 3]> = {
             let mut k: Vec<_> = grid.keys().copied().collect();
             k.sort();
@@ -259,7 +269,7 @@ fn weld(positions: &[[f64; 3]], tol: f64) -> Result<Welded, String> {
 }
 
 /// Largest number of vertices in one weld cell.
-const MAX_CELL: usize = 4096;
+const MAX_CELL: usize = 64;
 
 fn signed_volume(pos: &[[f64; 3]], tris: &[[u32; 3]]) -> f64 {
     tris.iter()
@@ -498,13 +508,25 @@ pub fn repair(
     // oriented by its nesting depth among the closed components (even: outward,
     // odd: a void, inward).
     if opts.orient {
-        orient_outward(&pos, &mut tris);
+        orient_outward(&pos, &mut tris, &mut notes);
+    }
+    // #11: bounded notes.
+    if notes.len() > MAX_NOTES {
+        let extra = notes.len() - MAX_NOTES;
+        notes.truncate(MAX_NOTES);
+        notes.push(format!("... and {extra} more"));
     }
     let flipped_triangles = original
         .iter()
         .zip(&tris)
         .filter(|(a, b)| !same_cycle(a, b))
         .count();
+    if tris.is_empty() {
+        return Err(
+            "the repair would remove every triangle (all degenerate or duplicate); nothing kept"
+                .into(),
+        );
+    }
     let after = diagnose(&pos, &tris);
     if after.closed && !before.closed {
         notes
@@ -581,7 +603,8 @@ fn planar_components(
             .clone()
             .map(|v| len(sub(pos[v as usize], c)))
             .fold(0.0, f64::max);
-        let t = tol.max(1e-9 * size);
+        // Above float32 noise (~6e-8 relative) for tilted STL sheets (#10).
+        let t = tol.max(1e-6 * size);
         if verts
             .clone()
             .all(|v| dot(sub(pos[v as usize], c), nrm).abs() <= t)
@@ -608,7 +631,7 @@ fn winding(pos: &[[f64; 3]], ts: &[[u32; 3]], p: [f64; 3]) -> f64 {
 /// Orient each closed component (connected through two-triangle edges) by its
 /// nesting depth: a component inside an odd number of others is a void and
 /// faces inward, otherwise outward.
-fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]]) {
+fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]], notes: &mut Vec<String>) {
     let mut edge_tris: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
     for (ti, t) in tris.iter().enumerate() {
         for k in 0..3 {
@@ -662,16 +685,53 @@ fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]]) {
             (lo, hi)
         })
         .collect();
+    // Review run 7 round 2 #1/#12/#20: a shell counts as nested in another
+    // only when strictly contained (bounding box inside, and up to 16 spread
+    // vertices all clearly inside by winding number); partially overlapping
+    // shells (unbooleaned STL parts) are oriented outward independently.
+    // Bounded: beyond MAX_NESTING_SHELLS closed shells nesting is not analysed.
+    let analyse = sets.len() <= MAX_NESTING_SHELLS;
+    if !analyse {
+        notes.push(format!(
+            "{} closed shells: nesting not analysed (more than {MAX_NESTING_SHELLS}); every \
+             shell oriented outward",
+            sets.len()
+        ));
+    }
+    let strictly_inside = |ci: usize, o: usize| -> bool {
+        let (a, b) = (boxes[ci], boxes[o]);
+        if !(0..3).all(|k| a.0[k] > b.0[k] && a.1[k] < b.1[k]) {
+            return false;
+        }
+        let verts: Vec<u32> = {
+            let mut v: Vec<u32> = sets[ci].iter().flatten().copied().collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        let step = (verts.len() / 16).max(1);
+        verts
+            .iter()
+            .step_by(step)
+            .take(16)
+            .all(|&i| winding(pos, &sets[o], pos[i as usize]).abs() > 0.75)
+    };
     for (ci, comp) in comps.iter().enumerate() {
-        let p = pos[sets[ci][0][0] as usize];
-        let depth = (0..sets.len())
-            .filter(|&o| {
-                o != ci
-                    && (0..3).all(|k| p[k] >= boxes[o].0[k] && p[k] <= boxes[o].1[k])
-                    && winding(pos, &sets[o], p).abs() > 0.5
-            })
-            .count();
+        let depth = if analyse {
+            (0..sets.len())
+                .filter(|&o| o != ci && strictly_inside(ci, o))
+                .count()
+        } else {
+            0
+        };
         let v = signed_volume(pos, &sets[ci]);
+        let (lo, hi) = boxes[ci];
+        let size = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
+        if v.abs() <= 1e-12 * size.powi(3) {
+            // #21: zero volume (coincident reversed sheets): no outward side.
+            notes.push("a closed shell has zero volume (coincident faces); left as is".into());
+            continue;
+        }
         let want_positive = depth % 2 == 0;
         if (v > 0.0) != want_positive {
             for &ti in comp {
@@ -680,6 +740,14 @@ fn orient_outward(pos: &[[f64; 3]], tris: &mut [[u32; 3]]) {
         }
     }
 }
+
+/// Most closed shells whose mutual nesting is analysed (O(shells²) bounding
+/// box tests).
+const MAX_NESTING_SHELLS: usize = 2000;
+/// Most notes kept in a report (the rest are counted).
+const MAX_NOTES: usize = 50;
+/// Upper bound on weld pair tests (refused beyond: tolerance too coarse).
+const MAX_WELD_TESTS: u64 = 50_000_000;
 
 /// Ear-clipping triangulation of a nearly planar loop (vertex indices in
 /// fill order: the triangles keep this orientation).
@@ -797,9 +865,12 @@ fn fill_loop(pos: &[[f64; 3]], lp: &[u32], tol: f64) -> Result<Vec<[u32; 3]>, St
             return Err("no ear found (degenerate outline)".into());
         }
     }
-    if area2(p2[idx[0]], p2[idx[1]], p2[idx[2]]) > 0.0 {
-        out.push([lp[idx[0]], lp[idx[1]], lp[idx[2]]]);
+    if area2(p2[idx[0]], p2[idx[1]], p2[idx[2]]) <= 0.0 {
+        // #23: the last three points are collinear: the fill would leave
+        // their edges open.
+        return Err("degenerate outline (collinear points)".into());
     }
+    out.push([lp[idx[0]], lp[idx[1]], lp[idx[2]]]);
     Ok(out)
 }
 
@@ -1051,6 +1122,98 @@ mod tests {
             ..Default::default()
         };
         assert!(repair(&p, &t, &o).unwrap_err().contains("chains"));
+    }
+
+    /// Review round 2 #1: two overlapping outward cubes (unbooleaned STL
+    /// parts) are not nested: nothing flips, total signed volume 16.
+    #[test]
+    fn overlapping_shells_are_not_voids() {
+        let (mut p, mut t) = cube_at([0.0; 3], 2.0, 0);
+        let (p2, t2) = cube_at([1.0; 3], 2.0, 8);
+        p.extend(p2);
+        t.extend(t2);
+        let (_, _, r) = repair(&p, &t, &RepairOptions::default()).unwrap();
+        assert_eq!(r.flipped_triangles, 0, "{r:?}");
+        assert!((r.after.signed_volume.unwrap() - 16.0).abs() < 1e-12);
+    }
+
+    /// Review round 2 #20: a cube standing on another's top face (its first
+    /// vertex on the other's surface) is not nested.
+    #[test]
+    fn touching_shells_are_not_voids() {
+        let (mut p, mut t) = cube_at([0.0; 3], 2.0, 0);
+        let (p2, t2) = cube_at([0.5, 0.5, 2.0], 1.0, 8);
+        p.extend(p2);
+        t.extend(t2);
+        let (_, _, r) = repair(&p, &t, &RepairOptions::default()).unwrap();
+        assert_eq!(r.flipped_triangles, 0, "{r:?}");
+    }
+
+    /// #21: a zero-volume closed shell is left as is, with a note.
+    #[test]
+    fn zero_volume_shell_is_not_flipped() {
+        let p = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let t = vec![[0, 1, 2], [0, 2, 1]];
+        let o = RepairOptions {
+            remove_duplicates: false,
+            ..Default::default()
+        };
+        let (_, _, r) = repair(&p, &t, &o).unwrap();
+        assert_eq!(r.flipped_triangles, 0);
+        assert!(
+            r.notes.iter().any(|n| n.contains("zero volume")),
+            "{:?}",
+            r.notes
+        );
+    }
+
+    /// #10: a tilted flat sheet stored in float32 is still a sheet (its
+    /// outline is not filled).
+    #[test]
+    fn tilted_float32_sheet_is_not_filled() {
+        let r32 = |x: f64| x as f32 as f64;
+        let q = |u: f64, v: f64| [r32(100.0 + u * 0.8), r32(50.0 + v), r32(20.0 + u * 0.6)];
+        let p = vec![q(0.0, 0.0), q(30.0, 0.0), q(30.0, 30.0), q(0.0, 30.0)];
+        let t = vec![[0, 1, 2], [0, 2, 3]];
+        let o = RepairOptions {
+            fill_holes_max_edges: 8,
+            ..Default::default()
+        };
+        let (_, tris, r) = repair(&p, &t, &o).unwrap();
+        assert_eq!((tris.len(), r.filled_holes), (2, 0), "{:?}", r.notes);
+    }
+
+    /// #23: a loop whose last three points are collinear counts as unfilled.
+    #[test]
+    fn collinear_outline_is_reported_unfilled() {
+        let pts = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [1.0, 1.0]];
+        let pos: Vec<[f64; 3]> = pts.iter().map(|q| [q[0], q[1], 0.0]).collect();
+        let e = fill_loop(&pos, &[0, 1, 2], 0.0);
+        assert!(e.is_err());
+    }
+
+    /// #24 and #22: an all-degenerate mesh and a too-coarse weld are refused.
+    #[test]
+    fn empty_results_and_coarse_welds_are_refused() {
+        let p = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let e = repair(&p, &[[0, 1, 2]], &RepairOptions::default()).unwrap_err();
+        assert!(e.contains("every triangle"), "{e}");
+        // 4000 points within one 0.9 mm cell.
+        let p: Vec<[f64; 3]> = (0..4000)
+            .map(|i| {
+                [
+                    (i % 20) as f64 * 0.04,
+                    ((i / 20) % 20) as f64 * 0.04,
+                    (i / 400) as f64 * 0.04,
+                ]
+            })
+            .collect();
+        let t: Vec<[u32; 3]> = (0..3998).map(|i| [i, i + 1, i + 2]).collect();
+        let o = RepairOptions {
+            weld_tolerance: 0.9,
+            ..Default::default()
+        };
+        assert!(repair(&p, &t, &o).is_err());
     }
 
     #[test]
