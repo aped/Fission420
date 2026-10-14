@@ -49,6 +49,21 @@ fn check(name: &str, target: &Body, tool: &Body, op: CombineOp, want: f64, shell
     let m = measure(&out).unwrap();
     assert!(m.all_shells_closed, "{name}: open shell");
     assert_eq!(m.shell_count, shells, "{name}: shells");
+    // Evidence for tools/check_revolved.sh (FreeCAD reads the STEP independently).
+    if let Ok(dir) = std::env::var("RCAD_EVIDENCE_DIR") {
+        let file = format!("revolved_{}.step", name.replace(' ', "_"));
+        std::fs::write(
+            std::path::Path::new(&dir).join(file),
+            export_step(&out, "R-CAD").unwrap(),
+        )
+        .unwrap();
+        // Diagnostic: the revolved tool alone.
+        if std::env::var("RCAD_EVIDENCE_TOOLS").is_ok() {
+            let file = format!("tool_{}.step", name.replace(' ', "_"));
+            let text = export_step(tool, "R-CAD").unwrap();
+            std::fs::write(std::path::Path::new(&dir).join(file), text).unwrap();
+        }
+    }
     let VolumeResult::Value { volume: v, .. } = m.volume else {
         panic!("{name}: volume unavailable");
     };
@@ -134,4 +149,30 @@ fn tube_cut_through_a_block_is_refused_by_the_one_body_rule() {
         .expect_err("two solids")
         .to_string();
     assert!(e.contains("2 disconnected solids"), "{e}");
+}
+
+/// STEP export: a revolved straight edge must not be written over an unbounded `LINE` (it crosses
+/// the axis for an annulus or cone, so readers mis-trim the face; FreeCAD read most seams of
+/// these rings as invalid). tools/check_revolved.sh checks the files in OpenCascade.
+#[test]
+fn revolution_generatrix_is_bounded_in_step() {
+    let ring = ring(&rect_rz(9.0, 11.0, 10.0, 12.0), 1.234);
+    let text = export_step(&ring, "R-CAD").unwrap();
+    let entity = |id: &str| {
+        text.lines()
+            .find(|l| l.trim_start().starts_with(&format!("{id} =")))
+            .unwrap_or_else(|| panic!("entity {id} missing"))
+            .to_string()
+    };
+    let mut n = 0;
+    for l in text.lines().filter(|l| l.contains("SURFACE_OF_REVOLUTION")) {
+        let curve = l.split(',').nth(1).unwrap().trim().to_string();
+        let def = entity(&curve);
+        assert!(
+            !def.contains("= LINE("),
+            "unbounded generatrix: {l} -> {def}"
+        );
+        n += 1;
+    }
+    assert_eq!(n, 12, "four revolved edges x three sectors");
 }
