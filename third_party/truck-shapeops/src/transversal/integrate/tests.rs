@@ -84,3 +84,31 @@ fn difference_with_tool_inside_hole() {
     assert_eq!(res.boundaries()[0].len(), punched.boundaries()[0].len());
     assert!((volume(&res) - before).abs() < 1.0e-6);
 }
+
+/// R-CAD fork: a ring of revolution cut from a coaxial cylinder (a groove). The tool's faces are surfaces
+/// of revolution (v period 2π); a boundary crossing the seam used to jump a full period in parameter
+/// space, so face division failed and `and` returned `None` for every seam angle.
+#[test]
+fn groove_cut_by_a_revolved_ring() {
+    use std::f64::consts::PI;
+    for seam in [0.0, PI / 4.0, PI / 2.0, PI] {
+        let cyl = cylinder(0.0, 0.0, 10.0, 0.0, 30.0);
+        let v: Vec<Vertex> = [(9.0, 10.0), (11.0, 10.0), (11.0, 12.0), (9.0, 12.0)]
+            .iter()
+            .map(|&(x, z)| builder::vertex(Point3::new(x, 0.0, z)))
+            .collect();
+        let w: Wire = (0..4).map(|i| builder::line(&v[i], &v[(i + 1) % 4])).collect();
+        let face = builder::try_attach_plane(&[w]).unwrap();
+        let face = builder::rotated(&face, Point3::origin(), Vector3::unit_z(), Rad(seam));
+        let mut ring = builder::rsweep(&face, Point3::origin(), Vector3::unit_z(), Rad(2.0 * PI));
+        if volume(&ring) < 0.0 {
+            ring.not();
+        }
+        ring.not();
+        let res = crate::and(&cyl, &ring, 0.05).unwrap_or_else(|| panic!("seam {seam}: None"));
+        assert_eq!(res.boundaries().len(), 1);
+        // Tessellated volume (chordal error ~3e-4 at this tolerance); exact: 3000π - 38π.
+        let want = 2962.0 * PI;
+        assert!(((volume(&res) - want) / want).abs() < 1e-3, "seam {seam}: {}", volume(&res));
+    }
+}

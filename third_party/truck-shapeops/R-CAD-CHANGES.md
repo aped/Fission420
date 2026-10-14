@@ -26,3 +26,9 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   volume within 1.3e-6 of 48000 - 160π.
 - Known pre-existing failure: `healing::tests::step_import` reads a fixture that is not in the
   crates.io package (fails identically on the verbatim crate).
+- `src/transversal/divide_face`: parameter loops on periodic surfaces are unwrapped. Each point
+  takes the period nearest to its predecessor, and each loop is shifted by whole periods into the
+  frame of the face's original outer boundary. Before this, `search_parameter` on a surface of
+  revolution could return v = 2π where the walk was at v = 0, so the loop self-crossed. Its area
+  sign flipped, and `divide_faces` returned `None` for every revolved Join/Cut that crossed a seam.
+  Test: `groove_cut_by_a_revolved_ring`, which uses 4 seam angles and fails on the previous code.
