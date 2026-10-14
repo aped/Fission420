@@ -956,6 +956,9 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
+/// (point on axis, unit axis, radius, axial min, axial max, vertex angles).
+type AxisGroup = ([f64; 3], [f64; 3], f64, f64, f64, Vec<f64>);
+
 /// (point on axis, unit axis, axial range along it).
 type AxisSpan = ([f64; 3], [f64; 3], (f64, f64));
 
@@ -1025,7 +1028,7 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
         }
     }
     // Group by axis line and radius.
-    let mut groups: Vec<([f64; 3], [f64; 3], f64, f64, f64, Vec<f64>)> = Vec::new();
+    let mut groups: Vec<AxisGroup> = Vec::new();
     let mut keys: Vec<usize> = per_face.keys().copied().collect();
     keys.sort_unstable();
     for fi in keys {
