@@ -1,0 +1,102 @@
+# Rounded box from New with real pointer/keyboard input: a dimensioned
+# 60 x 40 rectangle extruded 20, four vertical edges rounded R 5 (Fillet
+# edge…), then the top face picked and its whole edge loop rounded
+# (Fillet edge loop…) r 2 (tori at the corners), the radius edited to 5
+# (sphere corners), undo/redo, and an over-large radius refused.
+# Expected volumes are closed forms: A = r^2 (1 - pi/4), M = r^3 (5/6 - pi/4),
+# V = (2400 - (4 - pi) 25) 20 - A 160 - 2 pi (5 A - M).
+clickw New
+wait_idle
+clickw New Sketch on XY
+wait_idle
+clickw 2-Point Rect
+sclick 0.3 0.2
+sclick 40 30
+expect editing.entities 4
+key d
+sclick 20 0
+type 60
+key Return
+key f
+wait_idle
+sclick 60 15
+type 40
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 20
+key Return
+wait_idle
+expect volume 48000 0.01
+# Vertical edges: entity 1 front (y = 0), 2 right, 3 back, 4 left.
+key 1
+key f
+wait_idle
+wclick 30 0 10
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 2)
+typew Fillet radius (mm) | 5
+clickw OK
+wait_idle
+wclick 30 0 10
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 4)
+typew Fillet radius (mm) | 5
+clickw OK
+wait_idle
+key 3
+key f
+wait_idle
+wclick 60 20 10
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 3)
+typew Fillet radius (mm) | 5
+clickw OK
+wait_idle
+key 6
+key f
+wait_idle
+wclick 30 40 10
+clickw Fillet edge…
+clickw Second face
+clickw Extrude1 side face (sketch entity 4)
+typew Fillet radius (mm) | 5
+clickw OK
+wait_idle
+expect volume 47570.796327 0.001
+# The top loop.
+key 0
+key f
+wait_idle
+wclick 30 20 20
+clickw Fillet edge loop…
+typew Fillet radius (mm) | 2
+clickw OK
+wait_idle
+expect last_reply.ok true
+expect volume 47408.892974 0.001
+shot
+# Radius 5 = the corner radius: sphere corners.
+clickw Fillet5
+typew radius (mm) | 5
+clickw Apply
+wait_idle
+expect volume 46581.489286 0.001
+key ctrl+z
+wait_idle
+expect volume 47408.892974 0.001
+key ctrl+shift+z
+wait_idle
+expect volume 46581.489286 0.001
+# Larger than the corner radius: refused, the model keeps r 5.
+typew radius (mm) | 6
+clickw Apply
+wait_idle
+expect last_reply.ok false
+expect volume 46581.489286 0.001
+shot
