@@ -1810,6 +1810,15 @@ impl Session {
             Ok(()) => r.ok = true,
             Err(e) => {
                 r.ok = false;
+                // An import stopped by a cancellation request: say so (the
+                // reader's own error says only that it stopped), nothing is
+                // committed (the transaction never ran or was rolled back).
+                let e = match (import_path(cmd), &e) {
+                    (Some(path), _) if rcad_document::cancel_requested() => {
+                        DocError::ImportCancelled(path.display().to_string())
+                    }
+                    _ => e,
+                };
                 r.error = Some(e);
             }
         }
@@ -4684,6 +4693,20 @@ fn file_stem(p: &Path) -> String {
 }
 
 /// Read an import source, bounded by the native file limit (it is embedded).
+/// The file of an import command (None for other commands).
+fn import_path(cmd: &Command) -> Option<&Path> {
+    match cmd {
+        Command::ImportStep { path, .. }
+        | Command::ImportStepAssembly { path, .. }
+        | Command::ImportStl { path, .. }
+        | Command::ImportDxf { path, .. }
+        | Command::Import3mf { path }
+        | Command::ImportSvg { path, .. } => Some(path),
+        Command::ImportSurfaces(a) => Some(&a.path),
+        _ => None,
+    }
+}
+
 fn read_import(path: &Path) -> Result<Vec<u8>, DocError> {
     let ferr = |e: std::io::Error| DocError::File(format!("open {}: {e}", path.display()));
     let len = std::fs::metadata(path).map_err(ferr)?.len();

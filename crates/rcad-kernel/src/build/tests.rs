@@ -278,4 +278,26 @@ fn revolve_of_a_profile_touching_the_axis() {
     assert!(e.contains("cone tip"), "{e}");
     let e = revolve(&cup, &Frame::XZ, PI).unwrap_err().to_string();
     assert!(e.contains("full 360"), "{e}");
+    // A flat-backed dome (an arc and the axis line, two edges): refused, no
+    // panic; a section necked down to 1e-5 mm from the axis: refused.
+    let dome = Profile::Loop(vec![
+        LoopSegment::Arc {
+            start: [0.0, -5.0],
+            center: [-8.660254037844386, 0.0],
+            ccw: true,
+        },
+        LoopSegment::Line { start: [0.0, 5.0] },
+    ]);
+    assert!(revolve(&dome, &Frame::XZ, 2.0 * PI).is_err());
+    let neck = Profile::Polygon(vec![
+        [0.0, 0.0],
+        [10.0, 0.0],
+        [1e-5, 5.0],
+        [10.0, 10.0],
+        [0.0, 10.0],
+    ]);
+    let e = revolve(&neck, &Frame::XZ, 2.0 * PI)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("within"), "{e}");
 }

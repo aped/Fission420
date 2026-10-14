@@ -956,7 +956,7 @@ impl RcadApp {
         let name = cmd.name().to_string();
         if self.engine.submit(cmd) {
             self.in_flight.push_back((name, Instant::now()));
-            self.submitted += 1;
+            self.submitted = self.engine.submitted();
             Some(self.submitted)
         } else {
             self.diag(
@@ -2783,6 +2783,7 @@ pub fn error_kind(e: &DocError) -> &'static str {
         DocError::File(_) => "File",
         DocError::NeedsPieces { .. } => "NeedsPieces",
         DocError::Cancelled(_) => "Cancelled",
+        DocError::ImportCancelled(_) => "Cancelled",
     }
 }
 

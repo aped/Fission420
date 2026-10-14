@@ -48,16 +48,17 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 
 | | |
 |---|---|
-| **Sketching** | Lines, rectangles, circles, three-point arcs, slots, regular polygons, sketch patterns, fillets, offsets, trim/extend, text from installed fonts; associative projection of faces and other sketches; dimensions and geometric constraints; a solver that reports residuals, remaining degrees of freedom and conflicts |
-| **Solids** | Extrude (new body / join / cut / intersect; symmetric, two sides, start offset, up to a plane, thin, taper, several regions), revolve about any sketch axis or line, multi-section loft, sweep, holes with counterbores and countersinks, modeled threads (faceted), linear/circular patterns, mirror, convex and concave solid fillets, chamfers, shell from a face, ribs, sheet-metal contour flange with flat pattern; body move/copy/scale/align/split/combine; direct edits of imported STEP faces and holes |
+| **Sketching** | Lines, rectangles, circles, three-point arcs, ellipses, cubic splines, slots, regular polygons, sketch patterns, fillets, offsets, trim/extend, text from installed fonts; associative projection of faces, single edges (oblique circles become exact ellipses), body sections and other sketches; dimensions and geometric constraints; a solver that reports residuals, remaining degrees of freedom and conflicts |
+| **Solids** | Extrude (new body / join / cut / intersect; symmetric, two sides, start offset, up to a plane, thin, taper, several regions), revolve about any sketch axis or line (also sections drawn against the axis, e.g. cups and knobs), multi-section loft, sweep, holes with counterbores and countersinks, modeled threads (faceted), linear (one or two directions), circular patterns, mirror, convex and concave solid fillets, fillet and chamfer of a face's whole edge loop (tori and sphere corners, also on shelled enclosures), chamfers, shell from a face, ribs, sheet-metal contour flange with flat pattern; body move/copy/scale/align/split/combine; cuts that separate a body make one body per piece; direct edits of imported STEP faces and holes |
 | **History** | Suppression, timeline rollback marker, safe reorder, re-attach and unlink repairs, configurations (named variants with part numbers) |
-| **Assemblies** | Components with linked occurrences, rigid/revolute/slider joints with limits, BOM, static interference, assembly export |
+| **Assemblies** | Nested components with linked occurrences, rigid/revolute/slider/cylindrical/pin-slot/planar/ball joints with limits, BOM, static interference and sampled sweep checks, exploded views, STEP assembly import/export |
 | **Drawings** | Base, projected, section and detail views (first/third angle), hidden lines, automatic dimensions and hole callouts, title block; SVG, PDF and DXF |
 | **Parameters** | Named user parameters with units and expressions (`outer_length - 2 * wall`); each change is one undo step; impossible values are refused with the model unchanged |
 | **Inspection** | Exact face measurements (distances, angles, radii, axes), per-body volume, materials and mass properties (mass, centre of mass, inertia), bounds and topology, section view |
-| **Print export** | STL / 3MF with chord control, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
-| **Interchange** | STEP import/export (exact B-rep subset), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.rcad.json` (v7; v4 to v6 written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
+| **Mesh** | Mesh diagnosis (boundaries, non-manifold, orientation, duplicates, components, bounded self-intersection check), repair, transform/unit conversion, plane cut with caps, decimation with measured deviation |
+| **Print export** | STL / 3MF with chord control, separate objects with their own transforms, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
+| **Interchange** | STEP import/export (exact B-rep subset, assemblies, surface bodies), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
+| **Native format** | Versioned `.rcad.json` (v8; older versions written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
 
 ## Screenshots
 
@@ -181,14 +182,16 @@ cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptan
 
 ## Status and limits
 
-R-CAD is a **prototype**. It is useful for prismatic and lofted parts and printable
-enclosures. Solid fillets are limited to straight edges of bodies prismatic along the edge
-(no corner blends); threads are faceted (within 0.01 mm), not exact helicoids; revolved
-Join/Cut and some coplanar or coincident boolean cases are refused (Truck 0.6 limitations);
-assemblies are flat (no nesting) and drawings use sampled hidden-line removal. Every Join/Cut
-result is independently checked before it commits (ADR 0005), so an unsupported case
-fails loudly instead of producing wrong geometry. Example exports are validated in CAD and
-slicer software but have **not** been physically printed.
+R-CAD is a **prototype**. It is useful for prismatic, revolved and lofted parts and printable
+enclosures. Solid fillets cover straight prismatic edges and whole edge loops of a cap face
+(tori, sphere corners, mitred corners, also after a shell); arbitrary corner blends and
+variable radii are not implemented. Threads are faceted (within 0.01 mm), not exact
+helicoids. Some coplanar or coincident boolean cases are still refused, and curved booleans
+can take seconds to tens of seconds. Drawings use sampled hidden-line removal. Every
+Join/Cut result is independently checked before it commits (ADR 0005), so an unsupported
+case fails loudly instead of producing wrong geometry; a running regeneration can be
+cancelled from the toolbar. Example exports are validated in CAD and slicer software but
+have **not** been physically printed (sliced is not printed).
 
 Linux (Bazzite / Fedora atomic) is the primary development platform. Windows and macOS
 builds are produced by CI and are being brought up to the same test bar.

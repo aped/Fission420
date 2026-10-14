@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rcad-cancel = { version = "0.1.0", path = "../rcad-cancel" }
 rcad-kernel = { version = "0.1.0", path = "../rcad-kernel" }
 rcad-sketch = { version = "0.1.0", path = "../rcad-sketch" }
 rcad-exchange = { version = "0.1.0", path = "../rcad-exchange" }

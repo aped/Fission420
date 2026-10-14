@@ -282,7 +282,7 @@ impl RcadApp {
                     )
                     .clicked()
                 {
-                    rcad_document::request_cancel();
+                    self.engine.cancel_running();
                 }
             }
         });
@@ -2305,7 +2305,7 @@ impl RcadApp {
                     Dialog::Import(form) => {
                         ok_allowed &= self.import_form_ui(ui, form);
                         if form.pending.is_some() {
-                            ui.small("Cancel closes this dialog only: a running import still completes, and Undo removes it.");
+                            ui.small("Importing… Cancel stops the import: nothing is imported.");
                         }
                     }
                 }
@@ -2321,6 +2321,13 @@ impl RcadApp {
         ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
         if cancel {
+            // A pending import is cancelled too (stopped while it reads, or
+            // answered as cancelled if still queued): nothing is imported.
+            if let Dialog::Import(f) = &dlg
+                && let Some(token) = f.pending
+            {
+                self.engine.cancel(token);
+            }
             self.last_dialog = None;
             return; // dialog dropped; nothing created
         }

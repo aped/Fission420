@@ -6,6 +6,7 @@ license.workspace = true
 description = "Pure-Rust interchange adapters: STL mesh read/write and diagnostics, ASCII DXF sketch import/export, 3MF mesh read/write"
 
 [dependencies]
+rcad-cancel = { version = "0.1.0", path = "../rcad-cancel" }
 rcad-sketch = { path = "../rcad-sketch" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"

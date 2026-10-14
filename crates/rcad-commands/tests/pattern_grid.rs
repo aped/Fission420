@@ -97,3 +97,46 @@ fn three_by_two_compartments_from_one_pocket() {
         r.error
     );
 }
+
+/// A sketch on the floor of grid instance (i 1, j 1) keeps that occurrence
+/// when the first-direction count changes: instance numbers are stable per
+/// (i, j), not positional.
+#[test]
+fn copy_reference_keeps_its_grid_cell_when_count_changes() {
+    let mut s = Session::new();
+    tray_seed(&mut s);
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "linear_pattern", "feature": 4, "count": 3, "spacing": 32.0,
+                "direction": [1.0, 0.0],
+                "second": {"count": 2, "spacing": 32.0, "direction": [0.0, 1.0]}}),
+    );
+    // Instance (1, 1) = 1 + 1·100; its pocket floor faces up at z = 5.
+    let floor = json!({"Face": {"feature": 5, "role": {"Copy": {"instance": 101, "tool": 0,
+                         "of": "EndCap"}}}});
+    let r = tray::ok(
+        &mut s,
+        &json!({"cmd": "create_sketch", "plane": floor, "template": "centered_circle",
+                "diameter": 4.0, "center": [0.0, 0.0]}),
+    );
+    let sk = r.feature.unwrap();
+    let frame = |s: &Session| {
+        s.model()
+            .unwrap()
+            .evaluation()
+            .features
+            .iter()
+            .find(|f| f.id == sk)
+            .and_then(|f| f.frame)
+            .expect("sketch frame")
+    };
+    let o = frame(&s).origin;
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 5, "name": "count", "value": 2.0}),
+    );
+    let o2 = frame(&s).origin;
+    for k in 0..3 {
+        assert!((o[k] - o2[k]).abs() < 1e-9, "{o:?} -> {o2:?}");
+    }
+}

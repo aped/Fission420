@@ -33,7 +33,11 @@
 //!   regeneration to stop at the next feature (or pattern instance)
 //!   ([`rcad_document::request_cancel`]): that command then fails with
 //!   `DocError::Cancelled` and commits nothing; the flag is cleared before
-//!   each command.
+//!   each command. [`Engine::cancel`] cancels one submitted command by its
+//!   token (the Import dialog's Cancel): still queued, it is answered with
+//!   `DocError::ImportCancelled` without running; running, the flag is set
+//!   and the file readers stop at their next poll (`rcad_cancel`), so the
+//!   import fails and nothing is committed.
 //! * Profiling: `response.elapsed_ms` ([`Reply::elapsed`]) is the worker time for
 //!   the command including display tessellation.
 //!
@@ -252,10 +256,66 @@ fn handle_next(session: &mut Session, queue: &mut VecDeque<Command>) -> Option<R
     })
 }
 
+/// Per-command cancellation shared by the engine (UI thread) and the worker.
+/// Tokens number the submitted commands 1, 2, … in submission (= execution)
+/// order.
+#[derive(Default)]
+pub(crate) struct CancelTokens {
+    /// Token of the command the worker runs now (0: none yet).
+    running: std::sync::atomic::AtomicU64,
+    cancelled: Mutex<Vec<u64>>,
+}
+
+impl CancelTokens {
+    fn is_cancelled(&self, token: u64) -> bool {
+        self.cancelled
+            .lock()
+            .map(|v| v.contains(&token))
+            .unwrap_or(false)
+    }
+
+    /// Worker side, before each command: clear the flag (a request applies to
+    /// the command running when it was made), publish the token, and say
+    /// whether it was cancelled while queued.
+    /// Saves, exports and measurement are never interrupted (a Cancel
+    /// meant for a regeneration must not fail a Save): they publish token 0.
+    fn start(&self, token: u64, cancellable: bool) -> bool {
+        rcad_document::clear_cancel();
+        self.running.store(
+            if cancellable { token } else { 0 },
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.is_cancelled(token)
+    }
+}
+
+/// Reply for a command cancelled before it started: nothing ran.
+fn cancelled_reply(session: &Session, cmd: Command) -> Reply {
+    let response = Response {
+        ok: false,
+        command: cmd.name().into(),
+        error: Some(rcad_document::DocError::ImportCancelled(format!(
+            "{} (cancelled before it started)",
+            cmd.name()
+        ))),
+        elapsed_ms: Some(0.0),
+        ..Default::default()
+    };
+    Reply {
+        command: cmd,
+        response,
+        summary: session.summary(),
+        measurements: session
+            .model()
+            .and_then(|m| m.evaluation().measurements.clone()),
+        mesh: MeshUpdate::Unchanged,
+        followup: false,
+    }
+}
+
 /// Execute one command and derive everything the UI needs from the session.
+/// The caller clears the cancellation flag before it (see [`CancelTokens`]).
 pub fn execute(session: &mut Session, cmd: Command) -> Reply {
-    // A cancellation request applies to the command running when it was made.
-    rcad_document::clear_cancel();
     let t0 = Instant::now();
     let before = session.summary();
     let mut response = session.execute(&cmd);
@@ -543,7 +603,9 @@ fn worker(
     self_tx: Sender<WorkerIn>,
     tx: Sender<Reply>,
     repaint: Option<Box<dyn Fn() + Send>>,
+    tokens: Arc<CancelTokens>,
 ) {
+    let mut seq = 0u64;
     let mut session = Session::new();
     session.set_defer_measurements(true);
     let slot = Arc::new((Mutex::new(MeasureSlot::default()), Condvar::new()));
@@ -592,8 +654,32 @@ fn worker(
                 WorkerIn::Shutdown => stopping = true,
             }
         }
-        let Some(reply) = handle_next(&mut session, &mut queue) else {
+        if queue.is_empty() {
             continue;
+        }
+        seq += 1;
+        let cancellable = queue.front().is_some_and(|c| {
+            !matches!(
+                c,
+                Command::Save { .. }
+                    | Command::SaveCopy { .. }
+                    | Command::Measure
+                    | Command::ExportStl { .. }
+                    | Command::ExportStep { .. }
+                    | Command::Export3mf { .. }
+                    | Command::ExportDrawing { .. }
+            )
+        });
+        let reply = if tokens.start(seq, cancellable) {
+            match queue.pop_front() {
+                Some(cmd) => cancelled_reply(&session, cmd),
+                None => continue,
+            }
+        } else {
+            match handle_next(&mut session, &mut queue) {
+                Some(r) => r,
+                None => continue,
+            }
         };
         if tx.send(reply).is_err() {
             break;
@@ -651,11 +737,15 @@ pub struct Engine {
     backend: Backend,
     in_flight: usize,
     worker_lost: bool,
+    tokens: Arc<CancelTokens>,
+    /// Commands submitted so far (the last one's token).
+    submitted: u64,
 }
 
 impl Engine {
     /// `repaint` is called from the worker after each reply (wakes the UI).
     pub fn new(mode: ExecMode, repaint: Option<Box<dyn Fn() + Send>>) -> Self {
+        let tokens = Arc::new(CancelTokens::default());
         let backend = match mode {
             ExecMode::Sync => Backend::Sync {
                 session: Box::new(Session::new()),
@@ -665,9 +755,10 @@ impl Engine {
                 let (tx, worker_rx) = channel::<WorkerIn>();
                 let (worker_tx, rx) = channel::<Reply>();
                 let self_tx = tx.clone();
+                let t = tokens.clone();
                 let handle = std::thread::Builder::new()
                     .name("rcad-session".into())
-                    .spawn(move || worker(worker_rx, self_tx, worker_tx, repaint))
+                    .spawn(move || worker(worker_rx, self_tx, worker_tx, repaint, t))
                     .ok();
                 Backend::Threaded {
                     tx: Some(tx),
@@ -680,6 +771,8 @@ impl Engine {
             backend,
             in_flight: 0,
             worker_lost: false,
+            tokens,
+            submitted: 0,
         }
     }
 
@@ -717,9 +810,14 @@ impl Engine {
         match &mut self.backend {
             Backend::Sync { session, ready } => {
                 let mut queue: VecDeque<Command> = cmds.into();
-                while let Some(r) = handle_next(session, &mut queue) {
+                loop {
+                    rcad_document::clear_cancel();
+                    let Some(r) = handle_next(session, &mut queue) else {
+                        break;
+                    };
                     ready.push_back(r);
                 }
+                self.submitted += n as u64;
                 true
             }
             Backend::Threaded { tx, handle, .. } => {
@@ -729,6 +827,7 @@ impl Engine {
                         .is_some_and(|t| t.send(WorkerIn::Commands(cmds)).is_ok());
                 if sent {
                     self.in_flight += n;
+                    self.submitted += n as u64;
                 } else {
                     self.worker_lost = true;
                 }
@@ -755,6 +854,42 @@ impl Engine {
                     None
                 }
             },
+        }
+    }
+
+    /// Token of the last submitted command (commands are numbered 1, 2, … in
+    /// submission order; replies come back in the same order).
+    pub fn submitted(&self) -> u64 {
+        self.submitted
+    }
+
+    /// Cancel the submitted command `token`: if it is still queued it is
+    /// answered as cancelled without running; if it is running, the
+    /// cooperative flag is set (readers and regeneration stop at their next
+    /// poll and nothing is committed). No effect once it has finished.
+    pub fn cancel(&self, token: u64) {
+        if let Ok(mut v) = self.tokens.cancelled.lock() {
+            v.push(token);
+        }
+        if self
+            .tokens
+            .running
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == token
+        {
+            rcad_document::request_cancel();
+        }
+    }
+
+    /// Cancel whatever command is running now (the toolbar's Cancel); no
+    /// effect between commands or during a save/export.
+    pub fn cancel_running(&self) {
+        let t = self
+            .tokens
+            .running
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if t != 0 {
+            self.cancel(t);
         }
     }
 
