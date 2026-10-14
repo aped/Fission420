@@ -839,3 +839,118 @@ fn unevaluated_occurrence_bodies_flag_the_assembly_view() {
         "missing occurrence body not reported: {issues:?}"
     );
 }
+
+/// Review round 2 #9: a 180° rotation swaps two equal holes, so a cylinder of
+/// the same size sits on the first hole's old axis; the dimension must still
+/// dangle (body moved after the hole), not print a value.
+#[test]
+fn hole_dimension_dangles_after_a_rotation_that_swaps_holes() {
+    let mut s = Session::new();
+    let (e, hole) = block(&mut s);
+    // A second Ø8 hole mirrored about x = 20: the first is at (20, 15), move
+    // it to (10, 15) and add one at (30, 15).
+    ok(
+        &mut s,
+        Command::SetParameter {
+            feature: hole,
+            name: "center_x".into(),
+            value: 10.0,
+        },
+    );
+    ok(
+        &mut s,
+        Command::Hole {
+            name: None,
+            plane: SketchPlane::Face(FaceRef {
+                feature: e,
+                role: FaceRole::ExtrudeEndCap,
+            }),
+            center: [30.0, 15.0],
+            diameter: 8.0,
+            depth: None,
+            counterbore: None,
+            target: None,
+        },
+    );
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: None,
+            assembly: false,
+        },
+    )
+    .drawing
+    .unwrap();
+    let left = side_face(&s, e, [-1.0, 0.0, 0.0]);
+    ok(
+        &mut s,
+        Command::AddDrawingDimension {
+            drawing: d,
+            view: ViewId(2),
+            a: DimRef::Face(left),
+            b: Some(DimRef::Hole(hole)),
+            tolerance: Tolerance::None,
+        },
+    );
+    let (r, _) = export(&mut s, d, "swap_0.svg");
+    assert_eq!(user_dims(&r, 2)[0].1, Some(10.0));
+    ok(
+        &mut s,
+        serde_json::from_value(serde_json::json!({"cmd": "move_body", "body": 1,
+            "origin": [20.0, 15.0, 0.0], "axis": [0.0, 0.0, 1.0], "angle_deg": 180.0}))
+        .unwrap(),
+    );
+    let (r, _) = export(&mut s, d, "swap_1.svg");
+    let dims = user_dims(&r, 2);
+    assert!(dims[0].1.is_none() && dims[0].3, "{dims:?}");
+}
+
+/// Review round 2 #13: centre lines are for holes and bosses (full circles),
+/// not for fillets: a block with one rounded vertical edge has no centre line
+/// or mark anywhere on the sheet.
+#[test]
+fn fillets_get_no_centre_lines() {
+    let mut s = Session::new();
+    let (e, hole) = block(&mut s);
+    ok(&mut s, Command::DeleteFeature { feature: hole });
+    let right = side_face(&s, e, [1.0, 0.0, 0.0]);
+    let back = side_face(&s, e, [0.0, 1.0, 0.0]);
+    ok(
+        &mut s,
+        Command::Fillet {
+            name: None,
+            a: right,
+            b: back,
+            radius: 4.0,
+        },
+    );
+    let d = ok(
+        &mut s,
+        Command::CreateDrawing {
+            name: None,
+            sheet: None,
+            projection: None,
+            title: None,
+            part_number: None,
+            material: None,
+            bodies: vec![BodyId(1)],
+            standard_views: None,
+            assembly: false,
+        },
+    )
+    .drawing
+    .unwrap();
+    let (_, svg) = export(&mut s, d, "fillet_centres.svg");
+    assert_eq!(
+        svg.matches("class=\"center\"").count(),
+        0,
+        "centre lines on a fillet"
+    );
+}

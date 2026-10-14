@@ -939,6 +939,19 @@ fn norm(a: [f64; 3]) -> [f64; 3] {
     let l = dot(a, a).sqrt();
     a.map(|x| x / l)
 }
+fn norm3(a: [f64; 3]) -> f64 {
+    dot(a, a).sqrt()
+}
+/// Two unit vectors perpendicular to unit `a` (deterministic).
+fn perp_basis(a: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let h = if a[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let u = norm(cross(a, h));
+    (u, cross(a, u))
+}
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
@@ -987,25 +1000,92 @@ fn body_data(b: &k::Body, chord: f64) -> Result<BodyData> {
             _ => None,
         })
         .collect();
-    let mut axes = Vec::new();
-    for (fi, f) in classes.iter().enumerate() {
-        let k::DirectFace::Cylinder { origin, axis, .. } = f else {
+    // Run 7 centre lines (review round 2 #13/#28): per cylindrical face its
+    // axial range and the angles of its vertices about the axis, in one pass
+    // over the tessellation; faces sharing an axis line and radius are merged
+    // and get a centre line only when together they cover the full circle
+    // (holes and bosses, often split in halves) — not fillets or bends.
+    let mut per_face: HashMap<usize, (f64, f64, Vec<f64>)> = HashMap::new();
+    for (ti, t) in mesh.triangles.iter().enumerate() {
+        let fi = mesh.tri_face.get(ti).copied().unwrap_or(u32::MAX) as usize;
+        let Some(k::DirectFace::Cylinder { origin, axis, .. }) = classes.get(fi) else {
             continue;
         };
         let ax = norm(*axis);
-        let (mut t0, mut t1) = (f64::INFINITY, f64::NEG_INFINITY);
-        for (ti, t) in mesh.triangles.iter().enumerate() {
-            if mesh.tri_face.get(ti) != Some(&(fi as u32)) {
-                continue;
-            }
-            for &v in t {
-                let x = dot(sub(mesh.positions[v as usize], *origin), ax);
-                t0 = t0.min(x);
-                t1 = t1.max(x);
-            }
+        let (u, w) = perp_basis(ax);
+        let e = per_face
+            .entry(fi)
+            .or_insert((f64::INFINITY, f64::NEG_INFINITY, Vec::new()));
+        for &v in t {
+            let d = sub(mesh.positions[v as usize], *origin);
+            let x = dot(d, ax);
+            e.0 = e.0.min(x);
+            e.1 = e.1.max(x);
+            e.2.push(dot(d, w).atan2(dot(d, u)));
         }
-        if t0 < t1 {
-            axes.push((*origin, ax, (t0, t1)));
+    }
+    // Group by axis line and radius.
+    let mut groups: Vec<([f64; 3], [f64; 3], f64, f64, f64, Vec<f64>)> = Vec::new();
+    let mut keys: Vec<usize> = per_face.keys().copied().collect();
+    keys.sort_unstable();
+    for fi in keys {
+        let (t0, t1, angles) = per_face.remove(&fi).unwrap_or_default();
+        let Some(k::DirectFace::Cylinder {
+            origin,
+            axis,
+            radius,
+            ..
+        }) = classes.get(fi)
+        else {
+            continue;
+        };
+        let ax = norm(*axis);
+        let tol = k::tol::KERNEL_LINEAR.max(1e-9 * radius);
+        let same = groups.iter_mut().find(|g| {
+            let w = sub(*origin, g.0);
+            let along = dot(w, g.1);
+            let off = [0, 1, 2].map(|i| w[i] - along * g.1[i]);
+            dot(ax, g.1).abs() > 1.0 - 1e-9 && (g.2 - radius).abs() <= tol && norm3(off) <= tol
+        });
+        match same {
+            Some(g) => {
+                // Express this face's axial range in the group's origin.
+                // Axial position in the group's frame: origin offset along
+                // the group axis plus ±t (antiparallel axes reverse t).
+                let shift = dot(sub(*origin, g.0), g.1);
+                let s = dot(ax, g.1).signum();
+                let (a, b) = (shift + s * t0, shift + s * t1);
+                g.3 = g.3.min(a.min(b));
+                g.4 = g.4.max(a.max(b));
+                // `perp_basis` is a function of the axis: the same for a
+                // parallel axis; for an antiparallel one u -> -u, w -> w, so
+                // an angle θ maps to π − θ.
+                g.5.extend(angles.iter().map(|x| {
+                    let a = if s > 0.0 {
+                        *x
+                    } else {
+                        std::f64::consts::PI - x
+                    };
+                    // Back into (−π, π] for the gap test.
+                    a.sin().atan2(a.cos())
+                }));
+            }
+            None => groups.push((*origin, ax, *radius, t0, t1, angles)),
+        }
+    }
+    let mut axes = Vec::new();
+    for (o, ax, _, t0, t1, mut angles) in groups {
+        if t0 >= t1 || angles.is_empty() {
+            continue;
+        }
+        angles.sort_by(f64::total_cmp);
+        let mut gap = angles[0] + TAU - angles[angles.len() - 1];
+        for w in angles.windows(2) {
+            gap = gap.max(w[1] - w[0]);
+        }
+        // Full circle: no angular gap wider than a tessellation step.
+        if gap < 0.5 {
+            axes.push((o, ax, (t0, t1)));
         }
     }
     let bounds = k::bounds(b).map_err(kerr)?;
@@ -2432,9 +2512,20 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             // (split cylinder faces). Not in pictorial or detail views.
             if frame.name() != "Iso" && !matches!(v.kind, ViewKind::Detail { .. }) {
                 let mut lines: Vec<([f64; 2], [f64; 2])> = Vec::new();
-                for d in &shown {
+                // Section views: the axes of the uncut bodies on or behind
+                // the cutting plane (a cut hole keeps its centre line by
+                // convention; the cut leaves only part of its cylinder).
+                let uncut: Vec<&BodyData> = keys.iter().filter_map(|k| data.get(k)).collect();
+                let sources: &[&BodyData] = if cut_plane.is_some() { &uncut } else { &shown };
+                for d in sources {
                     for (o, ax, (t0, t1)) in &d.axes {
-                        if dot(*ax, frame.toward).abs() > 1e-9 {
+                        if let Some(pl) = &cut_plane
+                            && dot(sub(*o, pl.origin), frame.toward) > 1e-6 * diag
+                        {
+                            continue; // in the removed part
+                        }
+                        // Side-on within the classifier's angular accuracy (#28).
+                        if dot(*ax, frame.toward).abs() > 1e-6 {
                             continue;
                         }
                         let ext = 2.0 / scale;
@@ -3194,6 +3285,39 @@ fn resolve_ref(
                 .find(|r| r.id == *feature)
                 .and_then(|r| r.frame)
                 .ok_or_else(|| format!("hole {feature} was not evaluated"))?;
+            // Review round 2 #9: the hole's frame is where it was made; a
+            // later move/scale/align of its body is not followed, so the
+            // reference dangles instead of measuring a stale (or another)
+            // hole.
+            if let Ok(order) = doc.evaluation_order()
+                && let Some(pos) = order.iter().position(|x| x == feature)
+            {
+                for later in &order[pos + 1..] {
+                    let Ok(lf) = doc.feature(*later) else {
+                        continue;
+                    };
+                    if lf.suppressed || doc.is_rolled_back(*later) {
+                        continue;
+                    }
+                    let moves = matches!(
+                        lf.kind,
+                        FeatureKind::MoveBody { copy: None, .. }
+                            | FeatureKind::ScaleBody { .. }
+                            | FeatureKind::AlignBody { .. }
+                    );
+                    let body = eval
+                        .features
+                        .iter()
+                        .find(|r| r.id == *later)
+                        .and_then(|r| r.body);
+                    if moves && body == Some(*target) {
+                        return Err(format!(
+                            "{target} was moved, scaled or aligned by {later} after hole \
+                             {feature}; hole references do not follow body moves"
+                        ));
+                    }
+                }
+            }
             let (p, d) = (fr.to_world(*center), fr.z);
             // Review run 7 #3: the hole's frame is where it was made. Require
             // its cylinder in the current body on that axis (a later move,
@@ -3227,15 +3351,19 @@ fn hole_cylinder_present(
         return false;
     };
     let tol = k::tol::KERNEL_LINEAR.max(1e-9 * r);
-    (0..k::face_count(b)).any(|i| match k::face_geometry(b, i) {
-        Ok(k::DirectFace::Cylinder {
+    // One classification of all faces (review round 2 #27).
+    let Ok(classes) = k::classify_faces(b) else {
+        return false;
+    };
+    classes.iter().any(|f| match f {
+        k::DirectFace::Cylinder {
             origin,
             axis,
             radius,
             ..
-        }) => {
-            let a = norm(axis);
-            let w = sub(p, origin);
+        } => {
+            let a = norm(*axis);
+            let w = sub(p, *origin);
             let along = dot(w, a);
             let off = [0, 1, 2].map(|k| w[k] - along * a[k]);
             (radius - r).abs() <= tol
