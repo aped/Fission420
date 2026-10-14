@@ -66,7 +66,7 @@ pub use ops::{
     through_all_margin,
 };
 pub use pieces::split_pieces;
-pub use project::{Curve2, face_boundary_curves};
+pub use project::{Curve2, face_boundary_curves, section_curves};
 pub use step::{StepProduct, export_step, export_step_assembly, export_step_bodies};
 pub use step_in::{
     ImportedAssembly, ImportedPlanarFace, ImportedProduct, ImportedSolid, ImportedSurfaces,

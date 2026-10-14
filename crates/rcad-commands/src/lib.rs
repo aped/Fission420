@@ -756,6 +756,10 @@ pub enum Command {
         source: rcad_document::ProjectSource,
         #[serde(default)]
         construction: bool,
+        /// `Edge` sources: a world point picking the face edge (the one
+        /// whose projection passes nearest to it; required, unambiguous).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<[f64; 3]>,
     },
     /// Break projection `link` (0-based) of `sketch` (one undo step): its
     /// geometry stays where the last regeneration put it, as plain fixed
@@ -2916,10 +2920,35 @@ impl Session {
                 sketch,
                 source,
                 construction,
+                at,
             } => {
                 let (sk_id, source, construction) = (*sketch, *source, *construction);
                 let m = self.model_mut()?;
-                let curves = rcad_document::projection_curves(m.document(), sk_id, &source)?;
+                let mut curves = rcad_document::projection_curves(m.document(), sk_id, &source)?;
+                if let rcad_document::ProjectSource::Edge(_) = source {
+                    let frame = m
+                        .evaluation()
+                        .features
+                        .iter()
+                        .find(|f| f.id == sk_id)
+                        .and_then(|f| f.frame)
+                        .ok_or_else(|| {
+                            DocError::Validation(format!("{sk_id} has no evaluated plane"))
+                        })?;
+                    let at = at.ok_or_else(|| {
+                        DocError::Validation(
+                            "projecting an edge needs `at`, a point on or near the edge".into(),
+                        )
+                    })?;
+                    let w = [
+                        at[0] - frame.origin[0],
+                        at[1] - frame.origin[1],
+                        at[2] - frame.origin[2],
+                    ];
+                    let d3 = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+                    let p = [d3(w, frame.x), d3(w, frame.y)];
+                    curves = vec![vec![pick_projected_edge(&curves, p)?]];
+                }
                 if curves.iter().all(Vec::is_empty) {
                     return Err(DocError::Validation("nothing to project".into()));
                 }
@@ -2980,6 +3009,25 @@ impl Session {
                                         end: pb,
                                     });
                                     (id, vec![pc, pa, pb])
+                                }
+                                rcad_kernel::Curve2::Ellipse { c, major, minor } => {
+                                    let (pc, pm) = (point(sketch, c), point(sketch, major));
+                                    let id = sketch.next_entity_id();
+                                    sketch.entities.push(rcad_sketch::Entity::Ellipse {
+                                        id,
+                                        center: pc,
+                                        major: pm,
+                                        minor,
+                                    });
+                                    // Unnamed: driven by the link, not a user dimension.
+                                    sketch.constraints.push(
+                                        rcad_sketch::Constraint::EllipseRadius {
+                                            ellipse: id,
+                                            major: false,
+                                            dim: rcad_sketch::Dimension::new("", minor),
+                                        },
+                                    );
+                                    (id, vec![pc, pm])
                                 }
                                 rcad_kernel::Curve2::Circle { c, r } => {
                                     let pc = point(sketch, c);
@@ -4642,6 +4690,67 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
     }
     s.validate()?;
     Ok(s)
+}
+
+/// The projected face edge nearest to sketch point `p`, unambiguous
+/// (another edge within 1e-6 mm of the same distance is refused).
+fn pick_projected_edge(
+    curves: &[Vec<(rcad_kernel::Curve2, Option<rcad_sketch::EntityId>)>],
+    p: [f64; 2],
+) -> Result<(rcad_kernel::Curve2, Option<rcad_sketch::EntityId>), DocError> {
+    use rcad_kernel::Curve2;
+    let dist = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    let seg = |a: [f64; 2], b: [f64; 2]| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 > 0.0 {
+            (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        dist(p, [a[0] + t * dx, a[1] + t * dy])
+    };
+    let d = |c: &Curve2| match *c {
+        Curve2::Line { a, b } => seg(a, b),
+        Curve2::Circle { c, r } => (dist(p, c) - r).abs(),
+        Curve2::Arc { c, a, b, ccw } => {
+            let (from, to) = if ccw { (a, b) } else { (b, a) };
+            let ang = |q: [f64; 2]| (q[1] - c[1]).atan2(q[0] - c[0]);
+            let tau = std::f64::consts::TAU;
+            let sweep = (ang(to) - ang(from)).rem_euclid(tau);
+            if (ang(p) - ang(from)).rem_euclid(tau) <= sweep {
+                (dist(p, c) - dist(a, c)).abs()
+            } else {
+                dist(p, a).min(dist(p, b))
+            }
+        }
+        Curve2::Ellipse { c, major, minor } => {
+            let a = dist(c, major);
+            let u = [(major[0] - c[0]) / a, (major[1] - c[1]) / a];
+            (0..1024)
+                .map(|k| {
+                    let t = std::f64::consts::TAU * k as f64 / 1024.0;
+                    let q = [
+                        c[0] + a * t.cos() * u[0] - minor * t.sin() * u[1],
+                        c[1] + a * t.cos() * u[1] + minor * t.sin() * u[0],
+                    ];
+                    dist(p, q)
+                })
+                .fold(f64::INFINITY, f64::min)
+        }
+    };
+    let mut ranked: Vec<(f64, &(Curve2, Option<rcad_sketch::EntityId>))> =
+        curves.iter().flatten().map(|c| (d(&c.0), c)).collect();
+    ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+    match ranked.as_slice() {
+        [] => Err(DocError::Validation(
+            "the face has no edges to project".into(),
+        )),
+        [(b, _), (s, _), ..] if s - b <= 1e-6 => Err(DocError::Validation(
+            "two edges of the face are equally near `at`; pick a point closer to one edge".into(),
+        )),
+        [(_, c), ..] => Ok(**c),
+    }
 }
 
 /// Editor-style sketch with one cubic B-spline through `points` (see

@@ -30,6 +30,14 @@ pub enum Curve2 {
         c: [f64; 2],
         r: f64,
     },
+    /// Full ellipse: centre, end point of one axis, the other semi-axis
+    /// (the image of a circle under an oblique projection; never produced
+    /// from a face's own plane).
+    Ellipse {
+        c: [f64; 2],
+        major: [f64; 2],
+        minor: f64,
+    },
 }
 
 /// Samples along a curved edge used to recognise a circle.
@@ -69,6 +77,78 @@ pub fn face_boundary_curves(body: &Body, frame: &Frame) -> Result<Vec<Vec<Curve2
             )));
         }
     };
+    let mut loops = face_loops(&face, frame)?;
+    loops.sort_by(|a, b| b.0.total_cmp(&a.0));
+    Ok(loops.into_iter().map(|(_, l)| l).collect())
+}
+
+/// Section of `body` by `frame`'s plane: the boundary loops of every face the
+/// plane cuts through the body, as exact lines, arcs and circles in `frame`
+/// coordinates (loops sorted by enclosed area, largest first). Built by
+/// cutting away the material in front of the plane (the exact Truck boolean,
+/// intersection edges rebuilt as verified exact curves) and reading the cap
+/// faces left in the plane, so plane ∩ planar faces gives lines, plane ∩
+/// cylinders / cones about axes normal to the plane circles or arcs, plane ∩
+/// a cylinder parallel to it lines. Any other section curve (an oblique
+/// cylinder's ellipse, a free-form surface) is refused by name. Refused too:
+/// a plane holding a face of the body (project that face) and a plane that
+/// does not cross the body.
+pub fn section_curves(body: &Body, frame: &Frame) -> Result<Vec<Vec<Curve2>>> {
+    frame.validate()?;
+    if !coplanar_faces(body, frame).is_empty() {
+        return Err(KernelError::InvalidInput(
+            "section: the plane contains a face of the body (project that face instead)".into(),
+        ));
+    }
+    let b = crate::measure::raw_bounds(&body.solid)?;
+    let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
+    let (x, y, z) = (
+        Vector3::new(frame.x[0], frame.x[1], frame.x[2]),
+        Vector3::new(frame.y[0], frame.y[1], frame.y[2]),
+        Vector3::new(frame.z[0], frame.z[1], frame.z[2]),
+    );
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for cx in [b.min[0], b.max[0]] {
+        for cy in [b.min[1], b.max[1]] {
+            for cz in [b.min[2], b.max[2]] {
+                let d = Point3::new(cx, cy, cz) - o;
+                for (i, v) in [d.dot(x), d.dot(y), d.dot(z)].into_iter().enumerate() {
+                    lo[i] = lo[i].min(v);
+                    hi[i] = hi[i].max(v);
+                }
+            }
+        }
+    }
+    if !(lo[2] < -tol::MIN_LENGTH && hi[2] > tol::MIN_LENGTH) {
+        return Err(KernelError::InvalidInput(
+            "section: the plane does not cross the body".into(),
+        ));
+    }
+    let m = 1.0 + 0.05 * (0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max);
+    let cutter = crate::Profile::Polygon(vec![
+        [lo[0] - m, lo[1] - m],
+        [hi[0] + m, lo[1] - m],
+        [hi[0] + m, hi[1] + m],
+        [lo[0] - m, hi[1] + m],
+    ]);
+    let kept = crate::cut_region_pieces(body, &cutter, &[], frame, hi[2] + m)
+        .map_err(|e| KernelError::InvalidInput(format!("section: cutting the body failed: {e}")))?;
+    let mut loops = Vec::new();
+    for f in coplanar_faces(&kept, frame) {
+        loops.extend(face_loops(&f, frame)?);
+    }
+    if loops.is_empty() {
+        return Err(KernelError::InvalidInput(
+            "section: the plane does not cross the body".into(),
+        ));
+    }
+    loops.sort_by(|a, b| b.0.total_cmp(&a.0));
+    Ok(loops.into_iter().map(|(_, l)| l).collect())
+}
+
+/// Boundary loops of one planar face as exact curves in `frame` coordinates,
+/// each with its enclosed area (unsorted).
+fn face_loops(face: &Face, frame: &Frame) -> Result<Vec<(f64, Vec<Curve2>)>> {
     let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
     let x = Vector3::new(frame.x[0], frame.x[1], frame.x[2]);
     let y = Vector3::new(frame.y[0], frame.y[1], frame.y[2]);
@@ -145,8 +225,7 @@ pub fn face_boundary_curves(body: &Body, frame: &Frame) -> Result<Vec<Vec<Curve2
             / 2.0;
         loops.push((area.abs(), out));
     }
-    loops.sort_by(|a, b| b.0.total_cmp(&a.0));
-    Ok(loops.into_iter().map(|(_, l)| l).collect())
+    Ok(loops)
 }
 
 #[cfg(test)]

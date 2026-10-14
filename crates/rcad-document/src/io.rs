@@ -354,6 +354,15 @@ pub fn v8_feature(doc: &Document) -> Option<&'static str> {
 /// misleading message).
 fn sketch_v8_feature(doc: &Document) -> Option<&'static str> {
     use rcad_sketch::{Constraint, Entity};
+    let new_sources = doc.features.iter().any(|f| {
+        matches!(&f.kind, crate::FeatureKind::Sketch { links, .. } if links.iter().any(|l| matches!(
+            l.source,
+            crate::ProjectSource::Edge(_) | crate::ProjectSource::Section { .. }
+        )))
+    });
+    if new_sources {
+        return Some("projected edges and body sections in sketches");
+    }
     doc.features
         .iter()
         .filter_map(|f| match &f.kind {

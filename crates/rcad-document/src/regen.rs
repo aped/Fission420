@@ -2505,6 +2505,7 @@ fn curves_to_profile(l: &[k::Curve2]) -> std::result::Result<SketchProfile, Stri
                 })
             }
             k::Curve2::Circle { .. } => return Err("a circle inside a loop".into()),
+            k::Curve2::Ellipse { .. } => return Err("an ellipse in a face boundary".into()),
         }
     }
     let poly: Vec<[f64; 2]> = segs.iter().map(|s| s.start()).collect();
@@ -4889,6 +4890,35 @@ fn link_curves(
 ) -> Result<SourceCurves> {
     let broken = |detail: String| DocError::BrokenReference { from: id, detail };
     let (src_frame, loops): (Frame, SourceCurves) = match source {
+        ProjectSource::Edge(r) => {
+            let rf = resolve_face(id, r, st)?;
+            let body = brep_target(st, id, rf.body)?;
+            let loops = k::face_boundary_curves(&body, &rf.frame)
+                .map_err(|e| broken(format!("projection of {} {:?}: {e}", r.feature, r.role)))?;
+            let loops: SourceCurves = loops
+                .into_iter()
+                .map(|l| {
+                    merged_circle(&l)
+                        .map_or(l, |c| vec![c])
+                        .into_iter()
+                        .map(|c| (c, None))
+                        .collect()
+                })
+                .collect();
+            return project_oblique(id, &rf.frame, frame, loops);
+        }
+        ProjectSource::Section { body, .. } => {
+            let b = brep_target(st, id, *body)?;
+            let loops = k::section_curves(&b, frame)
+                .map_err(|e| broken(format!("section of body {body}: {e}")))?;
+            (
+                *frame,
+                loops
+                    .into_iter()
+                    .map(|l| l.into_iter().map(|c| (c, None)).collect())
+                    .collect(),
+            )
+        }
         ProjectSource::Face(r) => {
             let rf = resolve_face(id, r, st)?;
             let body = brep_target(st, id, rf.body)?;
@@ -4978,12 +5008,129 @@ fn link_curves(
                             ccw: ccw != flip,
                         },
                         k::Curve2::Circle { c, r } => k::Curve2::Circle { c: to2(c), r },
+                        k::Curve2::Ellipse { c, major, minor } => k::Curve2::Ellipse {
+                            c: to2(c),
+                            major: to2(major),
+                            minor,
+                        },
                     };
                     (c, e)
                 })
                 .collect()
         })
         .collect())
+}
+
+/// A boundary loop made only of arcs of one circle (the kernel splits a
+/// full circle into arcs) as that full circle: a picked hole rim projects as
+/// one circle.
+fn merged_circle(l: &[k::Curve2]) -> Option<k::Curve2> {
+    let mut circle: Option<([f64; 2], f64)> = None;
+    for c in l {
+        let k::Curve2::Arc { c, a, .. } = *c else {
+            return None;
+        };
+        let r = (a[0] - c[0]).hypot(a[1] - c[1]);
+        match circle {
+            None => circle = Some((c, r)),
+            Some((c0, r0)) => {
+                if (c[0] - c0[0]).hypot(c[1] - c0[1]) > k::tol::KERNEL_LINEAR
+                    || (r - r0).abs() > k::tol::KERNEL_LINEAR
+                {
+                    return None;
+                }
+            }
+        }
+    }
+    circle.map(|(c, r)| k::Curve2::Circle { c, r })
+}
+
+/// Source curves (in `src`'s 2-D coordinates) projected along the sketch
+/// normal into the sketch on `frame`. Lines stay lines; arcs and circles
+/// stay circular on a parallel plane; on an oblique plane a circle becomes
+/// the exact ellipse with the principal axes of `r [X Y]` (`X`, `Y` the
+/// projected unit axes of the source plane: one semi-axis is `r`, the other
+/// `r |cos φ|`); an arc there would be an elliptical arc (refused), and a
+/// plane perpendicular to the sketch flattens circles to segments (refused).
+fn project_oblique(
+    id: FeatureId,
+    src: &Frame,
+    frame: &Frame,
+    loops: SourceCurves,
+) -> Result<SourceCurves> {
+    let cosine = dot(src.z, frame.z);
+    let refuse = |why: &str| DocError::ProductLimit(format!("{id}: projected edge: {why}"));
+    let to2 = |p: [f64; 2]| {
+        let w = sub(src.to_world(p), frame.origin);
+        [dot(w, frame.x), dot(w, frame.y)]
+    };
+    let parallel = cosine.abs() >= 1.0 - 1e-9;
+    let flip = cosine < 0.0;
+    let (ax, ay) = (
+        [dot(src.x, frame.x), dot(src.x, frame.y)],
+        [dot(src.y, frame.x), dot(src.y, frame.y)],
+    );
+    let mut out = Vec::new();
+    for l in loops {
+        let mut ol = Vec::new();
+        for (c, e) in l {
+            let c = match c {
+                k::Curve2::Line { a, b } => k::Curve2::Line {
+                    a: to2(a),
+                    b: to2(b),
+                },
+                k::Curve2::Arc { c, a, b, ccw } if parallel => k::Curve2::Arc {
+                    c: to2(c),
+                    a: to2(a),
+                    b: to2(b),
+                    ccw: ccw != flip,
+                },
+                k::Curve2::Circle { c, r } if parallel => k::Curve2::Circle { c: to2(c), r },
+                k::Curve2::Arc { .. } => {
+                    return Err(refuse(
+                        "an arc on a face oblique to the sketch projects to an elliptical arc \
+                         (not supported; full circles project to ellipses)",
+                    ));
+                }
+                k::Curve2::Circle { c, r } => {
+                    // M = r [ax ay]; M Mᵀ = r² [[p, q], [q, t]].
+                    let (p, q, t) = (
+                        ax[0] * ax[0] + ay[0] * ay[0],
+                        ax[0] * ax[1] + ay[0] * ay[1],
+                        ax[1] * ax[1] + ay[1] * ay[1],
+                    );
+                    let (m, d) = ((p + t) / 2.0, (((p - t) / 2.0).powi(2) + q * q).sqrt());
+                    let (l1, l2) = (m + d, (m - d).max(0.0));
+                    if l2.sqrt() < 1e-9 {
+                        return Err(refuse(
+                            "a circle on a face perpendicular to the sketch projects to a segment",
+                        ));
+                    }
+                    let v = if d <= 1e-15 {
+                        [1.0, 0.0]
+                    } else if (l1 - p).abs() >= (l1 - t).abs() {
+                        [q, l1 - p]
+                    } else {
+                        [l1 - t, q]
+                    };
+                    let n = v[0].hypot(v[1]);
+                    let cc = to2(c);
+                    let a = r * l1.sqrt();
+                    k::Curve2::Ellipse {
+                        c: cc,
+                        major: [cc[0] + a * v[0] / n, cc[1] + a * v[1] / n],
+                        minor: r * l2.sqrt(),
+                    }
+                }
+                k::Curve2::Ellipse { .. } => {
+                    return Err(refuse("an ellipse edge cannot be projected"));
+                }
+            };
+            ol.push((c, e));
+        }
+        out.push(ol);
+    }
+    Ok(out)
 }
 
 /// The points a curve pins: line a, b; arc centre, start, end (sketch arcs
@@ -4999,6 +5146,7 @@ fn curve_points(c: &k::Curve2) -> Vec<[f64; 2]> {
             }
         }
         k::Curve2::Circle { c, r } => vec![c, [c[0] + r, c[1]]],
+        k::Curve2::Ellipse { c, major, .. } => vec![c, major],
     }
 }
 
@@ -5007,6 +5155,7 @@ fn curve_kind(c: &k::Curve2) -> u8 {
         k::Curve2::Line { .. } => 0,
         k::Curve2::Arc { .. } => 1,
         k::Curve2::Circle { .. } => 2,
+        k::Curve2::Ellipse { .. } => 3,
     }
 }
 
@@ -5063,7 +5212,52 @@ fn bind_link(
                 assigned.push((lc, *c));
             }
         }
-        ProjectSource::Face(_) => {
+        ProjectSource::Edge(_) => {
+            // One curve: the face edge of the same kind nearest to the pins.
+            for lc in link.loops.iter().flatten() {
+                let kind = match s.entities.iter().find(|x| x.id() == lc.entity) {
+                    Some(rcad_sketch::Entity::Line { .. }) => 0u8,
+                    Some(rcad_sketch::Entity::Arc { .. }) => 1,
+                    Some(rcad_sketch::Entity::Circle { .. }) => 2,
+                    Some(rcad_sketch::Entity::Ellipse { .. }) => 3,
+                    _ => return Err(broken(format!("{:?} is not a projected curve", lc.entity))),
+                };
+                let mut ranked: Vec<(f64, k::Curve2)> = curves
+                    .iter()
+                    .flatten()
+                    .filter(|(c, _)| curve_kind(c) == kind)
+                    .map(|(c, _)| {
+                        let d = curve_points(c)
+                            .iter()
+                            .zip(&lc.points)
+                            .map(|(p, q)| match stored(*q, s) {
+                                (Some(x), Some(y)) => (p[0] - x).hypot(p[1] - y),
+                                (Some(x), None) => (p[0] - x).abs(),
+                                (None, Some(y)) => (p[1] - y).abs(),
+                                (None, None) => 0.0,
+                            })
+                            .sum::<f64>();
+                        (d, *c)
+                    })
+                    .collect();
+                ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let Some(&(bd, c)) = ranked.first() else {
+                    return Err(broken("the face has no edge of that kind any more".into()));
+                };
+                if ranked
+                    .get(1)
+                    .is_some_and(|(sd, _)| sd - bd <= k::tol::KERNEL_LINEAR)
+                {
+                    return Err(broken(
+                        "two edges of the face match the projected edge equally well; the \
+                         edge is ambiguous"
+                            .into(),
+                    ));
+                }
+                assigned.push((lc, c));
+            }
+        }
+        ProjectSource::Face(_) | ProjectSource::Section { .. } => {
             if curves.len() != link.loops.len() {
                 return Err(broken(format!(
                     "the face had {} boundary loop(s), now {}",
@@ -5182,6 +5376,24 @@ fn bind_link(
         {
             *radius = r;
         }
+        if let k::Curve2::Ellipse { minor: b, .. } = c {
+            if let Some(rcad_sketch::Entity::Ellipse { minor, .. }) =
+                s.entities.iter_mut().find(|e| e.id() == lc.entity)
+            {
+                *minor = b;
+            }
+            for k in s.constraints.iter_mut() {
+                if let rcad_sketch::Constraint::EllipseRadius {
+                    ellipse,
+                    major: false,
+                    dim,
+                } = k
+                    && *ellipse == lc.entity
+                {
+                    dim.value = b;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -5199,8 +5411,9 @@ pub fn projection_curves(
     // The source must come first in history (no cycle).
     let pos = |f: FeatureId| doc.features.iter().position(|x| x.id == f);
     let src = match source {
-        ProjectSource::Face(r) => r.feature,
+        ProjectSource::Face(r) | ProjectSource::Edge(r) => r.feature,
         ProjectSource::Sketch(f) => *f,
+        ProjectSource::Section { after, .. } => *after,
     };
     if src == sketch || pos(src) > pos(sketch) || doc.with_dependents(sketch).contains(&src) {
         return Err(DocError::Validation(format!(

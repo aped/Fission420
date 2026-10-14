@@ -2724,6 +2724,7 @@ impl RcadApp {
                                 sketch: f.id,
                                 source: src,
                                 construction: false,
+                                at: None,
                             });
                         }
                         if ui.small_button("as construction").clicked() {
@@ -2731,6 +2732,7 @@ impl RcadApp {
                                 sketch: f.id,
                                 source: src,
                                 construction: true,
+                                at: None,
                             });
                         }
                     });

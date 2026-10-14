@@ -831,6 +831,19 @@ pub enum ProjectSource {
     /// The non-construction lines, arcs and circles of another sketch on a
     /// parallel plane, matched by entity id.
     Sketch(FeatureId),
+    /// One boundary edge (line, arc or circle) of a planar face, on a plane
+    /// parallel or oblique to the sketch: projected along the sketch normal
+    /// (a circle on an oblique face becomes an exact ellipse; an arc there
+    /// would be an elliptical arc and is refused). The edge is picked at
+    /// creation; regeneration keeps the face edge of the same kind nearest to
+    /// the projected curve's pinned points (ambiguous or missing: a
+    /// `BrokenReference`). Format v8.
+    Edge(FaceRef),
+    /// Intersect: the section of `body` by the sketch plane (lines, arcs and
+    /// circles; `rcad_kernel::section_curves`), read at the sketch's place in
+    /// history. `after` is the feature that last shaped the body when the
+    /// section was made (the dependency). Format v8.
+    Section { body: BodyId, after: FeatureId },
 }
 
 /// One projected curve: the sketch entity it drives and its pinned points
@@ -858,8 +871,9 @@ pub struct ProjectionLink {
 impl ProjectionLink {
     pub fn source_feature(&self) -> FeatureId {
         match self.source {
-            ProjectSource::Face(r) => r.feature,
+            ProjectSource::Face(r) | ProjectSource::Edge(r) => r.feature,
             ProjectSource::Sketch(f) => f,
+            ProjectSource::Section { after, .. } => after,
         }
     }
 }
