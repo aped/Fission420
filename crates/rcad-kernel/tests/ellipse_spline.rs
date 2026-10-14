@@ -128,12 +128,18 @@ fn revolved_ellipse_matches_pappus() {
     let body = revolve(&ellipse([30.0, 0.0], a, b), &Frame::XZ, 2.0 * PI).unwrap();
     let (v, est, method) = volume(&body);
     let want = 2.0 * PI * 30.0 * PI * a * b;
-    // No exact boundary integral covers a revolved free-form face: the
-    // tessellation estimate is used. Its reported error estimate must cover
-    // the true error, and both stay below 0.2 %.
-    assert_eq!(method, VolumeMethod::TessellationEstimate);
-    assert!((v - want).abs() <= est, "{v} vs {want} (estimate {est:e})");
-    assert!(est <= 2e-3 * want, "{est:e}");
+    // The exact parametric boundary integral covers the revolved rational
+    // face; a tessellation estimate would have to cover its error.
+    match method {
+        VolumeMethod::BrepBoundaryIntegralParametric => {
+            assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}")
+        }
+        VolumeMethod::TessellationEstimate => {
+            assert!((v - want).abs() <= est, "{v} vs {want} (estimate {est:e})");
+            assert!(est <= 2e-3 * want, "{est:e}");
+        }
+        m => panic!("unexpected volume method {m:?}"),
+    }
     // Profiles touching the axis are refused (convex-hull bound).
     assert!(revolve(&ellipse([7.9, 0.0], a, b), &Frame::XZ, PI).is_err());
 }
