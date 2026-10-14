@@ -543,13 +543,15 @@ fn revolve_touching_axis(profile: &Profile, frame: &Frame, angle: f64) -> Result
         .collect();
     let [k] = axis_edges[..] else {
         return refuse(
-            "it must touch the axis along exactly one straight edge (a profile meeting the \
-             axis at a single point makes a cone tip or pole, not supported yet)",
+            "it must touch the axis along exactly one straight edge with flat ends (a profile \
+             meeting the axis at a point — a dome, hemisphere, bowl or cone tip — makes a pole, \
+             not supported yet; leave a flat of at least the minimum length on the axis)",
         );
     };
     if n < 3 {
         return refuse(
-            "the profile needs at least two edges besides the axis edge (a flat-ended section)",
+            "the section needs flat ends: lines perpendicular to the axis at both ends of the \
+             axis edge (a dome or hemisphere meets the axis at a pole, not supported yet)",
         );
     }
     let order: Vec<usize> = (1..n).map(|j| (k + j) % n).collect();
@@ -583,8 +585,9 @@ fn revolve_touching_axis(profile: &Profile, frame: &Frame, angle: f64) -> Result
         let straight = ((mid - a).cross(d)).magnitude() <= tol::KERNEL_LINEAR * d.magnitude();
         if !straight || d.normalize().dot(ax).abs() > 1e-9 {
             return refuse(
-                "the edges leaving the axis must be lines perpendicular to it (a flat end); \
-                 an edge meeting the axis at an angle makes a cone tip, not supported yet",
+                "the edges leaving the axis must be lines perpendicular to it (a flat end); an \
+                 edge meeting the axis at an angle or as an arc makes a cone tip or pole (cone, \
+                 dome, bowl), not supported yet",
             );
         }
     }

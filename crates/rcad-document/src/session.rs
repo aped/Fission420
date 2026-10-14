@@ -243,10 +243,7 @@ impl Model {
                         .map(|b| b.name.clone());
                     for _ in assigned + 1..pieces {
                         let name = match &source {
-                            Some(src) => (2..)
-                                .map(|k| format!("{src} ({k})"))
-                                .find(|n| !doc.bodies.iter().any(|b| &b.name == n))
-                                .unwrap_or_else(|| doc.default_body_name()),
+                            Some(src) => doc.piece_name(src),
                             None => doc.default_body_name(),
                         };
                         let b = doc.add_body(name);

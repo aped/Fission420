@@ -445,6 +445,10 @@ impl Body {
 /// Truck 0.6 has `unwrap()`s on some numerical paths (e.g. intersection-curve
 /// projection); a modeling failure must never take the application down.
 pub(crate) fn guarded<T>(what: &str, f: impl FnOnce() -> T) -> Result<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
-        .map_err(|_| KernelError::Internal(format!("{what}: kernel panicked")))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| {
+        KernelError::Internal(format!(
+            "{what}: the geometry kernel failed on this input (an internal panic was \
+                 caught; nothing was changed). Try a slightly different size or position"
+        ))
+    })
 }

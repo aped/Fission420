@@ -2317,6 +2317,24 @@ impl Document {
     }
 
     /// Unique default body name like "Body1".
+    /// Name for a body split off `source`: "Bar (2)", "Bar (3)", ... (the
+    /// first free number; a source that is itself "Bar (2)" numbers from
+    /// "Bar", so names do not nest).
+    pub fn piece_name(&self, source: &str) -> String {
+        let base = match source.rsplit_once(" (") {
+            Some((b, n))
+                if n.ends_with(')') && n[..n.len() - 1].chars().all(|c| c.is_ascii_digit()) =>
+            {
+                b
+            }
+            _ => source,
+        };
+        (2..)
+            .map(|k| format!("{base} ({k})"))
+            .find(|n| !self.bodies.iter().any(|b| &b.name == n))
+            .unwrap_or_else(|| self.default_body_name())
+    }
+
     pub fn default_body_name(&self) -> String {
         (1..)
             .map(|i| format!("Body{i}"))

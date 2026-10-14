@@ -3630,7 +3630,7 @@ impl Session {
                 let id = m.transact(&format!("Split {src}"), |d| {
                     let n = match &body_name {
                         Some(n) => valid_name(n, "body")?,
-                        None => d.default_body_name(),
+                        None => d.piece_name(&src),
                     };
                     if d.bodies.iter().any(|b| b.name == n) {
                         return Err(DocError::Validation(format!(
