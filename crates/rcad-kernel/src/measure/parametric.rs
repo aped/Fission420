@@ -40,13 +40,49 @@ const GL8: [(f64, f64); 8] = [
     (0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
 ];
 
-/// Panels of the inner integral G (in s).
+/// Panels of the inner integral G (in s) per knot span, at the coarse
+/// level (doubled at the fine level together with the edge panels, so the
+/// error estimate covers both quadratures).
 const S_PANELS: usize = 4;
+
+/// Distinct interior knots of a knot vector strictly inside (lo, hi).
+fn interior(knots: &[f64], lo: f64, hi: f64) -> Vec<f64> {
+    let mut out: Vec<f64> = knots
+        .iter()
+        .copied()
+        .filter(|k| *k > lo + 1e-12 * (1.0 + lo.abs()) && *k < hi - 1e-12 * (1.0 + hi.abs()))
+        .collect();
+    out.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * (1.0 + a.abs()));
+    out
+}
+
+/// The u-direction knots of a surface (where its integrand may kink).
+fn u_knots(s: &Surface) -> Vec<f64> {
+    match s {
+        Surface::BSplineSurface(b) => b.knot_vecs().0.to_vec(),
+        Surface::NurbsSurface(n) => n.knot_vecs().0.to_vec(),
+        Surface::RevolutedCurve(r) => curve_knots(r.entity().entity_curve()),
+        Surface::Plane(_) => Vec::new(),
+    }
+}
+
+/// Knots of an edge curve (where its derivative may jump).
+fn curve_knots(c: &Curve) -> Vec<f64> {
+    match c {
+        Curve::BSplineCurve(b) => b.knot_vec().to_vec(),
+        Curve::NurbsCurve(n) => n.knot_vec().to_vec(),
+        _ => Vec::new(),
+    }
+}
 
 struct FaceCtx<'a> {
     s: &'a Surface,
     fr: &'a MomFrame,
     u0: f64,
+    /// Interior u-knots of the surface (sorted).
+    uk: Vec<f64>,
+    /// Panels per knot span of the inner integral.
+    s_panels: usize,
     v_period: Option<f64>,
     u_period: Option<f64>,
     /// Distance tolerance for "on the surface" (mm).
@@ -55,15 +91,31 @@ struct FaceCtx<'a> {
 
 impl FaceCtx<'_> {
     /// ∫_{u0}^{u} G(S(s, v)) (S_u × S_v · a) ds for every moment.
+    /// Split at the surface's u-knots, so each Gauss–Legendre piece
+    /// integrates a smooth (single-span) integrand.
     fn big_g(&self, u: f64, v: f64) -> Mom {
         let mut acc = [0.0; 10];
-        let h = (u - self.u0) / S_PANELS as f64;
-        for k in 0..S_PANELS {
-            let m = self.u0 + h * (k as f64 + 0.5);
-            for (x, w) in GL8 {
-                let s = m + 0.5 * h * x;
-                let n = self.s.uder(s, v).cross(self.s.vder(s, v)).dot(self.fr.a);
-                add_scaled(&mut acc, &self.fr.g(self.s.subs(s, v)), 0.5 * h * w * n);
+        let (lo, hi, sign) = if u >= self.u0 {
+            (self.u0, u, 1.0)
+        } else {
+            (u, self.u0, -1.0)
+        };
+        let mut cuts = vec![lo];
+        cuts.extend(interior(&self.uk, lo, hi));
+        cuts.push(hi);
+        for span in cuts.windows(2) {
+            let h = (span[1] - span[0]) / self.s_panels as f64;
+            for k in 0..self.s_panels {
+                let m = span[0] + h * (k as f64 + 0.5);
+                for (x, w) in GL8 {
+                    let s = m + 0.5 * h * x;
+                    let n = self.s.uder(s, v).cross(self.s.vder(s, v)).dot(self.fr.a);
+                    add_scaled(
+                        &mut acc,
+                        &self.fr.g(self.s.subs(s, v)),
+                        sign * 0.5 * h * w * n,
+                    );
+                }
             }
         }
         acc
@@ -97,10 +149,14 @@ impl FaceCtx<'_> {
 fn face_flux(f: &Face, fr: &MomFrame, on_tol: f64, panels: usize) -> Res<Mom> {
     let s = f.surface();
     let mut total = [0.0; 10];
+    let mut uk = u_knots(&s);
+    uk.sort_by(f64::total_cmp);
     let mut ctx = FaceCtx {
         s: &s,
         fr,
         u0: 0.0,
+        uk,
+        s_panels: S_PANELS * panels.div_ceil(PANELS).max(1),
         v_period: s.v_period(),
         u_period: s.u_period(),
         on_tol,
@@ -139,7 +195,13 @@ fn face_flux(f: &Face, fr: &MomFrame, on_tol: f64, panels: usize) -> Res<Mom> {
                 have_ref = true;
             }
             let mut last = (t0, first);
-            let h = (t1 - t0) / panels as f64;
+            // Edge pieces between the curve's knots, `panels` panels each.
+            let mut cuts = vec![t0];
+            cuts.extend(interior(&curve_knots(&c), t0.min(t1), t0.max(t1)));
+            if t1 < t0 {
+                cuts[1..].reverse();
+            }
+            cuts.push(t1);
             // Next evaluation point after `last`: located, and checked against
             // the curve at the parameter midpoint (a jump through a pole or
             // across a seam between samples fails this).
@@ -154,21 +216,24 @@ fn face_flux(f: &Face, fr: &MomFrame, on_tol: f64, panels: usize) -> Res<Mom> {
                 *last = (t, uv);
                 Ok(uv)
             };
-            for k in 0..panels {
-                let m = t0 + h * (k as f64 + 0.5);
-                for (x, wgt) in GL8 {
-                    let t = m + 0.5 * h * x;
-                    let (u, v) = step(t, &mut last)?;
-                    let (su, sv, dc) = (s.uder(u, v), s.vder(u, v), c.der(t));
-                    let (a, b, d) = (su.dot(su), su.dot(sv), sv.dot(sv));
-                    let det = a * d - b * b;
-                    if det <= 1e-10 * a * d || a * d == 0.0 {
-                        return Err("singular surface parametrisation on a boundary".into());
+            for piece in cuts.windows(2) {
+                let (p0, h) = (piece[0], (piece[1] - piece[0]) / panels as f64);
+                for k in 0..panels {
+                    let m = p0 + h * (k as f64 + 0.5);
+                    for (x, wgt) in GL8 {
+                        let t = m + 0.5 * h * x;
+                        let (u, v) = step(t, &mut last)?;
+                        let (su, sv, dc) = (s.uder(u, v), s.vder(u, v), c.der(t));
+                        let (a, b, d) = (su.dot(su), su.dot(sv), sv.dot(sv));
+                        let det = a * d - b * b;
+                        if det <= 1e-10 * a * d || a * d == 0.0 {
+                            return Err("singular surface parametrisation on a boundary".into());
+                        }
+                        let vdot = (a * sv.dot(dc) - b * su.dot(dc)) / det;
+                        add_scaled(&mut total, &ctx.big_g(u, v), 0.5 * h * wgt * vdot);
                     }
-                    let vdot = (a * sv.dot(dc) - b * su.dot(dc)) / det;
-                    add_scaled(&mut total, &ctx.big_g(u, v), 0.5 * h * wgt * vdot);
+                    step(p0 + h * (k + 1) as f64, &mut last)?;
                 }
-                step(t0 + h * (k + 1) as f64, &mut last)?;
             }
             prev = Some(last.1);
         }
@@ -185,8 +250,8 @@ fn face_flux(f: &Face, fr: &MomFrame, on_tol: f64, panels: usize) -> Res<Mom> {
 pub(crate) const MAX_FACES: usize = 2000;
 /// Gauss–Legendre panels per edge (and twice that for the error estimate).
 pub(crate) const PANELS: usize = 4;
-/// Largest relative difference between the two panel counts accepted (of
-/// the volume, for every moment scaled by its own magnitude).
+/// Largest relative difference between the two panel counts accepted, for
+/// every moment against its scale (V, V·L, V·L² with L the bounding diagonal).
 pub(crate) const MAX_REL_ERR: f64 = 1e-9;
 
 /// The ten moments of `solid` in `fr` at `panels` and `2 * panels` panels
@@ -230,11 +295,26 @@ pub(crate) fn parametric_moments(solid: &Solid, fr: &MomFrame) -> Res<(Mom, Mom)
     }
     let (hi, lo) = parametric_moments_at(solid, fr, PANELS)?;
     let v = hi[0];
-    if !(v.is_finite() && (hi[0] - lo[0]).abs() <= MAX_REL_ERR * v.abs()) {
-        return Err(format!(
-            "not converged (volume difference {:.3e})",
-            (hi[0] - lo[0]).abs()
-        ));
+    let b = super::raw_bounds(solid).map_err(|e| e.to_string())?;
+    let l = (0..3)
+        .map(|i| (b.max[i] - b.min[i]).powi(2))
+        .sum::<f64>()
+        .sqrt()
+        .max(1.0);
+    // Every moment must converge, each against its own scale (V, V·L, V·L²).
+    for k in 0..10 {
+        let scale = v.abs()
+            * l.powi(match k {
+                0 => 0,
+                1..=3 => 1,
+                _ => 2,
+            });
+        if !(hi[k].is_finite() && (hi[k] - lo[k]).abs() <= MAX_REL_ERR * scale) {
+            return Err(format!(
+                "not converged (moment {k} difference {:.3e})",
+                (hi[k] - lo[k]).abs()
+            ));
+        }
     }
     Ok((hi, lo))
 }
@@ -260,4 +340,61 @@ pub(crate) fn parametric_volume(solid: &Solid, panels: usize) -> Res<(f64, f64)>
     let fr = center_frame(solid)?;
     let (hi, lo) = parametric_moments_at(solid, &fr, panels)?;
     Ok((hi[0], (hi[0] - lo[0]).abs()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Body;
+
+    /// Tent prism: the triangle (0,0)-(5,3)-(10,0) in XZ swept 4 along Y; its
+    /// roof is ONE degree-1 B-spline face with an interior knot (two planar
+    /// facets meeting at the ridge), so its integrand kinks inside the face.
+    /// Volume 15 × 4 = 60, centroid (5, 2, 1).
+    fn tent() -> Body {
+        let v0 = builder::vertex(Point3::new(0.0, 0.0, 0.0));
+        let v1 = builder::vertex(Point3::new(10.0, 0.0, 0.0));
+        let roof = BSplineCurve::new(
+            KnotVec::from(vec![0.0, 0.0, 0.37, 1.0, 1.0]),
+            vec![
+                Point3::new(10.0, 0.0, 0.0),
+                Point3::new(5.0, 0.0, 3.0),
+                Point3::new(0.0, 0.0, 0.0),
+            ],
+        );
+        let wire: Wire = vec![
+            builder::line(&v0, &v1),
+            Edge::new(&v1, &v0, Curve::BSplineCurve(roof)),
+        ]
+        .into();
+        let mut face = builder::try_attach_plane(&[wire]).unwrap();
+        if let Surface::Plane(pl) = face.surface() {
+            // Sweep along +Y with the face's normal pointing away from it.
+            if pl.normal().y * if face.orientation() { 1.0 } else { -1.0 } > 0.0 {
+                face = face.inverse();
+            }
+        }
+        let solid = builder::tsweep(&face, Vector3::new(0.0, 4.0, 0.0));
+        Body { solid }
+    }
+
+    #[test]
+    fn multi_span_bspline_face_is_integrated_per_knot_span() {
+        let b = tent();
+        let fr = center_frame(&b.solid).unwrap();
+        let (hi, lo) = parametric_moments(&b.solid, &fr).unwrap();
+        let v = hi[0].abs();
+        assert!(
+            (v - 60.0).abs() < 1e-9 * 60.0,
+            "volume {} (lo {})",
+            hi[0],
+            lo[0]
+        );
+        // Centroid (5, 2, 1) relative to the frame origin.
+        let c = [hi[1] / hi[0], hi[2] / hi[0], hi[3] / hi[0]];
+        let want = [5.0 - fr.o.x, 2.0 - fr.o.y, 1.0 - fr.o.z];
+        for k in 0..3 {
+            assert!((c[k] - want[k]).abs() < 1e-9, "centroid {c:?} vs {want:?}");
+        }
+    }
 }
