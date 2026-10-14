@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-exclude = ["spikes"]
+exclude = ["spikes", "third_party"]
 
 [workspace.package]
 edition = "2024"
@@ -11,3 +11,8 @@ version = "0.1.0"
 # Truck booleans are ~30x slower unoptimised; optimise dependencies in dev/test builds.
 [profile.dev.package."*"]
 opt-level = 2
+
+# R-CAD's fork of truck-shapeops 0.4.0 (Apache-2.0, ricosjp/truck c23d2c25): boolean fixes, see
+# third_party/truck-shapeops/R-CAD-CHANGES.md.
+[patch.crates-io]
+truck-shapeops = { path = "third_party/truck-shapeops" }

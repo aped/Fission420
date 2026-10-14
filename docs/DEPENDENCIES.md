@@ -5,7 +5,7 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 | crate | version | license | source | used by |
 |---|---|---|---|---|
 | truck-modeling | 0.6.0 | Apache-2.0 | https://github.com/ricosjp/truck | rcad-kernel |
-| truck-shapeops | 0.4.0 | Apache-2.0 | same | rcad-kernel |
+| truck-shapeops | 0.4.0, R-CAD fork | Apache-2.0 | vendored in `third_party/truck-shapeops` from ricosjp/truck c23d2c25 via `[patch.crates-io]`; changes listed in its `R-CAD-CHANGES.md` | rcad-kernel |
 | truck-meshalgo | 0.4.0 | Apache-2.0 | same | rcad-kernel |
 | serde | 1.x | MIT OR Apache-2.0 | crates.io | all |
 | thiserror | 2.x | MIT OR Apache-2.0 | crates.io | all |
