@@ -32,7 +32,14 @@ R2018/AC1032 group-code files); binary DXF is rejected with a clear error.
   ≤ 1e-9 × max(1, |coordinates|). Extrusion must be (0,0,1) or (0,0,−1); for (0,0,−1) OCS
   points map to WCS (−x, y) and the arc is stored with swapped ends so it stays CCW (verified
   against ezdxf; FreeCAD 1.1.4 gets this case wrong, see fixtures README).
-* **Unsupported, always reported** with type, count, reason and first line: SPLINE, ELLIPSE,
+* **ELLIPSE / SPLINE**: a full ELLIPSE (parameters 0 to 2π, in the XY plane) becomes an exact
+  sketch ellipse; a SPLINE becomes a sketch spline only when it is exactly one: open,
+  non-rational (all weights 1), degree 3, control points given, clamped uniform knots (any
+  affine knot scaling), XY plane. Its end control points join other curves like line ends.
+  Elliptical arcs, fit-point, rational, periodic, other-degree or non-uniform splines are
+  unsupported (reported with the specific reason), never approximated.
+* **Unsupported, always reported** with type, count, reason and first line: SPLINE / ELLIPSE
+  other than the above,
   INSERT (blocks are never expanded; BLOCKS definitions are ignored), TEXT/MTEXT/ATTDEF/ATTRIB,
   DIMENSION/LEADER/…, HATCH/SOLID/TRACE, POINT, 3DFACE/3DSOLID/REGION/…, RAY/XLINE, VIEWPORT,
   IMAGE…, 3D/mesh/fit polylines, tilted extrusion, non-zero Z, paper-space entities, any other
@@ -74,7 +81,9 @@ small writer cannot produce an inconsistent R2000+ database; it is the most wide
 Numbers use the shortest exact `f64` decimal form.
 
 ## Known losses
-* Only lines, arcs and circles; no splines/ellipses/text/dimensions/hatches/blocks.
+* Import: only exactly representable ellipses/splines (see above); no text/dimensions/hatches/blocks.
+* Export (R12): lines, arcs and circles only; a sketch with an ellipse or spline is refused
+  (R12 has no ELLIPSE/SPLINE; use SVG or STEP).
 * Import creates no constraints: design intent (dimensions, tangency) is not recovered.
 * Width, thickness, linetype, colour are not imported.
 * Export writes no constraints/dimensions and no sketch placement (2D local coordinates only).

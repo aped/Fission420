@@ -10,6 +10,7 @@ implementation notes F.6.5); XML tokenizing by `quick-xml` (already a dependency
 | `line` | line | any affine transform |
 | `rect` | 4 lines | `rx`/`ry` > 0 (rounded) unsupported; zero size skipped as degenerate |
 | `circle`, `ellipse` with `rx == ry` (1e-5 relative; mean radius) | circle | similarity transforms only (1e-5 relative) |
+| `ellipse` with `rx != ry` | exact sketch ellipse | similarity transforms only; a non-uniform scale or skew is refused |
 | `polyline`, `polygon` | lines | polygon closed; an odd trailing coordinate is dropped and reported |
 | `path` `M L H V Z` (abs/rel) | lines | must start with M/m; numbers after `Z` are malformed |
 | `path` `A` with `rx == ry` (1e-5 relative) | arc | endpoint → centre (F.6.5), radius scaled up when too small; similarity transforms only (1e-5 relative; the mapped centre is moved onto the end points' bisector); re-oriented CCW after the full transform |

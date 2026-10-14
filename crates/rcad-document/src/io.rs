@@ -37,7 +37,7 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v7: the additions listed in [`v7_feature`] (nested
 /// assemblies, more joint types, drawing annotations, sheet-metal rules,
 /// surfaces, ...). Written only when used (otherwise v6 or older as before).
-/// v8: the additions listed in [`v8_feature`] (extra bodies of cuts that
+/// v8: the additions listed in [`v8_feature`] (sketch ellipses and splines, extra bodies of cuts that
 /// split a body, ...). Written only when used (otherwise v7 or older as before).
 pub const FORMAT_VERSION: u32 = 8;
 /// Oldest version this build reads.

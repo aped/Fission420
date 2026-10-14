@@ -151,6 +151,8 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `centered_rectangle` | `width`, `height`, `center?` | fixed anchor point (parameters `center_x`/`center_y`), no `origin` |
 | `centered_circle` | `diameter`, `center?` | same anchor rule as `centered_rectangle` |
 | `polygon` | `vertices` (`[[x,y],...]`, ≥ 3) | editor-style sketch: origin point plus a closed loop of unconstrained lines (vertices stay editable) |
+| `centered_ellipse` (format v8) | `major_radius`, `minor_radius`, `center?` | full ellipse, major axis along x (horizontal construction line), anchor rule as `centered_rectangle`; parameters `major_radius`, `minor_radius`, `center_x`/`center_y`. Exact (docs/behavior/sketching.md "Ellipses and splines") |
+| `spline` (format v8) | `points` (`[[x,y],...]`), `closed?` (default false) | editor-style sketch with one cubic B-spline through unconstrained control points: open ≥ 4 (clamped, through the end points), closed ≥ 3 (periodic) |
 | `custom` | `sketch` (a full `Sketch` object) | a sketch as produced by the interactive editor; validated and solved before it is stored |
 
 `center` = `[x, y]` in the plane's frame, default origin. `plane`: `"WorldXY"`, `"WorldXZ"`
