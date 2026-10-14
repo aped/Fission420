@@ -209,3 +209,41 @@ fn svg_ellipse_imports_exactly_and_skew_is_refused() {
     let e = svg::import(skew, &SvgImportOptions::default()).unwrap_err();
     assert!(e.to_string().contains("non-uniform scale or skew"), "{e}");
 }
+
+#[test]
+fn closed_dxf_splines_are_refused_not_dropped() {
+    let ctrl = [
+        [0.0, 0.0],
+        [5.0, 10.0],
+        [15.0, 10.0],
+        [20.0, 0.0],
+        [0.0, 0.0],
+    ];
+    let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+    // Ends coinciding: refused at classification (all-or-nothing by default).
+    let body = spline(&knots, &[], &ctrl);
+    let e = dxf::import(&dxf_file(&body), &DxfImportOptions::default()).unwrap_err();
+    assert!(e.to_string().contains("closed spline"), "{e}");
+    // The closed flag (70 bit 1) alone is refused too.
+    let flagged = spline(
+        &knots,
+        &[],
+        &[
+            [0.0, 0.0],
+            [5.0, 10.0],
+            [15.0, 10.0],
+            [20.0, 0.0],
+            [25.0, -5.0],
+        ],
+    )
+    .replace("70\n8\n", "70\n9\n");
+    let e = dxf::import(&dxf_file(&flagged), &DxfImportOptions::default()).unwrap_err();
+    assert!(e.to_string().contains("closed splines"), "{e}");
+    // Ends within the join tolerance (not equal): the import fails, it never
+    // succeeds without the outline.
+    let mut near = ctrl;
+    near[4] = [1e-7, 0.0];
+    let body = spline(&knots, &[], &near);
+    let r = dxf::import(&dxf_file(&body), &DxfImportOptions::default());
+    assert!(r.is_err(), "{:?}", r.map(|i| i.sketch.entities.len()));
+}

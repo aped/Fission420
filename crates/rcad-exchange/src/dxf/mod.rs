@@ -360,6 +360,9 @@ fn classify_spline(e: &RawEntity) -> Result<std::result::Result<Curve, &'static 
     if flags & 2 != 0 {
         return Ok(Err("periodic splines are not supported"));
     }
+    if flags & 1 != 0 {
+        return Ok(Err("closed splines are not supported (open splines only)"));
+    }
     let mut knots = Vec::new();
     let mut weights = Vec::new();
     let mut ctrl: Vec<[f64; 3]> = Vec::new();
@@ -413,6 +416,13 @@ fn classify_spline(e: &RawEntity) -> Result<std::result::Result<Curve, &'static 
     let coords: Vec<f64> = ctrl.iter().flat_map(|c| [c[0], c[1]]).collect();
     if ctrl.iter().any(|c| c[2].abs() > planar_tol(&coords)) {
         return Ok(Err(R_NOT_XY));
+    }
+    let (f, l) = (ctrl[0], ctrl[n - 1]);
+    if (f[0] - l[0]).hypot(f[1] - l[1]) <= planar_tol(&coords) {
+        return Ok(Err(
+            "the spline's first and last control points coincide (a closed spline; open \
+             splines only)",
+        ));
     }
     Ok(Ok(Curve::Spline {
         ctrl: ctrl.iter().map(|c| [c[0], c[1]]).collect(),
@@ -997,13 +1007,11 @@ pub fn import(bytes: &[u8], opts: &DxfImportOptions) -> Result<DxfImport> {
                 }
                 let mut seen = std::collections::HashSet::new();
                 if !ids.iter().all(|p| seen.insert(*p)) {
-                    degenerate(
-                        kind,
-                        "spline ends meet (closed or zero length)",
-                        line,
-                        &mut warnings,
-                    );
-                    continue;
+                    // Never drop an outline silently: refuse the file.
+                    return Err(ExchangeError::Sketch(format!(
+                        "line {line}: the SPLINE's ends meet within the join tolerance (a closed \
+                         spline); closed DXF splines are not supported"
+                    )));
                 }
                 let id = sketch.next_entity_id_fast();
                 sketch.entities.push(Entity::Spline {
