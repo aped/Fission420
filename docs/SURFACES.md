@@ -24,7 +24,15 @@ surfaces in the import report (nothing is dropped silently). `OPEN_SHELL` inside
 * `surface_extrude {sketch, distance, reverse?}` (**Extrude surface**): the closed profile, or
   else the open chain of lines, swept along the sketch normal into an open ruled surface (planar
   strips; exact cylindrical patches for arcs). No caps. Parameter `distance` (upstream edits
-  regenerate later stitch/fill/thicken).
+  regenerate later stitch/fill/thicken). UI: **Reverse (below the sketch plane)** checkbox.
+  * **Orientation** (what a later thicken's side follows): every face's normal is the path tangent
+    × the sketch normal, i.e. to the right of the direction of travel seen from the sketch's +z. A
+    closed profile is run counter-clockwise, so it faces outward. An open chain is run from its
+    end with the smaller sketch x (the smaller y when the ends' x agree within 1e-9 × the sketch
+    scale), independent of entity ids and line directions: redrawing or reversing a line never
+    flips the surface. A chain along +x faces −y.
+  * `reverse` sweeps against the sketch normal (the surface lies below the sketch plane); it does
+    **not** flip the normal.
 
 ## Analysis (before any repair)
 

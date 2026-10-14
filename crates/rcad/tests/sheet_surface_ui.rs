@@ -297,3 +297,34 @@ fn extrude_surface_from_the_sketch_inspector() {
     click(&mut h, "Fill planar holes");
     assert!((volume(&h, 2).unwrap() - 24000.0).abs() < 1e-6);
 }
+
+/// Review run 7 #44: the inspector's reverse checkbox sends `reverse`, so
+/// the surface lies below the sketch plane.
+#[test]
+fn extrude_surface_reverse_from_the_sketch_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: Some([20.0, 15.0]),
+        },
+    });
+    settle(&mut h);
+    let sk = feature_name(&h, "sketch");
+    click(&mut h, &sk);
+    click(&mut h, "Surface from sketch");
+    type_into(&mut h, "Surface distance (mm)", "20");
+    click(&mut h, "Reverse (below the sketch plane)");
+    click(&mut h, "Extrude surface");
+    let s = h.state().summary();
+    let b = s.bodies.iter().find(|x| x.id == BodyId(1)).unwrap();
+    let bb = &b.measurements.as_ref().unwrap().bounds;
+    assert!(
+        (bb.min[2] + 20.0).abs() < 1e-9 && bb.max[2].abs() < 1e-9,
+        "{bb:?}"
+    );
+}

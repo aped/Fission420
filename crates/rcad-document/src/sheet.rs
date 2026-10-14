@@ -539,6 +539,29 @@ pub fn line_chain(s: &rcad_sketch::Sketch) -> std::result::Result<Vec<[f64; 2]>,
     Ok(out)
 }
 
+/// The open line chain of `s` (as [`line_chain`]) in a geometric order that
+/// does not depend on entity ids or line directions (review run 7 #43): it
+/// starts at the chain end with the smaller sketch x, or, when the two ends'
+/// x differ by at most 1e-9 × the sketch scale, the smaller y. Redrawing or
+/// reversing a line therefore never flips a ruled surface's normal (tangent
+/// × sketch normal: to the right of this direction of travel).
+pub fn surface_chain(s: &rcad_sketch::Sketch) -> std::result::Result<Vec<[f64; 2]>, String> {
+    let mut c = line_chain(s)?;
+    let (a, b) = (c[0], c[c.len() - 1]);
+    let scale = c
+        .iter()
+        .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
+    let flip = if (b[0] - a[0]).abs() > 1e-9 * scale {
+        b[0] < a[0]
+    } else {
+        b[1] < a[1]
+    };
+    if flip {
+        c.reverse();
+    }
+    Ok(c)
+}
+
 /// Flat pattern as a sketch: the outline (length × width) and the bend
 /// centre lines as construction lines (DXF: layer CUT and BEND).
 pub fn flat_pattern_sketch(part: &SheetPart, width: f64) -> rcad_sketch::Sketch {

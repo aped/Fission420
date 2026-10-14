@@ -46,8 +46,9 @@ pub struct SheetSurfaceForm {
     pub tolerance: String,
     pub thickness: String,
     pub reverse: bool,
-    /// Surface extrusion distance (sketch inspector).
+    /// Surface extrusion distance and direction (sketch inspector).
     pub surface_distance: String,
+    pub surface_reverse: bool,
     /// (doc_id, revision, body, report) of the last analysis reply.
     pub analysis: Option<(u64, u64, BodyId, rcad_kernel::ShellAnalysis)>,
 }
@@ -69,6 +70,7 @@ impl Default for SheetSurfaceForm {
             thickness: "2".into(),
             reverse: false,
             surface_distance: "10".into(),
+            surface_reverse: false,
             analysis: None,
         }
     }
@@ -209,11 +211,16 @@ impl RcadApp {
                             name: None,
                             sketch: f.id,
                             distance: d.unwrap_or(10.0),
-                            reverse: false,
+                            reverse: form.surface_reverse,
                             body_name: None,
                         }));
                     }
                 });
+                // Review run 7 #44: the side of the sketch plane (the
+                // normal does not change; docs/SURFACES.md).
+                ui.checkbox(&mut form.surface_reverse, "Reverse (below the sketch plane)")
+                    .probe("Surface reverse")
+                    .on_hover_text("Sweep against the sketch normal; the surface's facing side stays the same");
             });
         header.header_response.probe("Surface from sketch");
         if let Some(c) = send {

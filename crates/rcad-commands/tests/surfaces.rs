@@ -393,3 +393,92 @@ fn surfaces_from_sketches() {
     assert!((volume(&t, tb).unwrap() - want).abs() < 1e-6);
     assert!((volume(&t, 2).unwrap() - 12000.0).abs() < 1e-6);
 }
+
+/// Review run 7 #43: an open chain's ruled surface faces the same way
+/// however its lines were drawn (entity order and line directions), so a
+/// downstream thicken stays on its side; `reverse` moves the surface below
+/// the sketch plane without flipping it. Convention (docs/SURFACES.md): the
+/// chain runs from its end with the smaller x; the normal is to the right
+/// of that direction (here −y for a chain along +x).
+#[test]
+fn ruled_surface_side_does_not_depend_on_how_lines_were_drawn() {
+    let mut s = Session::new();
+    tray::ok(&mut s, &json!({"cmd": "new_document"}));
+    // Three drawings of the chain (0,0)-(10,0)-(20,0): forward, the lines
+    // created in the other order, and both lines drawn backwards.
+    let drawings: [&[([f64; 2], [f64; 2])]; 3] = [
+        &[([0.0, 0.0], [10.0, 0.0]), ([10.0, 0.0], [20.0, 0.0])],
+        &[([10.0, 0.0], [20.0, 0.0]), ([0.0, 0.0], [10.0, 0.0])],
+        &[([20.0, 0.0], [10.0, 0.0]), ([10.0, 0.0], [0.0, 0.0])],
+    ];
+    let mut boxes = Vec::new();
+    for (k, lines) in drawings.iter().enumerate() {
+        for reverse in [false, true] {
+            let mut sk = rcad_sketch::Sketch::default();
+            for (a, b) in lines.iter() {
+                let pa = sk.add_point(a[0], a[1]);
+                let pb = sk.add_point(b[0], b[1]);
+                sk.add_line(pa, pb);
+            }
+            let id = sketch(&mut s, sk);
+            tray::ok(
+                &mut s,
+                &json!({"cmd": "surface_extrude", "sketch": id, "distance": 5.0,
+                        "reverse": reverse}),
+            );
+            let sb = s.summary().bodies.last().unwrap().id.0;
+            // Every face of the two-face strip faces −y (thicken takes one
+            // face, so the single-line case below checks the solid's side).
+            let m = s.model().unwrap();
+            let brep = m
+                .evaluation()
+                .body_by_id(BodyId(sb))
+                .unwrap()
+                .geometry
+                .brep()
+                .unwrap()
+                .clone();
+            for f in rcad_kernel::classify_faces(&brep).unwrap() {
+                let rcad_kernel::DirectFace::Plane { normal, .. } = f else {
+                    panic!("{f:?}")
+                };
+                assert!(
+                    (normal[1] + 1.0).abs() < 1e-12,
+                    "drawing {k} reverse {reverse}: normal {normal:?}"
+                );
+            }
+            boxes.push((k, reverse, body(&s, sb).measurements.unwrap().bounds));
+        }
+    }
+    for (k, reverse, b) in &boxes {
+        let z = if *reverse { [-5.0, 0.0] } else { [0.0, 5.0] };
+        assert!(
+            (b.min[2] - z[0]).abs() < 1e-9 && (b.max[2] - z[1]).abs() < 1e-9,
+            "drawing {k}: {b:?}"
+        );
+    }
+    // A single line drawn either way, thickened 2 mm: the solid is on −y.
+    for (a, b) in [([0.0, 50.0], [10.0, 50.0]), ([10.0, 50.0], [0.0, 50.0])] {
+        let mut sk = rcad_sketch::Sketch::default();
+        let pa = sk.add_point(a[0], a[1]);
+        let pb = sk.add_point(b[0], b[1]);
+        sk.add_line(pa, pb);
+        let id = sketch(&mut s, sk);
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "surface_extrude", "sketch": id, "distance": 5.0}),
+        );
+        let sb = s.summary().bodies.last().unwrap().id.0;
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "thicken_surface", "body": sb, "distance": 2.0}),
+        );
+        let tb = s.summary().bodies.last().unwrap().id.0;
+        let bb = body(&s, tb).measurements.unwrap().bounds;
+        assert!(
+            (bb.min[1] - 48.0).abs() < 1e-9 && (bb.max[1] - 50.0).abs() < 1e-9,
+            "{a:?}->{b:?}: {bb:?}"
+        );
+        assert!((volume(&s, tb).unwrap() - 100.0).abs() < 1e-9);
+    }
+}

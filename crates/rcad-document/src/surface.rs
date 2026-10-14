@@ -163,7 +163,7 @@ pub fn from_sketch(
                     }
                     k::SurfacePath::Closed(crate::hole::to_kernel(&r.outer))
                 }
-                None => k::SurfacePath::Open(crate::sheet::line_chain(solved).map_err(|m| {
+                None => k::SurfacePath::Open(crate::sheet::surface_chain(solved).map_err(|m| {
                     DocError::Validation(format!(
                         "{id}: surface extrusion needs a closed profile or one open chain of lines ({m})"
                     ))

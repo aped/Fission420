@@ -27,6 +27,14 @@ pub fn planar_patch(outer: &Profile, holes: &[Profile], frame: &Frame) -> Result
 
 /// `path` on `frame` swept `distance` along `frame.z` (against it when
 /// `reverse`) as an open ruled surface body.
+///
+/// Orientation (review run 7 #43): every face's normal is the path tangent ×
+/// `frame.z`, i.e. to the right of the direction of travel seen from +z. A
+/// closed profile (counter-clockwise, as profiles are given) therefore
+/// faces outward; an open chain faces to the right of its point order (the
+/// caller fixes that order; documents use `sheet::surface_chain`).
+/// `reverse` changes only the side of the sketch plane the surface lies on,
+/// never its normal: the wire is run backwards for the opposite sweep.
 pub fn extrude_surface(
     path: &SurfacePath,
     frame: &Frame,
@@ -61,6 +69,9 @@ pub fn extrude_surface(
             v.windows(2).map(|w| builder::line(&w[0], &w[1])).collect()
         }
     };
+    // tsweep's faces have normal (wire tangent) × (sweep vector): sweeping
+    // the reversed wire against z keeps tangent × z.
+    let wire = if reverse { wire.inverse() } else { wire };
     let z = Vector3::new(frame.z[0], frame.z[1], frame.z[2])
         * if reverse { -distance } else { distance };
     let shell: Shell = guarded("extrude surface", || builder::tsweep(&wire, z))?;
