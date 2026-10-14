@@ -271,6 +271,15 @@ pub fn loop_outline(profile: &rcad_sketch::Profile) -> Option<Vec<[f64; 2]>> {
                     LoopSegment::Arc { start, center, ccw } => {
                         arc(&mut out, *start, next, *center, *ccw)
                     }
+                    LoopSegment::Cubic { start, c1, c2, w } => {
+                        // Preview outline only: 24 points per exact span.
+                        for k in 0..24 {
+                            let t = k as f64 / 24.0;
+                            out.push(rcad_sketch::curves::cubic_point(
+                                *start, *c1, *c2, next, *w, t,
+                            ));
+                        }
+                    }
                 }
             }
             out

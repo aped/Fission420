@@ -63,6 +63,11 @@ enum Step {
 pub fn sweep(profile: &Profile, frame: &Frame, path: &[PathSegment]) -> Result<Body> {
     frame.validate()?;
     profile.validate()?;
+    if profile.has_cubic() {
+        return refuse(
+            "ellipse and spline profiles cannot be swept (lines, arcs and circles only)",
+        );
+    }
     if path.is_empty() {
         return refuse("the path is empty");
     }

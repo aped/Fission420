@@ -17,6 +17,7 @@
 //! Geometric/profile tolerances reuse the solve tolerance (a length in mm).
 
 mod arc;
+pub mod curves;
 mod edit;
 pub mod fillet;
 pub mod font;
@@ -36,7 +37,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use fillet::FilletResult;
 pub use offset::{OffsetPair, OffsetResult, offset_profile};
-pub use profile::{LoopSegment, Profile};
+pub use profile::{LoopSegment, Profile, loop_area};
 pub use region::{Region, RegionRef, SketchRegion};
 pub use shapes::{PolygonFit, PolygonResult, SlotResult};
 pub use text::{FontSpec, HAlign, SketchText, TextLoop, TextSpec, VAlign};
@@ -94,16 +95,40 @@ pub enum Entity {
         start: PointId,
         end: PointId,
     },
+    /// Full ellipse ([`curves`]): centre point, the end point of one axis
+    /// (`major`: its distance from the centre is that semi-axis, its direction
+    /// the ellipse's orientation) and the other semi-axis `minor` (mm), a solver
+    /// unknown like a circle's radius. 5 degrees of freedom. Serde-additive.
+    Ellipse {
+        id: EntityId,
+        center: PointId,
+        major: PointId,
+        minor: f64,
+    },
+    /// Uniform cubic B-spline ([`curves`]) whose control points are ordinary
+    /// sketch points (2 degrees of freedom each). Open (`closed == false`):
+    /// clamped, at least 4 control points, passing through the first and last.
+    /// Closed: periodic, at least 3 control points. Serde-additive.
+    Spline {
+        id: EntityId,
+        points: Vec<PointId>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        closed: bool,
+    },
 }
 
 impl Entity {
     pub fn id(&self) -> EntityId {
         match self {
-            Entity::Line { id, .. } | Entity::Circle { id, .. } | Entity::Arc { id, .. } => *id,
+            Entity::Line { id, .. }
+            | Entity::Circle { id, .. }
+            | Entity::Arc { id, .. }
+            | Entity::Ellipse { id, .. }
+            | Entity::Spline { id, .. } => *id,
         }
     }
 
-    /// Every point the entity uses (endpoints, centre).
+    /// Every point the entity uses (endpoints, centre, control points).
     pub fn points(&self) -> Vec<PointId> {
         match self {
             Entity::Line { a, b, .. } => vec![*a, *b],
@@ -111,6 +136,23 @@ impl Entity {
             Entity::Arc {
                 center, start, end, ..
             } => vec![*center, *start, *end],
+            Entity::Ellipse { center, major, .. } => vec![*center, *major],
+            Entity::Spline { points, .. } => points.clone(),
+        }
+    }
+
+    /// The end points a curve joins other curves at in a profile loop (an
+    /// open spline's first and last control points); `None` for closed curves.
+    pub fn ends(&self) -> Option<(PointId, PointId)> {
+        match self {
+            Entity::Line { a, b, .. } => Some((*a, *b)),
+            Entity::Arc { start, end, .. } => Some((*start, *end)),
+            Entity::Spline {
+                points,
+                closed: false,
+                ..
+            } => Some((*points.first()?, *points.last()?)),
+            Entity::Circle { .. } | Entity::Ellipse { .. } | Entity::Spline { .. } => None,
         }
     }
 }
@@ -166,6 +208,13 @@ pub enum Constraint {
     Diameter { circle: EntityId, dim: Dimension },
     /// Arc: `|start − center| = dim.value`; circle: `radius = dim.value`; 1 equation.
     Radius { entity: EntityId, dim: Dimension },
+    /// Ellipse semi-axis: `major` → `|major point − centre| = dim.value`,
+    /// otherwise `minor = dim.value`; 1 equation (serde-additive).
+    EllipseRadius {
+        ellipse: EntityId,
+        major: bool,
+        dim: Dimension,
+    },
     /// The line is tangent to the arc at the endpoint they share (same
     /// `PointId`): the radius vector at that point is perpendicular to the
     /// line. 1 equation, `(P − C)·(Q − P)/|Q − P| = 0` (P shared point, C arc
@@ -265,6 +314,7 @@ impl Constraint {
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
+            | Constraint::EllipseRadius { dim, .. }
             | Constraint::Angle { dim, .. }
             | Constraint::PatternRotate { dim, .. }
             | Constraint::Offset { dim, .. } => Some(dim),
@@ -279,6 +329,7 @@ impl Constraint {
             | Constraint::Distance { dim, .. }
             | Constraint::Diameter { dim, .. }
             | Constraint::Radius { dim, .. }
+            | Constraint::EllipseRadius { dim, .. }
             | Constraint::Angle { dim, .. }
             | Constraint::PatternRotate { dim, .. }
             | Constraint::Offset { dim, .. } => Some(dim),
@@ -466,7 +517,7 @@ fn offset_valid(s: &Sketch, pairs: &[OffsetPair]) -> Result<(), String> {
     Ok(())
 }
 
-fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
+pub(crate) fn check_dim_value(name: &str, value: f64) -> Result<(), SketchError> {
     if !value.is_finite() || value <= 0.0 {
         return Err(SketchError::InvalidDimension {
             name: name.to_owned(),
@@ -757,6 +808,31 @@ impl Sketch {
                         )));
                     }
                 }
+                Entity::Ellipse {
+                    id,
+                    center,
+                    major,
+                    minor,
+                } => {
+                    need_point(center)?;
+                    need_point(major)?;
+                    if center == major {
+                        return Err(SketchError::InvalidValue(format!(
+                            "ellipse {id:?} must use two distinct points (centre, axis end)"
+                        )));
+                    }
+                    if !minor.is_finite() || *minor <= 0.0 {
+                        return Err(SketchError::InvalidValue(format!(
+                            "ellipse {id:?} minor radius {minor} must be finite and > 0"
+                        )));
+                    }
+                }
+                Entity::Spline { id, points, closed } => {
+                    for p in points {
+                        need_point(p)?;
+                    }
+                    curves::check_spline(*id, points, *closed)?;
+                }
             }
         }
         let need_entity = |index: usize, id: &EntityId, expected: &'static str| {
@@ -765,6 +841,7 @@ impl Sketch {
                 "line" => matches!(e, Entity::Line { .. }),
                 "circle" => matches!(e, Entity::Circle { .. }),
                 "arc" => matches!(e, Entity::Arc { .. }),
+                "ellipse" => matches!(e, Entity::Ellipse { .. }),
                 _ => matches!(e, Entity::Circle { .. } | Entity::Arc { .. }),
             };
             if ok {
@@ -816,6 +893,9 @@ impl Sketch {
                 }
                 Constraint::Radius { entity, .. } => {
                     need_entity(i, entity, "arc or circle")?;
+                }
+                Constraint::EllipseRadius { ellipse, .. } => {
+                    need_entity(i, ellipse, "ellipse")?;
                 }
                 Constraint::EqualRadius { a, b } => {
                     need_entity(i, a, "arc or circle")?;
@@ -872,7 +952,7 @@ impl Sketch {
                         Entity::Arc {
                             center, start, end, ..
                         } => vec![*center, *start, *end],
-                        Entity::Line { .. } => vec![],
+                        _ => vec![],
                     };
                     if own.contains(point) {
                         return Err(SketchError::InvalidValue(format!(
@@ -978,7 +1058,7 @@ impl Sketch {
         let circles = self
             .entities
             .iter()
-            .filter(|e| matches!(e, Entity::Circle { .. }))
+            .filter(|e| matches!(e, Entity::Circle { .. } | Entity::Ellipse { .. }))
             .count();
         self.points.len().saturating_mul(2).saturating_add(circles)
     }
@@ -990,7 +1070,7 @@ impl Sketch {
             s = s.max(p.x.abs()).max(p.y.abs());
         }
         for e in &self.entities {
-            if let Entity::Circle { radius, .. } = e {
+            if let Entity::Circle { radius, .. } | Entity::Ellipse { minor: radius, .. } = e {
                 s = s.max(radius.abs());
             }
         }
@@ -1072,6 +1152,8 @@ mod tests_arc;
 
 #[cfg(test)]
 mod tests_angle;
+#[cfg(test)]
+mod tests_curves;
 #[cfg(test)]
 mod tests_fillet;
 #[cfg(test)]

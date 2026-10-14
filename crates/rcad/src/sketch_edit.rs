@@ -831,6 +831,12 @@ impl SketchEditor {
                         (dist(pos, self.sketch.point_xy(*center)?) - radius).abs()
                     }
                     Entity::Arc { id, .. } => arc_distance(&self.sketch.arc_geometry(*id)?, pos),
+                    Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                        rcad_sketch::curves::entity_polyline(&self.sketch, e, 32)?
+                            .windows(2)
+                            .map(|w| seg_dist(pos, w[0], w[1]))
+                            .fold(f64::INFINITY, f64::min)
+                    }
                 };
                 (d <= tol).then_some((e.id(), d))
             })
@@ -921,7 +927,9 @@ impl SketchEditor {
             || self.sketch.entities.iter().any(|e| match e {
                 Entity::Line { a, b, .. } => *a == id || *b == id,
                 Entity::Circle { center, .. } => *center == id,
-                Entity::Arc { .. } => e.points().contains(&id),
+                Entity::Arc { .. } | Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                    e.points().contains(&id)
+                }
             })
     }
 
@@ -1703,6 +1711,22 @@ impl SketchEditor {
 
     // ----- trim -----
 
+    /// Trim and Extend compute intersections with lines, arcs and circles
+    /// only: in a sketch with an ellipse or spline they refuse rather than
+    /// ignore those curves.
+    fn free_form_refusal(&self, tool: &str) -> Option<String> {
+        self.sketch
+            .entities
+            .iter()
+            .any(|e| matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. }))
+            .then(|| {
+                format!(
+                    "{tool} does not support sketches with ellipses or splines (intersections \
+                     with them are not computed); delete and redraw the lines instead."
+                )
+            })
+    }
+
     /// Parameters t in (0, 1) along line `p -> q` where other curves cross it.
     fn line_cuts(&self, line: EntityId, p: [f64; 2], q: [f64; 2]) -> Vec<f64> {
         self.line_hits(line, p, q, false)
@@ -1760,6 +1784,8 @@ impl SketchEditor {
                         ts.push(t);
                     }
                 }
+                // Refused up front (see `free_form_refusal`).
+                Entity::Ellipse { .. } | Entity::Spline { .. } => {}
                 Entity::Circle { center, radius, .. } => {
                     if let Some(c) = self.sketch.point_xy(*center) {
                         ts.extend(circle_hits(c, *radius).into_iter().filter(|t| inside(*t)));
@@ -1789,6 +1815,10 @@ impl SketchEditor {
     /// Extend the line end nearest to the click along the line to the nearest
     /// curve it would cross. The end must be free (used by no other curve).
     fn extend_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Some(why) = self.free_form_refusal("Extend") {
+            self.fail(why);
+            return;
+        }
         // A line, or the end point of exactly one line.
         let (e, picked_end) = match self.pick(pos, screen, view) {
             Some(Item::Entity(e)) => (e, None),
@@ -1948,6 +1978,8 @@ impl SketchEditor {
                         }
                     }
                 }
+                // Refused up front (see `free_form_refusal`).
+                Entity::Ellipse { .. } | Entity::Spline { .. } => {}
                 Entity::Circle { center, radius, .. } => {
                     if let Some(c2) = self.sketch.point_xy(*center) {
                         out.extend(circle_circle(c2, *radius).into_iter().map(ang));
@@ -2178,6 +2210,10 @@ impl SketchEditor {
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Some(why) = self.free_form_refusal("Trim") {
+            self.fail(why);
+            return;
+        }
         let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
             self.fail("Click the part of a line to remove (away from its endpoints).".into());
             return;
@@ -2341,6 +2377,54 @@ impl SketchEditor {
                 circle: e,
                 dim: Dimension::new(self.sketch.unique_dimension_name("diameter"), 2.0 * radius),
             },
+            Entity::Ellipse {
+                center,
+                major,
+                minor,
+                ..
+            } => {
+                // First click: the major radius; second: the minor radius.
+                let has = |m: bool| {
+                    self.sketch.constraints.iter().any(|c| {
+                        matches!(c, Constraint::EllipseRadius { ellipse, major, .. }
+                            if *ellipse == e && *major == m)
+                    })
+                };
+                let (Some(c), Some(m)) =
+                    (self.sketch.point_xy(center), self.sketch.point_xy(major))
+                else {
+                    return;
+                };
+                if !has(true) {
+                    Constraint::EllipseRadius {
+                        ellipse: e,
+                        major: true,
+                        dim: Dimension::new(
+                            self.sketch.unique_dimension_name("major_radius"),
+                            dist(c, m),
+                        ),
+                    }
+                } else if !has(false) {
+                    Constraint::EllipseRadius {
+                        ellipse: e,
+                        major: false,
+                        dim: Dimension::new(
+                            self.sketch.unique_dimension_name("minor_radius"),
+                            minor,
+                        ),
+                    }
+                } else {
+                    self.fail("Both ellipse radii are already dimensioned.".into());
+                    return;
+                }
+            }
+            Entity::Spline { .. } => {
+                self.fail(
+                    "A spline has no dimension of its own: dimension or fix its control points."
+                        .into(),
+                );
+                return;
+            }
             Entity::Line { a, b, .. } => {
                 let (Some(pa), Some(pb)) = (self.sketch.point_xy(a), self.sketch.point_xy(b))
                 else {

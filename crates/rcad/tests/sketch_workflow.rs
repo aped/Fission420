@@ -158,6 +158,7 @@ fn extents(s: &rcad_sketch::Sketch) -> ([f64; 2], [f64; 2]) {
             rcad_sketch::Entity::Line { a, b, .. } => vec![*a, *b],
             rcad_sketch::Entity::Circle { center, .. } => vec![*center],
             rcad_sketch::Entity::Arc { start, end, .. } => vec![*start, *end],
+            e => e.points(),
         })
         .filter_map(|p| s.point_xy(p))
         .collect();

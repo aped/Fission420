@@ -120,6 +120,13 @@ impl Sketch {
         src: &[Entity],
         maps: &[(Map, usize)],
     ) -> Result<Vec<EntityId>, SketchError> {
+        if let Some(e) = src.iter().find(|e| matches!(e, Entity::Ellipse { .. })) {
+            return Err(SketchError::InvalidValue(format!(
+                "pattern: ellipse {:?} cannot be patterned (no equal-minor-radius tie); \
+                 pattern lines, arcs, circles and splines",
+                e.id()
+            )));
+        }
         let pts = source_points(src);
         let single = one_axis_points(self, src);
         let construction: BTreeSet<EntityId> = src
@@ -245,6 +252,16 @@ impl Sketch {
                         });
                         id
                     }
+                    Entity::Spline { points, closed, .. } => {
+                        let id = self.next_entity_id();
+                        self.entities.push(Entity::Spline {
+                            id,
+                            points: points.iter().map(|p| map_pt[p]).collect(),
+                            closed: *closed,
+                        });
+                        id
+                    }
+                    Entity::Ellipse { .. } => unreachable!("refused above"),
                 };
                 if construction.contains(&e.id()) {
                     self.set_construction(id, true);

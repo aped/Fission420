@@ -8,6 +8,7 @@
 mod build;
 mod chamfer;
 mod combine;
+mod cubic;
 mod direct;
 mod edges;
 mod exact;
@@ -217,13 +218,33 @@ pub enum LoopSegment {
         center: [f64; 2],
         ccw: bool,
     },
+    /// Rational cubic Bézier span (ellipse quarter or cubic B-spline span):
+    /// control points `start, c1, c2, end` (`end` the next segment's start),
+    /// weights `1, w[0], w[1], 1`, all positive. Built as an exact single-span
+    /// NURBS edge (see `cubic.rs`).
+    Cubic {
+        start: [f64; 2],
+        c1: [f64; 2],
+        c2: [f64; 2],
+        w: [f64; 2],
+    },
 }
 
 impl LoopSegment {
     pub fn start(&self) -> [f64; 2] {
         match self {
-            LoopSegment::Line { start } | LoopSegment::Arc { start, .. } => *start,
+            LoopSegment::Line { start }
+            | LoopSegment::Arc { start, .. }
+            | LoopSegment::Cubic { start, .. } => *start,
         }
+    }
+}
+
+impl Profile {
+    /// Whether the profile has free-form (ellipse / spline) spans. Operations
+    /// that only handle lines, arcs and circles refuse such profiles by name.
+    pub fn has_cubic(&self) -> bool {
+        matches!(self, Profile::Loop(v) if v.iter().any(|s| matches!(s, LoopSegment::Cubic { .. })))
     }
 }
 
@@ -255,6 +276,10 @@ pub(crate) fn loop_signed_area(segs: &[LoopSegment]) -> f64 {
             let r = (p[0] - center[0]).hypot(p[1] - center[1]);
             let t = arc_signed_sweep(p, q, *center, *ccw);
             a += 0.5 * r * r * (t - t.sin());
+        }
+        if let LoopSegment::Cubic { c1, c2, w, .. } = &segs[i] {
+            // Replace the chord term by the span's own integral.
+            a += cubic::area_term([p, *c1, *c2, q], *w) - 0.5 * (p[0] * q[1] - q[0] * p[1]);
         }
     }
     a
@@ -318,6 +343,18 @@ impl Profile {
                     let center = match seg {
                         LoopSegment::Arc { center, .. } => Some(*center),
                         LoopSegment::Line { .. } => None,
+                        LoopSegment::Cubic { c1, c2, w, .. } => {
+                            if c1.iter().chain(c2).chain(w).any(|v| !v.is_finite())
+                                || w[0] <= 0.0
+                                || w[1] <= 0.0
+                            {
+                                return Err(KernelError::InvalidInput(format!(
+                                    "loop span {i} has non-finite control data or a \
+                                     non-positive weight"
+                                )));
+                            }
+                            None
+                        }
                     };
                     if p.iter()
                         .chain(center.iter().flatten())

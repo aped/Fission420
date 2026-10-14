@@ -99,7 +99,7 @@ fn straight(p: &Profile) -> Option<Vec<[f64; 2]>> {
             .iter()
             .map(|s| match s {
                 LoopSegment::Line { start } => Some(*start),
-                LoopSegment::Arc { .. } => None,
+                LoopSegment::Arc { .. } | LoopSegment::Cubic { .. } => None,
             })
             .collect(),
         Profile::Circle { .. } => None,

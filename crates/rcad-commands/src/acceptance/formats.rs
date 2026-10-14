@@ -1024,16 +1024,18 @@ fn geometry(sk: &Sketch) -> Vec<Geo> {
     sk.entities
         .iter()
         .filter(|e| !sk.construction.contains(&e.id()))
-        .map(|e| match e {
-            Entity::Line { a, b, .. } => Geo::Line(p(*a), p(*b)),
+        .filter_map(|e| match e {
+            Entity::Line { a, b, .. } => Some(Geo::Line(p(*a), p(*b))),
             Entity::Arc {
                 center, start, end, ..
-            } => Geo::Arc {
+            } => Some(Geo::Arc {
                 c: p(*center),
                 s: p(*start),
                 e: p(*end),
-            },
-            Entity::Circle { center, radius, .. } => Geo::Circle(p(*center), *radius),
+            }),
+            Entity::Circle { center, radius, .. } => Some(Geo::Circle(p(*center), *radius)),
+            // The R12 DXF writer refuses ellipses and splines; nothing to compare.
+            Entity::Ellipse { .. } | Entity::Spline { .. } => None,
         })
         .collect()
 }
