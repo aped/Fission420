@@ -4841,6 +4841,13 @@ fn pick_projected_edge(
         [] => Err(DocError::Validation(
             "the face has no edges to project".into(),
         )),
+        [(_, (_, Some(e))), ..] if *e == rcad_document::UNPROJECTABLE => {
+            Err(DocError::ProductLimit(
+                "the picked edge is an arc on a face oblique to the sketch: its projection is an \
+                 elliptical arc, which is not supported (full circles project to ellipses)"
+                    .into(),
+            ))
+        }
         [(b, _), (s, _), ..] if s - b <= 1e-6 => Err(DocError::Validation(
             "two edges of the face are equally near `at`; pick a point closer to one edge".into(),
         )),
