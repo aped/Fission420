@@ -61,6 +61,12 @@ pub fn step_opts(
             .join(", ")
     ));
     notes.extend(imp.warnings.iter().map(|w| format!("warning: {w}")));
+    if let Some(n) = presentation_styles(text) {
+        notes.push(format!(
+            "warning: colours/styles ignored: {n} STYLED_ITEM presentation entities (colours, \
+             layers) are not imported"
+        ));
+    }
     Ok(StepResult {
         solids: imp.solids,
         surfaces: imp.surfaces,
@@ -68,6 +74,24 @@ pub fn step_opts(
         stats: imp.stats,
         notes,
     })
+}
+
+/// Number of `STYLED_ITEM` / `OVER_RIDING_STYLED_ITEM` instances (colour and
+/// style presentation, ISO 10303-214/242) in a STEP file's text: the kernel
+/// reads geometry only, so their loss is reported. `None` when there are none.
+fn presentation_styles(text: &str) -> Option<usize> {
+    let n = text
+        .split(';')
+        .filter(|inst| {
+            let t = inst.trim_start();
+            t.starts_with('#')
+                && t.split_once('=').is_some_and(|(_, rhs)| {
+                    let r = rhs.trim_start();
+                    r.starts_with("STYLED_ITEM") || r.starts_with("OVER_RIDING_STYLED_ITEM")
+                })
+        })
+        .count();
+    (n > 0).then_some(n)
 }
 
 /// Parse an embedded STL file into a mesh body scaled by `to_mm`.
