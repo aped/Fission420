@@ -161,10 +161,12 @@ fn canonical_engulfed_hole_cut_is_exact_and_regenerates() {
     let b = s.summary().bodies[0].measurements.clone().unwrap();
     assert!((b.bounds.max[2] - 10.0).abs() < 1e-9 && b.bounds.min[2].abs() < 1e-9);
     // No vestigial Ø10 wall: material only beyond r = 8 (also between the
-    // old r = 5 wall and the new one: empty), 6 plate faces + 4 hole patches.
+    // old r = 5 wall and the new one: empty). 6 plate faces + the Ø16 wall:
+    // 3 patches when Truck builds it (truck-shapeops fork), 4 from the slab
+    // fallback.
     probe(&s, &ring_probes(7.8, 8.2));
     probe(&s, &ring_probes(5.2, 8.2));
-    assert_eq!(b.face_count, 10);
+    assert!(b.face_count == 9 || b.face_count == 10, "{}", b.face_count);
     export(&mut s, "canonical_engulfed_d16");
     // Undo / redo restore the volumes.
     ok(&mut s, Command::Undo);

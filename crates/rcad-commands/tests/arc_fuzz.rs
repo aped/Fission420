@@ -553,6 +553,8 @@ fn arc_corpus(only: Option<usize>) {
 /// only, and a refilled void leaves none. The check now also probes the
 /// target's faces near the tool (ADR 0005 addendum): refused, unchanged. The
 /// slab construction refuses too (a tangent contact elsewhere in the body).
+/// With the truck-shapeops fork Truck sometimes builds the correct solid
+/// instead; that outcome is checked against the oracle like the other cuts.
 #[test]
 fn tangent_round_cut_beside_a_shallow_rounded_pocket() {
     let mut s = Session::new();
@@ -637,7 +639,11 @@ fn tangent_round_cut_beside_a_shallow_rounded_pocket() {
             region: None,
             options: Default::default(),
         });
-        if i == 4 {
+        // Cut 4: Truck's outcome here depends on its run-to-run edge ordering. It either
+        // refills the pocket, which the check must refuse with the model unchanged, or (with
+        // the truck-shapeops fork) builds the right solid, which must then pass the same oracle
+        // volume and point probes as every other cut below.
+        if i == 4 && !r.ok {
             assert!(
                 matches!(r.error, Some(rcad_document::DocError::GeometryCheck { ref detail, .. })
                     if detail.contains("beside a face of the target")),

@@ -3787,6 +3787,24 @@ fn mirror_feature(
     Ok(target)
 }
 
+/// True when `result` encloses measurably less volume than `target`: the exact boundary
+/// integrals differ by more than three times their combined error estimates (and 1e-9 of the
+/// target, for float noise). False when either volume is unavailable, so the caller refuses.
+fn removes_volume(target: &Body, result: &Body) -> bool {
+    let vol = |b: &Body| match k::measure(b).map(|m| m.volume) {
+        Ok(k::VolumeResult::Value {
+            volume,
+            error_estimate,
+            ..
+        }) => Some((volume, error_estimate)),
+        _ => None,
+    };
+    match (vol(target), vol(result)) {
+        (Some((vt, et)), Some((vr, er))) => vt - vr > (3.0 * (et + er)).max(1.0e-9 * vt.abs()),
+        _ => false,
+    }
+}
+
 /// Legacy (v1/v2) circular cut (`depth == None`: through all) and pocket features on
 /// their explicit target, with the original product limits.
 fn legacy_cut(
@@ -3918,9 +3936,11 @@ fn legacy_cut(
             (b, m)
         }
     };
-    // A cut that removes material always adds faces; containment (checked
-    // above) guarantees the cutter intersects the body.
-    if k::face_count(&b) <= k::face_count(&t) {
+    // A cut that removes material usually adds faces; containment (checked
+    // above) guarantees the cutter intersects the body. A cut engulfing an
+    // existing hole replaces its walls and can keep or lower the face count, so
+    // then the exact volumes decide (rare path; the measure is not cheap).
+    if k::face_count(&b) <= k::face_count(&t) && !removes_volume(&t, &b) {
         return Err(DocError::Kernel {
             feature: id,
             detail: format!(

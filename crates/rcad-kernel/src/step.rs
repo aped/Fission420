@@ -80,6 +80,9 @@ fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surfac
     }
     let mut cs = body.solid.compress();
     for shell in &mut cs.boundaries {
+        for face in &mut shell.faces {
+            bounded_revolution_generatrix(&mut face.surface);
+        }
         let verts = shell.vertices.clone();
         for e in &mut shell.edges {
             if let Curve::IntersectionCurve(ic) = &e.curve {
@@ -91,6 +94,32 @@ fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surfac
         }
     }
     Ok(cs)
+}
+
+/// truck-stepio writes a revolved straight edge as `SURFACE_OF_REVOLUTION` of a `LINE`, and a
+/// STEP `LINE` is unbounded: for a generatrix that is not parallel to the axis (a revolved annulus
+/// or cone) the line crosses the axis, the surface covers itself twice and readers rebuild the
+/// face trims in the wrong half (OpenCascade: invalid faces at most seam angles). Writing the
+/// generatrix as the degree-1 B-spline over the same two points is the same segment, bounded.
+fn bounded_revolution_generatrix(surface: &mut Surface) {
+    let Surface::RevolutedCurve(p) = surface else {
+        return;
+    };
+    let rev = p.entity();
+    let Curve::Line(line) = rev.entity_curve() else {
+        return;
+    };
+    let segment = BSplineCurve::new(KnotVec::bezier_knot(1), vec![line.0, line.1]);
+    let mut q = Processor::new(RevolutedCurve::by_revolution(
+        Curve::BSplineCurve(segment),
+        rev.origin(),
+        rev.axis(),
+    ));
+    q.transform_by(*p.transform());
+    if !p.orientation() {
+        q.invert();
+    }
+    *p = q;
 }
 
 /// STEP header. The `FILE_NAME` time stamp is `SOURCE_DATE_EPOCH` (seconds, the

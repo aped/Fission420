@@ -92,6 +92,49 @@ fn generating_curve_on(
     Err(unsupported("could not identify generating curve"))
 }
 
+/// The plane of a planar face: a `Plane`, or a surface of revolution whose generating curve is a
+/// straight segment perpendicular to the axis (a revolved annulus or disc, as Truck's revolve of a
+/// profile's horizontal edge produces). The rebuilt edges are still verified on the original
+/// surfaces, so a wrongly recognised plane fails verification instead of exporting.
+fn as_plane(s: &Surface) -> Option<Plane> {
+    match s {
+        Surface::Plane(p) => Some(*p),
+        Surface::RevolutedCurve(rev) => {
+            let Curve::Line(line) = rev.entity().entity_curve() else {
+                return None;
+            };
+            let t = *rev.transform();
+            let (o, a) = (
+                t.transform_point(rev.entity().origin()),
+                t.transform_vector(rev.entity().axis()),
+            );
+            let (l0, l1) = (t.transform_point(line.0), t.transform_point(line.1));
+            let d = l1 - l0;
+            if a.magnitude() < 1e-12 || d.magnitude() < 1e-12 {
+                return None;
+            }
+            let a = a.normalize();
+            if d.normalize().dot(a).abs() > 1e-12 {
+                return None;
+            }
+            // In-plane axes: radial (from the axis to the segment) and a x radial.
+            let c = o + a * (l0 - o).dot(a);
+            let far = if (l0 - c).magnitude() >= (l1 - c).magnitude() {
+                l0
+            } else {
+                l1
+            };
+            let x = far - c;
+            if x.magnitude() < 1e-12 {
+                return None;
+            }
+            let x = x.normalize();
+            Some(Plane::new(c, c + x, c + a.cross(x)))
+        }
+        _ => None,
+    }
+}
+
 /// Exact replacement for one intersection edge from vertex `p0` to vertex `p1` (in the
 /// edge's absolute direction), or an error when the case is unsupported or the
 /// rebuilt curve fails verification.
@@ -100,13 +143,17 @@ pub(crate) fn exact_edge(
     p0: Point3,
     p1: Point3,
 ) -> Result<Curve> {
-    if let (Surface::Plane(a), Surface::Plane(b)) = (ic.surface0(), ic.surface1()) {
+    let (s0, s1) = (ic.surface0(), ic.surface1());
+    let (q0, q1) = (as_plane(s0), as_plane(s1));
+    if let (Some(a), Some(b)) = (&q0, &q1) {
         return plane_plane_edge(ic, a, b, p0, p1);
     }
-    let (plane, other) = match (ic.surface0(), ic.surface1()) {
-        (Surface::Plane(p), o) | (o, Surface::Plane(p)) => (p, o),
+    let (plane, other) = match (q0, q1) {
+        (Some(p), _) => (p, s1),
+        (_, Some(p)) => (p, s0),
         _ => return Err(unsupported("intersection without a planar face")),
     };
+    let plane = &plane;
     let n = plane.normal();
     let o = plane.origin();
     if (n.magnitude() - 1.0).abs() > 1e-12 {
