@@ -299,3 +299,32 @@ fn v6_documents() {
     assert_eq!(s.model().unwrap().document().configurations.len(), 1);
     assert_eq!(s.model().unwrap().document().drawings.len(), 1);
 }
+
+/// Frozen format v7 documents, written by a v7 build (cda7c34) before
+/// the v8 schema changes: the drawing set (configurations, drawings with
+/// dimensions, BOM and balloons), the hinge assembly (nested components,
+/// joints), the sheet-metal U-channel and the open-box surface repair. They
+/// must open, regenerate, and re-save as v7 documents equal to the original.
+#[test]
+fn v7_documents() {
+    let d = repo().join("crates/rcad-commands/tests/fixtures/native_v7");
+    for name in [
+        "drawing_set",
+        "hinge_assembly",
+        "sheet_u_channel",
+        "open_box_repair",
+    ] {
+        let path = d.join(format!("{name}.rcad.json"));
+        assert_eq!(version(&path), 7, "{name}");
+        let mut s = Session::new();
+        let r = s.execute(&Command::Open { path: path.clone() });
+        assert!(r.ok, "{name}: {:?}", r.error);
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("resaved.rcad.json");
+        assert!(s.execute(&Command::Save { path: out.clone() }).ok);
+        assert_eq!(version(&out), 7, "{name}");
+        let mut t = Session::new();
+        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
+    }
+}

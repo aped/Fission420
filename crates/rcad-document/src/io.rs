@@ -37,7 +37,9 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v7: the additions listed in [`v7_feature`] (nested
 /// assemblies, more joint types, drawing annotations, sheet-metal rules,
 /// surfaces, ...). Written only when used (otherwise v6 or older as before).
-pub const FORMAT_VERSION: u32 = 7;
+/// v8: the additions listed in [`v8_feature`] (extra bodies of cuts that
+/// split a body, ...). Written only when used (otherwise v7 or older as before).
+pub const FORMAT_VERSION: u32 = 8;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -337,6 +339,33 @@ fn part_v7_feature(doc: &Document) -> Option<&'static str> {
     })
 }
 
+/// What in `doc` needs format v8, if anything (see [`FORMAT_VERSION`]).
+/// Every v8 addition that an older build would ignore or misread must be
+/// listed here. Each area keeps its checks in its own helper below.
+pub fn v8_feature(doc: &Document) -> Option<&'static str> {
+    part_v8_feature(doc)
+        .or_else(|| finish_v8_feature(doc))
+        .or_else(|| mesh_v8_feature(doc))
+}
+
+/// v8 part-modeling additions (bodies split off by cuts, ...).
+fn part_v8_feature(doc: &Document) -> Option<&'static str> {
+    let _ = doc;
+    None
+}
+
+/// v8 edge-finishing additions (fillets, ...).
+fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
+    let _ = doc;
+    None
+}
+
+/// v8 mesh and print additions.
+fn mesh_v8_feature(doc: &Document) -> Option<&'static str> {
+    let _ = doc;
+    None
+}
+
 /// v6 sketch additions: sketch text (`Sketch::texts`) and
 /// sketch pattern constraints (`PatternStep`, `PatternRotate`) need format v6;
 /// a v5 build would silently drop unknown fields or refuse with a misleading
@@ -364,10 +393,12 @@ pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
     None
 }
 
-/// The oldest format version that can hold `doc`: 7 / 6 / 5 when it uses a
-/// v7 / v6 / v5 feature, else 4.
+/// The oldest format version that can hold `doc`: 8 / 7 / 6 / 5 when it uses a
+/// v8 / v7 / v6 / v5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if v7_feature(doc).is_some() {
+    if v8_feature(doc).is_some() {
+        8
+    } else if v7_feature(doc).is_some() {
         7
     } else if v6_feature(doc).is_some() {
         6
@@ -536,6 +567,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     {
         return Err(DocError::File(format!(
             "a version {} file cannot contain {what} (v7 feature)",
+            nf.version
+        )));
+    }
+    if nf.version < 8
+        && let Some(what) = v8_feature(&nf.document)
+    {
+        return Err(DocError::File(format!(
+            "a version {} file cannot contain {what} (v8 feature)",
             nf.version
         )));
     }
