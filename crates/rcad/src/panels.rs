@@ -282,7 +282,7 @@ impl RcadApp {
                     )
                     .clicked()
                 {
-                    rcad_document::request_cancel();
+                    self.engine.cancel_running();
                 }
             }
         });

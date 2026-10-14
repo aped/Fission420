@@ -277,10 +277,14 @@ impl CancelTokens {
     /// Worker side, before each command: clear the flag (a request applies to
     /// the command running when it was made), publish the token, and say
     /// whether it was cancelled while queued.
-    fn start(&self, token: u64) -> bool {
+    /// Saves, exports and measurement are never interrupted (a Cancel
+    /// meant for a regeneration must not fail a Save): they publish token 0.
+    fn start(&self, token: u64, cancellable: bool) -> bool {
         rcad_document::clear_cancel();
-        self.running
-            .store(token, std::sync::atomic::Ordering::SeqCst);
+        self.running.store(
+            if cancellable { token } else { 0 },
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.is_cancelled(token)
     }
 }
@@ -654,7 +658,19 @@ fn worker(
             continue;
         }
         seq += 1;
-        let reply = if tokens.start(seq) {
+        let cancellable = queue.front().is_some_and(|c| {
+            !matches!(
+                c,
+                Command::Save { .. }
+                    | Command::SaveCopy { .. }
+                    | Command::Measure
+                    | Command::ExportStl { .. }
+                    | Command::ExportStep { .. }
+                    | Command::Export3mf { .. }
+                    | Command::ExportDrawing { .. }
+            )
+        });
+        let reply = if tokens.start(seq, cancellable) {
             match queue.pop_front() {
                 Some(cmd) => cancelled_reply(&session, cmd),
                 None => continue,
@@ -862,6 +878,18 @@ impl Engine {
             == token
         {
             rcad_document::request_cancel();
+        }
+    }
+
+    /// Cancel whatever command is running now (the toolbar's Cancel); no
+    /// effect between commands or during a save/export.
+    pub fn cancel_running(&self) {
+        let t = self
+            .tokens
+            .running
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if t != 0 {
+            self.cancel(t);
         }
     }
 
