@@ -306,6 +306,27 @@ impl RcadApp {
         {
             self.begin_sketch(SketchTarget::New { plane });
         }
+        // The world origin planes, whatever is selected (Fusion's Create
+        // Sketch offers the origin planes too).
+        let planes = ui.add_enabled_ui(open, |ui| {
+            ui.menu_button("▾", |ui| {
+                for (label, plane) in [
+                    ("Sketch on XY", SketchPlane::WorldXY),
+                    ("Sketch on XZ", SketchPlane::WorldXZ),
+                    ("Sketch on YZ", SketchPlane::WorldYZ),
+                ] {
+                    if ui.button(label).probe(label).clicked() {
+                        self.begin_sketch(SketchTarget::New { plane });
+                        ui.close();
+                    }
+                }
+            })
+        });
+        planes
+            .inner
+            .response
+            .named("Sketch plane menu")
+            .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)");
         if action(
             ui,
             "Sketch on offset plane…",
