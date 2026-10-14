@@ -252,3 +252,37 @@ fn a_face_divided_between_pieces_is_ambiguous() {
     );
     assert_eq!(s.model().unwrap().document(), &before);
 }
+
+/// A file whose splitting cut records fewer piece bodies than the cut now
+/// makes (here: removed by hand) opens anyway: the missing bodies are
+/// assigned on load, reported, and the document is marked unsaved.
+#[test]
+fn open_assigns_missing_piece_bodies() {
+    let mut s = Session::new();
+    slotted_block(&mut s, 32.0);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("split.rcad.json");
+    tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let feats = v["document"]["features"].as_array_mut().unwrap();
+    let cut = feats
+        .iter_mut()
+        .find(|f| f["kind"]["pieces"].is_array())
+        .expect("cut with pieces");
+    cut["kind"].as_object_mut().unwrap().remove("pieces");
+    let bodies = v["document"]["bodies"].as_array_mut().unwrap();
+    bodies.retain(|b| b["id"] != json!(2));
+    std::fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+    let mut t = Session::new();
+    let r = tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
+    assert!(
+        r.message.unwrap_or_default().contains("pieces"),
+        "load note expected"
+    );
+    assert_eq!(bodies_of(&t), 2);
+    assert!(t.summary().dirty);
+}
+
+fn bodies_of(s: &Session) -> usize {
+    s.summary().bodies.len()
+}

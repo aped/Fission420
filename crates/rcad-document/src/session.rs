@@ -116,21 +116,33 @@ impl Model {
                 Some(e)
             }
         };
-        let mut cache = RegenCache::default();
-        let eval = regenerate_cached(&doc, Some(&mut cache))?;
-        let dirty = !cleaned.is_empty();
+        let mut m = Self {
+            doc: Document::new(),
+            eval: Evaluation::empty(),
+            undo: vec![],
+            redo: vec![],
+            revision: 0,
+            dirty: false,
+            cache: RegenCache::default(),
+            defer_measurements: false,
+            measure_failed: None,
+        };
+        // A cut that now splits its target into more pieces than the file
+        // assigned (e.g. a kernel change between builds) gets its bodies here,
+        // as an edit would; the document is then marked unsaved.
+        let before = doc.features.clone();
+        m.eval = m.regen_assigning_pieces(&mut doc)?;
+        if doc.features != before {
+            cleaned.push(
+                "a cut now splits its body into more pieces than the file recorded: new bodies \
+                 were assigned (save to keep them)"
+                    .into(),
+            );
+        }
+        m.dirty = !cleaned.is_empty();
+        m.doc = doc;
         Ok((
-            Self {
-                doc,
-                eval,
-                undo: vec![],
-                redo: vec![],
-                revision: 0,
-                dirty,
-                cache,
-                defer_measurements: false,
-                measure_failed: None,
-            },
+            m,
             LoadReport {
                 expression_error,
                 cleaned,
