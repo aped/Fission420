@@ -60,9 +60,11 @@ w·t·(Σ straights) + Σ w·θ/2·((R+t)² − R²).
 ### Refusals (each with the feature and the reason)
 
 * a flat pattern that overlaps itself: the flat outline is checked for any intersection or
-  touching of non-neighbouring edges (collinear overlaps and end points on edges included) and its
-  area must equal the plate area plus the unfolded strips,
-* a relief that cuts into a hole of the plate,
+  touching of non-neighbouring edges (collinear overlaps and end points on edges included). (An
+  area comparison cannot detect overlapping strips: each strip adds exactly its own area to the
+  outline's signed area, overlapping or not.)
+* a relief that cuts into a hole of the plate (a circular hole is checked exactly: distance from
+  its centre to every line and arc of the relief-cut outline; other holes as polygons),
 * flange footprints on the base plane overlapping (self-overlapping / colliding flanges; this
   check is conservative for flanges leaning over the plate at > 90°: it refuses any overlap of
   their projections even if their heights would separate them),

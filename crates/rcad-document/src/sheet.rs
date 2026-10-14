@@ -285,19 +285,7 @@ fn check_simple(segs: &[LoopSegment]) -> std::result::Result<(), String> {
         .iter()
         .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
     let eps = 1e-9 * scale;
-    let o = |a: P, b: P, c: P| cross(sub(b, a), sub(c, a));
-    // Point c on the closed segment a-b (within eps).
-    let on = |a: P, b: P, c: P| {
-        let l = norm(sub(b, a));
-        if l == 0.0 {
-            return norm(sub(c, a)) <= eps;
-        }
-        let d = o(a, b, c).abs() / l;
-        let t = ((c[0] - a[0]) * (b[0] - a[0]) + (c[1] - a[1]) * (b[1] - a[1])) / (l * l);
-        d <= eps && t >= -eps / l && t <= 1.0 + eps / l
-    };
     let hit = |a: P, b: P, c: P, d: P| segs_meet(a, b, c, d, eps);
-    let _ = (&o, &on);
     for i in 0..n {
         let (a, b) = (p[i], p[(i + 1) % n]);
         for j in i + 1..n {
@@ -375,6 +363,44 @@ fn hole_poly(h: &kk::Profile) -> Vec<P> {
     }
 }
 
+/// Exact distance from `q` to the closed segment a-b.
+fn seg_dist(q: P, a: P, b: P) -> f64 {
+    let ab = sub(b, a);
+    let l2 = ab[0] * ab[0] + ab[1] * ab[1];
+    if l2 == 0.0 {
+        return norm(sub(q, a));
+    }
+    let t = (((q[0] - a[0]) * ab[0] + (q[1] - a[1]) * ab[1]) / l2).clamp(0.0, 1.0);
+    norm(sub(q, [a[0] + t * ab[0], a[1] + t * ab[1]]))
+}
+
+/// Exact distance from `q` to the circular arc about `c` from `s` to `e`
+/// (counter-clockwise when `ccw`; `s == e` is the full circle).
+fn arc_dist(q: P, s: P, e: P, c: P, ccw: bool) -> f64 {
+    use std::f64::consts::TAU;
+    let r = norm(sub(s, c));
+    let dq = norm(sub(q, c));
+    if dq == 0.0 {
+        return r;
+    }
+    let ang = |p: P| (p[1] - c[1]).atan2(p[0] - c[0]);
+    // Sweep from `lo` counter-clockwise to `lo + sweep`.
+    let (lo, hi) = if ccw {
+        (ang(s), ang(e))
+    } else {
+        (ang(e), ang(s))
+    };
+    let mut sweep = (hi - lo).rem_euclid(TAU);
+    if sweep == 0.0 {
+        sweep = TAU;
+    }
+    if (ang(q) - lo).rem_euclid(TAU) <= sweep {
+        (dq - r).abs()
+    } else {
+        norm(sub(q, s)).min(norm(sub(q, e)))
+    }
+}
+
 /// Review S4: every hole stays strictly inside the (relief-cut) outline.
 fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::Result<(), String> {
     let p = polyline(outline);
@@ -383,6 +409,37 @@ fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::R
         .fold(1.0f64, |m, q| m.max(q[0].abs()).max(q[1].abs()));
     let eps = 1e-9 * scale;
     for (k, h) in holes.iter().enumerate() {
+        // Review run 7 #48: a circle is checked exactly (distance from its
+        // centre to each true outline line and arc), not as a polygon
+        // inscribed in it, which misses an edge inside the circle by less
+        // than the sagitta.
+        if let kk::Profile::Circle { center, radius } = h {
+            if !inside(&p, *center) {
+                return Err(format!("hole {} is no longer inside the plate", k + 1));
+            }
+            let n = outline.len();
+            for i in 0..n {
+                let (s, e) = (&outline[i], outline[(i + 1) % n].start());
+                let d = match s {
+                    LoopSegment::Line { start } => seg_dist(*center, *start, e),
+                    LoopSegment::Arc {
+                        start,
+                        center: c,
+                        ccw,
+                    } => arc_dist(*center, *start, e, *c, *ccw),
+                };
+                if d <= radius + eps {
+                    let q = s.start();
+                    return Err(format!(
+                        "hole {} meets the outline near ({:.3}, {:.3})",
+                        k + 1,
+                        q[0],
+                        q[1]
+                    ));
+                }
+            }
+            continue;
+        }
         let hp = hole_poly(h);
         if hp.is_empty() {
             continue;
@@ -405,11 +462,6 @@ fn check_holes(outline: &[LoopSegment], holes: &[kk::Profile]) -> std::result::R
         }
     }
     Ok(())
-}
-
-/// Polygonized loop area (arcs at ≤ 2° chords).
-fn poly_area(segs: &[LoopSegment]) -> f64 {
-    signed_area(&polyline(segs))
 }
 
 /// The non-construction lines of `s` as one open chain of vertices, from
@@ -986,7 +1038,6 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
     let mut prisms = Vec::new();
     // (flange, plan footprint, down?, bend-zone footprint: 0..R+t outward).
     let mut footprints: Vec<(FeatureId, [P; 4], bool, [P; 4])> = Vec::new();
-    let mut strip_areas: Vec<f64> = Vec::new();
     let mut outward: Vec<(FeatureId, P, P, P, f64, f64, f64)> = Vec::new();
     let bottom = if m.flip { m.frame.offset(-t) } else { m.frame };
     let world_dir = |v: P| -> [f64; 3] {
@@ -1095,7 +1146,6 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
             // Attachment: folded keeps the edge, flat adds the unfolded strip.
             let ba = rule.bend_allowance(f.angle);
             let wflat = ba + f.length;
-            strip_areas.push((s1 - s0) * wflat);
             if s0 > 1e-9 {
                 folded.push(KSeg::Line { start: p(s0, 0.0) });
                 flat.push(KSeg::Line { start: p(s0, 0.0) });
@@ -1234,23 +1284,17 @@ fn build_all(m: &SheetModel) -> Result<SheetBuild> {
             }
         }
     }
+    // Review S1: this is the whole protection against unfolded strips that
+    // overlap each other or the plate. (Comparing the flat outline's area
+    // with the plate plus the strips cannot detect it: by the shoelace
+    // formula every strip detour adds exactly its own area, overlapping or
+    // not; review run 7 #45.)
     check_simple(&to_sk(&flat)).map_err(|e| {
         DocError::Validation(format!(
             "{}: the flat pattern overlaps itself ({e}); flanges collide when unfolded",
             who(m.flanges.last().map(|f| f.id))
         ))
     })?;
-    // Review S1: the flat outline must add exactly the unfolded strips to the
-    // plate (same arcs on both, so their chord areas cancel).
-    let strips: f64 = strip_areas.iter().sum();
-    let grown = poly_area(&to_sk(&flat)) - poly_area(&to_sk(&folded));
-    if (grown - strips).abs() > 1e-9 * (1.0 + strips.abs()) * 1e3 {
-        return Err(DocError::Validation(format!(
-            "{}: the flat pattern overlaps itself (unfolded strips overlap by {:.6} mm²); flanges collide when unfolded",
-            who(m.flanges.last().map(|f| f.id)),
-            strips - grown
-        )));
-    }
     let plate = kk::extrude_region(&kk::Profile::Loop(folded.clone()), &m.holes, &bottom, t)
         .map_err(|e| DocError::Kernel {
             feature: m.base,
@@ -1551,4 +1595,28 @@ pub fn notes(b: &SheetBuild, rule: &SheetRule) -> Vec<String> {
         ));
     }
     v
+}
+
+#[cfg(test)]
+mod dist_tests {
+    use super::*;
+
+    /// Review run 7 #48: exact point-to-segment and point-to-arc distances.
+    #[test]
+    fn segment_and_arc_distances_are_exact() {
+        assert_eq!(seg_dist([0.5, 2.0], [0.0, 0.0], [1.0, 0.0]), 2.0);
+        assert_eq!(seg_dist([4.0, 4.0], [0.0, 0.0], [1.0, 0.0]), 5.0);
+        // Upper half of the unit circle, counter-clockwise from (1, 0).
+        let (s, e, c) = ([1.0, 0.0], [-1.0, 0.0], [0.0, 0.0]);
+        assert!((arc_dist([0.0, 3.0], s, e, c, true) - 2.0).abs() < 1e-15);
+        assert!((arc_dist([0.0, 0.25], s, e, c, true) - 0.75).abs() < 1e-15);
+        // Below the chord: the nearest point is an end.
+        assert!((arc_dist([1.0, -2.0], s, e, c, true) - 2.0).abs() < 1e-15);
+        // The same ends clockwise: the lower half.
+        assert!((arc_dist([0.0, -3.0], s, e, c, false) - 2.0).abs() < 1e-15);
+        assert!((arc_dist([0.0, 3.0], s, e, c, false) - 10f64.sqrt()).abs() < 1e-15);
+        // Full circle and the centre.
+        assert!((arc_dist([0.0, -3.0], s, s, c, true) - 2.0).abs() < 1e-15);
+        assert_eq!(arc_dist(c, s, e, c, true), 1.0);
+    }
 }

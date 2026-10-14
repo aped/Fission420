@@ -999,3 +999,52 @@ fn flange_added_while_rolled_back_keeps_the_marker() {
     let flat_len = 60.0 + 20.0 + (PI / 2.0) * 2.4;
     assert!((body_volume(&s, 2) - flat_len * 40.0).abs() < 1e-6);
 }
+
+/// Review run 7 #48: a relief corner inside a Ø10 hole by 5e-4 mm (less
+/// than the 7.6e-4 mm sagitta of the 2° polygon that used to stand in for
+/// the circle, on a chord midpoint direction) is refused; 5e-4 mm outside
+/// is accepted.
+#[test]
+fn relief_corner_just_inside_a_hole_is_refused() {
+    for (delta, ok) in [(5e-4, false), (-5e-4, true)] {
+        let mut s = Session::new();
+        tray::ok(&mut s, &json!({"cmd": "new_document"}));
+        let mut sk = rcad_sketch::Sketch::default();
+        let p: Vec<_> = [[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [0.0, 40.0]]
+            .iter()
+            .map(|q| sk.add_point(q[0], q[1]))
+            .collect();
+        for i in 0..4 {
+            sk.add_line(p[i], p[(i + 1) % 4]);
+        }
+        // Relief (start offset 10, width 1, depth 3): notch x 9..10, y 0..3.
+        // Its corner (10, 3) is the nearest notch point to a centre up and
+        // to the right at 45° (225° from the centre: an odd degree, so a
+        // chord midpoint of the old 180-gon).
+        let r = 5.0;
+        let d = (r - delta) / 2f64.sqrt();
+        let c = sk.add_point(10.0 + d, 3.0 + d);
+        sk.add_circle(c, r);
+        let rr = s.execute(&Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom { sketch: sk },
+        });
+        assert!(rr.ok, "{:?}", rr.error);
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "sheet_base", "sketch": 1, "thickness": 1.0, "radius": 1.0,
+                    "relief_depth": 3.0}),
+        );
+        let bottom = line_id(&s, 1, |p| p[1].abs() < 1e-9);
+        let res = tray::exec(
+            &mut s,
+            &json!({"cmd": "sheet_flange", "base": 2, "edge": bottom, "length": 5.0,
+                    "start_offset": 10.0, "end_offset": 10.0}),
+        );
+        assert_eq!(res.ok, ok, "delta {delta}: {:?}", res.error);
+        if !ok {
+            assert!(format!("{:?}", res.error).contains("hole"));
+        }
+    }
+}
