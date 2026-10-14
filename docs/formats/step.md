@@ -70,8 +70,10 @@ vertices are out of parameter order, B-spline degree > 25.
 
 `SURFACE_OF_REVOLUTION` (run 7; R-CAD's own writer uses it for every revolved surface, so
 embedded copies of imported cylinders must read back): the swept `LINE`/B-spline curve revolved
-about the `AXIS1_PLACEMENT`, with STEP's normal d(angle) x d(curve); a line parallel to the axis
-is treated as a cylinder. A solid with such faces must tessellate watertight or it is refused
+about the `AXIS1_PLACEMENT`; a line parallel to the axis is treated as a cylinder. The normal
+convention differs between solids written by R-CAD's own writer (observed), so both normals are
+tried per solid and the one whose solid tessellates watertight and consistently oriented is
+kept; with neither the solid is refused
 (observed: a face reaching the surface's seam angle, e.g. the last sector of a full 360° revolve,
 and R-CAD-written spheres with poles, do not read back yet).
 
