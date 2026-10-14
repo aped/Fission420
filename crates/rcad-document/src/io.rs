@@ -397,8 +397,10 @@ fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
 
 /// v8 mesh and print additions.
 fn mesh_v8_feature(doc: &Document) -> Option<&'static str> {
-    let _ = doc;
-    None
+    doc.features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::MeshEdit { .. }))
+        .then_some("mesh edits (transform, plane cut, decimation)")
 }
 
 /// v6 sketch additions: sketch text (`Sketch::texts`) and

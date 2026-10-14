@@ -9,6 +9,7 @@ pub mod assembly;
 pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
+pub mod mesh_edit;
 pub mod mesh_repair;
 
 /// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
@@ -1025,6 +1026,14 @@ pub enum Command {
     /// kept. `Response.mesh_repair` reports every change and the diagnosis
     /// before/after. `preview`: nothing changes.
     RepairMesh(mesh_repair::RepairMeshArgs),
+    /// Mesh edit (docs/MESH.md): preview or apply a transform, plane cut or
+    /// decimation of a mesh body as new mesh body/bodies; the source is kept.
+    /// `Response.mesh_edit` reports the change counts, the diagnosis after and
+    /// (decimation) the measured deviation. `preview`: nothing changes.
+    EditMesh(mesh_edit::EditMeshArgs),
+    /// Read-only mesh inspection: the body's diagnosis plus the bounded
+    /// self-intersection check (`Response.mesh_inspection`).
+    InspectMesh(mesh_edit::InspectMeshArgs),
     DeleteFeature {
         feature: FeatureId,
     },
@@ -1281,6 +1290,8 @@ impl Command {
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::RepairMesh(_) => "repair_mesh",
+            Command::EditMesh(_) => "edit_mesh",
+            Command::InspectMesh(_) => "inspect_mesh",
             Command::SheetBase(_) => "sheet_base",
             Command::SheetFlange(_) => "sheet_flange",
             Command::EditSheetRule(_) => "edit_sheet_rule",
@@ -1627,6 +1638,12 @@ pub struct Response {
     /// `repair_mesh`: what the repair changes / changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_repair: Option<rcad_exchange::mesh_repair::RepairReport>,
+    /// `edit_mesh`: what the edit changes / changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_edit: Option<rcad_exchange::mesh_edit::MeshEditReport>,
+    /// `inspect_mesh`: diagnosis and self-intersection check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_inspection: Option<mesh_edit::MeshInspection>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1802,7 +1819,7 @@ impl Session {
         if self.run_sheet_surface(cmd, r)? {
             return Ok(());
         }
-        if self.run_mesh(cmd, r)? {
+        if self.run_mesh(cmd, r)? || self.run_mesh_edit(cmd, r)? {
             return Ok(());
         }
         match cmd {
@@ -3377,7 +3394,7 @@ impl Session {
                 r.feature = Some(id);
             }
             // Handled by `run_mesh` before this match.
-            Command::RepairMesh(_) => {}
+            Command::RepairMesh(_) | Command::EditMesh(_) | Command::InspectMesh(_) => {}
             // Handled by `run_sheet_surface` before this match.
             Command::SheetBase(_)
             | Command::SheetFlange(_)
@@ -4283,6 +4300,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SurfacePatch { .. } => ("surface_patch", None),
                 FeatureKind::SurfaceExtrude { .. } => ("surface_extrude", None),
                 FeatureKind::MeshRepair { .. } => ("mesh_repair", None),
+                FeatureKind::MeshEdit { .. } => ("mesh_edit", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::AlignBody { .. } => ("align_body", None),

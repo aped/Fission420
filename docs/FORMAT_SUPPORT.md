@@ -41,24 +41,29 @@ interchange does not carry another application's feature history.
 
 | Format | Direction | Entities | Units | Hierarchy | Names / colours | Fidelity | Known losses |
 |---|---|---|---|---|---|---|---|
-| STEP | import (`import_step`) | exact B-rep subset (planes, cylinders, cones, spheres, tori, B-splines per formats/step.md); open shells as surface bodies on request | declared unit honoured; override only when none | **flattened** (one body per placed solid; reported) | solid names kept; colours no | exact surfaces; volumes exact or labelled estimates | assembly structure (use `import_step_assembly`), colours, PMI |
-| STEP | import (`import_step_assembly`) | as above | as above | **products and usages preserved** as components and linked occurrences | product names kept; colours no | as above | colours, PMI, external references |
+| STEP | import (`import_step`) | exact B-rep subset (planes, cylinders, cones, spheres, tori, B-splines per formats/step.md); open shells as surface bodies on request | declared unit honoured (inch parts and inch assemblies tested); override only when none | **flattened** (one body per placed solid, nested rotated + translated occurrences composed; reported) | solid names kept; colours **no, loss reported** ("colours/styles ignored: N STYLED_ITEM …" in the import notes) | exact surfaces; volumes exact or labelled estimates | assembly structure (use `import_step_assembly`), colours (reported), PMI |
+| STEP | import (`import_step_assembly`) | as above | as above (inch assembly tested) | **products and usages preserved** as components and linked occurrences (two nested rotated + translated levels tested) | product names kept; colours no (reported) | as above | colours, PMI, external references |
 | STEP | export (`export_step`) | one solid per exact body | mm | none (flat bodies) | body names; colours no | exact B-rep | mesh bodies and open surface bodies refused |
 | STEP | export (`export_assembly` `step_assembly`) | per occurrence | mm | PRODUCT per component, NAUO + CDSR per occurrence (FreeCAD-checked) | names; colours no | exact | suppressed occurrences omitted (by design) |
-| STL | import | triangles (ASCII, binary) | none in file: unit choice required | none | no / no | mesh as stored (f32 exact) | everything but triangles |
-| STL | export | triangles (B-rep tessellated at chord) | mm | none | no / no | tessellation (stated chord) | exactness, units, names |
-| 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit | flattened | object names; object-level colour only | mesh as stored | per-triangle colours, textures, production extension (refused) |
-| 3MF | export | one object per body | selectable (default mm) | none | names; object colours | tessellation | exactness |
+| STL | import | triangles (ASCII, binary); several shells in one file stay one mesh body (components counted, per-component bounds/volume in the diagnosis) | none in file: unit choice required; the dialog shows "Interpreted as …" (mm, cm, m, inch); wrong-unit meshes can be rescaled afterwards (mesh transform presets) | none | no / no | mesh as stored (f32 exact) | everything but triangles |
+| STL | export | triangles (B-rep tessellated at chord / facet angle, both shown in the dialog) | mm | none (one shell per body, or one file per body) | no / no (file names per body with `separate_files`) | tessellation (stated chord) | exactness, units, names |
+| 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit (mm, cm, inch, … tested; unknown unit refused) | flattened | object names; object-level colour only | mesh as stored | per-triangle colours, textures; required extensions other than materials (production, beam lattice) **refused**; singular transforms refused |
+| 3MF | export | one object per body, body selection | selectable (default mm) | none; with `item_transforms` the export placement is kept per object as its build item `transform` (objects as modeled) | names; object colours | tessellation | exactness; no printer/process settings (geometry only) |
 | DXF | import | LINE, ARC, CIRCLE, LWPOLYLINE/POLYLINE subset → unconstrained sketch; splines refused by name | `$INSUNITS`, else choice | none | no | exact lines/arcs | splines, text, blocks beyond the subset |
 | DXF | export (sketch / flat pattern / drawing) | R12 LINE/ARC/CIRCLE(+TEXT, SOLID for drawings) | mm, `$INSUNITS` 4 | layers only | layer names | exact lines/arcs | splines (none produced) |
 | SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
 | SVG / PDF | export (sketch, drawings) | lines/arcs (PDF: Béziers ≤ 2.8e-4·r) | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
 
-Qualification corpus: `tools/fixtures/corpus/` (29 manifest entries:
+Qualification corpus: `tools/fixtures/corpus/` (44 manifest entries:
 12 STEP parts (mm and inch, rotated placements, holes, counterbore, chamfer, fillet, cone,
-sphere, torus, tube, open shell), 3 STEP assemblies (nested, repeated links, rotated parts),
-2 STL meshes, hand-authored 3MF/DXF/SVG/STL cases and malformed STEP/STL/3MF/DXF/SVG files;
-provenance in `tools/fixtures/corpus/MANIFEST.md`. No file from another CAD vendor yet.), checked by
+sphere, torus, tube, open shell), 5 STEP assemblies (nested, repeated links, rotated parts,
+an **inch** assembly, two nested levels each rotated and translated), a STEP with
+**colours** (loss reported), 3 FreeCAD STL meshes (binary, ASCII, a two-shell binary also
+read as inches), hand-authored 3MF (inch; centimetre with components and rotated items),
+DXF/SVG profiles with **holes and counters**, and malformed or unsupported
+STEP/STL/3MF/DXF/SVG files (truncated, NaN, unknown unit, required beam-lattice extension,
+singular transform); provenance in `tools/fixtures/corpus/MANIFEST.md`. FreeCAD is the
+independent CAD implementation; no file from another CAD vendor yet.), checked by
 `crates/rcad-commands/tests/format_corpus.rs` against FreeCAD read-back or closed-form values;
 malformed files must fail with a bounded error and leave no partial document. A curved
 STEP solid's tessellation-estimated volume (sphere) is compared within its stated error;
@@ -162,11 +167,15 @@ export and Cut of a mesh body are refused and nothing is written; the mesh body 
 684-byte binary STL validated by a Python reader and FreeCAD (V 1000, solid).
 
 **Print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
-manifold vertices, orientation, positive volume; self-intersection not checked), `angle_deg`,
+manifold vertices, orientation, positive volume; bounded self-intersection check as a warning), `angle_deg`,
 export-only placement/layout, P1S/manual bed fit, `separate_files`, `allow_open_meshes`,
 per-body report. Evidence: `crates/rcad-commands/tests/print_export.rs`,
 `crates/rcad-kernel/tests/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,
 FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/print/validation/`).
+
+**Mesh inspection and edits** ([`MESH.md`](MESH.md)): duplicates, per-component
+bounds/volume, bounded self-intersection check; transform (unit presets), plane cut with caps,
+decimation with measured deviation, as history features.
 
 **Known losses**: no units, colour, topology or exact geometry; binary STL is f32
 (~7 significant digits); ASCII export exists in the crate but is not a command option.

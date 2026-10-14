@@ -440,6 +440,7 @@ impl RcadApp {
             self.paint_placement(&painter, rect);
             self.paint_extrude_preview(&painter, rect);
             self.paint_reattach_preview(&painter, rect);
+            self.paint_mesh_edit_preview(&painter);
             if (!self.summary.open || self.summary.features.is_empty())
                 && self.placement.is_none()
                 && self.dialog.is_none()

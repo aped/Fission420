@@ -1,0 +1,70 @@
+{
+ "a4_assembly_inch.step": {
+  "bbox": [
+   -25.4,
+   -6.35,
+   0.0,
+   82.55,
+   127.0,
+   25.4
+  ],
+  "inch_unit": true,
+  "solids": 2,
+  "valid": true,
+  "volume": 19604.656492,
+  "volumes": [
+   3217.592492,
+   16387.064
+  ]
+ },
+ "a5_nested_transforms_mm.step": {
+  "bbox": [
+   94.330127,
+   -29.980762,
+   0.0,
+   119.0,
+   29.820508,
+   15.0
+  ],
+  "inch_unit": false,
+  "solids": 2,
+  "valid": true,
+  "volume": 1403.185789,
+  "volumes": [
+   603.185789,
+   800.0
+  ]
+ },
+ "c0_blocks_uncoloured_mm.step": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   70.0,
+   30.0,
+   20.0
+  ],
+  "inch_unit": false,
+  "solids": 2,
+  "valid": true,
+  "volume": 25000.0,
+  "volumes": [
+   1000.0,
+   24000.0
+  ]
+ },
+ "m3_two_shells_binary.stl": {
+  "bbox": [
+   0.0,
+   0.0,
+   0.0,
+   56.0,
+   20.0,
+   12.0
+  ],
+  "components": 2,
+  "facets": 492,
+  "solid": true,
+  "volume": 4873.231934
+ }
+}

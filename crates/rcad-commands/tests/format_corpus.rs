@@ -61,6 +61,13 @@ fn corpus_imports_match_their_references() {
             bad(format!("import failed: {:?}", r.error));
             continue;
         }
+        // Reported losses (e.g. ignored colours) must be stated in the reply.
+        if let Some(want) = exp.get("message_contains").and_then(Value::as_str) {
+            let msg = r.message.clone().unwrap_or_default();
+            if !msg.contains(want) {
+                bad(format!("message {msg:?} lacks '{want}'"));
+            }
+        }
         if let Some(n) = exp.get("bodies").and_then(Value::as_u64)
             && sum.bodies.len() as u64 != n
         {
@@ -181,6 +188,58 @@ fn corpus_imports_match_their_references() {
                     if ents as u64 != n {
                         bad(format!("{ents} sketch entities, expected {n}"));
                     }
+                    // Profiles with holes and counters: extrude the imported sketch
+                    // and compare with the closed-form area x distance. A profile
+                    // with a counter (island in a hole) is refused as a whole with
+                    // `extrude_whole_error`; then every material region (even
+                    // nesting depth: the outline minus its holes, and the counters)
+                    // is extruded on its own (new bodies) and the volumes summed.
+                    if let (Some(d), Some(v), Some(t)) = (
+                        f(exp, "extrude"),
+                        f(exp, "extrude_volume"),
+                        f(exp, "vol_tol"),
+                    ) {
+                        let skf = sum.features.iter().find(|x| x.kind == "sketch").unwrap().id;
+                        let er = s.execute(&Command::extrude(None, skf, d));
+                        let whole_err = exp.get("extrude_whole_error").and_then(Value::as_str);
+                        match (whole_err, er.ok) {
+                            (None, true) => {}
+                            (Some(w), false) if format!("{:?}", er.error).contains(w) => {
+                                let regions: Vec<_> = sk
+                                    .regions()
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .filter(|r| r.depth % 2 == 0)
+                                    .collect();
+                                if regions.len() < 2 {
+                                    bad(format!("{} regions", regions.len()));
+                                }
+                                for rg in regions {
+                                    let mut c = Command::extrude(None, skf, d);
+                                    if let Command::Extrude { region, .. } = &mut c {
+                                        *region = Some(rg.id.clone());
+                                    }
+                                    let rr = s.execute(&c);
+                                    if !rr.ok {
+                                        bad(format!("region extrude: {:?}", rr.error));
+                                    }
+                                }
+                            }
+                            _ => bad(format!("whole-sketch extrude: {:?}", er.error)),
+                        }
+                        let got: f64 = s
+                            .summary()
+                            .bodies
+                            .iter()
+                            .filter_map(|b| match b.measurements.as_ref().map(|m| &m.volume) {
+                                Some(VolumeResult::Value { volume, .. }) => Some(*volume),
+                                _ => None,
+                            })
+                            .sum();
+                        if (got - v).abs() > t {
+                            bad(format!("extruded volume {got}, expected {v}"));
+                        }
+                    }
                     if let Some(mx) = exp.get("sketch_max").and_then(Value::as_array) {
                         let gx = sk.points.iter().map(|q| q.x).fold(f64::MIN, f64::max);
                         let gy = sk.points.iter().map(|q| q.y).fold(f64::MIN, f64::max);
@@ -202,16 +261,25 @@ fn corpus_imports_match_their_references() {
 /// volume FreeCAD measured.
 #[test]
 fn corpus_assemblies_import_with_hierarchy() {
-    let reference: Value = serde_json::from_str(
-        &std::fs::read_to_string(corpus().join("freecad_reference.json")).unwrap(),
-    )
-    .unwrap();
+    let read = |name: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(corpus().join(name)).unwrap()).unwrap()
+    };
+    let (first, more) = (
+        read("freecad_reference.json"),
+        read("freecad_reference_more.json"),
+    );
     for file in [
         "a1_nested_assembly_mm.step",
         "a2_repeated_links_mm.step",
         "a3_rotated_parts_mm.step",
+        "a4_assembly_inch.step",
+        "a5_nested_transforms_mm.step",
     ] {
-        let rf = &reference[file];
+        let rf = if first.get(file).is_some() {
+            &first[file]
+        } else {
+            &more[file]
+        };
         let mut s = Session::new();
         assert!(s.execute(&Command::NewDocument).ok);
         let c: Command = serde_json::from_value(

@@ -188,11 +188,13 @@ fn stl_units_and_unitless_dxf_asks_for_units() {
         "Import file path",
         &fixture("rcad-exchange/tests/fixtures/stl/box_freecad_binary.stl"),
     );
-    // STL: the unit choice is always shown; choose cm.
+    // STL: the unit choice is always shown with its interpretation; choose cm.
+    h.get_by_label_contains("Interpreted as mm: 1 file unit = 1 mm");
     h.get_by_label("File units").click();
     let _ = h.try_run();
     h.get_by_label("cm").click();
     let _ = h.try_run();
+    h.get_by_label_contains("Interpreted as cm: 1 file unit = 10 mm");
     click(&mut h, "OK");
     let b = h.state().summary().bodies[0].clone();
     assert_eq!(b.kind, "mesh");
