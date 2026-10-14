@@ -447,3 +447,68 @@ fn imported_plate_with_hole_takes_a_second_hole() {
     assert_closed_single(&cut);
     assert_exact_volume(&cut, 60.0 * 40.0 * 8.0 - PI * 25.0 * 8.0 - PI * 9.0 * 8.0);
 }
+
+/// An imported cylinder is a surface of revolution of a line given by a point and a unit direction,
+/// not by the face's end points. Export bounds the generatrix by the face's extent; bounding it by
+/// the line's two stored points wrote 1 mm generatrices for 15 mm faces, which OpenCascade read as
+/// invalid solids. (Our own reader and volume extrapolate a degree-1 B-spline linearly, so a
+/// round trip cannot see it: the control points are checked directly.)
+#[test]
+fn imported_cylinder_generatrix_spans_the_face() {
+    let imp = import("cylinder_d20_h15_mm.step");
+    let text = export_step(&imp.solids[0].body, "R-CAD").unwrap();
+    // Entity text from its `#id =` line to the closing `;` (entities can span lines).
+    let def = |id: &str| -> String {
+        let key = format!("{id} =");
+        let start = text
+            .match_indices(&key)
+            .map(|(i, _)| i)
+            .find(|&i| i == 0 || text.as_bytes()[i - 1] == b'\n')
+            .unwrap_or_else(|| panic!("{id} missing"));
+        text[start..start + text[start..].find(';').unwrap()].to_string()
+    };
+    let refs = |d: &str| -> Vec<String> {
+        d.split(|c: char| !(c == '#' || c.is_ascii_digit()))
+            .filter(|t| t.starts_with('#') && t.len() > 1)
+            .map(str::to_string)
+            .collect()
+    };
+    let mut checked = 0;
+    for line in text.lines().filter(|l| l.contains("SURFACE_OF_REVOLUTION")) {
+        let curve = refs(line)[1].clone();
+        let c = def(&curve);
+        if !c.contains("B_SPLINE_CURVE") {
+            continue;
+        }
+        let zs: Vec<f64> = refs(&c)[1..]
+            .iter()
+            .map(|id| def(id))
+            .filter(|d| d.contains("CARTESIAN_POINT"))
+            .map(|d| {
+                let open = d.rfind('(').unwrap() + 1;
+                let inner = &d[open..open + d[open..].find(')').unwrap()];
+                inner
+                    .split(',')
+                    .nth(2)
+                    .unwrap()
+                    .trim()
+                    .parse::<f64>()
+                    .unwrap()
+            })
+            .collect();
+        let (lo, hi) = zs
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &z| {
+                (a.min(z), b.max(z))
+            });
+        if (lo - hi).abs() < 1e-9 {
+            continue; // a radial generatrix (planar annulus), constant z
+        }
+        assert!(
+            lo <= 1e-6 && hi >= 15.0 - 1e-6,
+            "{curve}: generatrix z {lo}..{hi}, face 0..15"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 1, "no cylinder generatrix found in the export");
+}

@@ -80,9 +80,6 @@ fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surfac
     }
     let mut cs = body.solid.compress();
     for shell in &mut cs.boundaries {
-        for face in &mut shell.faces {
-            bounded_revolution_generatrix(&mut face.surface);
-        }
         let verts = shell.vertices.clone();
         for e in &mut shell.edges {
             if let Curve::IntersectionCurve(ic) = &e.curve {
@@ -92,16 +89,36 @@ fn exact_compressed(body: &Body) -> Result<CompressedSolid<Point3, Curve, Surfac
                 })?;
             }
         }
+        // After the edges are exact: each face's boundary samples bound its generatrix.
+        for face in &mut shell.faces {
+            let samples: Vec<Point3> = face
+                .boundaries
+                .iter()
+                .flatten()
+                .flat_map(|ei| {
+                    let c = &shell.edges[ei.index].curve;
+                    let (t0, t1) = c.range_tuple();
+                    (0..=GENERATRIX_SAMPLES)
+                        .map(move |k| c.subs(t0 + (t1 - t0) * k as f64 / GENERATRIX_SAMPLES as f64))
+                })
+                .collect();
+            bounded_revolution_generatrix(&mut face.surface, &samples);
+        }
     }
     Ok(cs)
 }
 
+/// Points sampled per boundary edge to bound a revolution's generatrix.
+const GENERATRIX_SAMPLES: usize = 16;
+
 /// truck-stepio writes a revolved straight edge as `SURFACE_OF_REVOLUTION` of a `LINE`, and a
 /// STEP `LINE` is unbounded: for a generatrix that is not parallel to the axis (a revolved annulus
 /// or cone) the line crosses the axis, the surface covers itself twice and readers rebuild the
-/// face trims in the wrong half (OpenCascade: invalid faces at most seam angles). Writing the
-/// generatrix as the degree-1 B-spline over the same two points is the same segment, bounded.
-fn bounded_revolution_generatrix(surface: &mut Surface) {
+/// face trims in the wrong half (OpenCascade: invalid faces at most seam angles). The generatrix
+/// is written instead as the degree-1 B-spline over the part of the line the face uses: the
+/// parameter range of its boundary samples (`samples`, world coordinates). The line's own two
+/// points are not that range (an imported cylinder's line is a unit direction from one point).
+fn bounded_revolution_generatrix(surface: &mut Surface, samples: &[Point3]) {
     let Surface::RevolutedCurve(p) = surface else {
         return;
     };
@@ -109,13 +126,32 @@ fn bounded_revolution_generatrix(surface: &mut Surface) {
     let Curve::Line(line) = rev.entity_curve() else {
         return;
     };
-    let segment = BSplineCurve::new(KnotVec::bezier_knot(1), vec![line.0, line.1]);
+    // The transform is affine, so a point's line parameter is the same in world coordinates.
+    let t = *p.transform();
+    let (w0, w1) = (t.transform_point(line.0), t.transform_point(line.1));
+    let d = w1 - w0;
+    let len2 = d.magnitude2();
+    if len2 < 1e-24 || samples.is_empty() {
+        return;
+    }
+    let (lo, hi) = samples
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| {
+            let s = (q - w0).dot(d) / len2;
+            (lo.min(s), hi.max(s))
+        });
+    if !(lo.is_finite() && hi.is_finite()) || hi - lo < 1e-12 {
+        return;
+    }
+    let pad = (hi - lo) * 1e-7;
+    let at = |s: f64| line.0 + (line.1 - line.0) * s;
+    let segment = BSplineCurve::new(KnotVec::bezier_knot(1), vec![at(lo - pad), at(hi + pad)]);
     let mut q = Processor::new(RevolutedCurve::by_revolution(
         Curve::BSplineCurve(segment),
         rev.origin(),
         rev.axis(),
     ));
-    q.transform_by(*p.transform());
+    q.transform_by(t);
     if !p.orientation() {
         q.invert();
     }
