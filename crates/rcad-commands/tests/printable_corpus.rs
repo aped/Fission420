@@ -698,3 +698,353 @@ fn enclosure_width_edit_moves_everything_upstream() {
     rel_close(volume(&s, 1), e.base(e.w), 1e-9, "base after undo");
     rel_close(volume(&s, 2), e.lid(e.w), 1e-9, "lid after undo");
 }
+
+// ------------------------------------------------------------------ exports
+
+/// Export chord (default `tol::MESH_CHORD`), f32 allowances, P1S bed centre
+/// and layout gap (as in `print_examples.rs`).
+const CHORD: f64 = 0.01;
+const F32_VOL: f64 = 0.5;
+const F32_LEN: f64 = 1e-4;
+const BED_C: f64 = 128.0;
+const GAP: f64 = 10.0;
+
+fn print_opts() -> rcad_commands::print::PrintOptions {
+    use rcad_commands::print::{BedPreset, BedSpec, Layout, Placement, PrintOptions};
+    PrintOptions {
+        placement: Some(Placement {
+            bodies: vec![],
+            layout: Some(Layout { gap: GAP }),
+        }),
+        bed: Some(BedSpec::Preset {
+            preset: BedPreset::BambuP1s,
+        }),
+        ..Default::default()
+    }
+}
+
+/// Placed bounds of a row along X centred on the bed (documented layout rule).
+fn row(sizes: &[[f64; 3]]) -> Vec<[[f64; 3]; 2]> {
+    let total: f64 = sizes.iter().map(|s| s[0]).sum::<f64>() + GAP * (sizes.len() - 1) as f64;
+    let mut x = BED_C - total / 2.0;
+    sizes
+        .iter()
+        .map(|s| {
+            let b = [
+                [x, BED_C - s[1] / 2.0, 0.0],
+                [x + s[0], BED_C + s[1] / 2.0, s[2]],
+            ];
+            x += s[0] + GAP;
+            b
+        })
+        .collect()
+}
+
+/// Per body: name, exact volume, modeled bounds, mesh volume tolerance,
+/// dims/bounds tolerance (curved outlines are inscribed polygons).
+struct Expect {
+    volume: f64,
+    bounds: [f64; 6],
+    mesh_tol: f64,
+    len_tol: f64,
+}
+
+fn expectations(name: &str) -> Vec<Expect> {
+    // Chordal volume error <= chord x curved area; areas bounded generously
+    // by twice the bounding-box surface (k) per body.
+    let area = |b: [f64; 6], k: f64| {
+        let (x, y, z) = (b[3] - b[0], b[4] - b[1], b[5] - b[2]);
+        2.0 * (x * y + x * z + y * z) * k
+    };
+    let ex = |volume: f64, bounds: [f64; 6], k: f64, len_tol: f64| Expect {
+        volume,
+        bounds,
+        mesh_tol: CHORD * area(bounds, k) + F32_VOL,
+        len_tol,
+    };
+    match name {
+        "everyday_enclosure" => {
+            let e = &ENCL;
+            let (hw, hd) = (e.w / 2.0, e.d / 2.0);
+            vec![
+                ex(e.base(e.w), [-hw, -hd, 0.0, hw, hd, e.h], 2.0, F32_LEN),
+                ex(
+                    e.lid(e.w),
+                    [-hw, -hd, e.lid_z, hw, hd, e.lid_z + e.lid_t],
+                    1.0,
+                    F32_LEN,
+                ),
+            ]
+        }
+        "everyday_tray" => vec![ex(
+            TRAY.volume(),
+            [0.0, 0.0, 0.0, TRAY.w, TRAY.d, TRAY.h],
+            4.0,
+            F32_LEN,
+        )],
+        "everyday_knob" => {
+            let r = KNOB[0];
+            vec![ex(
+                knob_volume(),
+                [-r, -r, 0.0, r, r, KNOB[3]],
+                1.0,
+                CHORD + F32_LEN,
+            )]
+        }
+        // Faceted threads: planar facets, exact tessellation; rod bounds are
+        // those of the facets (within the Ø20 envelope).
+        "threaded_pair" => vec![
+            Expect {
+                volume: ROD_V,
+                bounds: [-10.0, -10.0, 0.0, 10.0, 10.0, 12.0],
+                mesh_tol: F32_VOL,
+                len_tol: 0.05,
+            },
+            Expect {
+                volume: NUT_V,
+                bounds: [-15.0, -15.0, 0.0, 15.0, 15.0, 12.0],
+                mesh_tol: F32_VOL,
+                len_tol: F32_LEN,
+            },
+        ],
+        "split_bar" => {
+            let [l, w, h, slot] = BAR;
+            let p = (l - slot) / 2.0;
+            vec![
+                ex(p * w * h, [0.0, 0.0, 0.0, p, w, h], 0.0, F32_LEN),
+                ex(p * w * h, [p + slot, 0.0, 0.0, l, w, h], 0.0, F32_LEN),
+            ]
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Toolpath probes of each plate (P1S, 0.2 mm layers), from the dimensions
+/// and the layout rule.
+fn plate_probes(name: &str, placed: &[[[f64; 3]; 2]]) -> Value {
+    let h = placed.iter().map(|b| b[1][2]).fold(0.0, f64::max);
+    let mut p = vec![
+        json!({"name": format!("layer count {} ({h} mm / 0.2)", (h / 0.2).round()),
+               "kind": "layer_count", "equals": (h / 0.2).round() as i64}),
+        json!({"name": format!("top layer z={h}"), "kind": "max_z", "value": h}),
+    ];
+    let empty = |n: &str, rect: [f64; 4], z: [f64; 2]| json!({"name": n, "kind": "no_extrusion_in_rect", "frame": "plate", "z_range": z, "rect": rect});
+    let near = |n: &str, xy: [f64; 2], z: f64, r: f64| json!({"name": n, "kind": "extrusion_near", "frame": "plate", "z": z, "xy": xy, "radius": r});
+    match name {
+        "everyday_enclosure" => {
+            let e = &ENCL;
+            let (b, l) = (placed[0], placed[1]);
+            // Clear of the inner rounded corners (radius r - wall) by 0.5 mm.
+            let w = e.wall + (e.r - e.wall) * (1.0 - std::f64::consts::FRAC_1_SQRT_2) + 0.5;
+            p.push(empty(
+                "base cavity empty above the floor",
+                [b[0][0] + w, b[0][1] + w, b[1][0] - w, b[1][1] - w],
+                [e.wall + 0.4, e.h],
+            ));
+            p.push(near(
+                "base wall at mid-height",
+                [b[0][0] + e.wall / 2.0, BED_C],
+                e.h / 2.0,
+                0.6,
+            ));
+            p.push(near("base floor", [b[0][0] + 20.0, BED_C], 0.2, 0.6));
+            let c = [(l[0][0] + l[1][0]) / 2.0, BED_C];
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let x = c[0] + sx * (e.w / 2.0 - e.inset);
+                let y = c[1] + sy * (e.d / 2.0 - e.inset);
+                p.push(empty(
+                    "lid screw hole open",
+                    [x - 0.8, y - 0.8, x + 0.8, y + 0.8],
+                    [0.0, e.lid_t],
+                ));
+            }
+            p.push(near("lid plate", c, e.lid_t / 2.0, 1.0));
+        }
+        "everyday_tray" => {
+            let t = &TRAY;
+            let (cw, ch) = t.cell();
+            let o = placed[0][0];
+            for i in 0..3 {
+                for j in 0..2 {
+                    let x0 = o[0] + t.wall + f64::from(i) * (cw + t.wall);
+                    let y0 = o[1] + t.wall + f64::from(j) * (ch + t.wall);
+                    p.push(empty(
+                        &format!("compartment {} empty", i * 2 + j + 1),
+                        [x0 + 1.5, y0 + 1.5, x0 + cw - 1.5, y0 + ch - 1.5],
+                        [t.floor + 0.4, t.h],
+                    ));
+                }
+            }
+            let xd = o[0] + t.wall + cw + t.wall / 2.0;
+            p.push(near(
+                "divider at mid-height",
+                [xd, o[1] + t.wall + ch / 2.0],
+                t.h / 2.0,
+                0.6,
+            ));
+        }
+        "everyday_knob" => {
+            let [_, _, _, _, rs, flat, depth] = KNOB;
+            let c = [BED_C, BED_C];
+            p.push(empty(
+                "D shaft open (round side)",
+                [c[0] - rs + 0.6, c[1] - 1.0, c[0] + flat - 0.6, c[1] + 1.0],
+                [0.0, depth - 0.4],
+            ));
+            p.push(near(
+                "D flat wall",
+                [c[0] + flat + 0.2, c[1]],
+                depth / 2.0,
+                0.6,
+            ));
+        }
+        "threaded_pair" => {
+            let n = placed[1];
+            let c = [(n[0][0] + n[1][0]) / 2.0, BED_C];
+            p.push(empty(
+                "nut bore open",
+                [c[0] - 6.0, c[1] - 6.0, c[0] + 6.0, c[1] + 6.0],
+                [0.4, 11.6],
+            ));
+            let r = placed[0];
+            p.push(near(
+                "rod body",
+                [(r[0][0] + r[1][0]) / 2.0 + 8.0, BED_C],
+                6.0,
+                1.5,
+            ));
+        }
+        "split_bar" => {
+            let (a, b) = (placed[0], placed[1]);
+            p.push(empty(
+                "gap between the pieces",
+                [a[1][0] + 0.5, a[0][1], b[0][0] - 0.5, a[1][1]],
+                [0.0, BAR[2]],
+            ));
+            p.push(near("piece 1", [a[0][0] + 0.2, BED_C], 5.0, 0.6));
+            p.push(near("piece 2", [b[1][0] - 0.2, BED_C], 5.0, 0.6));
+        }
+        _ => unreachable!(),
+    }
+    json!({"_comment": format!("{name}: P1S bed, layout along X with {GAP} mm gaps"), "probes": p})
+}
+
+#[test]
+#[ignore = "writes the everyday parts' exports; run by tools/print/validate_everyday_parts.sh"]
+fn export_everyday_parts() {
+    use rcad_commands::Command;
+    let out = std::path::PathBuf::from(
+        std::env::var("RCAD_EVERYDAY_OUT").expect("set RCAD_EVERYDAY_OUT"),
+    );
+    std::fs::create_dir_all(&out).unwrap();
+    let mut spec = json!({"files": {}});
+    let mut step = json!({});
+    for (name, steps) in parts() {
+        let mut s = replay(&steps, &out);
+        let summary = s.summary();
+        let ids: Vec<BodyId> = summary.bodies.iter().map(|b| b.id).collect();
+        let names: Vec<String> = summary.bodies.iter().map(|b| b.name.clone()).collect();
+        let rev = s.model().unwrap().revision;
+        for (stl, c) in [
+            (
+                true,
+                Command::ExportStl {
+                    path: out.join(format!("{name}.stl")),
+                    chord: None,
+                    bodies: Some(ids.clone()),
+                    print: rcad_commands::print::PrintOptions {
+                        separate_files: true,
+                        ..print_opts()
+                    },
+                },
+            ),
+            (
+                false,
+                Command::Export3mf {
+                    path: out.join(format!("{name}.3mf")),
+                    chord: None,
+                    bodies: Some(ids.clone()),
+                    unit: None,
+                    print: print_opts(),
+                },
+            ),
+        ] {
+            let r = s.execute(&c);
+            assert!(r.ok, "{name} stl={stl}: {:?}", r.error);
+        }
+        for b in &ids {
+            let r = s.execute(&Command::ExportStep {
+                path: out.join(format!("{name}-body{}.step", b.0)),
+                bodies: Some(vec![*b]),
+            });
+            assert!(r.ok, "{name} STEP: {:?}", r.error);
+        }
+        assert_eq!(
+            s.model().unwrap().revision,
+            rev,
+            "exports changed the document"
+        );
+        let ex = expectations(name);
+        let dims: Vec<[f64; 3]> = ex
+            .iter()
+            .map(|e| {
+                [
+                    e.bounds[3] - e.bounds[0],
+                    e.bounds[4] - e.bounds[1],
+                    e.bounds[5] - e.bounds[2],
+                ]
+            })
+            .collect();
+        let placed = row(&dims);
+        let mut per = serde_json::Map::new();
+        let f = spec["files"].as_object_mut().unwrap();
+        for (i, e) in ex.iter().enumerate() {
+            let o = json!({
+                "closed": true,
+                "volume": [e.volume, e.mesh_tol],
+                "dims": [dims[i], e.len_tol],
+                "min_z": [0.0, 1e-4],
+                // Layout positions depend on the earlier bodies' actual widths.
+                "bounds": [placed[i][0], placed[i][1],
+                           ex[..=i].iter().map(|x| x.len_tol).sum::<f64>() + F32_LEN],
+            });
+            per.insert(names[i].clone(), o.clone());
+            let mut so = o;
+            so["objects"] = json!(1);
+            so["within_bed"] = json!([[0.0, 0.0], [256.0, 256.0], 250.0]);
+            f.insert(
+                format!(
+                    "{name}-{}.stl",
+                    rcad_commands::print::sanitize_file_component(&names[i])
+                ),
+                so,
+            );
+            step.as_object_mut().unwrap().insert(
+                format!("{name}-body{}.step", ids[i].0),
+                json!({"volume": e.volume, "bounds": e.bounds,
+                       "bounds_tol": if name == "threaded_pair" { 0.05 } else { 1e-4 }}),
+            );
+        }
+        f.insert(
+            format!("{name}.3mf"),
+            json!({"unit": "millimeter", "objects": names.len(), "names": names, "closed": true,
+                   "min_z": [0.0, 1e-4], "within_bed": [[0.0, 0.0], [256.0, 256.0], 250.0],
+                   "per_object": per}),
+        );
+        std::fs::write(
+            out.join(format!("probes_{name}.json")),
+            serde_json::to_string_pretty(&plate_probes(name, &placed)).unwrap(),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        out.join("spec.json"),
+        serde_json::to_string_pretty(&spec).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        out.join("step_expected.json"),
+        serde_json::to_string_pretty(&step).unwrap(),
+    )
+    .unwrap();
+}
