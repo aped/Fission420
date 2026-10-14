@@ -83,7 +83,7 @@ After applying, fix these leftovers. `rename_f420.py check` does not catch them,
 they are not old names:
 
 - **`runs/` references** in comments, which now dangle. Known in run-5 code:
-  `crates/rcad-commands/tests/review_run4.rs:1`, plus any added since. Find them with
+  `crates/rcad-commands/tests/expression_and_hole_regressions.rs:1`, plus any added since. Find them with
   `git grep -n "runs/" -- crates tools xtask docs`.
 - **Hard-coded home paths** in run-5's copies of `tools/heavy.sh`,
   `tools/live/g_enclosure_params_export.txt` and `tools/print/validate_examples.sh`.

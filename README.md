@@ -17,7 +17,7 @@ STEP / STL / 3MF / DXF / SVG · a headless command API
 ![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
 ![Status](https://img.shields.io/badge/status-prototype-yellow)
 
-<img src="docs/screenshots/18-run4-params.png" alt="Parametric enclosure: parameter table, feature history, lid sketch preview and inspector" width="900">
+<img src="docs/screenshots/18-params.png" alt="Parametric enclosure: parameter table, feature history, lid sketch preview and inspector" width="900">
 
 <sub>A parametric enclosure driven by 15 named parameters. Every dimension is an expression
 such as <code>cavity_length - 2 * fit_clearance</code>.</sub>
@@ -64,14 +64,14 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/01-sketch-dimensions.jpg" alt="Sketch mode with dimensions"><br><sub><b>Sketch.</b> A fully constrained centre rectangle (DOF 0) with driving dimensions.</sub></td>
-<td width="50%"><img src="docs/screenshots/23-run4-extrude.png" alt="Extrude cut preview"><br><sub><b>Extrude.</b> A through-all cut previewed in red before it is committed; the exact solid is built and checked on OK.</sub></td>
+<td width="50%"><img src="docs/screenshots/23-extrude.png" alt="Extrude cut preview"><br><sub><b>Extrude.</b> A through-all cut previewed in red before it is committed; the exact solid is built and checked on OK.</sub></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/22-run4-hole.png" alt="Hole dialog on a mounting bracket"><br><sub><b>Holes.</b> A counterbored hole placed on a semantic face of a parametric mounting bracket.</sub></td>
-<td><img src="docs/screenshots/19-run4-measure.png" alt="Measuring the fit clearance"><br><sub><b>Measure.</b> The lid lip's 0.25 mm fit clearance against the enclosure cavity wall.</sub></td>
+<td><img src="docs/screenshots/22-hole.png" alt="Hole dialog on a mounting bracket"><br><sub><b>Holes.</b> A counterbored hole placed on a semantic face of a parametric mounting bracket.</sub></td>
+<td><img src="docs/screenshots/19-measure.png" alt="Measuring the fit clearance"><br><sub><b>Measure.</b> The lid lip's 0.25 mm fit clearance against the enclosure cavity wall.</sub></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/screenshots/21-run4-print_export.png" alt="3MF print export dialog"><br><sub><b>Print export.</b> Both bodies to 3MF: lid turned face-down onto the bed, laid out side by side, checked against the printer's bed.</sub></td>
+<td colspan="2"><img src="docs/screenshots/21-print_export.png" alt="3MF print export dialog"><br><sub><b>Print export.</b> Both bodies to 3MF: lid turned face-down onto the bed, laid out side by side, checked against the printer's bed.</sub></td>
 </tr>
 </table>
 

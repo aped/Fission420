@@ -648,7 +648,7 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
 
@@ -979,7 +979,7 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
     let path = r.out_dir.join("pattern.rcad.json");
@@ -1079,7 +1079,7 @@ pub(super) fn scenario_mirror(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
     // A mirrored join that would land off the support face is refused: mirror the
@@ -1176,7 +1176,7 @@ pub(super) fn scenario_chamfer(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
     r.refused(
@@ -1241,7 +1241,7 @@ pub(super) fn scenario_svg(r: &mut Run<'_>) {
         path: out.clone(),
         sketch: sk,
     });
-    r.ok("export_svg (external check: tools/check_run3_steps.sh)", &x);
+    r.ok("export_svg (external check: tools/check_scenario_steps.sh)", &x);
     let mut t = crate::Session::new();
     t.execute(&Command::NewDocument);
     let x = t.execute(&Command::ImportSvg {
@@ -1274,7 +1274,7 @@ pub(super) fn scenario_svg(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
 }
@@ -1345,7 +1345,7 @@ pub(super) fn scenario_circular(r: &mut Run<'_>) {
         bodies: None,
     });
     r.ok(
-        "export STEP (external check: tools/check_run3_steps.sh)",
+        "export STEP (external check: tools/check_scenario_steps.sh)",
         &x,
     );
     r.step = "3O.2 edits".into();

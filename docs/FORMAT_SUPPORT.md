@@ -245,7 +245,7 @@ written.
 
 Evidence: `crates/rcad-exchange/tests/svg_fixtures.rs` (15 tests: hand-written `plate_mm.svg`,
 FreeCAD-generated `freecad_plate.svg`, the review fixes above); acceptance 3S (FreeCAD SVG →
-sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_run3_steps.sh`
+sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_scenario_steps.sh`
 (FreeCAD validates the 3S STEP and reads the exported SVG with `importSVG`: total edge length
 220 + 20π, 60 × 40); UI import in `exchange_ui.rs::threemf_import_export_and_svg_sketch`.
 
@@ -329,7 +329,7 @@ Reproduce (from the repository root):
 ```sh
 cargo run --release -p rcad-cli -- acceptance --out artifacts/acceptance   # scenarios C and D are the "C." / "D." steps
 tools/external_validation.sh artifacts/acceptance                          # FreeCAD checks incl. tools/check_formats.sh
-tools/check_run3_steps.sh                                                  # run-3 STEP exports incl. 3S + exported SVG via FreeCAD
+tools/check_scenario_steps.sh                                                  # run-3 STEP exports incl. 3S + exported SVG via FreeCAD
 cargo test --release -p rcad-commands --test imports --test native_formats --test bodies
 cargo test --release -p rcad-kernel --test step_import --test step_export_multi
 cargo test --release -p rcad-exchange
@@ -344,7 +344,7 @@ Test results below are from `cargo xtask check` (log `artifacts/run3/verify/xtas
 |---|---|---|
 | Acceptance C.1-C.8, D.1-D.11, 3S | `crates/rcad-commands/src/acceptance/formats.rs`, `bodies.rs` (`scenario_svg`); reports `artifacts/acceptance/acceptance_report.json` (written by `cargo xtask check`) and `artifacts/run3/acceptance/acceptance_report.json` (a separate run, same results) | all checks PASS (855 total, all scenarios; C 120, D 90, 3S 10) |
 | FreeCAD validation of C/D exports | `tools/check_formats.sh` (called by `tools/external_validation.sh`); per-file results `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`; log `artifacts/run3/verify/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
-| FreeCAD validation of 3S (SVG) | `tools/check_run3_steps.sh`; log `artifacts/run3/verify/check_run3_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
+| FreeCAD validation of 3S (SVG) | `tools/check_scenario_steps.sh`; log `artifacts/run3/verify/check_scenario_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
 | Command-level import edge cases | `crates/rcad-commands/tests/imports.rs`; 3MF: `bodies.rs::threemf_import_and_multi_body_export_round_trip` | 12 + 8 pass |
 | UI import/export dialogs | `crates/rcad/tests/exchange_ui.rs` | 6 pass |
 | Native v1/v2/v3 | `crates/rcad-commands/tests/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |

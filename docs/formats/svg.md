@@ -48,5 +48,5 @@ sketch placement (plane) — the same contract as DXF export.
   near-equal radii / near-similarity scales, aspect-ratio alignments, width-only roots.
 * Acceptance 3S (`rcad-cli acceptance`): FreeCAD SVG → sketch with two holes → 5 mm solid
   (exact volume, bounds), own SVG export re-imported to the same solid, STEP export.
-* `tools/check_run3_steps.sh`: the 3S STEP validated by FreeCAD (volume, bounds, probes), and
+* `tools/check_scenario_steps.sh`: the 3S STEP validated by FreeCAD (volume, bounds, probes), and
   the exported SVG read by FreeCAD's own `importSVG` (total edge length 220 + 20π, 60 × 40).

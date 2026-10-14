@@ -1,7 +1,9 @@
-//! `cargo xtask check`: repository layout, formatting, lints, tests (release),
+//! `cargo xtask check`: repository layout, public text, formatting, lints, tests (release),
 //! headless acceptance. Exits non-zero on the first failing stage; never masks failures.
 use std::path::Path;
 use std::process::{Command, ExitCode};
+
+mod public_text;
 
 /// Run records belong under `.meta/runs/` (local, git-ignored), not in the root.
 /// Returns the offending root entries.
@@ -51,6 +53,32 @@ fn check_layout() -> bool {
     }
 }
 
+fn check_public_text() -> bool {
+    eprintln!("==> public text: no development-process references in tracked files");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    match public_text::offenders(&root) {
+        Ok(found) if found.is_empty() => {
+            eprintln!("<== public text: ok");
+            true
+        }
+        Ok(found) => {
+            for f in &found {
+                eprintln!("    {f}");
+            }
+            eprintln!(
+                "<== public text: FAILED: {} reference(s) to development runs, session specs or \
+                 local notes; describe the feature, ADR or doc instead",
+                found.len()
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("<== public text: FAILED: {e}");
+            false
+        }
+    }
+}
+
 const NEXTEST: &[&str] = &[
     "nextest",
     "run",
@@ -93,11 +121,18 @@ fn run(stage: &str, args: &[&str]) -> bool {
 
 fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
+    if task == "public-text" {
+        return if check_public_text() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
     if task != "check" {
-        eprintln!("usage: cargo xtask check");
+        eprintln!("usage: cargo xtask check | cargo xtask public-text");
         return ExitCode::from(64);
     }
-    if !check_layout() {
+    if !check_layout() || !check_public_text() {
         return ExitCode::FAILURE;
     }
     let stages: &[(&str, &[&str])] = &[

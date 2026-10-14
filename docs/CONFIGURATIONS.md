@@ -70,6 +70,6 @@ Evidence: `crates/rcad-commands/tests/configurations.rs` (run 6: two variants, s
 batch export, refusals, reopen), `crates/rcad-commands/tests/product_configurations.rs` (run 7
 acceptance 3: 80/100 mm enclosure assembly with an optional fan occurrence and drain hole;
 per variant assembly volume/mass, BOM and drawing dimensions; shared height edit; export
-names; no silent overwrite; table edit + undo; reopen), `crates/rcad/tests/run6_ui.rs`,
+names; no silent overwrite; table edit + undo; reopen), `crates/rcad/tests/extrude_history_ui.rs`,
 `crates/rcad/tests/config_table_ui.rs` (table editing, one undo step, duplicate refused,
 variant export through the widgets).

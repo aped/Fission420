@@ -163,14 +163,12 @@ impl RcadApp {
     pub fn start_scene(&mut self, name: &str) -> bool {
         use SceneStep::*;
         let steps: Vec<SceneStep> = match name {
-            // Run 7: committed examples (assembly, drawings/configurations,
+            // Committed examples (assembly, drawings/configurations,
             // sheet metal, surface repair) in the iso view.
-            "run7_hinge" | "run7_drawing_set" | "run7_sheet" | "run7_open_box" => {
+            "hinge_assembly" | "drawing_set" | "sheet_u_channel" | "open_box" => {
                 let file = match name {
-                    "run7_hinge" => "hinge_assembly",
-                    "run7_drawing_set" => "drawing_set",
-                    "run7_sheet" => "sheet_u_channel",
-                    _ => "open_box_repair",
+                    "open_box" => "open_box_repair",
+                    _ => name,
                 };
                 vec![
                     Cmd(Command::Open {
@@ -181,7 +179,7 @@ impl RcadApp {
                 ]
             }
             // Run 7: mesh repair inspector on the broken-cube STL fixture.
-            "run7_mesh_repair" => vec![
+            "mesh_repair" => vec![
                 Cmd(Command::NewDocument),
                 Cmd(Command::ImportStl {
                     path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -194,7 +192,7 @@ impl RcadApp {
                 }),
             ],
             // Run 6: the rounded labelled enclosure (committed example).
-            "run6_enclosure" => vec![
+            "rounded_enclosure" => vec![
                 Cmd(Command::Open {
                     path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join("../../examples/rounded_enclosure.rcad.json"),
@@ -202,7 +200,7 @@ impl RcadApp {
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],
             // Run 6: sheet-metal U-channel (flange inspector selected).
-            "run6_sheet_metal" => {
+            "sheet_metal" => {
                 let mut sk = rcad_sketch::Sketch::default();
                 let p: Vec<_> = [[0.0, 22.0], [0.0, 0.0], [64.0, 0.0], [64.0, 22.0]]
                     .iter()
@@ -235,7 +233,7 @@ impl RcadApp {
                 ]
             }
             // Run 6: modeled (faceted) thread pair, rod and nut side by side.
-            "run6_thread" => {
+            "thread" => {
                 let t = |center: [f64; 2], nut: Option<f64>| Command::Thread {
                     name: None,
                     plane: rcad_document::SketchPlane::WorldXY,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Independent FreeCAD 1.1 (OpenCascade) validation of the run-3 scenario STEP exports
 # written by `rcad-cli acceptance --out DIR` (steps 3A, 3B, 3N, 3P).
-# usage: tools/check_run3_steps.sh [DIR]   (default artifacts/run3/acceptance)
+# usage: tools/check_scenario_steps.sh [DIR]   (default artifacts/run3/acceptance)
 # Expected values are analytic (derived here, not read from R-CAD output); probe
 # points check feature placement (inside material / inside a removed region).
 set -u -o pipefail

@@ -234,7 +234,7 @@ build refuses such a file instead of dropping the annotations).
   model's referenceable faces and holes, tolerance type and values, **Add dimension**;
   note text, **Add note**), each annotation listed under its view with a × button.
 
-Evidence: `crates/rcad-commands/tests/drawings_run7.rs` (thickness ±0.1, hole position
+Evidence: `crates/rcad-commands/tests/drawing_annotations.rs` (thickness ±0.1, hole position
 deviation, hole limits; values follow a Ø/position/thickness edit; deleting the hole makes
 both hole dimensions dangling with no value and no stale text in the SVG; undo restores;
 save/reopen as v7 gives the same report; assembly sheet: BOM rows/quantities/part numbers/
