@@ -58,7 +58,7 @@ key ctrl+shift+z
 wait_idle
 expect body_volume.B2 11200 0.01
 # A drawing of the right piece: select it in the browser.
-clickw Body2
+clickw Body1 (2)
 clickw Drawings header
 clickw New drawing of selected body
 wait_idle

@@ -56,6 +56,26 @@ fn rounded(a: f64, b: f64, rr: f64) -> Profile {
     ])
 }
 
+/// [`rounded`] moved by (x0, y0).
+fn rounded_at(x0: f64, y0: f64, a: f64, b: f64, rr: f64) -> Profile {
+    let Profile::Loop(segs) = rounded(a, b, rr) else {
+        unreachable!()
+    };
+    let mv = |p: [f64; 2]| [p[0] + x0, p[1] + y0];
+    Profile::Loop(
+        segs.into_iter()
+            .map(|s| match s {
+                LoopSegment::Line { start } => LoopSegment::Line { start: mv(start) },
+                LoopSegment::Arc { start, center, ccw } => LoopSegment::Arc {
+                    start: mv(start),
+                    center: mv(center),
+                    ccw,
+                },
+            })
+            .collect(),
+    )
+}
+
 fn rect(a: f64, b: f64) -> Profile {
     Profile::Polygon(vec![[0.0, 0.0], [a, 0.0], [a, b], [0.0, b]])
 }
@@ -216,10 +236,9 @@ fn holes_away_from_the_rim_are_kept() {
     let area = a * b - (4.0 - PI) * 16.0 - PI * 25.0;
     let straight = 2.0 * (a - 8.0) + 2.0 * (b - 8.0);
     let want = area * h - sa * straight - 2.0 * PI * (sa * 4.0 - m);
-    // Truck splits the extruded circle into 120° walls; each is rebuilt as
-    // two arcs of at most a quarter turn.
+    // The hole's walls (Truck's 120° arcs) are kept as they are.
     let holes = measure(&input).unwrap().face_count - 10;
-    check(&out, &input, want, 18 + 2 * holes);
+    check(&out, &input, want, 18 + holes);
     // The hole wall still runs the full height.
     assert_eq!(
         point_membership(&out, &[[20.0, 15.0, h - 0.1], [20.0, 9.9, h - 0.1]]).unwrap(),
@@ -413,4 +432,79 @@ fn chamfered_rounded_rectangle_gets_cones() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("chamfer loop") && e.contains("apex"), "{e}");
+}
+
+/// Open enclosure: rounded box 60 × 40 × 25 (R 5) with a cavity cut from
+/// the top (walls 2, floor 2, inner corner radius 3). The body is not a
+/// prism under either cap, so only the cap face and the outer walls are
+/// rebuilt; the cavity is kept. Expected: the enclosure's closed-form volume
+/// minus the loop's spandrel sweep.
+#[test]
+fn enclosure_rim_and_base_loops_keep_the_cavity() {
+    let (a, b, h, rr, t) = (60.0, 40.0, 25.0, 5.0, 2.0);
+    let outer = extrude(&rounded(a, b, rr), &Frame::XY, h).unwrap();
+    let cavity = rounded_at(t, t, a - 2.0 * t, b - 2.0 * t, rr - t);
+    let body = crate::cut_blind(&outer, &cavity, &top(h), h - t).unwrap();
+    let rra = |a: f64, b: f64, r: f64| a * b - (4.0 - PI) * r * r;
+    let shell = rra(a, b, rr) * h - rra(a - 2.0 * t, b - 2.0 * t, rr - t) * (h - t);
+    let removed = |r: f64| {
+        let (sa, m) = spandrel(r);
+        let straight = 2.0 * (a - 2.0 * rr) + 2.0 * (b - 2.0 * rr);
+        sa * straight + 2.0 * PI * (sa * rr - m)
+    };
+    // Top rim, outer edge: r 1.5 (< wall 2).
+    let out = fillet_cap_loop(&body, &top(h), 1.5).unwrap();
+    let want = shell - removed(1.5);
+    let m = measure(&out).unwrap();
+    assert!(m.all_shells_closed && m.shell_count == 1);
+    let (v, e) = volume_of(&out).unwrap();
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    // The cavity is untouched: air inside, the floor solid.
+    assert_eq!(
+        point_membership(
+            &out,
+            &[[30.0, 20.0, 10.0], [30.0, 20.0, 1.0], [1.0, 20.0, 24.9]]
+        )
+        .unwrap(),
+        vec![Some(false), Some(true), Some(true)]
+    );
+    evidence(&out, "cap_fillet_enclosure_rim");
+    // Base loop (bottom face, outward −Z): r 1.5 keeps clear of the 2 mm floor.
+    let bottom = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, -1.0, 0.0],
+        z: [0.0, 0.0, -1.0],
+    };
+    let out = fillet_cap_loop(&body, &bottom, 1.5).unwrap();
+    let (v, e) = volume_of(&out).unwrap();
+    let want = shell - removed(1.5);
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    evidence(&out, "cap_fillet_enclosure_base");
+    // Both: rim then base.
+    let both =
+        fillet_cap_loop(&fillet_cap_loop(&body, &top(h), 1.5).unwrap(), &bottom, 1.5).unwrap();
+    let (v, e) = volume_of(&both).unwrap();
+    let want = shell - 2.0 * removed(1.5);
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    evidence(&both, "cap_fillet_enclosure_both");
+    // Too large: the base fillet would reach the cavity floor; the rim
+    // fillet the cavity (a hole in the rim face).
+    let e = fillet_cap_loop(&body, &bottom, 2.5)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("blend band"), "{e}");
+    let e = fillet_cap_loop(&body, &top(h), 2.5)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("hole"), "{e}");
 }
