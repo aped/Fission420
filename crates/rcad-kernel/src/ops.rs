@@ -332,6 +332,9 @@ pub(crate) fn profile_points(profile: &Profile) -> Vec<[f64; 2]> {
                             out.push([center[0] + r * t.cos(), center[1] + r * t.sin()]);
                         }
                     }
+                    crate::LoopSegment::Cubic { c1, c2, w, .. } => {
+                        out.extend(crate::cubic::samples([p, *c1, *c2, q], *w, REGION_SAMPLES));
+                    }
                 }
             }
             out

@@ -120,11 +120,21 @@ fn walk(s: &Sketch, entity: EntityId) -> Result<Vec<Seg>, SketchError> {
     let ends = |e: &Entity| match e {
         Entity::Line { a, b, .. } => Some((*a, *b)),
         Entity::Arc { start, end, .. } => Some((*start, *end)),
-        Entity::Circle { .. } => None,
+        _ => None,
     };
     let first = s.entity(entity).ok_or(SketchError::MissingEntity(entity))?;
     if s.is_construction(entity) {
         return Err(bad("construction geometry cannot be offset"));
+    }
+    if let Some(e) = s.entities.iter().find(|e| {
+        live(e)
+            && matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. })
+            && e.points().iter().any(|p| first.points().contains(p))
+    }) {
+        return Err(bad(&format!(
+            "ellipses and splines cannot be offset ({:?})",
+            e.id()
+        )));
     }
     let (p0, _) = ends(first).ok_or_else(|| bad("circles are offset as a whole"))?;
     let mut segs = Vec::new();
@@ -148,7 +158,7 @@ fn walk(s: &Sketch, entity: EntityId) -> Result<Vec<Seg>, SketchError> {
                 c: center,
                 ccw: sp == start,
             },
-            Entity::Circle { .. } => unreachable!(),
+            _ => unreachable!("ends() is Some for lines and arcs only"),
         });
         let next: Vec<&Entity> = s
             .entities
@@ -538,7 +548,7 @@ pub(crate) fn shared_point(s: &Sketch, a: EntityId, b: EntityId) -> Option<Point
     let ends = |id: EntityId| match s.entity(id)? {
         Entity::Line { a, b, .. } => Some([*a, *b]),
         Entity::Arc { start, end, .. } => Some([*start, *end]),
-        Entity::Circle { .. } => None,
+        _ => None,
     };
     let (x, y) = (ends(a)?, ends(b)?);
     let shared: Vec<PointId> = x.iter().copied().filter(|p| y.contains(p)).collect();
@@ -591,6 +601,11 @@ pub fn offset_profile(
                             end,
                         });
                         id
+                    }
+                    LoopSegment::Cubic { .. } => {
+                        return Err(SketchError::UnsupportedProfile(
+                            "offset: profiles with ellipse or spline spans cannot be offset".into(),
+                        ));
                     }
                 });
             }

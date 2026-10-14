@@ -55,6 +55,7 @@ fn sampled_area(segs: &[LoopSegment], n: usize) -> f64 {
                     pts.push([c[0] + r * t.cos(), c[1] + r * t.sin()]);
                 }
             }
+            LoopSegment::Cubic { .. } => panic!("line/arc loops only"),
         }
     }
     let m = pts.len();

@@ -1,6 +1,8 @@
 //! Autosave/recovery through the real app: a dirty document is
 //! copied to the recovery directory, a "crashed" session's copy is offered and
-//! opens as an unsaved document, and saving removes the copy. Own test binary:
+//! opens as an unsaved document, and saving removes the copy; a copy older
+//! than the saved file it came from is flagged and the saved file offered.
+//! Own test binary:
 //! it sets process environment variables.
 use std::time::{Duration, Instant};
 
@@ -102,5 +104,51 @@ fn autosave_crash_recover_and_save() {
     settle(&mut h);
     assert!(saved.exists());
     assert!(copies(dir.path()).is_empty(), "{:?}", copies(dir.path()));
+    drop(h);
+    // Session 3: edit the saved document, autosave, "crash". The copy records
+    // the saved file it came from.
+    {
+        let mut h = harness();
+        h.state_mut().request(Command::Open {
+            path: saved.clone(),
+        });
+        settle(&mut h);
+        h.state_mut().request(Command::SetParameter {
+            feature: rcad_document::FeatureId(2),
+            name: "distance".into(),
+            value: 7.0,
+        });
+        settle(&mut h);
+        let c = copies(dir.path());
+        assert_eq!(c.len(), 1, "{c:?}");
+        let origin = rcad::recovery::copy_origin(&c[0]).expect("origin recorded");
+        assert_eq!(origin, saved.canonicalize().unwrap());
+        assert!(!rcad::recovery::origin_is_newer(&c[0], &origin));
+    }
+    // The saved file is then written again later (another instance saved
+    // newer work): the copy is now older than the file it came from.
+    let later = std::time::SystemTime::now() + Duration::from_secs(60);
+    std::fs::File::options()
+        .write(true)
+        .open(&saved)
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    // Session 4: the offer says so; "Open saved document" opens the saved
+    // file (5 mm plate, its own path) and never the older copy's state.
+    let mut h = harness();
+    let _ = h.try_run();
+    h.get_by_label_contains("was saved after this copy");
+    h.get_by_label("Open saved document").click();
+    settle(&mut h);
+    let s = h.state().summary().clone();
+    assert_eq!(s.path.as_deref(), Some(saved.as_path()));
+    assert!(!s.dirty);
+    assert!((h.state().volume().unwrap() - 3000.0).abs() < 1e-9);
+    assert_eq!(
+        copies(dir.path()).len(),
+        1,
+        "the copy stays until discarded"
+    );
     let _ = std::fs::remove_dir_all(dir.path());
 }

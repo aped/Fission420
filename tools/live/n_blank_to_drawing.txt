@@ -1,0 +1,108 @@
+# From a blank document to a drawing and exports through real pointer/keyboard
+# input: a dimensioned 60 x 40 rectangle extruded 10 mm; a slot sketched across
+# the whole part and cut through all, which leaves two separate bodies (as
+# Fusion does); one-step undo/redo of the cut; a drawing of one piece exported to
+# PDF and DXF; both pieces exported to one 3MF (separate objects); save, close,
+# reopen. Expected volumes: 60*40*10; each piece = its width * 40 * 10, the slot
+# x 28..32 (clicked on the sketch grid).
+clickw New
+wait_idle
+clickw New Sketch on XY
+wait_idle
+clickw 2-Point Rect
+sclick 0.3 0.2
+sclick 40 30
+expect editing.entities 4
+key d
+sclick 20 0
+type 60
+key Return
+key f
+wait_idle
+sclick 60 15
+type 40
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 24000 0.01
+shot
+# The slot: a rectangle reaching past both long sides, cut through all
+# (Create Sketch with no face selected sketches on world XY; Cut through all
+# opens Extrude preset to Cut + Through All for a non-circular profile).
+clickw Create Sketch
+wait_idle
+clickw 2-Point Rect
+key f
+wait_idle
+sclick 28 -5
+sclick 32 45
+expect editing.entities 4
+clickw Finish Sketch
+wait_idle
+clickw Cut through all…
+key Return
+wait_idle
+expect last_reply.ok true
+expect body_volume.B1 11200 0.01
+expect body_volume.B2 11200 0.01
+shot
+key ctrl+z
+wait_idle
+expect body_volume.B1 24000 0.01
+key ctrl+shift+z
+wait_idle
+expect body_volume.B2 11200 0.01
+# A drawing of the right piece: select it in the browser.
+clickw Body2
+clickw Drawings header
+clickw New drawing of selected body
+wait_idle
+expect last_reply.ok true
+expect drawings 1
+typew Drawing export path | @OUT@/piece.pdf
+clickw Export Drawing1
+wait_idle
+expect last_reply.ok true
+expect drawing_issues 0
+typew Drawing export path | @OUT@/piece.dxf
+clickw Export Drawing1
+wait_idle
+expect last_reply.ok true
+shot
+clickw Drawings header
+key 0
+key f
+wait_idle
+clickw Export
+clickw Export 3MF…
+typew 3MF path | @OUT@/pieces.3mf
+clickw All visible bodies
+clickw OK
+wait_idle
+expect last_reply.command export_3mf
+expect last_reply.ok true
+shot
+# The print export dialog stays open with its report until closed.
+clickw Cancel
+# Save, close, reopen.
+key ctrl+shift+s
+typew File path | @OUT@/split_part.rcad.json
+key Return
+wait_idle
+clickw Close
+wait_idle
+key ctrl+o
+typew File path | @OUT@/split_part.rcad.json
+key Return
+wait_idle
+expect body_volume.B1 11200 0.01
+expect body_volume.B2 11200 0.01
+expect drawings 1
+shot
+# Files checked afterwards: @OUT@/piece.pdf (pdftotext), @OUT@/pieces.3mf
+# (tools/print/check_print_mesh.py: two closed objects of 11200 mm³ each).

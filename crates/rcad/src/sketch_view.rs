@@ -17,6 +17,8 @@ use crate::sketch_edit::{Item, SketchEditor, SketchTool, SnapKind, StateKind};
 /// Offset of a dimension line from its geometry, screen pixels.
 const DIM_OFFSET_PX: f64 = 26.0;
 const CIRCLE_SEGMENTS: usize = 96;
+/// Display segments per exact ellipse / spline span.
+const CURVE_SPAN_SEGMENTS: usize = 32;
 
 pub struct Palette {
     pub curve: Color32,
@@ -116,6 +118,11 @@ fn bbox(s: &Sketch) -> Option<([f64; 2], [f64; 2])> {
                 .arc_geometry(*id)
                 .map(|g| arc_points(&g, 32).into_iter().map(|q| (q, 0.0)).collect())
                 .unwrap_or_default(),
+            Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                rcad_sketch::curves::entity_polyline(s, e, 16)
+                    .map(|v| v.into_iter().map(|q| (q, 0.0)).collect())
+                    .unwrap_or_default()
+            }
         };
         for (p, r) in pts {
             any = true;
@@ -291,6 +298,27 @@ pub fn paint_sketch(
                     draw(pts, w);
                 }
             }
+            Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                if let Entity::Spline { points, closed, .. } = e {
+                    // Control polygon: thin dashed guide.
+                    let mut cp: Vec<Pos2> = points
+                        .iter()
+                        .filter_map(|p| s.point_xy(*p).and_then(|q| pr.screen(q)))
+                        .collect();
+                    if *closed && let Some(f) = cp.first().copied() {
+                        cp.push(f);
+                    }
+                    painter.extend(egui::Shape::dashed_line(
+                        &cp,
+                        Stroke::new(1.0, fade(PALETTE.glyph, st.alpha)),
+                        4.0,
+                        4.0,
+                    ));
+                }
+                if let Some(v) = rcad_sketch::curves::entity_polyline(s, e, CURVE_SPAN_SEGMENTS) {
+                    draw(v.into_iter().filter_map(|q| pr.screen(q)).collect(), w);
+                }
+            }
         }
     }
     // Points: entity endpoints and centres; construction points as small x.
@@ -302,6 +330,8 @@ pub fn paint_sketch(
             Entity::Circle { center, .. } => vec![*center],
             // Arc centres are construction points (drawn as a small x).
             Entity::Arc { start, end, .. } => vec![*start, *end],
+            Entity::Ellipse { center, major, .. } => vec![*center, *major],
+            Entity::Spline { points, .. } => points.clone(),
         })
         .collect();
     for p in &s.points {
@@ -693,6 +723,11 @@ fn paint_offset_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEdit
                 .arc_geometry(id)
                 .map(|g| arc_pts(g.center, g.radius, g.start_angle, g.sweep))
                 .unwrap_or_default(),
+            Some(e @ (Entity::Ellipse { .. } | Entity::Spline { .. })) => {
+                rcad_sketch::curves::entity_polyline(&s, e, CURVE_SPAN_SEGMENTS)
+                    .map(|v| v.into_iter().filter_map(|q| pr.screen(q)).collect())
+                    .unwrap_or_default()
+            }
             None => vec![],
         };
         if pts.len() >= 2 {

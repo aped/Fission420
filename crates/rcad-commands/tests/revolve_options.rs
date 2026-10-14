@@ -204,3 +204,81 @@ fn revolve_cut_groove_is_exact() {
     tray::ok(&mut s, &json!({"cmd": "redo"}));
     assert!((tray::volume(&s) - (PI * 3000.0 - PI * 38.0)).abs() < 1e-6 * PI * 3000.0);
 }
+
+/// A cup drawn the usual way, its section against the axis (outer R 25,
+/// height 60, wall 2, floor 3), about the sketch Y axis and, mirrored, about
+/// a sketch line on the −X side: exact volume π(25²·60 − 23²·57); an
+/// upstream edit of the floor; save/reopen; STEP export; a section touching
+/// the axis only at a point (cone tip) and a partial turn are refused.
+#[test]
+fn revolve_of_a_cup_section_touching_the_axis() {
+    let cup = |floor: f64, sign: f64| {
+        let mut s = Sketch::default();
+        let p: Vec<_> = [
+            [0.0, 0.0],
+            [25.0, 0.0],
+            [25.0, 60.0],
+            [23.0, 60.0],
+            [23.0, floor],
+            [0.0, floor],
+        ]
+        .iter()
+        .map(|q| s.add_point(sign * q[0], q[1]))
+        .collect();
+        for i in 0..6 {
+            s.add_line(p[i], p[(i + 1) % 6]);
+        }
+        s
+    };
+    let want = |floor: f64| PI * (625.0 * 60.0 - 529.0 * (60.0 - floor));
+    let mut s = fresh();
+    let r = revolve(&mut s, cup(3.0, 1.0), 360.0, RevolveAxis::SketchY, false);
+    assert!(r.ok, "{:?}", r.error);
+    assert!((tray::volume(&s) - want(3.0)).abs() < 1e-6 * want(3.0));
+    // About the sketch Y axis with the section on −X (mirrored).
+    let mut m = fresh();
+    let r = revolve(&mut m, cup(3.0, -1.0), 360.0, RevolveAxis::SketchY, false);
+    assert!(r.ok, "{:?}", r.error);
+    assert!((tray::volume(&m) - want(3.0)).abs() < 1e-6 * want(3.0));
+    // Upstream edit: a 5 mm floor (replace the sketch through edit_sketch).
+    let sk = s.summary().features[0].id;
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "edit_sketch", "feature": sk.0, "sketch": cup(5.0, 1.0)}),
+    );
+    assert!((tray::volume(&s) - want(5.0)).abs() < 1e-6 * want(5.0));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cup.rcad.json");
+    tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
+    let mut t = Session::new();
+    tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
+    assert!((tray::volume(&t) - want(5.0)).abs() < 1e-6 * want(5.0));
+    let step = dir.path().join("cup.step");
+    tray::ok(&mut t, &json!({"cmd": "export_step", "path": step}));
+    if let Some(ev) = std::env::var_os("RCAD_EVIDENCE_DIR") {
+        let ev = std::path::PathBuf::from(ev);
+        std::fs::create_dir_all(&ev).unwrap();
+        std::fs::copy(&step, ev.join("revolved_cup_floor5.step")).unwrap();
+    }
+    // Cone tip and a partial turn: refused, nothing created.
+    let mut c = fresh();
+    let mut cone = Sketch::default();
+    let p: Vec<_> = [[0.0, 0.0], [10.0, 0.0], [0.0, 20.0]]
+        .iter()
+        .map(|q| cone.add_point(q[0], q[1]))
+        .collect();
+    for i in 0..3 {
+        cone.add_line(p[i], p[(i + 1) % 3]);
+    }
+    let r = revolve(&mut c, cone, 360.0, RevolveAxis::SketchY, false);
+    assert!(!r.ok);
+    assert!(
+        format!("{:?}", r.error).contains("cone tip"),
+        "{:?}",
+        r.error
+    );
+    let mut h = fresh();
+    let r = revolve(&mut h, cup(3.0, 1.0), 180.0, RevolveAxis::SketchY, false);
+    assert!(!r.ok);
+    assert!(h.summary().bodies.is_empty());
+}

@@ -198,8 +198,10 @@ class Probe:
         eye = [c["target"][i] + back[i] * c["distance"] for i in range(3)]
         fwd = [-b for b in back]
         r = (fwd[1] * 1 - fwd[2] * 0, fwd[2] * 0 - fwd[0] * 1, 0.0)
-        n = math.hypot(r[0], r[1]) or 1.0
-        r = (r[0] / n, r[1] / n, 0.0)
+        n = math.hypot(r[0], r[1])
+        # Looking straight down or up (pitch ±90°), fwd × Z vanishes: the
+        # limit of fwd × Z / |fwd × Z| as cos(pitch) -> 0 is (-sin yaw, cos yaw).
+        r = (r[0] / n, r[1] / n, 0.0) if n > 1e-9 else (-sy, cy, 0.0)
         u = (r[1] * fwd[2] - r[2] * fwd[1], r[2] * fwd[0] - r[0] * fwd[2], r[0] * fwd[1] - r[1] * fwd[0])
         rel = [p[i] - eye[i] for i in range(3)]
         dot = lambda a, b: sum(a[i] * b[i] for i in range(3))
@@ -276,6 +278,8 @@ def run(driver, lines, probe=None):
             probe.fresh(driver)
             v = list(map(float, args))
             sx, sy = probe.world(v[:3]) if op == "wclick" else probe.sketch(v[0], v[1])
+            if os.environ.get("RCAD_LIVE_TRACE"):
+                print(f"  -> screen ({sx:.1f}, {sy:.1f}) camera {probe.load().get('camera')}")
             driver.move(sx, sy)
             if op != "smove":
                 time.sleep(0.05)

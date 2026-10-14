@@ -59,6 +59,23 @@ pub enum SketchTemplate {
     /// Closed polygon of lines through `vertices` (sketch-plane mm), sharing
     /// endpoints, with no other constraints (vertices stay editable).
     Polygon { vertices: Vec<[f64; 2]> },
+    /// Full ellipse centred on `center` (default: sketch origin), major axis
+    /// along the sketch x axis. Parameters: "major_radius", "minor_radius",
+    /// "center_x", "center_y" (see docs/behavior/sketching.md).
+    CenteredEllipse {
+        major_radius: f64,
+        minor_radius: f64,
+        #[serde(default)]
+        center: Option<[f64; 2]>,
+    },
+    /// Cubic B-spline through the control points `points` (sketch-plane
+    /// mm; open: at least 4, clamped to its end points; `closed`: periodic,
+    /// at least 3), with no constraints (control points stay editable).
+    Spline {
+        points: Vec<[f64; 2]>,
+        #[serde(default)]
+        closed: bool,
+    },
     /// A complete sketch as produced by the interactive editor.
     Custom { sketch: Sketch },
 }
@@ -213,6 +230,18 @@ pub enum Command {
         name: Option<String>,
         a: FaceRef,
         b: FaceRef,
+        radius: f64,
+    },
+    /// Exact solid fillet of every edge of the outer boundary loop of the
+    /// planar face `face` (semantic reference), `radius` mm: cylinders along
+    /// lines, tori along arcs, sphere corners where an arc radius equals
+    /// the radius, mitered sharp line corners. The body must be a straight
+    /// prism under the face (ADR 0014); refused otherwise with the reason.
+    /// Parameter `radius`.
+    FilletLoop {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
         radius: f64,
     },
     /// Direct edit (ADR 0010) of an imported STEP body at imported face
@@ -1223,6 +1252,7 @@ impl Command {
             Command::CircularPattern { .. } => "circular_pattern",
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
+            Command::FilletLoop { .. } => "fillet_loop",
             Command::DirectEdit { .. } => "direct_edit",
             Command::Countersink { .. } => "countersink",
             Command::Thread { .. } => "thread",
@@ -1816,6 +1846,17 @@ impl Session {
                     SketchTemplate::Polygon { vertices } => {
                         (solved(v(polygon_sketch(vertices))?)?, None)
                     }
+                    SketchTemplate::CenteredEllipse {
+                        major_radius,
+                        minor_radius,
+                        center,
+                    } => (
+                        v(Sketch::centered_ellipse(*major_radius, *minor_radius))?,
+                        *center,
+                    ),
+                    SketchTemplate::Spline { points, closed } => {
+                        (solved(v(spline_sketch(points, *closed))?)?, None)
+                    }
                     SketchTemplate::Custom { sketch } => (solved(sketch.clone())?, None),
                 };
                 let mut sketch = sketch;
@@ -2193,6 +2234,19 @@ impl Session {
                 let id = self.model_mut()?.transact("Fillet", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Fillet"));
                     Ok(d.push(n, FeatureKind::Fillet { a, b, radius }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::FilletLoop { name, face, radius } => {
+                let (name, face, radius) = (name.clone(), *face, *radius);
+                if !radius.is_finite() || radius <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "fillet radius must be > 0 mm, got {radius}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Fillet loop", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Fillet"));
+                    Ok(d.push(n, FeatureKind::FilletLoop { face, radius }))
                 })?;
                 r.feature = Some(id);
             }
@@ -4218,6 +4272,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Mirror { plane, .. } => ("mirror", Some(*plane)),
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
                 FeatureKind::Fillet { .. } => ("fillet", None),
+                FeatureKind::FilletLoop { .. } => ("fillet_loop", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
@@ -4545,6 +4600,19 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
     for i in 0..ids.len() {
         s.add_line(ids[i], ids[(i + 1) % ids.len()]);
     }
+    s.validate()?;
+    Ok(s)
+}
+
+/// Editor-style sketch with one cubic B-spline through `points` (see
+/// [`SketchTemplate::Spline`]).
+pub fn spline_sketch(
+    points: &[[f64; 2]],
+    closed: bool,
+) -> Result<Sketch, rcad_sketch::SketchError> {
+    let mut s = Sketch::default();
+    s.ensure_origin();
+    s.add_spline(points, closed)?;
     s.validate()?;
     Ok(s)
 }

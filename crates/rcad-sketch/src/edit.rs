@@ -296,6 +296,16 @@ impl Sketch {
                 };
                 format!("{} (radius of {prefix}{})", dim(d), entity.0)
             }
+            Constraint::EllipseRadius {
+                ellipse,
+                major,
+                dim: d,
+            } => format!(
+                "{} ({} radius of El{})",
+                dim(d),
+                if *major { "major" } else { "minor" },
+                ellipse.0
+            ),
             Constraint::Tangent { line, arc } => format!("Tangent L{} · A{}", line.0, arc.0),
             Constraint::TangentArcs { a, b } => format!("Tangent A{} · A{}", a.0, b.0),
             Constraint::EqualRadius { a, b } => {
@@ -411,7 +421,8 @@ impl Sketch {
             .iter()
             .zip(&other.entities)
             .map(|(a, b)| match (a, b) {
-                (Entity::Circle { radius: r1, .. }, Entity::Circle { radius: r2, .. }) => {
+                (Entity::Circle { radius: r1, .. }, Entity::Circle { radius: r2, .. })
+                | (Entity::Ellipse { minor: r1, .. }, Entity::Ellipse { minor: r2, .. }) => {
                     (r1 - r2).abs()
                 }
                 _ => 0.0,
@@ -502,6 +513,7 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Vertical { .. }
         | Constraint::Diameter { .. }
         | Constraint::Radius { .. }
+        | Constraint::EllipseRadius { .. }
         | Constraint::Tangent { .. }
         | Constraint::TangentArcs { .. }
         | Constraint::EqualRadius { .. }
@@ -519,6 +531,7 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         Constraint::Horizontal { line } | Constraint::Vertical { line } => vec![*line],
         Constraint::Diameter { circle, .. } => vec![*circle],
         Constraint::Radius { entity, .. } => vec![*entity],
+        Constraint::EllipseRadius { ellipse, .. } => vec![*ellipse],
         Constraint::Tangent { line, arc } => vec![*line, *arc],
         Constraint::TangentArcs { a, b } => vec![*a, *b],
         Constraint::EqualRadius { a, b }

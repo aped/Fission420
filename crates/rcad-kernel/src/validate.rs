@@ -76,7 +76,8 @@ fn diag_of(b: &crate::Bounds) -> f64 {
 // ------------------------------------------------------------------ 2D profile
 
 /// Profile boundary as a closed polygon dense enough that its distance to the
-/// true boundary is below `1e-6 * scale` (arcs and circles are subdivided).
+/// true boundary is below `1e-6 * scale` (arcs, circles and cubic spans are
+/// subdivided).
 fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
     fn arc_pts(out: &mut Vec<[f64; 2]>, c: [f64; 2], r: f64, a0: f64, sweep: f64) {
         let sag = (1.0e-6 * r).max(1.0e-9);
@@ -106,6 +107,17 @@ fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
                         let sweep = crate::arc_signed_sweep(a, b, *center, *ccw);
                         let a0 = (a[1] - center[1]).atan2(a[0] - center[0]);
                         arc_pts(&mut out, *center, r, a0, sweep);
+                    }
+                    LoopSegment::Cubic { c1, c2, w, .. } => {
+                        // Polyline within 1e-6 × the span's control-polygon size
+                        // of the exact curve (convex-hull flattening bound,
+                        // `cubic::flatten_into`), the same bound as the arcs.
+                        let pts = [a, *c1, *c2, b];
+                        let size = pts
+                            .iter()
+                            .flat_map(|p| pts.iter().map(move |q| (p[0] - q[0]).hypot(p[1] - q[1])))
+                            .fold(0.0, f64::max);
+                        crate::cubic::flatten_into(&mut out, pts, *w, (1.0e-6 * size).max(1.0e-9));
                     }
                 }
             }
@@ -782,10 +794,10 @@ fn check_faces(
     };
     // Union of the tools: inside any → inside; ambiguous near one and not
     // inside another → unclassified.
-    let in_tools = |p: [f64; 3]| -> Option<bool> {
+    let in_tools_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
         let mut unknown = false;
         for t in &tests {
-            match t.classify(p, eps_tool) {
+            match t.classify(p, eps) {
                 Some(true) => return Some(true),
                 Some(false) => {}
                 None => unknown = true,
@@ -793,14 +805,15 @@ fn check_faces(
         }
         (!unknown).then_some(false)
     };
-    let expected = |p: [f64; 3]| -> Option<bool> {
-        let in_tool = in_tools(p)?;
+    let expected_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
+        let in_tool = in_tools_eps(p, eps)?;
         match (op, in_tool) {
             (PrismOp::Join, true) => Some(true),
             (PrismOp::Cut, true) => Some(false),
             _ => wind.classify(p),
         }
     };
+    let expected = |p: [f64; 3]| expected_eps(p, eps_tool);
     // Per face: the triangles (largest first) to probe.
     let nfaces = planar.len();
     let mut by_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); nfaces];
@@ -933,7 +946,11 @@ fn check_faces(
                     centroid[1] + sgn * h * n[1],
                     centroid[2] + sgn * h * n[2],
                 ];
-                match (expected(p), rwind.classify(p)) {
+                // A target face may cross the tool's wall: probes within the
+                // tessellation's chord error of a curved tool wall (h_curved)
+                // are not classified, as the result's mesh of that wall is
+                // only that accurate.
+                match (expected_eps(p, eps_tool.max(h_curved)), rwind.classify(p)) {
                     (Some(e), Some(r)) if e != r => {
                         return Err(KernelError::InvalidResult(format!(
                             "result check: beside a face of the target near {} the result has {} \

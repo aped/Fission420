@@ -43,6 +43,9 @@ fn fine_profile_points(profile: &Profile) -> Vec<[f64; 2]> {
                             out.push([center[0] + r * t.cos(), center[1] + r * t.sin()]);
                         }
                     }
+                    crate::LoopSegment::Cubic { c1, c2, w, .. } => {
+                        out.extend(crate::cubic::samples([p, *c1, *c2, q], *w, FINE_SAMPLES));
+                    }
                 }
             }
             out
@@ -93,7 +96,7 @@ pub fn profile_outline(profile: &Profile) -> (Vec<[f64; 2]>, bool) {
         Profile::Circle { .. } => true,
         Profile::Loop(segs) => segs
             .iter()
-            .any(|s| matches!(s, crate::LoopSegment::Arc { .. })),
+            .any(|s| !matches!(s, crate::LoopSegment::Line { .. })),
     };
     (fine_profile_points(profile), curved)
 }

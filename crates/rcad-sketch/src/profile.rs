@@ -5,6 +5,10 @@
 //! Line-only loops keep the [`Profile::Polygon`] form; loops with arcs
 //! are [`Profile::Loop`].
 //!
+//! An ellipse or a closed spline is a loop on its own; an open spline joins
+//! lines and arcs at its end control points like any other curve. Both become
+//! exact rational cubic [`LoopSegment::Cubic`] spans ([`crate::curves`]).
+//!
 //! Construction entities (`Sketch::construction`) are ignored here: they take
 //! part in solving only.
 //!
@@ -46,14 +50,58 @@ pub enum LoopSegment {
         center: [f64; 2],
         ccw: bool,
     },
+    /// Rational cubic Bézier span with control points `start, c1, c2, end`
+    /// (`end` the next segment's start) and weights `1, w[0], w[1], 1`; all
+    /// weights positive. Exact span of an ellipse (rational) or of a cubic
+    /// B-spline (`w == [1, 1]`), see [`crate::curves`]. Serde-additive.
+    Cubic {
+        start: [f64; 2],
+        c1: [f64; 2],
+        c2: [f64; 2],
+        w: [f64; 2],
+    },
 }
 
 impl LoopSegment {
     pub fn start(&self) -> [f64; 2] {
         match self {
-            LoopSegment::Line { start } | LoopSegment::Arc { start, .. } => *start,
+            LoopSegment::Line { start }
+            | LoopSegment::Arc { start, .. }
+            | LoopSegment::Cubic { start, .. } => *start,
         }
     }
+}
+
+/// Does any segment of the loop carry a free-form span?
+pub(crate) fn has_cubic(segs: &[LoopSegment]) -> bool {
+    segs.iter().any(|s| matches!(s, LoopSegment::Cubic { .. }))
+}
+
+/// Exact signed area of a loop (counter-clockwise positive): per segment the
+/// Green's-theorem term `∮ (x dy − y dx) / 2`, closed form for lines and arcs,
+/// Gauss–Legendre for cubic spans ([`crate::curves::cubic_area_term`]).
+pub fn loop_area(segs: &[LoopSegment]) -> f64 {
+    let k = segs.len();
+    let mut a = 0.0;
+    for (i, s) in segs.iter().enumerate() {
+        let p = s.start();
+        let q = segs[(i + 1) % k].start();
+        match *s {
+            LoopSegment::Line { .. } => a += 0.5 * (p[0] * q[1] - q[0] * p[1]),
+            LoopSegment::Arc { center, ccw, .. } => {
+                a += 0.5 * (p[0] * q[1] - q[0] * p[1]);
+                let r = dist(center, p);
+                let (from, to) = if ccw { (p, q) } else { (q, p) };
+                let sweep = ccw_angle(center, from, to);
+                let th = if ccw { sweep } else { -sweep };
+                a += 0.5 * r * r * (th - th.sin());
+            }
+            LoopSegment::Cubic { c1, c2, w, .. } => {
+                a += crate::curves::cubic_area_term(p, c1, c2, q, w);
+            }
+        }
+    }
+    a
 }
 
 /// Union-find over point indices, merging `Coincident` points into one vertex.
@@ -72,6 +120,8 @@ enum EdgeKind {
     Arc {
         center: [f64; 2],
     },
+    /// Open spline: index into the span table, spans stored from `u` to `v`.
+    Spline(usize),
 }
 
 pub(crate) fn extract(s: &Sketch) -> Result<Profile, SketchError> {
@@ -106,8 +156,21 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
     let mut curve_ids: Vec<EntityId> = Vec::new();
     let mut circles: Vec<(PointId, f64)> = Vec::new();
     let mut circle_ids: Vec<EntityId> = Vec::new();
+    // Ellipses and closed splines (each a loop of its own).
+    let mut closed: Vec<&Entity> = Vec::new();
+    // Bézier spans of each open spline, from its first to its last point.
+    let mut spline_spans: Vec<Vec<[[f64; 2]; 4]>> = Vec::new();
     for e in s.entities.iter().filter(|e| !s.is_construction(e.id())) {
         match e {
+            Entity::Ellipse { .. } | Entity::Spline { closed: true, .. } => closed.push(e),
+            Entity::Spline { id, points, .. } => {
+                let (Some(a), Some(b)) = (points.first(), points.last()) else {
+                    continue;
+                };
+                curves.push((*a, *b, EdgeKind::Spline(spline_spans.len())));
+                spline_spans.push(crate::curves::open_spline_spans(s, points));
+                curve_ids.push(*id);
+            }
             Entity::Line { a, b, id } => {
                 curves.push((*a, *b, EdgeKind::Line));
                 curve_ids.push(*id);
@@ -135,9 +198,21 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
     }
     let n_arcs = curves
         .iter()
-        .filter(|c| matches!(c.2, EdgeKind::Arc { .. }))
+        .filter(|c| !matches!(c.2, EdgeKind::Line))
         .count();
     let n_lines = curves.len() - n_arcs;
+    let n_splines = spline_spans.len();
+    if !closed.is_empty() {
+        if closed.len() == 1 && curves.is_empty() && circles.is_empty() {
+            return closed_curve_profile(s, closed[0], tol);
+        }
+        return Err(SketchError::UnsupportedProfile(format!(
+            "expected one closed loop; found {} ellipse(s)/closed spline(s) with {} other curves              and {} circles",
+            closed.len(),
+            curves.len(),
+            circles.len()
+        )));
+    }
 
     match (curves.len(), circles.len()) {
         (0, 1) => {
@@ -162,7 +237,15 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
         }
         (_, 0) => {}
         _ => {
-            return Err(SketchError::UnsupportedProfile(if n_arcs == 0 {
+            return Err(SketchError::UnsupportedProfile(if n_splines > 0 {
+                format!(
+                    "expected one closed loop or a single circle; found {} curves (with {} \
+                     splines) and {} circles",
+                    curves.len(),
+                    n_splines,
+                    circles.len()
+                )
+            } else if n_arcs == 0 {
                 format!(
                     "expected one closed loop of lines or a single circle; found {} lines and {} circles",
                     n_lines,
@@ -198,6 +281,9 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
                 EdgeKind::Arc { .. } => {
                     "arc start and end are the same vertex (zero or full sweep)".into()
                 }
+                EdgeKind::Spline(_) => "an open spline's first and last control points are \
+                                        the same vertex (use a closed spline)"
+                    .into(),
             }));
         }
         edges.push((ra, rb, *kind));
@@ -247,28 +333,51 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
         let p = &s.points[v];
         [p.x, p.y]
     };
-    let mut segs: Vec<LoopSegment> = walk
-        .iter()
-        .map(|&(e, forward)| {
-            let (a, b, kind) = edges[e];
-            let from = if forward { a } else { b };
-            match kind {
-                EdgeKind::Line => LoopSegment::Line {
-                    start: rep_xy(from),
-                },
-                EdgeKind::Arc { center } => LoopSegment::Arc {
-                    start: rep_xy(from),
-                    center,
-                    ccw: forward,
-                },
+    let mut segs: Vec<LoopSegment> = Vec::with_capacity(walk.len());
+    let mut ents: Vec<EntityId> = Vec::with_capacity(walk.len());
+    for &(e, forward) in &walk {
+        let (a, b, kind) = edges[e];
+        let from = if forward { a } else { b };
+        match kind {
+            EdgeKind::Line => segs.push(LoopSegment::Line {
+                start: rep_xy(from),
+            }),
+            EdgeKind::Arc { center } => segs.push(LoopSegment::Arc {
+                start: rep_xy(from),
+                center,
+                ccw: forward,
+            }),
+            EdgeKind::Spline(i) => {
+                let spans = &spline_spans[i];
+                let n = spans.len();
+                for j in 0..n {
+                    let [p0, c1, c2, _] = if forward {
+                        spans[j]
+                    } else {
+                        let [p0, c1, c2, p3] = spans[n - 1 - j];
+                        [p3, c2, c1, p0]
+                    };
+                    // The vertex joining other curves keeps its representative
+                    // coordinates (coincident points agree to the solve tolerance).
+                    let start = if j == 0 { rep_xy(from) } else { p0 };
+                    segs.push(LoopSegment::Cubic {
+                        start,
+                        c1,
+                        c2,
+                        w: [1.0, 1.0],
+                    });
+                    ents.push(curve_ids[e]);
+                }
+                continue;
             }
-        })
-        .collect();
-    let mut ents: Vec<EntityId> = walk.iter().map(|&(e, _)| curve_ids[e]).collect();
+        }
+        ents.push(curve_ids[e]);
+    }
     let k = segs.len();
-    let geo: Vec<Prim> = (0..k)
-        .map(|i| Prim::of(&segs[i], segs[(i + 1) % k].start()))
-        .collect();
+    check_cubic_spans(&segs, tol)?;
+    let delta = crate::curves::flatten_tolerance(s.scale());
+    let geo: Vec<Prim> = loop_prims(&segs, delta);
+    let ctol = if has_cubic(&segs) { tol + delta } else { tol };
     for g in &geo {
         match *g {
             Prim::Seg { a, b } => {
@@ -290,12 +399,16 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
             }
         }
     }
-    if loop_self_intersects(&geo, tol) {
+    if loop_self_intersects(&geo, ctol) {
         return Err(SketchError::UnsupportedProfile(
             "loop is self-intersecting".into(),
         ));
     }
-    let area = signed_area(&geo);
+    let area = if has_cubic(&segs) {
+        loop_area(&segs)
+    } else {
+        signed_area(&geo)
+    };
     let perimeter: f64 = geo.iter().map(Prim::length).sum();
     if area.abs() <= 0.5 * tol * perimeter {
         return Err(SketchError::DegenerateProfile(
@@ -326,6 +439,108 @@ pub(crate) fn extract_with_entities(s: &Sketch) -> Result<(Profile, Vec<EntityId
     Ok((Profile::Loop(segs), ents))
 }
 
+/// Every cubic span must have a chord longer than `tol` and finite, positive
+/// data (a span whose ends coincide comes from repeated control points).
+fn check_cubic_spans(segs: &[LoopSegment], tol: f64) -> Result<(), SketchError> {
+    let k = segs.len();
+    for (i, s) in segs.iter().enumerate() {
+        if let LoopSegment::Cubic { start, c1, c2, w } = *s {
+            let end = segs[(i + 1) % k].start();
+            if [start, c1, c2, end]
+                .iter()
+                .flatten()
+                .any(|v| !v.is_finite())
+                || !(w[0] > 0.0 && w[1] > 0.0)
+            {
+                return Err(SketchError::DegenerateProfile(
+                    "curve span has non-finite control data".into(),
+                ));
+            }
+            if dist(start, end) <= tol {
+                return Err(SketchError::DegenerateProfile(
+                    "spline span starts and ends at the same point (coincident control \
+                     points)"
+                        .into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Profile of a lone ellipse or closed spline.
+fn closed_curve_profile(
+    s: &Sketch,
+    e: &Entity,
+    tol: f64,
+) -> Result<(Profile, Vec<EntityId>), SketchError> {
+    if let Entity::Ellipse {
+        minor,
+        center,
+        major,
+        ..
+    } = e
+    {
+        let a = match (s.point_xy(*center), s.point_xy(*major)) {
+            (Some(c), Some(m)) => dist(c, m),
+            _ => 0.0,
+        };
+        if *minor <= tol || a <= tol {
+            return Err(SketchError::DegenerateProfile(format!(
+                "ellipse radii {a:.3e} / {minor:.3e} mm must be positive"
+            )));
+        }
+    }
+    let mut segs = crate::curves::closed_segments(s, e);
+    check_cubic_spans(&segs, tol)?;
+    let delta = crate::curves::flatten_tolerance(s.scale());
+    let geo = loop_prims(&segs, delta);
+    if loop_self_intersects(&geo, tol + delta) {
+        return Err(SketchError::UnsupportedProfile(
+            "closed spline is self-intersecting".into(),
+        ));
+    }
+    let area = loop_area(&segs);
+    let perimeter: f64 = geo.iter().map(Prim::length).sum();
+    if area.abs() <= 0.5 * tol * perimeter {
+        return Err(SketchError::DegenerateProfile(
+            "loop encloses zero area".into(),
+        ));
+    }
+    if area < 0.0 {
+        segs = reversed(&segs);
+    }
+    let k = segs.len();
+    let ymin = segs
+        .iter()
+        .map(|s| s.start()[1])
+        .fold(f64::INFINITY, f64::min);
+    let first = (0..k)
+        .filter(|&i| segs[i].start()[1] <= ymin + tol)
+        .min_by(|&i, &j| segs[i].start()[0].total_cmp(&segs[j].start()[0]))
+        .unwrap_or(0);
+    segs.rotate_left(first);
+    Ok((Profile::Loop(segs), vec![e.id(); k]))
+}
+
+/// Boundary primitives of a loop: lines and arcs exactly, cubic spans as a
+/// polyline within `delta` of the curve ([`crate::curves::flatten`]).
+pub(crate) fn loop_prims(segs: &[LoopSegment], delta: f64) -> Vec<Prim> {
+    let k = segs.len();
+    let mut out = Vec::with_capacity(k);
+    for i in 0..k {
+        let end = segs[(i + 1) % k].start();
+        match segs[i] {
+            LoopSegment::Cubic { start, c1, c2, w } => {
+                let pts = crate::curves::flatten(start, c1, c2, end, w, delta);
+                out.extend(pts.windows(2).map(|p| Prim::Seg { a: p[0], b: p[1] }));
+            }
+            ref seg => out.push(Prim::of(seg, end)),
+        }
+    }
+    out
+}
+
 /// The same loop traversed the other way.
 fn reversed(segs: &[LoopSegment]) -> Vec<LoopSegment> {
     let k = segs.len();
@@ -339,6 +554,12 @@ fn reversed(segs: &[LoopSegment]) -> Vec<LoopSegment> {
                     start,
                     center,
                     ccw: !ccw,
+                },
+                LoopSegment::Cubic { c1, c2, w, .. } => LoopSegment::Cubic {
+                    start,
+                    c1: c2,
+                    c2: c1,
+                    w: [w[1], w[0]],
                 },
             }
         })
@@ -370,9 +591,12 @@ pub(crate) enum Prim {
 }
 
 impl Prim {
+    /// A line or arc segment (a cubic span gives its chord; use [`loop_prims`]).
     pub(crate) fn of(seg: &LoopSegment, end: [f64; 2]) -> Prim {
         match *seg {
-            LoopSegment::Line { start } => Prim::Seg { a: start, b: end },
+            LoopSegment::Line { start } | LoopSegment::Cubic { start, .. } => {
+                Prim::Seg { a: start, b: end }
+            }
             LoopSegment::Arc { start, center, ccw } => {
                 let (from, to) = if ccw { (start, end) } else { (end, start) };
                 Prim::Arc {

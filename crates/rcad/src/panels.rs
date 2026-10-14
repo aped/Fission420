@@ -7,7 +7,7 @@
 
 use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{Command, FeatureSummary};
+use rcad_commands::{Command, ExtrudeOp, FeatureSummary};
 use rcad_document::{FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::SolveStatus;
@@ -309,7 +309,7 @@ impl RcadApp {
         // The world origin planes, whatever is selected (Fusion's Create
         // Sketch offers the origin planes too).
         let planes = ui.add_enabled_ui(open, |ui| {
-            ui.menu_button("▾", |ui| {
+            ui.menu_button("Planes", |ui| {
                 for (label, plane) in [
                     ("Sketch on XY", SketchPlane::WorldXY),
                     ("Sketch on XZ", SketchPlane::WorldXZ),
@@ -354,23 +354,41 @@ impl RcadApp {
                 self, sketch,
             )));
         }
+        // Circles keep the hole-style Cut dialog (through all or blind
+        // pocket); any other closed profile opens Extrude preset to Cut,
+        // Through All (the general cut).
+        let circle_block = sketch_sel.as_ref().and_then(|s| self.cut_blocker(s));
+        let general = circle_block.is_some()
+            && extrude_block.is_none()
+            && sketch_sel
+                .as_ref()
+                .is_some_and(|s| s.profile_error.is_none() && self.consumer_of(s.id).is_none());
         let cut_block = if !has_sketch {
-            Some("Create a circle sketch on a cap face first".to_string())
+            Some("Create a closed sketch profile first".to_string())
         } else if !self.has_body() {
             Some("Create a body first (Extrude)".to_string())
+        } else if general {
+            None
         } else {
-            sketch_sel.as_ref().and_then(|s| self.cut_blocker(s))
+            circle_block
         };
         if action(ui, "Cut through all…", cut_block.as_deref()) {
             let sketch = sketch_sel
                 .as_ref()
                 .map(|s| s.id)
                 .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Cut {
-                sketch,
-                blind: false,
-                depth: "5".into(),
-            });
+            if general {
+                let mut form = crate::extrude::ExtrudeForm::new(self, sketch);
+                form.op = ExtrudeOp::Cut;
+                form.through_all = true;
+                self.dialog = Some(Dialog::Extrude(form));
+            } else {
+                self.dialog = Some(Dialog::Cut {
+                    sketch,
+                    blind: false,
+                    depth: "5".into(),
+                });
+            }
         }
         let revolve_block = if !has_sketch {
             Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
@@ -975,6 +993,17 @@ impl RcadApp {
                             fillet: true,
                         });
                     }
+                    if ui
+                        .button("Fillet edge loop…")
+                        .probe("Fillet edge loop…")
+                        .on_hover_text("Round every edge around this face's outer boundary (e.g. the top edge of a box or rounded rectangle) with exact cylinders, tori and sphere corners")
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::FilletLoop {
+                            face: r,
+                            radius: "2".into(),
+                        });
+                    }
                 }
                 (None, Some(why)) => {
                     ui.add_enabled(false, egui::Button::new("Create Sketch on this face"))
@@ -1577,6 +1606,29 @@ impl RcadApp {
                             None => format!("Arc A{}", e.0),
                         }
                     }
+                    Some(rcad_sketch::Entity::Ellipse {
+                        center,
+                        major,
+                        minor,
+                        ..
+                    }) => {
+                        let (c, m) = (
+                            s.editor.sketch.point_xy(*center).unwrap_or_default(),
+                            s.editor.sketch.point_xy(*major).unwrap_or_default(),
+                        );
+                        format!(
+                            "Ellipse El{} radii {} × {} mm",
+                            e.0,
+                            rcad_sketch::fmt_mm((m[0] - c[0]).hypot(m[1] - c[1])),
+                            rcad_sketch::fmt_mm(*minor)
+                        )
+                    }
+                    Some(rcad_sketch::Entity::Spline { points, closed, .. }) => format!(
+                        "Spline Sp{} ({} control points, {})",
+                        e.0,
+                        points.len(),
+                        if *closed { "closed" } else { "open" }
+                    ),
                     None => continue,
                 },
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),
@@ -2113,6 +2165,10 @@ impl RcadApp {
                             num_field(ui, "Chamfer distance (mm)", distance);
                             ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
                         }
+                    }
+                    Dialog::FilletLoop { radius, .. } => {
+                        num_field(ui, "Fillet radius (mm)", radius);
+                        ui.small("Exact solid fillet of every edge of this face's outer boundary: cylinders along straight edges, tori along arcs, a sphere corner where a rounded corner's radius equals this radius, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (radius larger than a rounded corner, a hole within reach, the loop already filleted).");
                     }
                     Dialog::Pattern {
                         feature,

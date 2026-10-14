@@ -79,3 +79,76 @@ fn sketch_on_world_planes_from_the_toolbar_menu() {
         );
     }
 }
+
+fn sk_click(h: &mut Harness<'_, RcadApp>, p: [f64; 2]) {
+    use eframe::egui::{self, Modifiers, PointerButton};
+    let s = h.state().sketch_to_screen(p).expect("visible");
+    h.event(egui::Event::PointerMoved(s));
+    let _ = h.try_run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: s,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        let _ = h.try_run();
+    }
+    let _ = h.try_run();
+}
+
+/// A rectangle drawn past the body's outline in a second sketch on the
+/// body's bottom plane while zoomed out (the drawn grid is coarser than
+/// the rectangle): both corners keep their own positions. Then Cut through
+/// all of that rectangle splits the block into two bodies.
+#[test]
+fn narrow_rectangle_in_a_second_sketch_keeps_its_width() {
+    let mut h = harness();
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 60.0,
+            height: 40.0,
+            center: Some([30.0, 20.0]),
+        },
+    });
+    settle(&mut h);
+    let sk = h.state().summary().features[0].id;
+    h.state_mut().request(Command::extrude(None, sk, 10.0));
+    settle(&mut h);
+    click(&mut h, "Create Sketch");
+    click(&mut h, "2-Point Rect");
+    sk_click(&mut h, [28.0, -5.0]);
+    sk_click(&mut h, [32.0, 45.0]);
+    settle(&mut h);
+    let n = h
+        .state()
+        .sketch_session()
+        .expect("session")
+        .editor
+        .sketch
+        .entities
+        .len();
+    assert_eq!(n, 4, "rectangle not drawn");
+    // Cut through all with a non-circular profile opens Extrude preset to
+    // Cut + Through All; OK splits the block into two bodies (x 0..28 and
+    // 32..60, each 40 deep and 10 thick).
+    click(&mut h, "Finish Sketch");
+    click(&mut h, "Cut through all…");
+    click(&mut h, "OK");
+    let vols: Vec<f64> = h
+        .state()
+        .summary()
+        .bodies
+        .iter()
+        .map(|b| match b.measurements.clone().expect("measured").volume {
+            rcad_kernel::VolumeResult::Value { volume, .. } => volume,
+            v => panic!("{v:?}"),
+        })
+        .collect();
+    assert_eq!(vols.len(), 2, "{vols:?}");
+    assert!((vols[0] - 28.0 * 400.0).abs() < 1e-6, "{vols:?}");
+    assert!((vols[1] - 28.0 * 400.0).abs() < 1e-6, "{vols:?}");
+}

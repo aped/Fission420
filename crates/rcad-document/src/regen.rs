@@ -1042,6 +1042,13 @@ fn regen_impl(
                 replace_body(&mut st, id, fa.body, out);
                 r.body = Some(fa.body);
             }
+            FeatureKind::FilletLoop { face, radius } => {
+                let fa = resolve_face(id, face, &st)?;
+                let body = brep_target(&st, id, fa.body)?;
+                let out = k::fillet_cap_loop(&body, &fa.frame, *radius).map_err(kernel(id))?;
+                replace_body(&mut st, id, fa.body, out);
+                r.body = Some(fa.body);
+            }
             FeatureKind::Hole {
                 plane,
                 center,
@@ -2528,6 +2535,12 @@ fn curves_to_profile(l: &[k::Curve2]) -> std::result::Result<SketchProfile, Stri
                 start: to,
                 center,
                 ccw: !ccw,
+            },
+            rcad_sketch::LoopSegment::Cubic { c1, c2, w, .. } => rcad_sketch::LoopSegment::Cubic {
+                start: to,
+                c1: c2,
+                c2: c1,
+                w: [w[1], w[0]],
             },
         });
     }
@@ -4265,6 +4278,12 @@ fn extrude_face_frame(e: &ExtrudeOut, fr: &FaceRef, from: FeatureId) -> Result<F
                             "sketch entity {entity} is an arc; its side face is curved"
                         )));
                     }
+                    rcad_sketch::LoopSegment::Cubic { .. } => {
+                        return Err(broken(format!(
+                            "sketch entity {entity} is an ellipse or spline; its side face is \
+                             curved"
+                        )));
+                    }
                 },
                 SketchProfile::Circle { .. } => {
                     return Err(broken("a circle's side face is curved".into()));
@@ -4317,6 +4336,9 @@ fn path_segments(
             Entity::Line { a, b, .. } => Ok((*a, *b)),
             Entity::Arc { start, end, .. } => Ok((*start, *end)),
             Entity::Circle { .. } => Err("a circle cannot be a sweep path".to_string()),
+            Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                Err("an ellipse or spline cannot be a sweep path (lines and arcs only)".to_string())
+            }
         }
     };
     let mut degree: HashMap<rcad_sketch::PointId, usize> = HashMap::new();
@@ -4362,7 +4384,9 @@ fn path_segments(
                 center: world(*center)?,
                 end: world(next)?,
             },
-            Entity::Circle { .. } => unreachable!("refused above"),
+            Entity::Circle { .. } | Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                unreachable!("refused above")
+            }
         });
         at = next;
     }
@@ -4415,7 +4439,8 @@ fn footprint(e: &ExtrudeOut, role: FaceRole, frame: &Frame) -> (Vec<[f64; 3]>, b
                             rcad_sketch::LoopSegment::Line { start } => {
                                 Some((start, segs[(i + 1) % segs.len()].start()))
                             }
-                            rcad_sketch::LoopSegment::Arc { .. } => None,
+                            rcad_sketch::LoopSegment::Arc { .. }
+                            | rcad_sketch::LoopSegment::Cubic { .. } => None,
                         },
                         SketchProfile::Circle { .. } => None,
                     }
@@ -4577,13 +4602,16 @@ fn revolve_about(
             let v = side(*q);
             (l.min(v), h.max(v))
         });
-    let s = if lo > 0.0 {
+    // Touching the axis (within the kernel tolerance) is allowed: the kernel
+    // revolves such profiles when they meet the axis along a straight edge.
+    let eps = k::tol::KERNEL_LINEAR;
+    let s = if lo > -eps && hi > eps {
         1.0
-    } else if hi < 0.0 {
+    } else if hi < eps && lo < -eps {
         -1.0
     } else {
         return Err(invalid(
-            "the profile crosses or touches the axis; it must lie on one side of it".into(),
+            "the profile crosses the axis; it must lie on one side of it".into(),
         ));
     };
     // New 2-D frame: x' = s·(d.y, −d.x) (toward the profile), y' = s·d: a
@@ -4677,6 +4705,14 @@ fn map_profile(profile: &SketchProfile, f: &dyn Fn([f64; 2]) -> [f64; 2]) -> Ske
                             ccw,
                         }
                     }
+                    rcad_sketch::LoopSegment::Cubic { start, c1, c2, w } => {
+                        rcad_sketch::LoopSegment::Cubic {
+                            start: f(start),
+                            c1: f(c1),
+                            c2: f(c2),
+                            w,
+                        }
+                    }
                 })
                 .collect(),
         ),
@@ -4767,6 +4803,12 @@ fn link_curves(
                         c: pt(*center)?,
                         r: *radius,
                     },
+                    rcad_sketch::Entity::Ellipse { .. } | rcad_sketch::Entity::Spline { .. } => {
+                        return Err(DocError::ProductLimit(format!(
+                            "{id}: projecting sketch ellipses and splines is not supported \
+                             (lines, arcs and circles only)"
+                        )));
+                    }
                 };
                 out.push((c, Some(e.id())));
             }
@@ -4900,6 +4942,8 @@ fn bind_link(
                 Some(rcad_sketch::Entity::Line { .. }) => Some(0u8),
                 Some(rcad_sketch::Entity::Arc { .. }) => Some(1),
                 Some(rcad_sketch::Entity::Circle { .. }) => Some(2),
+                Some(rcad_sketch::Entity::Ellipse { .. }) => Some(3),
+                Some(rcad_sketch::Entity::Spline { .. }) => Some(4),
                 None => None,
             };
             for ll in &link.loops {

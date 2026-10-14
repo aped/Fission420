@@ -240,3 +240,42 @@ fn fragile_corner_then_centre_hole_is_cut_exactly() {
     assert!((v - expected).abs() < 1e-6, "{v} vs {expected}");
     assert!(check_mesh(&tessellate(&body, 0.01).unwrap()).watertight);
 }
+
+/// A cup section drawn against the axis (outer R 25, height 60, wall 2,
+/// floor 3): one closed solid without zero-area faces, exact volume
+/// π(25²·60 − 23²·57), a closed outward mesh, 2 disks + cylinders + annulus.
+/// A cone tip (a profile edge meeting the axis at an angle) and a partial
+/// turn are refused by name.
+#[test]
+fn revolve_of_a_profile_touching_the_axis() {
+    let cup = Profile::Polygon(vec![
+        [0.0, 0.0],
+        [25.0, 0.0],
+        [25.0, 60.0],
+        [23.0, 60.0],
+        [23.0, 3.0],
+        [0.0, 3.0],
+    ]);
+    let b = revolve(&cup, &Frame::XZ, 2.0 * PI).unwrap();
+    let want = PI * (625.0 * 60.0 - 529.0 * 57.0);
+    let m = measure(&b).unwrap();
+    let VolumeResult::Value { volume, .. } = m.volume else {
+        panic!("{:?}", m.volume)
+    };
+    assert!((volume - want).abs() < 1e-6 * want, "{volume} vs {want}");
+    assert_eq!((m.shell_count, m.all_shells_closed), (1, true));
+    let c = check_mesh(&tessellate(&b, 0.01).unwrap());
+    assert!(c.watertight && c.mesh_volume > 0.0);
+    assert!((c.mesh_volume - want).abs() < 1e-3 * want);
+    for p in [[25.0, 0.0, 30.0], [0.0, 25.0, 30.0]] {
+        assert!(m.bounds.max[0] >= p[0] - 1e-9);
+    }
+    // Cone: the edge from the axis at an angle.
+    let cone = Profile::Polygon(vec![[0.0, 0.0], [10.0, 0.0], [0.0, 20.0]]);
+    let e = revolve(&cone, &Frame::XZ, 2.0 * PI)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("cone tip"), "{e}");
+    let e = revolve(&cup, &Frame::XZ, PI).unwrap_err().to_string();
+    assert!(e.contains("full 360"), "{e}");
+}
