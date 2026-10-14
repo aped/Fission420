@@ -58,6 +58,10 @@ be interrupted and still completes, and Undo removes it in one step.
   recovery files. Copies left by a pre-rename build (`…/fission420/recovery`,
   `*.autosave.f420.json`) are still offered, and `F420_RECOVERY_DIR` /
   `F420_AUTOSAVE_SECS` still apply when the `RCAD_*` variables are unset.
+  Each copy has a side file naming the saved document it came from; if that document
+  was saved after the copy (e.g. by another instance), the offer says the copy holds
+  older work and offers **Open saved document**. Opening a copy never writes to the
+  saved file (it opens without a path).
 * Dialogs holding feature/body ids close on Undo/Redo (ids may be reused afterwards) and
   when their ids disappear; import replies resolve only the form that submitted them.
 
