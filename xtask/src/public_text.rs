@@ -60,13 +60,23 @@ fn snippet(text: &str, start: usize, len: usize) -> String {
 /// Offending `path: marker` (or `path:line: marker`) entries across the
 /// tracked files of the repository at `root`.
 pub fn offenders(root: &Path) -> Result<Vec<String>, String> {
+    // CI containers check the repository out as another user than the one running git, which
+    // git refuses ("dubious ownership"); trust this one repository for this one call.
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("repository root {}: {e}", root.display()))?;
     let out = Command::new("git")
+        .arg("-c")
+        .arg(format!("safe.directory={}", root.display()))
         .args(["ls-files", "-z"])
-        .current_dir(root)
+        .current_dir(&root)
         .output()
         .map_err(|e| format!("cannot run git ls-files: {e}"))?;
     if !out.status.success() {
-        return Err("git ls-files failed".into());
+        return Err(format!(
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     let mut found = Vec::new();
     for path in out.stdout.split(|&c| c == 0).filter(|p| !p.is_empty()) {

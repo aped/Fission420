@@ -61,6 +61,8 @@ jobs:
           mkdir -p "$dir"
           curl -sSLf --retry 3 -o "$dir/lf.tar.gz" "$url"
           if command -v sha256sum >/dev/null; then got=$(sha256sum "$dir/lf.tar.gz"); else got=$(shasum -a 256 "$dir/lf.tar.gz"); fi
+          # Git Bash's sha256sum prefixes the line with "\" when the path holds backslashes.
+          got=${got#\\}
           [ "${got%% *}" = "$sum" ] || { echo "::error::font archive checksum mismatch: ${got%% *}"; exit 1; }
           # Relative archive name: GNU tar reads "D:\..." as a remote host.
           (cd "$dir" && tar -xzf lf.tar.gz)
