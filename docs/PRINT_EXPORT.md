@@ -15,6 +15,10 @@ report, atomic writes), `crates/rcad-kernel/src/mesh.rs` (`check_mesh`, `MeshChe
 * **STL has no unit field.** Coordinates are written in millimetres (the header says
   `units=mm`, which slicers ignore). The slicer must interpret the file as mm; Bambu Studio,
   PrusaSlicer and Orca do by default. The response's `export.units` states this.
+* **STL import** (the other direction): the Import dialog shows "Interpreted as mm: 1 file
+  unit = 1 mm" for the chosen unit (mm default; cm, m, inch), and the import notes repeat the
+  scale. A mesh imported in the wrong unit can be converted afterwards with the mesh
+  transform presets inch → mm / m → mm (docs/MESH.md).
 * **3MF declares its unit** in the model's `unit` attribute (`millimeter` by default; `unit`
   selects micron…meter and coordinates are converted). Reported dimensions are always mm.
 * **A geometry-only 3MF carries no Bambu printer, process or filament settings.** It holds mesh
@@ -104,6 +108,31 @@ The transform is reported per body (`transform.rotation` row-major, `translation
 never edits features, parameters or the document revision (tested: summary before/after equal).
 A proper rotation plus translation preserves volume, distances and handedness (tested on
 pairwise distances and volume of a placed cylinder; reflections are refused by construction).
+
+### 3MF build-item transforms (`item_transforms`)
+
+3MF only (refused for STL). With `placement`, each object is written in its **modeled**
+coordinates and the placement (proper rotation + translation) becomes its build item's
+`transform` attribute (3MF core row-vector convention, translation in the file's unit), so a
+slicer still sees one movable object per body with its own name and transform. Without
+`placement` no transform is written. Readers apply the transform; the geometry is the same as
+the baked export. Desktop dialog: "Placement as 3MF item transforms" (shown for 3MF when
+"Place on bed" is on).
+
+Evidence (`crates/rcad-commands/tests/print_item_transforms.rs`, files under
+`artifacts/print/tests/item_transforms/`): the placed enclosure (lid face down, X layout,
+gap 10, P1S bed) in mm and inch, with and without item transforms, read back with the 3MF
+reader: both objects closed, on z = 0, at x = 43 / 133 (analytic: 170 mm row centred on
+128), y centred on 128, dims 80×50×25 / 80×50×5, volumes 19592 / 9404 mm³.
+Independent: `tools/print/check_print_mesh.py` (Python zipfile + XML, applies unit and item
+transforms itself) on all four files: 8 PASS, 0 FAIL, same bounds and volumes; it shows the
+lid's item transform `[1 0 0 0 -1 0 0 0 -1 …]` (half turn about X). Bambu Studio 2.8.2.61:
+the **mm** item-transform file slices (exit 0, 125 layers, object heights 25 / 5) and passes
+all 17 enclosure baseline toolpath probes (`tools/print/probes/baseline_plate.json`), as does
+a baked **inch** file. **Finding:** an **inch** file *with* item transforms is refused by
+Bambu Studio ("no object fully inside the print volume", exit 206) although the Python
+checker and our reader place it correctly per the core spec (transforms in model units);
+the export therefore warns for item transforms in a non-mm unit.
 
 ## Bed and fit
 
@@ -261,7 +290,9 @@ base on its floor, 10 mm gap, analytic volumes, document unchanged).
 * App dialogs: no live pre-export preview of placed sizes/triangle counts (modeled sizes are
   shown before export, the exact per-body report after it); one selected face at a time is
   used for "Selected face down".
-* Self-intersection and minimum-thickness checks are not implemented in the app.
+* Minimum-thickness checks are not implemented. Self-intersection: the export check does
+  not run it; mesh bodies can be checked on demand in the inspector (`inspect_mesh`,
+  docs/MESH.md), bounded and not a proof.
 * Truck's isotropic lateral-face grid makes curved parts heavier than necessary (see above).
 * Layout is a single row along X; no rotation about Z, no packing; it may not fit even when a
   different arrangement would (reported, not fixed).

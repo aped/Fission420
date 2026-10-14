@@ -36,6 +36,13 @@ pub struct PrintOptions {
     /// be valid solids.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub allow_open_meshes: bool,
+    /// 3MF only: write each object in its modeled coordinates and the placement
+    /// (rotation + translation) as its build item's `transform`, instead of baking
+    /// the placement into the vertices. Readers place the objects identically; the
+    /// per-object transform stays editable in the slicer. Without `placement` no
+    /// transform is written (identity).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub item_transforms: bool,
 }
 
 /// Export-only placement: every exported body is oriented (default as modeled),
@@ -240,6 +247,8 @@ type OutFile = (PathBuf, Vec<u8>, Vec<BodyId>);
 struct Prepared {
     mesh: TriMesh,
     report: BodyExport,
+    /// The mesh before placement (set by `place`).
+    unplaced: Option<TriMesh>,
 }
 
 const STL_UNITS: &str = "mm (STL has no unit field: coordinates are written in millimetres and the slicer must interpret them as mm)";
@@ -427,6 +436,7 @@ fn prepare(
                 file: None,
             },
             mesh,
+            unplaced: None,
         });
     }
     if let Some(p) = &opts.placement {
@@ -529,7 +539,8 @@ fn place(
     }
     for (prep, (rot, t, _, _)) in out.iter_mut().zip(placed) {
         let tf = rot.then_translate(t);
-        prep.mesh = tf.apply_mesh(&prep.mesh);
+        let placed = tf.apply_mesh(&prep.mesh);
+        prep.unplaced = Some(std::mem::replace(&mut prep.mesh, placed));
         let (lo, hi) = bounds(&prep.mesh);
         prep.report.transform = Some(tf);
         prep.report.bounds_min = lo;
@@ -682,6 +693,11 @@ pub(crate) fn export(
     {
         return Err(invalid(format!("angle_deg must be in (0, 90), got {a}")));
     }
+    if opts.item_transforms && !matches!(format, Format::ThreeMf(_)) {
+        return Err(invalid(
+            "item_transforms is for 3MF (STL has no objects or transforms)".into(),
+        ));
+    }
     if opts.separate_files && !matches!(format, Format::Stl) {
         return Err(invalid(
             "separate_files is for STL; a 3MF file already keeps one object per body".into(),
@@ -737,16 +753,50 @@ pub(crate) fn export(
         }
         Format::ThreeMf(unit) => {
             use rcad_exchange::threemf;
+            if opts.item_transforms
+                && opts.placement.is_some()
+                && unit != threemf::ThreeMfUnit::Millimeter
+            {
+                // Observed: Bambu Studio 2.8.2.61 refuses to slice such a file
+                // ("no object fully inside the print volume") although the
+                // file follows the core spec (transforms in model units).
+                warnings.push(format!(
+                    "item transforms in a {} file: valid 3MF, but Bambu Studio 2.8.2.61 did not \
+                     place such objects on the plate in testing; use millimeter for slicers",
+                    unit.name()
+                ));
+            }
+            let mut items: Vec<Option<threemf::ItemTransform>> = Vec::new();
             let objects: Vec<threemf::MeshObject> = prepared
                 .iter()
-                .map(|p| threemf::MeshObject {
-                    name: Some(p.report.name.clone()),
-                    positions: p.mesh.positions.clone(),
-                    triangles: p.mesh.triangles.clone(),
-                    color: None,
+                .map(|p| {
+                    let (mesh, item) = match (&p.unplaced, &p.report.transform) {
+                        (Some(u), Some(tf)) if opts.item_transforms => {
+                            // Row-vector convention: M[r][c] = R[c][r].
+                            let r = tf.rotation;
+                            (
+                                u,
+                                Some([
+                                    [r[0][0], r[1][0], r[2][0]],
+                                    [r[0][1], r[1][1], r[2][1]],
+                                    [r[0][2], r[1][2], r[2][2]],
+                                    tf.translation,
+                                ]),
+                            )
+                        }
+                        _ => (&p.mesh, None),
+                    };
+                    items.push(item);
+                    threemf::MeshObject {
+                        name: Some(p.report.name.clone()),
+                        positions: mesh.positions.clone(),
+                        triangles: mesh.triangles.clone(),
+                        color: None,
+                    }
                 })
                 .collect();
-            let bytes = threemf::write(&objects, unit).map_err(|e| invalid(e.to_string()))?;
+            let bytes =
+                threemf::write_items(&objects, &items, unit).map_err(|e| invalid(e.to_string()))?;
             (
                 vec![(path.to_path_buf(), bytes, ids.clone())],
                 format!(
@@ -764,18 +814,24 @@ pub(crate) fn export(
     write_all(&to_write)?;
     let placement = match &opts.placement {
         None => "as modeled (document coordinates)".to_string(),
-        Some(p) => format!(
-            "export-only: lowest point at z = 0{}; document unchanged",
-            match p.layout {
-                Some(l) => format!(
-                    ", side by side along X with {} mm gaps, centred on {}",
-                    l.gap,
-                    bed.as_ref()
-                        .map_or("the origin".to_string(), |b| format!("the {} bed", b.name))
-                ),
-                None => ", XY centre of each body kept".into(),
+        Some(p) => {
+            format!(
+                "export-only: lowest point at z = 0{}; document unchanged",
+                match p.layout {
+                    Some(l) => format!(
+                        ", side by side along X with {} mm gaps, centred on {}",
+                        l.gap,
+                        bed.as_ref()
+                            .map_or("the origin".to_string(), |b| format!("the {} bed", b.name))
+                    ),
+                    None => ", XY centre of each body kept".into(),
+                }
+            ) + if opts.item_transforms {
+                "; objects written as modeled with the placement as each 3MF build item's transform"
+            } else {
+                ""
             }
-        ),
+        }
     };
     let triangles: usize = prepared.iter().map(|p| p.report.triangles).sum();
     let report = ExportReport {

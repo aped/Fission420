@@ -191,6 +191,27 @@ fn enclosure_3mf_with_lid_face_down_and_layout() {
         assert!(d.closed, "{d:?}");
         assert!((d.signed_volume.unwrap() - v).abs() < 1e-3, "{d:?} vs {v}");
     }
+    // Same export with the placement as 3MF build-item transforms: different
+    // bytes (objects as modeled + transforms), same placed geometry when read.
+    click(&mut h, "Placement as 3MF item transforms");
+    click(&mut h, "OK");
+    settle(&mut h);
+    let bytes2 = std::fs::read(&out).expect("3MF written");
+    assert_ne!(bytes2, bytes);
+    let pkg2 = rcad_exchange::threemf::read(&bytes2, &Default::default()).unwrap();
+    for (a, b) in pkg.objects.iter().zip(&pkg2.objects) {
+        let ((alo, ahi), (blo, bhi)) = (bounds(&a.positions), bounds(&b.positions));
+        for i in 0..3 {
+            assert!(
+                close(alo[i], blo[i]) && close(ahi[i], bhi[i]),
+                "{alo:?} {blo:?}"
+            );
+        }
+        assert!(
+            (a.diagnostics.signed_volume.unwrap() - b.diagnostics.signed_volume.unwrap()).abs()
+                < 1e-6
+        );
+    }
     // Export-only: the document is unchanged.
     let after = h.state().summary().clone();
     assert_eq!(after.revision, before.revision);
