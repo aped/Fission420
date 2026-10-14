@@ -601,7 +601,9 @@ fn parse_model(
     let mut meta_text: Option<(String, String)> = None;
     let (mut n_vertices, mut n_triangles) = (0usize, 0usize);
     let mut foreign: HashMap<String, usize> = HashMap::new();
+    let mut poll = rcad_cancel::Poll::new(crate::CANCEL_POLL);
     loop {
+        crate::poll_cancel(&mut poll, "3MF")?;
         let pos = r.buffer_position();
         let (ns, ev) = r
             .read_resolved_event()

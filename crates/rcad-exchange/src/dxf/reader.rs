@@ -136,7 +136,9 @@ pub(crate) fn tokenize(bytes: &[u8], max_pairs: u64) -> Result<Vec<Pair>> {
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let mut pairs = Vec::new();
     let mut lines = bytes.split(|&b| b == b'\n').enumerate();
+    let mut poll = rcad_cancel::Poll::new(crate::CANCEL_POLL);
     while let Some((i, code_line)) = lines.next() {
+        crate::poll_cancel(&mut poll, "DXF")?;
         let code_txt = String::from_utf8_lossy(code_line);
         let code_txt = code_txt.trim();
         if code_txt.is_empty() {

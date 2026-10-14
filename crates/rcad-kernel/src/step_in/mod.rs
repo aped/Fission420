@@ -33,6 +33,17 @@ pub(crate) fn fail(msg: String) -> StepError {
     StepError(msg)
 }
 
+/// Message of an import stopped by `rcad_cancel` (the caller maps it).
+pub const CANCELLED: &str = "cancelled";
+
+fn cancelled() -> std::result::Result<(), StepError> {
+    if rcad_cancel::requested() {
+        Err(StepError(CANCELLED.into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// Import limits and unit policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepImportOptions {
@@ -186,6 +197,10 @@ const FACE_CHORDS: usize = 512;
 pub fn import_step(text: &str, opts: &StepImportOptions) -> Result<StepImport> {
     let err = |e: StepError| KernelError::InvalidInput(format!("STEP import: {}", e.0));
     let entities = prescan(text, opts).map_err(err)?;
+    // Cooperative cancellation (`rcad_cancel`): polled in the pre-scan, here,
+    // after the third-party parser (which itself cannot be interrupted) and per
+    // solid while the topology is built.
+    cancelled().map_err(err)?;
     let exchange = guarded("STEP parse", || {
         truck_stepio::r#in::ruststep::parser::parse(text)
     })?
@@ -194,6 +209,7 @@ pub fn import_step(text: &str, opts: &StepImportOptions) -> Result<StepImport> {
         let short: String = msg.chars().take(300).collect();
         KernelError::InvalidInput(format!("STEP import: syntax error: {short}"))
     })?;
+    cancelled().map_err(err)?;
     guarded("STEP import", || import_parsed(&exchange, entities, opts))?.map_err(err)
 }
 
@@ -244,6 +260,9 @@ fn prescan(text: &str, opts: &StepImportOptions) -> std::result::Result<usize, S
             b')' => depth = depth.saturating_sub(1),
             b'=' if depth == 0 => {
                 entities += 1;
+                if entities % 4096 == 0 {
+                    cancelled()?;
+                }
                 if entities > opts.max_entities {
                     return Err(fail(format!("more than {} entities", opts.max_entities)));
                 }
@@ -336,6 +355,7 @@ fn import_parsed(
     // instance limit) is not built.
     let flat: &[u64] = if structure.is_some() { &[] } else { &breps };
     for &brep in flat {
+        cancelled()?;
         // One solid is built into local copies of the
         // stats and warnings, committed only when it succeeds, so a solid
         // that fails while surfaces were asked for is skipped cleanly.
@@ -651,6 +671,7 @@ fn structured(
     }
     let mut loose_root: Option<usize> = None;
     for &brep in breps {
+        cancelled()?;
         let (_, p) = idx.simple(brep, &["MANIFOLD_SOLID_BREP"])?;
         let label = brep_label(&p);
         let direct = placements
