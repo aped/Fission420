@@ -96,7 +96,7 @@ pub fn stl(bytes: &[u8], to_mm: f64) -> Result<(MeshBody, Vec<String>)> {
 }
 
 /// Topology notes for a mesh body (never an exact-solid claim).
-fn mesh_notes(diagnostics: &MeshDiagnostics) -> Vec<String> {
+pub(crate) fn mesh_notes(diagnostics: &MeshDiagnostics) -> Vec<String> {
     let mut notes = vec![
         if diagnostics.closed {
             "closed, consistently oriented".to_string()
@@ -121,7 +121,11 @@ fn mesh_notes(diagnostics: &MeshDiagnostics) -> Vec<String> {
 
 /// Display mesh body: unshared vertices with flat (geometric) normals. The
 /// caller checked that every index is in range.
-fn mesh_body(positions: &[[f64; 3]], tris: &[[u32; 3]], diagnostics: MeshDiagnostics) -> MeshBody {
+pub(crate) fn mesh_body(
+    positions: &[[f64; 3]],
+    tris: &[[u32; 3]],
+    diagnostics: MeshDiagnostics,
+) -> MeshBody {
     let n = tris.len();
     let mut out_positions = Vec::with_capacity(3 * n);
     let mut normals = Vec::with_capacity(3 * n);

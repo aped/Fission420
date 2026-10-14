@@ -108,6 +108,12 @@ pub enum BodySource {
     RepairedMesh {
         source: BodyId,
     },
+    /// An edited copy of mesh body `source` (FeatureKind::MeshEdit);
+    /// `operation`: "transform", "plane cut" or "decimate".
+    EditedMesh {
+        source: BodyId,
+        operation: String,
+    },
 }
 
 /// One evaluated body.
@@ -1247,6 +1253,51 @@ fn regen_impl(
                     BodyGeometry::Brep(geom),
                     BodySource::Modeled,
                 )?;
+                r.body = Some(*body);
+            }
+            FeatureKind::MeshEdit {
+                source,
+                op,
+                body,
+                second_body,
+            } => {
+                let bs = st
+                    .bodies
+                    .get(source)
+                    .ok_or_else(|| DocError::BrokenReference {
+                        from: id,
+                        detail: format!("mesh edit source {source} is not in the model"),
+                    })?;
+                let BodyGeometry::Mesh(m) = &bs.geometry else {
+                    return Err(DocError::ProductLimit(format!(
+                        "{id}: {source} is an exact (B-rep) body; mesh edits apply to mesh \
+                         bodies (STL/3MF imports)"
+                    )));
+                };
+                let (meshes, notes) = crate::mesh_edit::edited(m, op)?;
+                if meshes.len() != 1 + usize::from(second_body.is_some()) {
+                    return Err(DocError::Validation(format!(
+                        "{id}: the mesh edit made {} meshes for {} bodies",
+                        meshes.len(),
+                        1 + usize::from(second_body.is_some())
+                    )));
+                }
+                r.notes = notes;
+                for (mesh, b) in meshes
+                    .into_iter()
+                    .zip(std::iter::once(*body).chain(*second_body))
+                {
+                    create_body(
+                        &mut st,
+                        id,
+                        b,
+                        BodyGeometry::Mesh(Arc::new(mesh)),
+                        BodySource::EditedMesh {
+                            source: *source,
+                            operation: op.name().into(),
+                        },
+                    )?;
+                }
                 r.body = Some(*body);
             }
             FeatureKind::MeshRepair {

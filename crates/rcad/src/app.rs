@@ -431,6 +431,7 @@ pub struct RcadApp {
     pub(crate) drawing_ui: crate::drawing_ui::DrawingUi,
     pub(crate) config_table: crate::config_ui::ConfigTableUi,
     pub(crate) mesh_repair: crate::mesh_repair_ui::MeshRepairUi,
+    pub(crate) mesh_edit: crate::mesh_edit_ui::MeshEditUi,
     /// Body material form and last mass-properties report.
     pub(crate) body_props: crate::bodies::BodyProps,
     /// Exact face measurement state.
@@ -539,6 +540,7 @@ impl RcadApp {
             drawing_ui: Default::default(),
             config_table: Default::default(),
             mesh_repair: Default::default(),
+            mesh_edit: Default::default(),
             body_props: Default::default(),
             exact_measure: Default::default(),
             assembly_ui: Default::default(),
@@ -1122,6 +1124,7 @@ impl RcadApp {
         self.assembly_ui.on_reply(&response, &summary);
         self.drawing_ui.on_reply(&response, &summary);
         self.mesh_repair.on_reply(&response, &summary);
+        self.mesh_edit.on_reply(&response, &summary);
         self.config_table.on_reply(&response);
         if doc_changed {
             self.fitted = false;

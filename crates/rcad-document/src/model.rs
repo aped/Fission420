@@ -660,6 +660,17 @@ pub enum FeatureKind {
         options: rcad_exchange::mesh_repair::RepairOptions,
         body: BodyId,
     },
+    /// Mesh edit (format v8; docs/MESH.md): transform, plane cut or
+    /// decimation of mesh body `source` (`rcad_exchange::mesh_edit`) as new
+    /// body `body` (and `second_body`: the upper half of a two-sided cut);
+    /// the source is kept. Parameters depend on the operation.
+    MeshEdit {
+        source: BodyId,
+        op: rcad_exchange::mesh_edit::MeshEditOp,
+        body: BodyId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second_body: Option<BodyId>,
+    },
     /// Stitch (format v7) the faces of surface body `source` within
     /// healing `tolerance` mm into new body `body` (closed: a solid); the
     /// source body is kept. Parameter "tolerance".
@@ -937,7 +948,8 @@ impl Feature {
             | FeatureKind::SurfaceStitch { .. }
             | FeatureKind::SurfaceFill { .. }
             | FeatureKind::Thicken { .. }
-            | FeatureKind::MeshRepair { .. } => vec![],
+            | FeatureKind::MeshRepair { .. }
+            | FeatureKind::MeshEdit { .. } => vec![],
             FeatureKind::ShellFace { face, .. } => vec![face.feature],
             FeatureKind::ScaleBody { .. } => vec![],
             FeatureKind::AlignBody { from, to, .. } => vec![from.feature, to.feature],
@@ -985,6 +997,9 @@ impl Feature {
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
+            FeatureKind::MeshEdit {
+                body, second_body, ..
+            } => std::iter::once(*body).chain(*second_body).collect(),
             _ => vec![],
         }
     }
@@ -996,7 +1011,8 @@ impl Feature {
             FeatureKind::SurfaceStitch { source, body, .. }
             | FeatureKind::SurfaceFill { source, body, .. }
             | FeatureKind::Thicken { source, body, .. }
-            | FeatureKind::MeshRepair { source, body, .. } => Some((*source, *body)),
+            | FeatureKind::MeshRepair { source, body, .. }
+            | FeatureKind::MeshEdit { source, body, .. } => Some((*source, *body)),
             _ => None,
         }
     }
@@ -1048,7 +1064,8 @@ impl Feature {
             FeatureKind::SurfaceStitch { source, .. }
             | FeatureKind::SurfaceFill { source, .. }
             | FeatureKind::Thicken { source, .. }
-            | FeatureKind::MeshRepair { source, .. } => vec![*source],
+            | FeatureKind::MeshRepair { source, .. }
+            | FeatureKind::MeshEdit { source, .. } => vec![*source],
             _ => vec![],
         }
     }
@@ -1218,6 +1235,7 @@ impl Feature {
             FeatureKind::MeshRepair { options, .. } => {
                 vec![("weld_tolerance".into(), options.weld_tolerance)]
             }
+            FeatureKind::MeshEdit { op, .. } => crate::mesh_edit::parameters(op),
             FeatureKind::SheetFlat { .. } | FeatureKind::ImportSurfaces { .. } => vec![],
             FeatureKind::MoveBody {
                 translate, angle, ..
@@ -1637,6 +1655,9 @@ impl Feature {
                     _ => *end_offset = value,
                 }
                 Ok(())
+            }
+            FeatureKind::MeshEdit { op, .. } => {
+                crate::mesh_edit::set_parameter(id, op, name, value)
             }
             FeatureKind::MeshRepair { options, .. } if name == "weld_tolerance" => {
                 let mut o = *options;
