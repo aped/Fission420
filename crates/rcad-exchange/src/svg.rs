@@ -1289,12 +1289,15 @@ pub fn export(sketch: &Sketch) -> Result<String> {
                     num(-t[1])
                 );
             }
+            Entity::Ellipse { .. } | Entity::Spline { .. } => {
+                body += &curve_path(sketch, e, &mut grow)?;
+            }
         }
         count += 1;
     }
     if count == 0 {
         return Err(ExchangeError::Sketch(
-            "the sketch has no (non-construction) lines, arcs or circles".into(),
+            "the sketch has no (non-construction) curves".into(),
         ));
     }
     let (w, h) = ((hi[0] - lo[0]).max(1e-6), (hi[1] - lo[1]).max(1e-6));
@@ -1310,4 +1313,83 @@ pub fn export(sketch: &Sketch) -> Result<String> {
         num(w),
         num(h)
     ))
+}
+
+/// Exact SVG path of an ellipse (two elliptical arc commands with the axis
+/// rotation) or a cubic B-spline (its polynomial Bézier spans as `C`
+/// commands), y negated. Bounds grow by the control points (the curve lies in
+/// their convex hull) or the ellipse's axis-aligned box.
+fn curve_path(sketch: &Sketch, e: &Entity, grow: &mut impl FnMut([f64; 2], f64)) -> Result<String> {
+    let xy = |id: rcad_sketch::PointId| {
+        sketch
+            .point_xy(id)
+            .ok_or_else(|| ExchangeError::Sketch(format!("missing point {id:?}")))
+    };
+    match e {
+        Entity::Ellipse {
+            center,
+            major,
+            minor,
+            ..
+        } => {
+            let (c, m) = (xy(*center)?, xy(*major)?);
+            let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+            let a = dx.hypot(dy);
+            let th = dy.atan2(dx);
+            // Axis-aligned half extents of the rotated ellipse.
+            let hx = (a * th.cos()).hypot(minor * th.sin());
+            let hy = (a * th.sin()).hypot(minor * th.cos());
+            grow([c[0] - hx, c[1] - hy], 0.0);
+            grow([c[0] + hx, c[1] + hy], 0.0);
+            let o = [2.0 * c[0] - m[0], 2.0 * c[1] - m[1]];
+            // y is negated, so the rotation angle changes sign.
+            let rot = num(-th.to_degrees());
+            Ok(format!(
+                "  <path d=\"M {} {} A {} {} {rot} 0 0 {} {} A {} {} {rot} 0 0 {} {} Z\"/>\n",
+                num(m[0]),
+                num(-m[1]),
+                num(a),
+                num(*minor),
+                num(o[0]),
+                num(-o[1]),
+                num(a),
+                num(*minor),
+                num(m[0]),
+                num(-m[1])
+            ))
+        }
+        Entity::Spline { points, closed, .. } => {
+            let ctrl = points
+                .iter()
+                .map(|p| xy(*p))
+                .collect::<Result<Vec<[f64; 2]>>>()?;
+            for p in &ctrl {
+                grow(*p, 0.0);
+            }
+            let spans = rcad_sketch::curves::spline_beziers(&ctrl, *closed);
+            let Some(first) = spans.first() else {
+                return Err(ExchangeError::Sketch(format!(
+                    "spline {:?} has too few control points",
+                    e.id()
+                )));
+            };
+            let mut d = format!("M {} {}", num(first[0][0]), num(-first[0][1]));
+            for sp in &spans {
+                d += &format!(
+                    " C {} {} {} {} {} {}",
+                    num(sp[1][0]),
+                    num(-sp[1][1]),
+                    num(sp[2][0]),
+                    num(-sp[2][1]),
+                    num(sp[3][0]),
+                    num(-sp[3][1])
+                );
+            }
+            if *closed {
+                d += " Z";
+            }
+            Ok(format!("  <path d=\"{d}\"/>\n"))
+        }
+        _ => Ok(String::new()),
+    }
 }

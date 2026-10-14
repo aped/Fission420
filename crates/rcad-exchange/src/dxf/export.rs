@@ -155,6 +155,13 @@ pub fn export(sketch: &Sketch, opts: &DxfExportOptions) -> Result<String> {
                 ents.f(50, a0);
                 ents.f(51, a1);
             }
+            Entity::Ellipse { id, .. } | Entity::Spline { id, .. } => {
+                // R12 has no ELLIPSE or SPLINE entity; a polyline would not be exact.
+                return Err(ExchangeError::Sketch(format!(
+                    "DXF export (R12) cannot write ellipse or spline {id:?} exactly; \
+                     export the sketch as SVG or the body as STEP"
+                )));
+            }
         }
     }
     if !lo[0].is_finite() {

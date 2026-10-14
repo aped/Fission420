@@ -76,7 +76,8 @@ fn diag_of(b: &crate::Bounds) -> f64 {
 // ------------------------------------------------------------------ 2D profile
 
 /// Profile boundary as a closed polygon dense enough that its distance to the
-/// true boundary is below `1e-6 * scale` (arcs and circles are subdivided).
+/// true boundary is below `1e-6 * scale` (arcs, circles and cubic spans are
+/// subdivided).
 fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
     fn arc_pts(out: &mut Vec<[f64; 2]>, c: [f64; 2], r: f64, a0: f64, sweep: f64) {
         let sag = (1.0e-6 * r).max(1.0e-9);
@@ -106,6 +107,17 @@ fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
                         let sweep = crate::arc_signed_sweep(a, b, *center, *ccw);
                         let a0 = (a[1] - center[1]).atan2(a[0] - center[0]);
                         arc_pts(&mut out, *center, r, a0, sweep);
+                    }
+                    LoopSegment::Cubic { c1, c2, w, .. } => {
+                        // Polyline within 1e-6 × the span's control-polygon size
+                        // of the exact curve (convex-hull flattening bound,
+                        // `cubic::flatten_into`), the same bound as the arcs.
+                        let pts = [a, *c1, *c2, b];
+                        let size = pts
+                            .iter()
+                            .flat_map(|p| pts.iter().map(move |q| (p[0] - q[0]).hypot(p[1] - q[1])))
+                            .fold(0.0, f64::max);
+                        crate::cubic::flatten_into(&mut out, pts, *w, (1.0e-6 * size).max(1.0e-9));
                     }
                 }
             }

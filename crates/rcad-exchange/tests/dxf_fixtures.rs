@@ -96,6 +96,39 @@ fn bounds(s: &Sketch) -> ([f64; 2], [f64; 2]) {
                 add([c[0] - radius, c[1] - radius]);
                 add([c[0] + radius, c[1] + radius]);
             }
+            Entity::Ellipse {
+                center,
+                major,
+                minor,
+                ..
+            } => {
+                let (c, m) = (s.point_xy(*center).unwrap(), s.point_xy(*major).unwrap());
+                let (u, a) = ([m[0] - c[0], m[1] - c[1]], (m[0] - c[0]).hypot(m[1] - c[1]));
+                let v = [-u[1] / a, u[0] / a];
+                for k in 0..100_000 {
+                    let t = std::f64::consts::TAU * k as f64 / 100_000.0;
+                    add([
+                        c[0] + t.cos() * u[0] + minor * t.sin() * v[0],
+                        c[1] + t.cos() * u[1] + minor * t.sin() * v[1],
+                    ]);
+                }
+            }
+            Entity::Spline { points, closed, .. } => {
+                let ctrl: Vec<[f64; 2]> = points.iter().map(|p| s.point_xy(*p).unwrap()).collect();
+                for b in rcad_sketch::curves::spline_beziers(&ctrl, *closed) {
+                    for k in 0..=10_000 {
+                        let t = k as f64 / 10_000.0;
+                        add(rcad_sketch::curves::cubic_point(
+                            b[0],
+                            b[1],
+                            b[2],
+                            b[3],
+                            [1.0, 1.0],
+                            t,
+                        ));
+                    }
+                }
+            }
         }
     }
     (lo, hi)
@@ -568,7 +601,8 @@ fn assert_finite(imp: &DxfImport, what: &str) {
                     );
                 }
             }
-            Entity::Line { .. } => {}
+            Entity::Ellipse { minor, .. } => assert!(minor.is_finite(), "{what}: {e:?}"),
+            Entity::Line { .. } | Entity::Spline { .. } => {}
         }
     }
 }

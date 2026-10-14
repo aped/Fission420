@@ -102,6 +102,11 @@ fn loop_wire(segs: &[LoopSegment], frame: &Frame) -> Result<Wire> {
                     prev = next;
                 }
             }
+            LoopSegment::Cubic { start, c1, c2, w } => {
+                let end = segs[(i + 1) % n].start();
+                let curve = crate::cubic::nurbs([*start, *c1, *c2, end], *w, frame)?;
+                wire.push_back(Edge::new(v0, v1, Curve::NurbsCurve(curve)));
+            }
         }
     }
     Ok(wire)
@@ -411,8 +416,9 @@ pub(crate) fn check_single_closed(body: &Body, what: &str) -> Result<()> {
     Ok(())
 }
 
-/// Smallest x over a line/arc loop: segment endpoints, plus `cx - r` for an arc
-/// whose angular span contains the direction pi (-x).
+/// Smallest x over a loop: segment endpoints, plus `cx - r` for an arc
+/// whose angular span contains the direction pi (-x), and the control-point
+/// minimum of a cubic span (a lower bound, so the revolve check is conservative).
 fn loop_min_x(segs: &[LoopSegment]) -> f64 {
     let n = segs.len();
     let mut m = f64::INFINITY;
@@ -433,6 +439,17 @@ fn loop_min_x(segs: &[LoopSegment]) -> f64 {
             if d <= sweep {
                 m = m.min(center[0] - r);
             }
+        }
+        if let LoopSegment::Cubic {
+            start,
+            c1,
+            c2,
+            w: _,
+        } = s
+        {
+            // Convex-hull bound: never above the true minimum (conservative).
+            let q = segs[(i + 1) % n].start();
+            m = m.min(crate::cubic::hull_range([*start, *c1, *c2, q], [1.0, 0.0]).0);
         }
     }
     m

@@ -619,6 +619,12 @@ fn reverse_loop(segs: &[LoopSegment]) -> Vec<LoopSegment> {
                     center: *center,
                     ccw: !ccw,
                 },
+                LoopSegment::Cubic { c1, c2, w, .. } => LoopSegment::Cubic {
+                    start: end,
+                    c1: *c2,
+                    c2: *c1,
+                    w: [w[1], w[0]],
+                },
             }
         })
         .collect()

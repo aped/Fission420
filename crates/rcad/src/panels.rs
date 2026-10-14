@@ -1556,6 +1556,29 @@ impl RcadApp {
                             None => format!("Arc A{}", e.0),
                         }
                     }
+                    Some(rcad_sketch::Entity::Ellipse {
+                        center,
+                        major,
+                        minor,
+                        ..
+                    }) => {
+                        let (c, m) = (
+                            s.editor.sketch.point_xy(*center).unwrap_or_default(),
+                            s.editor.sketch.point_xy(*major).unwrap_or_default(),
+                        );
+                        format!(
+                            "Ellipse El{} radii {} × {} mm",
+                            e.0,
+                            rcad_sketch::fmt_mm((m[0] - c[0]).hypot(m[1] - c[1])),
+                            rcad_sketch::fmt_mm(*minor)
+                        )
+                    }
+                    Some(rcad_sketch::Entity::Spline { points, closed, .. }) => format!(
+                        "Spline Sp{} ({} control points, {})",
+                        e.0,
+                        points.len(),
+                        if *closed { "closed" } else { "open" }
+                    ),
                     None => continue,
                 },
                 Item::Constraint(i) => s.editor.sketch.constraint_label(i),

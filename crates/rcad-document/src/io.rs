@@ -346,6 +346,29 @@ pub fn v8_feature(doc: &Document) -> Option<&'static str> {
     part_v8_feature(doc)
         .or_else(|| finish_v8_feature(doc))
         .or_else(|| mesh_v8_feature(doc))
+        .or_else(|| sketch_v8_feature(doc))
+}
+
+/// v8 sketch additions: ellipse and spline entities and ellipse radius
+/// dimensions (a v7 build would refuse the unknown variants with a
+/// misleading message).
+fn sketch_v8_feature(doc: &Document) -> Option<&'static str> {
+    use rcad_sketch::{Constraint, Entity};
+    doc.features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            crate::FeatureKind::Sketch { sketch, .. } => Some(sketch),
+            _ => None,
+        })
+        .any(|s| {
+            s.entities
+                .iter()
+                .any(|e| matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. }))
+                || s.constraints
+                    .iter()
+                    .any(|c| matches!(c, Constraint::EllipseRadius { .. }))
+        })
+        .then_some("sketch ellipses and splines")
 }
 
 /// v8 part-modeling additions (bodies split off by cuts, ...).

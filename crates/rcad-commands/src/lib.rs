@@ -58,6 +58,23 @@ pub enum SketchTemplate {
     /// Closed polygon of lines through `vertices` (sketch-plane mm), sharing
     /// endpoints, with no other constraints (vertices stay editable).
     Polygon { vertices: Vec<[f64; 2]> },
+    /// Full ellipse centred on `center` (default: sketch origin), major axis
+    /// along the sketch x axis. Parameters: "major_radius", "minor_radius",
+    /// "center_x", "center_y" (see docs/behavior/sketching.md).
+    CenteredEllipse {
+        major_radius: f64,
+        minor_radius: f64,
+        #[serde(default)]
+        center: Option<[f64; 2]>,
+    },
+    /// Cubic B-spline through the control points `points` (sketch-plane
+    /// mm; open: at least 4, clamped to its end points; `closed`: periodic,
+    /// at least 3), with no constraints (control points stay editable).
+    Spline {
+        points: Vec<[f64; 2]>,
+        #[serde(default)]
+        closed: bool,
+    },
     /// A complete sketch as produced by the interactive editor.
     Custom { sketch: Sketch },
 }
@@ -1798,6 +1815,17 @@ impl Session {
                     }
                     SketchTemplate::Polygon { vertices } => {
                         (solved(v(polygon_sketch(vertices))?)?, None)
+                    }
+                    SketchTemplate::CenteredEllipse {
+                        major_radius,
+                        minor_radius,
+                        center,
+                    } => (
+                        v(Sketch::centered_ellipse(*major_radius, *minor_radius))?,
+                        *center,
+                    ),
+                    SketchTemplate::Spline { points, closed } => {
+                        (solved(v(spline_sketch(points, *closed))?)?, None)
                     }
                     SketchTemplate::Custom { sketch } => (solved(sketch.clone())?, None),
                 };
@@ -4527,6 +4555,19 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
     for i in 0..ids.len() {
         s.add_line(ids[i], ids[(i + 1) % ids.len()]);
     }
+    s.validate()?;
+    Ok(s)
+}
+
+/// Editor-style sketch with one cubic B-spline through `points` (see
+/// [`SketchTemplate::Spline`]).
+pub fn spline_sketch(
+    points: &[[f64; 2]],
+    closed: bool,
+) -> Result<Sketch, rcad_sketch::SketchError> {
+    let mut s = Sketch::default();
+    s.ensure_origin();
+    s.add_spline(points, closed)?;
     s.validate()?;
     Ok(s)
 }

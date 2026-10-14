@@ -13,7 +13,7 @@
 //! directly inside it, any nesting depth) with a persistent [`RegionRef`], and
 //! [`Sketch::region_at`] finds the region under a point.
 
-use crate::profile::{Prim, arc_arc_hits, line_arc_hits, segments_touch};
+use crate::profile::{Prim, arc_arc_hits, has_cubic, line_arc_hits, loop_prims, segments_touch};
 use crate::{Constraint, Entity, EntityId, Profile, Sketch, SketchError, solve_tolerance};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -63,24 +63,20 @@ fn groups(s: &Sketch) -> Vec<Vec<EntityId>> {
         .filter(|e| !s.is_construction(e.id()))
         .collect();
     for e in &live {
-        let pts: Vec<usize> = match e {
-            Entity::Line { a, b, .. } => vec![pidx[a], pidx[b]],
-            Entity::Arc { start, end, .. } => vec![pidx[start], pidx[end]],
-            Entity::Circle { .. } => vec![],
-        };
-        for w in pts.windows(2) {
-            join(&mut parent, w[0], w[1]);
+        if let Some((a, b)) = e.ends() {
+            join(&mut parent, pidx[&a], pidx[&b]);
         }
     }
     let mut by_root: BTreeMap<usize, Vec<EntityId>> = BTreeMap::new();
     let mut out = Vec::new();
     for e in live {
-        match e {
-            Entity::Line { a, .. } | Entity::Arc { start: a, .. } => {
-                let r = find(&mut parent, pidx[a]);
+        // Circles, ellipses and closed splines are loops on their own.
+        match e.ends() {
+            Some((a, _)) => {
+                let r = find(&mut parent, pidx[&a]);
                 by_root.entry(r).or_default().push(e.id());
             }
-            Entity::Circle { id, .. } => out.push(vec![*id]),
+            None => out.push(vec![e.id()]),
         }
     }
     out.extend(by_root.into_values());
@@ -88,8 +84,9 @@ fn groups(s: &Sketch) -> Vec<Vec<EntityId>> {
     out
 }
 
-/// Boundary primitives of a loop (a circle as two half arcs).
-fn prims(p: &Profile) -> Vec<Prim> {
+/// Boundary primitives of a loop (a circle as two half arcs, cubic spans as
+/// a polyline within `delta`, see [`crate::curves`]).
+fn prims(p: &Profile, delta: f64) -> Vec<Prim> {
     match p {
         Profile::Polygon(v) => (0..v.len())
             .map(|i| Prim::Seg {
@@ -97,9 +94,7 @@ fn prims(p: &Profile) -> Vec<Prim> {
                 b: v[(i + 1) % v.len()],
             })
             .collect(),
-        Profile::Loop(segs) => (0..segs.len())
-            .map(|i| Prim::of(&segs[i], segs[(i + 1) % segs.len()].start()))
-            .collect(),
+        Profile::Loop(segs) => loop_prims(segs, delta),
         Profile::Circle { center, radius } => {
             // Exact, shared end points on y = center.y (no trigonometric noise),
             // so the half-open crossing rule in `inside` sees one vertex each.
@@ -292,7 +287,13 @@ fn analyse(s: &Sketch, groups: &[Vec<EntityId>]) -> Result<Loops, SketchError> {
         ));
         loops.push((Profile::Polygon(t.polygon), t.edges));
     }
-    let geo: Vec<Vec<Prim>> = loops.iter().map(|(p, _)| prims(p)).collect();
+    let delta = crate::curves::flatten_tolerance(s.scale());
+    let geo: Vec<Vec<Prim>> = loops.iter().map(|(p, _)| prims(p, delta)).collect();
+    // Polylines stand for cubic spans: widen the contact test by their bound.
+    let curved = loops
+        .iter()
+        .any(|(p, _)| matches!(p, Profile::Loop(v) if has_cubic(v)));
+    let tol = if curved { tol + delta } else { tol };
     // Bounding boxes (widened by tol): disjoint boxes cannot touch, and a loop
     // can only contain loops whose box lies inside its own.
     let boxes: Vec<[f64; 4]> = geo.iter().map(|g| bbox(g, tol)).collect();
@@ -414,7 +415,10 @@ pub struct SketchRegion {
 
 /// Enclosed area of one loop (positive).
 fn loop_area(p: &Profile) -> f64 {
-    crate::profile::signed_area(&prims(p)).abs()
+    match p {
+        Profile::Loop(v) if has_cubic(v) => crate::profile::loop_area(v).abs(),
+        _ => crate::profile::signed_area(&prims(p, f64::INFINITY)).abs(),
+    }
 }
 
 /// Every bounded region: each closed loop minus the loops directly inside it.
@@ -465,16 +469,17 @@ pub(crate) fn region_by_ref(s: &Sketch, id: &RegionRef) -> Result<Option<Region>
 /// `None` outside every loop or exactly on a boundary (within tolerance).
 pub(crate) fn region_at(s: &Sketch, p: [f64; 2]) -> Result<Option<RegionRef>, SketchError> {
     let rs = regions(s)?;
-    let tol = solve_tolerance(s.scale());
+    let delta = crate::curves::flatten_tolerance(s.scale());
+    let tol = solve_tolerance(s.scale()) + delta;
     let on_boundary = |g: &[Prim]| g.iter().any(|x| prim_distance(x, p) <= tol);
     let mut best: Option<&SketchRegion> = None;
     for r in &rs {
-        let og = prims(&r.region.outer);
+        let og = prims(&r.region.outer, delta);
         if on_boundary(&og) || !inside(p, &og) {
             continue;
         }
         let in_hole = r.region.holes.iter().any(|(h, _)| {
-            let hg = prims(h);
+            let hg = prims(h, delta);
             on_boundary(&hg) || inside(p, &hg)
         });
         if !in_hole && best.is_none_or(|b| r.depth > b.depth) {
