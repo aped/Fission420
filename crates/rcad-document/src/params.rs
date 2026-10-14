@@ -671,11 +671,18 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
         {
             Some(SlotKind::Count)
         }
-        FeatureKind::LinearPattern { .. } if name == "spacing" => Some(SlotKind::Length),
+        FeatureKind::LinearPattern { .. } if name == "count2" => Some(SlotKind::Count),
+        FeatureKind::LinearPattern { .. } if name == "spacing" || name == "spacing2" => {
+            Some(SlotKind::Length)
+        }
         FeatureKind::Fillet { .. } | FeatureKind::FilletLoop { .. } if name == "radius" => {
             Some(SlotKind::Length)
         }
-        FeatureKind::Extrude { .. } | FeatureKind::Chamfer { .. } if name == "distance" => {
+        FeatureKind::Extrude { .. }
+        | FeatureKind::Chamfer { .. }
+        | FeatureKind::ChamferLoop { .. }
+            if name == "distance" =>
+        {
             Some(SlotKind::Length)
         }
         FeatureKind::Extrude { .. } if name == "taper_deg" => {

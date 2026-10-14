@@ -22,6 +22,8 @@ pub mod drawing;
 pub mod drawing_dxf;
 pub mod dxf;
 pub mod mesh;
+pub mod mesh_edit;
+pub mod mesh_query;
 pub mod mesh_repair;
 pub mod pdf;
 pub mod stl;

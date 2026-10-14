@@ -151,6 +151,7 @@ fn patterned_counterbored_holes_and_parameters() {
         count: 3,
         spacing: 10.0,
         direction: [1.0, 0.0],
+        second: None,
     });
     assert!(
         matches!(r.error, Some(DocError::GeometryCheck { .. })),
@@ -167,6 +168,7 @@ fn patterned_counterbored_holes_and_parameters() {
             count: 3,
             spacing: 12.0,
             direction: [1.0, 0.0],
+            second: None,
         },
     );
     assert!(

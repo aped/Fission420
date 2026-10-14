@@ -29,7 +29,11 @@
 //!   the UI applies replies in arrival order and can drop any reply whose `doc_id`
 //!   differs from the document it currently shows. A running kernel operation is
 //!   never interrupted; its reply is simply followed by the replies of the
-//!   commands queued after it.
+//!   commands queued after it. The toolbar's Cancel asks the running
+//!   regeneration to stop at the next feature (or pattern instance)
+//!   ([`rcad_document::request_cancel`]): that command then fails with
+//!   `DocError::Cancelled` and commits nothing; the flag is cleared before
+//!   each command.
 //! * Profiling: `response.elapsed_ms` ([`Reply::elapsed`]) is the worker time for
 //!   the command including display tessellation.
 //!
@@ -219,6 +223,8 @@ fn handle_next(session: &mut Session, queue: &mut VecDeque<Command>) -> Option<R
 
 /// Execute one command and derive everything the UI needs from the session.
 pub fn execute(session: &mut Session, cmd: Command) -> Reply {
+    // A cancellation request applies to the command running when it was made.
+    rcad_document::clear_cancel();
     let t0 = Instant::now();
     let before = session.summary();
     let mut response = session.execute(&cmd);

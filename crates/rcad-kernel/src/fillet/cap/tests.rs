@@ -24,17 +24,6 @@ fn top(h: f64) -> Frame {
     }
 }
 
-fn volume(b: &Body) -> (f64, f64) {
-    match measure(b).unwrap().volume {
-        VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => (volume, error_estimate),
-        VolumeResult::Unavailable { reason } => panic!("{reason}"),
-    }
-}
-
 fn evidence(b: &Body, name: &str) {
     if let Some(dir) = std::env::var_os("RCAD_EVIDENCE_DIR") {
         let text = export_step(b, "test").unwrap();
@@ -67,6 +56,27 @@ fn rounded(a: f64, b: f64, rr: f64) -> Profile {
     ])
 }
 
+/// [`rounded`] moved by (x0, y0).
+fn rounded_at(x0: f64, y0: f64, a: f64, b: f64, rr: f64) -> Profile {
+    let Profile::Loop(segs) = rounded(a, b, rr) else {
+        unreachable!()
+    };
+    let mv = |p: [f64; 2]| [p[0] + x0, p[1] + y0];
+    Profile::Loop(
+        segs.into_iter()
+            .map(|s| match s {
+                LoopSegment::Line { start } => LoopSegment::Line { start: mv(start) },
+                LoopSegment::Arc { start, center, ccw } => LoopSegment::Arc {
+                    start: mv(start),
+                    center: mv(center),
+                    ccw,
+                },
+                other => panic!("rounded rectangles have no {other:?}"),
+            })
+            .collect(),
+    )
+}
+
 fn rect(a: f64, b: f64) -> Profile {
     Profile::Polygon(vec![[0.0, 0.0], [a, 0.0], [a, b], [0.0, b]])
 }
@@ -74,12 +84,31 @@ fn rect(a: f64, b: f64) -> Profile {
 fn check(out: &Body, input: &Body, want: f64, faces: usize) {
     let m = measure(out).unwrap();
     assert!(m.all_shells_closed && m.shell_count == 1);
-    assert_eq!(m.face_count, faces);
-    let (v, err) = volume(out);
+    // Exact boundary integral over the faces' own parametrisations.
+    let (ve, ee) = crate::measure::parametric_volume(&out.solid, 8).unwrap();
     assert!(
-        (v - want).abs() <= 1e-5 * want + 3.0 * err,
-        "volume {v} (±{err}) vs closed form {want}"
+        (ve - want).abs() < 1e-9 * want && ee < 1e-9 * want,
+        "parametric volume {ve} (±{ee}) vs closed form {want}"
     );
+    assert_eq!(m.face_count, faces);
+    // The general measurement is exact too (cylinders only: the revolution
+    // integral; tori and spheres: the parametric boundary integral).
+    match m.volume {
+        VolumeResult::Value {
+            volume,
+            error_estimate,
+            method,
+        } => {
+            assert_ne!(method, crate::VolumeMethod::TessellationEstimate);
+            assert!(
+                (volume - want).abs() <= 1e-9 * want && error_estimate <= 1e-9 * want,
+                "measured {volume} (±{error_estimate}) vs closed form {want}"
+            );
+        }
+        VolumeResult::Unavailable { reason } => panic!("{reason}"),
+    }
+    let p = crate::volume_properties(out).unwrap();
+    assert!(p.is_exact() && (p.volume - want).abs() <= 1e-9 * want);
     // The fillet only removes material inside the walls: same bounding box.
     let (bi, bo) = (measure(input).unwrap().bounds, m.bounds);
     for k in 0..3 {
@@ -151,6 +180,12 @@ fn equal_radii_give_sphere_corners() {
     let straight = 2.0 * (a - 2.0 * r) + 2.0 * (b - 2.0 * r);
     let want = area * h - sa * straight - 2.0 * PI * (sa * r - m);
     check(&out, &input, want, 18);
+    // Symmetric about x = 15 and y = 10: the exact centroid lies on both.
+    let c = crate::volume_properties(&out).unwrap().centroid;
+    assert!(
+        (c[0] - 15.0).abs() < 1e-9 && (c[1] - 10.0).abs() < 1e-9,
+        "{c:?}"
+    );
     // Sphere about (r, r, h − r): probe along (−1, −1, 1)/√3.
     let d = 1.0 / 3f64.sqrt();
     let c = [r, r, h - r];
@@ -202,10 +237,9 @@ fn holes_away_from_the_rim_are_kept() {
     let area = a * b - (4.0 - PI) * 16.0 - PI * 25.0;
     let straight = 2.0 * (a - 8.0) + 2.0 * (b - 8.0);
     let want = area * h - sa * straight - 2.0 * PI * (sa * 4.0 - m);
-    // Truck splits the extruded circle into 120° walls; each is rebuilt as
-    // two arcs of at most a quarter turn.
+    // The hole's walls (Truck's 120° arcs) are kept as they are.
     let holes = measure(&input).unwrap().face_count - 10;
-    check(&out, &input, want, 18 + 2 * holes);
+    check(&out, &input, want, 18 + holes);
     // The hole wall still runs the full height.
     assert_eq!(
         point_membership(&out, &[[20.0, 15.0, h - 0.1], [20.0, 9.9, h - 0.1]]).unwrap(),
@@ -261,6 +295,22 @@ fn mesh_volume_converges_to_the_closed_form() {
     }
     assert!(errs[1] < errs[0] && errs[2] < errs[1], "{errs:?}");
     assert!(errs[2] < 1e-4 * want, "{errs:?}");
+}
+
+#[test]
+fn parametric_volume_of_known_solids() {
+    // Planes only, and an extruded disc (cylinder walls split at seams).
+    let b = extrude(&rect(40.0, 30.0), &Frame::XY, 10.0).unwrap();
+    let (v, _) = crate::measure::parametric_volume(&b.solid, 4).unwrap();
+    assert!((v - 12000.0).abs() < 1e-9 * 12000.0, "{v}");
+    let disc = Profile::Circle {
+        center: [3.0, -2.0],
+        radius: 7.0,
+    };
+    let b = extrude(&disc, &Frame::XZ, 5.0).unwrap();
+    let (v, _) = crate::measure::parametric_volume(&b.solid, 4).unwrap();
+    let want = PI * 49.0 * 5.0;
+    assert!((v - want).abs() < 1e-9 * want, "{v} vs {want}");
 }
 
 #[test]
@@ -321,4 +371,141 @@ fn refusals_name_the_reason() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("deep"), "{e}");
+}
+
+/// Prismatoid oracle (independent of the sweep formulas): the chamfer band
+/// of a convex polygon is the prismatoid between the polygon at depth d and
+/// its d-inset at the cap, V = d/6 (A0 + 4 Am + A1).
+#[test]
+fn chamfered_box_matches_the_prismatoid() {
+    let (a, b, h, d) = (40.0, 30.0, 10.0, 2.0);
+    let input = extrude(&rect(a, b), &Frame::XY, h).unwrap();
+    let out = chamfer_cap_loop(&input, &top(h), d).unwrap();
+    let band = d / 6.0 * (a * b + 4.0 * (a - d) * (b - d) + (a - 2.0 * d) * (b - 2.0 * d));
+    let want = a * b * (h - d) + band;
+    check(&out, &input, want, 10);
+    // Mid front edge: the 45° plane y = z − (h − d); probe across it.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    probe(&out, [20.0, 1.0, h - 1.0], [0.0, -s, s]);
+    evidence(&out, "cap_chamfer_box");
+}
+
+#[test]
+fn chamfered_hexagon_and_filleted_hexagon() {
+    // Regular hexagon, side 20 (apothem 10√3), 120° corners (turn 60°).
+    let (side, h, d) = (20.0, 8.0, 1.5);
+    let pts: Vec<[f64; 2]> = (0..6)
+        .map(|k| {
+            let t = PI / 3.0 * k as f64;
+            [side * t.cos(), side * t.sin()]
+        })
+        .collect();
+    let input = extrude(&Profile::Polygon(pts), &Frame::XY, h).unwrap();
+    let area = |ap: f64| 2.0 * 3f64.sqrt() * ap * ap; // hexagon by apothem
+    let ap = side * 3f64.sqrt() / 2.0;
+    let out = chamfer_cap_loop(&input, &top(h), d).unwrap();
+    let band = d / 6.0 * (area(ap) + 4.0 * area(ap - d / 2.0) + area(ap - d));
+    check(&out, &input, area(ap) * (h - d) + band, 14);
+    evidence(&out, "cap_chamfer_hexagon");
+    // Fillet: each of the 12 corner ends of an edge loses M·tan(30°).
+    let r = 2.0;
+    let out = fillet_cap_loop(&input, &top(h), r).unwrap();
+    let (sa, m) = spandrel(r);
+    let want = area(ap) * h - sa * 6.0 * side + 12.0 * m * (PI / 6.0).tan();
+    check(&out, &input, want, 14);
+    evidence(&out, "cap_fillet_hexagon");
+}
+
+#[test]
+fn chamfered_rounded_rectangle_gets_cones() {
+    let (a, b, h, rr, d) = (40.0, 30.0, 12.0, 5.0, 2.0);
+    let input = extrude(&rounded(a, b, rr), &Frame::XY, h).unwrap();
+    let out = chamfer_cap_loop(&input, &top(h), d).unwrap();
+    // Triangle section: area d²/2, centroid d/3 from each wall.
+    let tri = d * d / 2.0;
+    let area = a * b - (4.0 - PI) * rr * rr;
+    let straight = 2.0 * (a - 2.0 * rr) + 2.0 * (b - 2.0 * rr);
+    let want = area * h - tri * straight - 2.0 * PI * tri * (rr - d / 3.0);
+    check(&out, &input, want, 18);
+    evidence(&out, "cap_chamfer_rounded_rect");
+    // d = R: the corner cone would end in an apex; refused by name.
+    let e = chamfer_cap_loop(&input, &top(h), rr)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("chamfer loop") && e.contains("apex"), "{e}");
+}
+
+/// Open enclosure: rounded box 60 × 40 × 25 (R 5) with a cavity cut from
+/// the top (walls 2, floor 2, inner corner radius 3). The body is not a
+/// prism under either cap, so only the cap face and the outer walls are
+/// rebuilt; the cavity is kept. Expected: the enclosure's closed-form volume
+/// minus the loop's spandrel sweep.
+#[test]
+fn enclosure_rim_and_base_loops_keep_the_cavity() {
+    let (a, b, h, rr, t) = (60.0, 40.0, 25.0, 5.0, 2.0);
+    let outer = extrude(&rounded(a, b, rr), &Frame::XY, h).unwrap();
+    let cavity = rounded_at(t, t, a - 2.0 * t, b - 2.0 * t, rr - t);
+    let body = crate::cut_blind(&outer, &cavity, &top(h), h - t).unwrap();
+    let rra = |a: f64, b: f64, r: f64| a * b - (4.0 - PI) * r * r;
+    let shell = rra(a, b, rr) * h - rra(a - 2.0 * t, b - 2.0 * t, rr - t) * (h - t);
+    let removed = |r: f64| {
+        let (sa, m) = spandrel(r);
+        let straight = 2.0 * (a - 2.0 * rr) + 2.0 * (b - 2.0 * rr);
+        sa * straight + 2.0 * PI * (sa * rr - m)
+    };
+    // Top rim, outer edge: r 1.5 (< wall 2).
+    let out = fillet_cap_loop(&body, &top(h), 1.5).unwrap();
+    let want = shell - removed(1.5);
+    let m = measure(&out).unwrap();
+    assert!(m.all_shells_closed && m.shell_count == 1);
+    let (v, e) = volume_of(&out).unwrap();
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    // The cavity is untouched: air inside, the floor solid.
+    assert_eq!(
+        point_membership(
+            &out,
+            &[[30.0, 20.0, 10.0], [30.0, 20.0, 1.0], [1.0, 20.0, 24.9]]
+        )
+        .unwrap(),
+        vec![Some(false), Some(true), Some(true)]
+    );
+    evidence(&out, "cap_fillet_enclosure_rim");
+    // Base loop (bottom face, outward −Z): r 1.5 keeps clear of the 2 mm floor.
+    let bottom = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, -1.0, 0.0],
+        z: [0.0, 0.0, -1.0],
+    };
+    let out = fillet_cap_loop(&body, &bottom, 1.5).unwrap();
+    let (v, e) = volume_of(&out).unwrap();
+    let want = shell - removed(1.5);
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    evidence(&out, "cap_fillet_enclosure_base");
+    // Both: rim then base.
+    let both =
+        fillet_cap_loop(&fillet_cap_loop(&body, &top(h), 1.5).unwrap(), &bottom, 1.5).unwrap();
+    let (v, e) = volume_of(&both).unwrap();
+    let want = shell - 2.0 * removed(1.5);
+    assert!(
+        (v - want).abs() <= 1e-9 * want && e <= 1e-9 * want,
+        "{v} ± {e} vs {want}"
+    );
+    evidence(&both, "cap_fillet_enclosure_both");
+    // Too large: the base fillet would reach the cavity floor; the rim
+    // fillet the cavity (a hole in the rim face).
+    let e = fillet_cap_loop(&body, &bottom, 2.5)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("blend band"), "{e}");
+    let e = fillet_cap_loop(&body, &top(h), 2.5)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("hole"), "{e}");
 }

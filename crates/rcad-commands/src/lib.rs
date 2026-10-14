@@ -9,6 +9,7 @@ pub mod assembly;
 pub mod drawings;
 pub mod mass;
 pub mod measure_faces;
+pub mod mesh_edit;
 pub mod mesh_repair;
 
 /// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
@@ -191,6 +192,9 @@ pub enum Command {
         count: u32,
         spacing: f64,
         direction: [f64; 2],
+        /// A second direction: a rectangular grid (format v8).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second: Option<rcad_document::PatternDirection>,
     },
     /// Repeat an Extrude Join/Cut `count - 1` more times, each rotated a further
     /// `angle_deg` counter-clockwise about the seed sketch's normal through
@@ -242,6 +246,16 @@ pub enum Command {
         name: Option<String>,
         face: FaceRef,
         radius: f64,
+    },
+    /// Equal-distance chamfer of every edge of the outer boundary loop of the
+    /// planar face `face`, `distance` mm along both faces: 45° planes along
+    /// lines, cones along arcs, straight miters at sharp corners. Same scope
+    /// as [`Command::FilletLoop`]. Parameter `distance`.
+    ChamferLoop {
+        #[serde(default)]
+        name: Option<String>,
+        face: FaceRef,
+        distance: f64,
     },
     /// Direct edit (ADR 0010) of an imported STEP body at imported face
     /// `face` (`FaceRole::Imported`, stable import index; see
@@ -1022,6 +1036,14 @@ pub enum Command {
     /// kept. `Response.mesh_repair` reports every change and the diagnosis
     /// before/after. `preview`: nothing changes.
     RepairMesh(mesh_repair::RepairMeshArgs),
+    /// Mesh edit (docs/MESH.md): preview or apply a transform, plane cut or
+    /// decimation of a mesh body as new mesh body/bodies; the source is kept.
+    /// `Response.mesh_edit` reports the change counts, the diagnosis after and
+    /// (decimation) the measured deviation. `preview`: nothing changes.
+    EditMesh(mesh_edit::EditMeshArgs),
+    /// Read-only mesh inspection: the body's diagnosis plus the bounded
+    /// self-intersection check (`Response.mesh_inspection`).
+    InspectMesh(mesh_edit::InspectMeshArgs),
     DeleteFeature {
         feature: FeatureId,
     },
@@ -1244,6 +1266,7 @@ impl Command {
             Command::Chamfer { .. } => "chamfer",
             Command::Fillet { .. } => "fillet",
             Command::FilletLoop { .. } => "fillet_loop",
+            Command::ChamferLoop { .. } => "chamfer_loop",
             Command::DirectEdit { .. } => "direct_edit",
             Command::Countersink { .. } => "countersink",
             Command::Thread { .. } => "thread",
@@ -1278,6 +1301,8 @@ impl Command {
             Command::SheetMetal { .. } => "sheet_metal",
             Command::ExportFlatPattern { .. } => "export_flat_pattern",
             Command::RepairMesh(_) => "repair_mesh",
+            Command::EditMesh(_) => "edit_mesh",
+            Command::InspectMesh(_) => "inspect_mesh",
             Command::SheetBase(_) => "sheet_base",
             Command::SheetFlange(_) => "sheet_flange",
             Command::EditSheetRule(_) => "edit_sheet_rule",
@@ -1624,6 +1649,12 @@ pub struct Response {
     /// `repair_mesh`: what the repair changes / changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_repair: Option<rcad_exchange::mesh_repair::RepairReport>,
+    /// `edit_mesh`: what the edit changes / changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_edit: Option<rcad_exchange::mesh_edit::MeshEditReport>,
+    /// `inspect_mesh`: diagnosis and self-intersection check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_inspection: Option<mesh_edit::MeshInspection>,
     /// Set by a queueing front end (the app engine) when this command was not
     /// executed because a newer edit of the same parameter was already queued
     /// behind it. `ok` is true and nothing changed. [`Session`] never sets it.
@@ -1799,7 +1830,7 @@ impl Session {
         if self.run_sheet_surface(cmd, r)? {
             return Ok(());
         }
-        if self.run_mesh(cmd, r)? {
+        if self.run_mesh(cmd, r)? || self.run_mesh_edit(cmd, r)? {
             return Ok(());
         }
         match cmd {
@@ -2132,9 +2163,16 @@ impl Session {
                 count,
                 spacing,
                 direction,
+                second,
             } => {
-                let (name, seed, count, spacing, direction) =
-                    (name.clone(), *feature, *count, *spacing, *direction);
+                let (name, seed, count, spacing, direction, second) = (
+                    name.clone(),
+                    *feature,
+                    *count,
+                    *spacing,
+                    *direction,
+                    *second,
+                );
                 let id = self.model_mut()?.transact("Pattern", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Pattern"));
                     Ok(d.push(
@@ -2144,6 +2182,7 @@ impl Session {
                             count,
                             spacing,
                             direction,
+                            second,
                         },
                     ))
                 })?;
@@ -2230,6 +2269,23 @@ impl Session {
                 let id = self.model_mut()?.transact("Fillet loop", |d| {
                     let n = name.unwrap_or_else(|| d.default_name("Fillet"));
                     Ok(d.push(n, FeatureKind::FilletLoop { face, radius }))
+                })?;
+                r.feature = Some(id);
+            }
+            Command::ChamferLoop {
+                name,
+                face,
+                distance,
+            } => {
+                let (name, face, distance) = (name.clone(), *face, *distance);
+                if !distance.is_finite() || distance <= 0.0 {
+                    return Err(DocError::Validation(format!(
+                        "chamfer distance must be > 0 mm, got {distance}"
+                    )));
+                }
+                let id = self.model_mut()?.transact("Chamfer loop", |d| {
+                    let n = name.unwrap_or_else(|| d.default_name("Chamfer"));
+                    Ok(d.push(n, FeatureKind::ChamferLoop { face, distance }))
                 })?;
                 r.feature = Some(id);
             }
@@ -3366,7 +3422,7 @@ impl Session {
                 r.feature = Some(id);
             }
             // Handled by `run_mesh` before this match.
-            Command::RepairMesh(_) => {}
+            Command::RepairMesh(_) | Command::EditMesh(_) | Command::InspectMesh(_) => {}
             // Handled by `run_sheet_surface` before this match.
             Command::SheetBase(_)
             | Command::SheetFlange(_)
@@ -4256,6 +4312,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::Chamfer { .. } => ("chamfer", None),
                 FeatureKind::Fillet { .. } => ("fillet", None),
                 FeatureKind::FilletLoop { .. } => ("fillet_loop", None),
+                FeatureKind::ChamferLoop { .. } => ("chamfer_loop", None),
                 FeatureKind::Hole { plane, .. } => ("hole", Some(*plane)),
                 FeatureKind::Shell { .. } => ("shell", None),
                 FeatureKind::MoveBody { copy: None, .. } => ("move_body", None),
@@ -4272,6 +4329,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 FeatureKind::SurfacePatch { .. } => ("surface_patch", None),
                 FeatureKind::SurfaceExtrude { .. } => ("surface_extrude", None),
                 FeatureKind::MeshRepair { .. } => ("mesh_repair", None),
+                FeatureKind::MeshEdit { .. } => ("mesh_edit", None),
                 FeatureKind::ShellFace { .. } => ("shell", None),
                 FeatureKind::ScaleBody { .. } => ("scale_body", None),
                 FeatureKind::AlignBody { .. } => ("align_body", None),

@@ -380,6 +380,9 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
         crate::FeatureKind::SplitBody { pieces, .. } if !pieces.is_empty() => {
             Some("split bodies with several pieces per side")
         }
+        crate::FeatureKind::LinearPattern {
+            second: Some(_), ..
+        } => Some("rectangular patterns (a second direction)"),
         _ => None,
     })
 }
@@ -388,14 +391,21 @@ fn part_v8_feature(doc: &Document) -> Option<&'static str> {
 fn finish_v8_feature(doc: &Document) -> Option<&'static str> {
     doc.features
         .iter()
-        .any(|f| matches!(f.kind, crate::FeatureKind::FilletLoop { .. }))
-        .then_some("face edge-loop fillets")
+        .any(|f| {
+            matches!(
+                f.kind,
+                crate::FeatureKind::FilletLoop { .. } | crate::FeatureKind::ChamferLoop { .. }
+            )
+        })
+        .then_some("face edge-loop fillets and chamfers")
 }
 
 /// v8 mesh and print additions.
 fn mesh_v8_feature(doc: &Document) -> Option<&'static str> {
-    let _ = doc;
-    None
+    doc.features
+        .iter()
+        .any(|f| matches!(f.kind, crate::FeatureKind::MeshEdit { .. }))
+        .then_some("mesh edits (transform, plane cut, decimation)")
 }
 
 /// v6 sketch additions: sketch text (`Sketch::texts`) and

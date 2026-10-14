@@ -81,7 +81,7 @@ fn a_cut_across_the_whole_part_makes_one_body_per_piece() {
     let b2 = s.summary().bodies[1].bounds.unwrap();
     assert!((b1.min[0] - 0.0).abs() < 1e-9 && (b1.max[0] - 18.0).abs() < 1e-9);
     assert!((b2.min[0] - 22.0).abs() < 1e-9 && (b2.max[0] - 40.0).abs() < 1e-9);
-    assert_eq!(s.summary().bodies[1].name, "Body2");
+    assert_eq!(s.summary().bodies[1].name, "Body1 (2)");
     // Undo restores one body and no assigned piece; redo both.
     tray::ok(&mut s, &json!({"cmd": "undo"}));
     assert_eq!(bodies(&s), vec![1]);

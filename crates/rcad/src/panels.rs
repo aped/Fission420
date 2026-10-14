@@ -270,6 +270,20 @@ impl RcadApp {
                 ui.separator();
                 ui.spinner();
                 ui.label("Regenerating…");
+                // Stops the running regeneration at the next feature; the
+                // edit is then not committed (the model keeps its last state).
+                if ui
+                    .small_button("Cancel")
+                    .named("Cancel regeneration")
+                    .on_hover_text(
+                        "Stop this regeneration at the next feature: the edit is not applied \
+                         and the model stays as it was (a kernel operation already running \
+                         finishes first)",
+                    )
+                    .clicked()
+                {
+                    rcad_document::request_cancel();
+                }
             }
         });
     }
@@ -1004,6 +1018,19 @@ impl RcadApp {
                         self.dialog = Some(Dialog::FilletLoop {
                             face: r,
                             radius: "2".into(),
+                            chamfer: false,
+                        });
+                    }
+                    if ui
+                        .button("Chamfer edge loop…")
+                        .probe("Chamfer edge loop…")
+                        .on_hover_text("Chamfer every edge around this face's outer boundary at 45° (planes along straight edges, cones along arcs, mitered corners)")
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::FilletLoop {
+                            face: r,
+                            radius: "1".into(),
+                            chamfer: true,
                         });
                     }
                 }
@@ -1251,6 +1278,8 @@ impl RcadApp {
                         spacing: "10".into(),
                         along_y: false,
                         reverse: false,
+                        count2: "1".into(),
+                        spacing2: "10".into(),
                         angle: "60".into(),
                         center_x: "0".into(),
                         center_y: "0".into(),
@@ -2168,6 +2197,14 @@ impl RcadApp {
                             ui.small("Equal-distance chamfer of the straight convex edge where the two faces meet. Refused for parallel or non-adjacent faces, concave edges, or when anything other than the edge wedge would be removed.");
                         }
                     }
+                    Dialog::FilletLoop {
+                        radius,
+                        chamfer: true,
+                        ..
+                    } => {
+                        num_field(ui, "Chamfer distance (mm)", radius);
+                        ui.small("Equal-distance chamfer of every edge of this face's outer boundary: 45° planes along straight edges, cones along arcs, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (distance not smaller than a rounded corner's radius, a hole within reach, the loop already finished).");
+                    }
                     Dialog::FilletLoop { radius, .. } => {
                         num_field(ui, "Fillet radius (mm)", radius);
                         ui.small("Exact solid fillet of every edge of this face's outer boundary: cylinders along straight edges, tori along arcs, a sphere corner where a rounded corner's radius equals this radius, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (radius larger than a rounded corner, a hole within reach, the loop already filleted).");
@@ -2179,6 +2216,8 @@ impl RcadApp {
                         spacing,
                         along_y,
                         reverse,
+                        count2,
+                        spacing2,
                         angle,
                         center_x,
                         center_y,
@@ -2203,7 +2242,9 @@ impl RcadApp {
                                     ui.radio_value(along_y, true, "Sketch Y");
                                     ui.checkbox(reverse, "Reverse");
                                 });
-                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; instances act on the same target. Count and spacing stay editable parameters.");
+                                num_field(ui, "Second direction count", count2);
+                                num_field(ui, "Second direction spacing (mm)", spacing2);
+                                ui.small("Count includes the seed. Direction is in the seed sketch's local axes; a second direction count above 1 makes a rectangular grid along the other sketch axis. Instances act on the same target. Counts and spacings stay editable parameters.");
                             }
                             PatternKind::Circular => {
                                 num_field(ui, "Pattern count", count);

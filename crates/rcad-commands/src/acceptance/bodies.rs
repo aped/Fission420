@@ -877,6 +877,7 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
         count: 5,
         spacing: 15.0,
         direction: [1.0, 0.0],
+        second: None,
     });
     let Some(row) = r.ok("pattern x5 at 15 mm along sketch x", &x) else {
         return;
@@ -1070,6 +1071,7 @@ pub(super) fn scenario_mirror(r: &mut Run<'_>) {
         count: 2,
         spacing: 14.0,
         direction: [1.0, 0.0],
+        second: None,
     });
     r.ok("pattern boss x2 at 14 mm (join pattern)", &x);
     let want = 16000.0 + 3.0 * 500.0 - 2.0 * PI * 9.0 * 10.0;

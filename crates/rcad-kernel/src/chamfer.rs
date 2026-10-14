@@ -119,7 +119,20 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
         &frame,
         smax - smin + 2.0 * m,
         "chamfer",
-    )?;
+    )
+    .map_err(|e| match e {
+        // Typically the edge ends at another chamfer or fillet: the tool then
+        // cuts across that blend's face and the boolean fails.
+        KernelError::BooleanFailed(_) | KernelError::Internal(_) => {
+            KernelError::InvalidInput(String::from(
+                "chamfer: this edge cannot be chamfered on its own here; where it meets \
+                 another chamfered or filleted edge at a corner the blend needs a mitered \
+                 corner, which single-edge chamfers do not build. To chamfer every edge of \
+                 a face's outer boundary use the chamfer_loop command (Chamfer edge loop…)",
+            ))
+        }
+        other => other,
+    })?;
     check_single_closed(&out, "chamfer")?;
     // The tool must have removed exactly the edge wedge: triangle (edge, A, B)
     // swept between the end planes, area(T) times the axial length at T's

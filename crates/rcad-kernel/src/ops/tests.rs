@@ -241,8 +241,8 @@ fn spike_fillet_tangent_arc_tool() {
 }
 
 #[test]
-fn join_and_cut_refuse_tools_with_inner_loops_up_front() {
-    // These used to reach Truck and end as "kernel panicked" inside `guarded`.
+fn join_and_cut_with_tools_with_inner_loops() {
+    // These used to reach Truck 0.6 and end as "kernel panicked" inside `guarded`.
     let a = block();
     let outer = rect(10.0, 5.0, 30.0, 25.0);
     let inner = [rect(15.0, 10.0, 25.0, 20.0)];
@@ -256,18 +256,45 @@ fn join_and_cut_refuse_tools_with_inner_loops_up_front() {
         y: [0.0, -1.0, 0.0],
         z: [0.0, 0.0, -1.0],
     };
-    for (name, r) in [
-        ("cut frame", cut_region(&a, &outer, &inner, &down, 14.0)),
-        ("cut ring", cut_region(&a, &outer, &ring, &down, 7.0)),
+    // Our truck-shapeops fork builds them; each is exact (closed-form volume).
+    let pi = std::f64::consts::PI;
+    for (name, r, dv) in [
+        (
+            "cut frame part way",
+            cut_region(&a, &outer, &inner, &down, 7.0),
+            -300.0 * 5.0,
+        ),
+        (
+            "cut ring",
+            cut_region(&a, &outer, &ring, &down, 7.0),
+            -(400.0 - 16.0 * pi) * 5.0,
+        ),
         (
             "join frame",
             join_region(&a, &outer, &inner, &top().offset(-0.5), 5.0),
+            300.0 * 4.5,
         ),
     ] {
-        let e = r.expect_err(name);
-        assert!(matches!(e, KernelError::InvalidInput(_)), "{name}: {e}");
-        assert!(e.to_string().contains("inner loop"), "{name}: {e}");
+        let b = r.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            (volume(&b) - volume(&a) - dv).abs() < 1e-6,
+            "{name}: {} vs {}",
+            volume(&b) - volume(&a),
+            dv
+        );
     }
+    // Through the whole block the frame leaves a free plug: refused as two
+    // solids by the one-body path, two exact pieces by the pieces path.
+    let e = cut_region(&a, &outer, &inner, &down, 14.0).unwrap_err();
+    assert!(e.to_string().contains("2 shells"), "{e}");
+    let p =
+        crate::split_pieces(&cut_region_pieces(&a, &outer, &inner, &down, 14.0).unwrap()).unwrap();
+    let v: Vec<f64> = p.iter().map(volume).collect();
+    assert_eq!(v.len(), 2);
+    assert!(
+        (v[0] - (12000.0 - 4000.0)).abs() < 1e-6 && (v[1] - 1000.0).abs() < 1e-6,
+        "{v:?}"
+    );
     // Empty holes still go through (the single-loop path).
     let c = cut_region(&a, &outer, &[], &down, 7.0).unwrap();
     assert!((volume(&a) - volume(&c) - 400.0 * 5.0).abs() < 1e-6);
