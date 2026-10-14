@@ -1904,6 +1904,7 @@ impl Session {
                             reverse,
                             region,
                             options,
+                            pieces: vec![],
                         },
                     ))
                 })?;
@@ -3454,6 +3455,7 @@ impl Session {
                             body,
                             plane,
                             new_body,
+                            pieces: vec![],
                         },
                     ))
                 })?;

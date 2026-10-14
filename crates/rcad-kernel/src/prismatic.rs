@@ -125,6 +125,32 @@ pub fn prism_region_boolean(
     length: f64,
     op: SlabOp,
 ) -> Result<Body> {
+    region_boolean(target, outer, holes, start, length, op, false)
+}
+
+/// [`prism_region_boolean`] that accepts a result falling apart into several
+/// separate solids: the returned body then has one closed shell per piece
+/// (see [`crate::split_pieces`]). An enclosed internal void is still refused.
+pub fn prism_region_boolean_pieces(
+    target: &Body,
+    outer: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+    op: SlabOp,
+) -> Result<Body> {
+    region_boolean(target, outer, holes, start, length, op, true)
+}
+
+fn region_boolean(
+    target: &Body,
+    outer: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+    op: SlabOp,
+    pieces: bool,
+) -> Result<Body> {
     start.validate()?;
     if !length.is_finite() || length < tol::MIN_LENGTH {
         return Err(KernelError::InvalidInput(format!(
@@ -166,7 +192,7 @@ pub fn prism_region_boolean(
     let mut last = String::new();
     for chords in RING_CHORDS {
         let step = std::f64::consts::TAU / chords as f64;
-        match attempt(&caps, &tool, &circles, step, length, op, &frame) {
+        match attempt(&caps, &tool, &circles, step, length, op, &frame, pieces) {
             Ok(solid) => return Ok(Body { solid }),
             Err(Fail::Refine(m)) => last = m,
             Err(f) => return Err(fail(f)),
@@ -247,6 +273,7 @@ fn attempt(
     length: f64,
     op: SlabOp,
     frame: &Frame,
+    pieces: bool,
 ) -> FResult<Solid> {
     let all: Vec<ELoop> = caps
         .iter()
@@ -351,7 +378,14 @@ fn attempt(
         cap_regions.push((w, true, bool_op(below, above, OverlayRule::Difference)?));
         cap_regions.push((w, false, bool_op(above, below, OverlayRule::Difference)?));
     }
-    Ok(solid::build(&levels, &slabs, &cap_regions, &rings, frame)?)
+    Ok(solid::build(
+        &levels,
+        &slabs,
+        &cap_regions,
+        &rings,
+        frame,
+        pieces,
+    )?)
 }
 
 /// A cap face of the target in tool-frame coordinates: level `w` along the

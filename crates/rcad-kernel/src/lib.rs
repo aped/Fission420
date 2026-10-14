@@ -17,6 +17,7 @@ mod loft;
 mod measure;
 mod mesh;
 mod ops;
+mod pieces;
 pub mod prismatic;
 mod project;
 mod step;
@@ -59,9 +60,11 @@ pub use mesh::{
     write_stl_binary,
 };
 pub use ops::{
-    bounds, coplanar_face_side, cut_prism, cut_region, extent_along, has_implicit_edges,
-    join_prism, join_region, plane_has_face, profile_within_face, through_all_margin,
+    bounds, coplanar_face_side, cut_prism, cut_region, cut_region_pieces, extent_along,
+    has_implicit_edges, join_prism, join_region, plane_has_face, profile_within_face,
+    through_all_margin,
 };
+pub use pieces::split_pieces;
 pub use project::{Curve2, face_boundary_curves};
 pub use step::{StepProduct, export_step, export_step_assembly, export_step_bodies};
 pub use step_in::{

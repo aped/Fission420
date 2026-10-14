@@ -95,7 +95,8 @@ Edge ordering therefore never flips axes.
 * A Join that does not touch the target is reported as such before the face-containment rule.
 * A Join/Cut tool whose bounds do not overlap the target is refused ("does not intersect").
   Results must be one closed shell; a multi-shell result is refused (no silent split bodies).
-  On failure the document keeps the last valid model.
+  On failure the document keeps the last valid model. *Amended (format v8):* see "Cuts that
+  split a body" below.
 
 ## Consequences
 * A coplanar Join flush with a face edge, or a cut that splits a referenced face, produces an
@@ -107,3 +108,26 @@ Side-face references name sketch entities by id. Removing an entity retires its 
 (`Sketch::retired_entity_ids`, only serialized when non-zero); new entities never reuse a
 retired id, and `EditSketch` refuses a sketch that gives an existing or retired id to an entity
 of a different kind. An edited line keeps its identity when its endpoints change.
+
+### Cuts that split a body (amendment, format v8)
+A single-region, straight-walled Extrude Cut that separates its target into several solids now
+makes one body per piece, as Autodesk Fusion does, instead of being refused:
+
+* The kernel's opt-in `*_pieces` operations (`cut_region_pieces`,
+  `prismatic::prism_region_boolean_pieces`) return one closed shell per piece; the result check
+  (ADR 0005) runs on all shells together against the nominal cut. `split_pieces` turns them into
+  bodies ordered by the lowest corner of their bounding boxes (x, then y, then z). A shell that
+  encloses negative volume is an internal void: still refused (one body = one solid without
+  cavities).
+* The first piece stays the target body. The others get the body ids stored in the feature
+  (`FeatureKind::Extrude::pieces`). When a regeneration needs more ids than the feature holds
+  (`DocError::NeedsPieces`), `Model::transact` assigns new bodies (default names) in the same
+  transaction and regenerates again, so committing the cut, or an upstream edit that makes an
+  existing cut split the body, is one undo step. Ids left unused when an edit rejoins the pieces
+  produce no body; a later feature that targets such a body fails with an explicit error and the
+  edit is refused.
+* Faces of the extra pieces made by earlier features are not referencable by role (they resolve
+  only on the target body), like a copied body's faces; references that now land on another
+  piece report `BrokenReference`.
+* Not covered: tapered and multi-region cuts, pattern/mirror copies, Split Body, Combine,
+  revolve cuts and hole features still refuse a result that falls apart.

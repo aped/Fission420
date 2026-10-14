@@ -67,6 +67,20 @@ pub enum DocError {
     Expression { name: String, detail: String },
     #[error("nothing to {0}")]
     NothingTo(String),
+    /// A cut splits its target into `pieces` separate solids, but only
+    /// `assigned` extra body ids were given to the feature. Recoverable: the
+    /// command that commits the cut assigns the missing ids and regenerates.
+    #[error(
+        "feature {feature}: the cut splits its target into {pieces} separate bodies, but only \
+         {} were assigned when it was committed; edit the cut (or commit it again) to create \
+         the new bodies",
+        assigned + 1
+    )]
+    NeedsPieces {
+        feature: FeatureId,
+        pieces: usize,
+        assigned: usize,
+    },
     #[error("file error: {0}")]
     File(String),
 }

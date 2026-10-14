@@ -100,8 +100,35 @@ pub fn cut_region(
             "cut: the extrusion does not intersect the target body".into(),
         ));
     }
-    let out = subtract_region(target, profile, holes, start, length, "cut")?;
+    let out = subtract_region(target, profile, holes, start, length, "cut", false)?;
     if same_shape(target, &out) {
+        return Err(KernelError::InvalidInput(
+            "cut: the extrusion removes no material from the target body".into(),
+        ));
+    }
+    Ok(out)
+}
+
+/// [`cut_region`] that accepts a result falling apart into several separate
+/// solids (one closed shell each; see [`crate::split_pieces`]). A result with
+/// a single shell is returned as is.
+pub fn cut_region_pieces(
+    target: &Body,
+    profile: &Profile,
+    holes: &[Profile],
+    start: &Frame,
+    length: f64,
+) -> Result<Body> {
+    refuse_holes("cut", holes)?;
+    let tool = extrude_region(profile, holes, start, length)?;
+    let (tb, ob) = (raw_bounds(&target.solid)?, raw_bounds(&tool.solid)?);
+    if !overlaps(&tb, &ob, -tol::KERNEL_LINEAR) {
+        return Err(KernelError::InvalidInput(
+            "cut: the extrusion does not intersect the target body".into(),
+        ));
+    }
+    let out = subtract_region(target, profile, holes, start, length, "cut", true)?;
+    if out.solid.boundaries().len() == 1 && same_shape(target, &out) {
         return Err(KernelError::InvalidInput(
             "cut: the extrusion removes no material from the target body".into(),
         ));

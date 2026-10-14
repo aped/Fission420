@@ -347,6 +347,15 @@ pub enum FeatureKind {
         /// Extent options (format v6; absent = a plain extrusion).
         #[serde(default, skip_serializing_if = "ExtrudeOptions::is_plain")]
         options: ExtrudeOptions,
+        /// Cut only (format v8): bodies for the separate pieces of a target
+        /// that the cut splits, after the first piece (which stays the
+        /// target). Pieces are ordered by the lowest corner of their bounding
+        /// boxes (`rcad_kernel::split_pieces`). Assigned by the command that
+        /// commits the cut; a regeneration that needs more pieces than were
+        /// assigned is refused ([`crate::DocError::NeedsPieces`]), and unused
+        /// ids simply produce no body.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pieces: Vec<BodyId>,
     },
     /// Legacy (v1/v2) circular through-all cut; see [`FeatureKind::Extrude`] with
     /// [`Operation::Cut`] for general cuts.
@@ -497,14 +506,20 @@ pub enum FeatureKind {
     /// Split body `body` by `plane` (format v6): `body` keeps the part
     /// behind the plane (against its normal), new body `new_body` gets the
     /// part in front of it. Each part is an exact, result-checked cut by a
-    /// half-space box (ADR 0005/0006); a plane that misses the body, or a
-    /// side that falls apart into several solids, is refused. Faces of the
-    /// new body are not referencable by role. Parameters "plane_offset",
-    /// "plane_angle_deg" for an offset plane.
+    /// half-space box (ADR 0005/0006); a plane that misses the body is
+    /// refused. A side that falls apart into several solids makes one body
+    /// per piece (format v8): the first piece of each side (lowest
+    /// bounding-box corner) is `body` / `new_body`, the others get the ids in
+    /// `pieces` (behind-side pieces first), assigned like a splitting cut's
+    /// ([`crate::DocError::NeedsPieces`]). Faces of the new bodies are not
+    /// referencable by role. Parameters "plane_offset", "plane_angle_deg"
+    /// for an offset plane.
     SplitBody {
         body: BodyId,
         plane: SketchPlane,
         new_body: BodyId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pieces: Vec<BodyId>,
     },
     /// Shell from any planar face (format v6): hollow the body under
     /// `face` (left open) to walls and floor `thickness` thick, for bodies
@@ -856,6 +871,7 @@ impl FeatureKind {
             reverse: false,
             region: None,
             options: ExtrudeOptions::default(),
+            pieces: vec![],
         }
     }
 }
@@ -956,7 +972,7 @@ impl Feature {
 
     /// Bodies this feature creates.
     pub fn created_bodies(&self) -> Vec<BodyId> {
-        match &self.kind {
+        let mut v = match &self.kind {
             FeatureKind::Extrude {
                 operation: Operation::NewBody { body },
                 ..
@@ -985,8 +1001,13 @@ impl Feature {
             FeatureKind::ImportStep { bodies, .. } | FeatureKind::Import3mf { bodies, .. } => {
                 bodies.clone()
             }
+            FeatureKind::Extrude { pieces, .. } => pieces.clone(),
             _ => vec![],
+        };
+        if let FeatureKind::SplitBody { pieces, .. } = &self.kind {
+            v.extend(pieces.iter().copied());
         }
+        v
     }
 
     /// (source, derived body) of a feature whose new body replaces its

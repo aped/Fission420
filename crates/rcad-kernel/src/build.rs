@@ -273,7 +273,7 @@ pub(crate) fn subtract_prism(
     length: f64,
     what: &str,
 ) -> Result<Body> {
-    subtract_region(target, profile, &[], start, length, what)
+    subtract_region(target, profile, &[], start, length, what, false)
 }
 
 /// [`subtract_prism`] of a region with inner loops.
@@ -284,6 +284,7 @@ pub(crate) fn subtract_region(
     start: &Frame,
     length: f64,
     what: &str,
+    pieces: bool,
 ) -> Result<Body> {
     let seams: &[f64] = match profile {
         Profile::Circle { .. } => &SEAM_ANGLES,
@@ -294,7 +295,10 @@ pub(crate) fn subtract_region(
         .iter()
         .flat_map(|&s| BOOLEAN_TOLS.iter().map(move |&t| (s, t)));
     for (seam, btol) in attempts {
-        match subtract_attempt(target, profile, holes, start, length, seam, btol, what) {
+        match subtract_attempt(
+            target, profile, holes, start, length, seam, btol, what, pieces,
+        ) {
+            Ok(body) if pieces => return Ok(with_exact_edges_pieces(body)),
             Ok(body) => return Ok(with_exact_edges(body)),
             Err(e) => failures.push(format!("seam {seam}/tol {btol}: {e}")),
         }
@@ -314,6 +318,7 @@ fn subtract_attempt(
     seam: f64,
     btol: f64,
     what: &str,
+    pieces: bool,
 ) -> Result<Body> {
     let tool = guarded(what, || -> Result<Solid> {
         let face = region_face(profile, holes, start, seam)?;
@@ -326,8 +331,50 @@ fn subtract_attempt(
     })?
     .ok_or_else(|| KernelError::BooleanFailed("truck_shapeops::and returned None".into()))?;
     let body = Body { solid };
-    check_single_closed(&body, what)?;
+    if pieces {
+        check_closed_shells(&body, what)?;
+    } else {
+        check_single_closed(&body, what)?;
+    }
     Ok(body)
+}
+
+/// [`with_exact_edges`] for a body that may hold several closed shells (one
+/// per separate piece): the rebuilt solid is kept only when it has the same
+/// number of shells, all closed.
+pub(crate) fn with_exact_edges_pieces(body: Body) -> Body {
+    match exact::exactify(&body.solid) {
+        (Some(solid), _) => {
+            let rebuilt = Body { solid };
+            if rebuilt.solid.boundaries().len() == body.solid.boundaries().len()
+                && check_closed_shells(&rebuilt, "exact edges").is_ok()
+            {
+                rebuilt
+            } else {
+                body
+            }
+        }
+        (None, _) => body,
+    }
+}
+
+/// Every shell of `body` is closed (one or more shells).
+pub(crate) fn check_closed_shells(body: &Body, what: &str) -> Result<()> {
+    let shells = body.solid.boundaries();
+    if shells.is_empty() {
+        return Err(KernelError::InvalidResult(format!(
+            "{what} produced no shell"
+        )));
+    }
+    for sh in shells {
+        let cond = sh.shell_condition();
+        if cond != ShellCondition::Closed {
+            return Err(KernelError::InvalidResult(format!(
+                "{what} produced a {cond:?} shell, not Closed"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Replace the boolean's implicit intersection edges with verified exact curves where

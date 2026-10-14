@@ -341,6 +341,11 @@ struct ExtrudeOut {
     /// Draft angle (radians) of a tapered Join/Cut (patterns/mirrors
     /// do not copy it: their copies would be straight).
     taper: f64,
+    /// Cut: accept a result that falls apart into several separate solids
+    /// (one shell each; the caller splits them into bodies). Set only on the
+    /// tool passed to [`apply_tool`], never on the stored feature output, so
+    /// pattern/mirror copies keep refusing such results.
+    pieces: bool,
     body: BodyId,
 }
 
@@ -889,6 +894,7 @@ fn regen_impl(
                 reverse,
                 region,
                 options,
+                pieces,
             } => {
                 let out = extrude_feature(
                     &mut st,
@@ -900,6 +906,7 @@ fn regen_impl(
                     *reverse,
                     region.as_ref(),
                     options,
+                    pieces,
                 )?;
                 r.body = Some(out.body);
                 st.extrudes.insert(id, out);
@@ -1390,20 +1397,46 @@ fn regen_impl(
                 body,
                 plane,
                 new_body,
+                pieces,
             } => {
                 let (pf, rf) = plane_frame(id, plane, &st)?;
                 r.frame = Some(pf);
                 r.resolved_face = rf;
                 let t = brep_target(&st, id, *body)?;
-                let (behind, front) = split_by_plane(&t, &pf, id)?;
-                replace_body(&mut st, id, *body, behind);
+                let (behind, front) = split_by_plane(&t, &pf, id, true)?;
+                let mut behind = k::split_pieces(&behind).map_err(kernel(id))?.into_iter();
+                let mut front = k::split_pieces(&front).map_err(kernel(id))?.into_iter();
+                let (Some(b0), Some(f0)) = (behind.next(), front.next()) else {
+                    return Err(DocError::Kernel {
+                        feature: id,
+                        detail: "split: an empty side".into(),
+                    });
+                };
+                let rest: Vec<Body> = behind.chain(front).collect();
+                if rest.len() > pieces.len() {
+                    return Err(DocError::NeedsPieces {
+                        feature: id,
+                        pieces: rest.len() + 1,
+                        assigned: pieces.len(),
+                    });
+                }
+                replace_body(&mut st, id, *body, b0);
                 create_body(
                     &mut st,
                     id,
                     *new_body,
-                    BodyGeometry::Brep(front),
+                    BodyGeometry::Brep(f0),
                     BodySource::Modeled,
                 )?;
+                for (piece, b) in rest.into_iter().zip(pieces) {
+                    create_body(
+                        &mut st,
+                        id,
+                        *b,
+                        BodyGeometry::Brep(piece),
+                        BodySource::Modeled,
+                    )?;
+                }
                 r.body = Some(*new_body);
             }
             FeatureKind::Shell {
@@ -1882,6 +1915,7 @@ fn extrude_feature(
     reverse: bool,
     pick: Option<&rcad_sketch::RegionRef>,
     opts: &ExtrudeOptions,
+    piece_ids: &[BodyId],
 ) -> Result<ExtrudeOut> {
     let s = st
         .sketches
@@ -2073,6 +2107,7 @@ fn extrude_feature(
         intersect: false,
         plain: opts.is_plain(),
         taper: opts.taper,
+        pieces: false,
         multi: false,
         body: BodyId(0),
     };
@@ -2177,11 +2212,18 @@ fn extrude_feature(
                 )));
             }
             let t_apply = std::time::Instant::now();
+            // One region, straight walls: a cut that separates the target
+            // into pieces makes one body per piece (as Fusion does).
+            let split = opts.taper == 0.0 && extra.is_empty();
             let (mut cut, used) = if opts.taper != 0.0 {
                 let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Cut)?;
                 (r, (a, b))
             } else {
-                apply_tool(&t, &out, &frame, None, id, None)?
+                let tool = ExtrudeOut {
+                    pieces: split,
+                    ..out.clone()
+                };
+                apply_tool(&t, &tool, &frame, None, id, None)?
             };
             trace_regen(id, "apply_tool", t_apply);
             (a, b) = used;
@@ -2195,7 +2237,29 @@ fn extrude_feature(
                 let w = format!("region {}", i + 2);
                 cut = apply_tool(&cut, &o, &frame, Some(&w), id, None)?.0;
             }
-            replace_body(st, id, target, cut);
+            let mut parts = k::split_pieces(&cut).map_err(kernel(id))?.into_iter();
+            let first = parts.next().ok_or_else(|| DocError::Kernel {
+                feature: id,
+                detail: "cut: empty result".into(),
+            })?;
+            let rest: Vec<Body> = parts.collect();
+            if rest.len() > piece_ids.len() {
+                return Err(DocError::NeedsPieces {
+                    feature: id,
+                    pieces: rest.len() + 1,
+                    assigned: piece_ids.len(),
+                });
+            }
+            replace_body(st, id, target, first);
+            for (piece, body) in rest.into_iter().zip(piece_ids) {
+                create_body(
+                    st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(piece),
+                    BodySource::Modeled,
+                )?;
+            }
             out.body = target;
             out.multi = !extra.is_empty();
         }
@@ -2346,6 +2410,7 @@ fn shell_from_face(id: FeatureId, t: &Body, frame: &Frame, th: f64) -> Result<Bo
         plain: true,
         multi: false,
         taper: 0.0,
+        pieces: false,
         body: BodyId(0),
     };
     Ok(apply_tool(t, &piece, frame, Some("shell"), id, None)?.0)
@@ -2421,7 +2486,15 @@ fn curves_to_profile(l: &[k::Curve2]) -> std::result::Result<SketchProfile, Stri
 /// Split `t` by the plane of `pf`: (the part behind the plane, the part in
 /// front of it), each an exact cut by a half-space box through
 /// [`apply_tool`] (result-checked; ADR 0005/0006).
-pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Body, Body)> {
+/// The parts of `t` behind and in front of `pf`'s plane. With `pieces`, a
+/// side that falls apart is returned as one body with a closed shell per
+/// piece (see `rcad_kernel::split_pieces`); otherwise it is refused.
+pub(crate) fn split_by_plane(
+    t: &Body,
+    pf: &Frame,
+    id: FeatureId,
+    pieces: bool,
+) -> Result<(Body, Body)> {
     let bb = k::bounds(t).map_err(kernel(id))?;
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for i in 0..8 {
@@ -2464,6 +2537,7 @@ pub(crate) fn split_by_plane(t: &Body, pf: &Frame, id: FeatureId) -> Result<(Bod
         plain: true,
         multi: false,
         taper: 0.0,
+        pieces,
         body: BodyId(0),
     };
     let cut = |span: (f64, f64), what: &str| {
@@ -2684,6 +2758,7 @@ fn intersect_tool(t: &Body, e: &ExtrudeOut, frame: &Frame, id: FeatureId) -> Res
         intersect: false,
         plain: true,
         taper: 0.0,
+        pieces: false,
         multi: false,
         body: e.body,
     };
@@ -2989,7 +3064,12 @@ fn apply_tool(
                 khole.len()
             )));
         }
-        let out = k::prismatic::prism_region_boolean(
+        let region_boolean = if e.pieces && e.removes {
+            k::prismatic::prism_region_boolean_pieces
+        } else {
+            k::prismatic::prism_region_boolean
+        };
+        let out = region_boolean(
             body,
             &kp,
             &khole,
@@ -3017,22 +3097,32 @@ fn apply_tool(
             )
         };
         let t = std::time::Instant::now();
-        let truck =
-            k::cut_prism(body, &kp, &frame.offset(span.0), span.1 - span.0).map_err(|x| match x {
-                x if refused.is_some() => coplanar_cut_error(id, refused, x),
-                x => err(x),
-            });
+        let (start, len) = (frame.offset(span.0), span.1 - span.0);
+        let truck = if e.pieces {
+            k::cut_region_pieces(body, &kp, &[], &start, len)
+        } else {
+            k::cut_prism(body, &kp, &start, len)
+        }
+        .map_err(|x| match x {
+            x if refused.is_some() => coplanar_cut_error(id, refused, x),
+            x => err(x),
+        });
         trace_regen(id, "cut_prism", t);
         let truck = truck.and_then(|out| check(&out, k::PrismOp::Cut, nominal, span).map(|()| out));
+        let e_pieces = e.pieces;
         let out = match truck {
             Ok(out) => {
                 let t = std::time::Instant::now();
-                let r = exact_instead(id, &prefix, body, out, &kp, frame, nominal, span, true);
+                let r = exact_instead(
+                    id, &prefix, body, out, &kp, frame, nominal, span, true, e.pieces,
+                );
                 trace_regen(id, "exact_instead", t);
                 r
             }
             Err(e) => {
-                let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Cut, e)?;
+                let pieces = e_pieces;
+                let out =
+                    slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Cut, e, pieces)?;
                 check(&out, k::PrismOp::Cut, nominal, span).map_err(slab_checked)?;
                 out
             }
@@ -3101,9 +3191,20 @@ fn apply_tool(
         .map_err(err)
         .and_then(|out| check(&out, k::PrismOp::Join, (a, b), span).map(|()| out));
     let out = match truck {
-        Ok(out) => exact_instead(id, &prefix, body, out, &kp, frame, (a, b), span, false),
+        Ok(out) => exact_instead(
+            id,
+            &prefix,
+            body,
+            out,
+            &kp,
+            frame,
+            (a, b),
+            span,
+            false,
+            false,
+        ),
         Err(e) => {
-            let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Join, e)?;
+            let out = slab_fallback(body, &kp, frame, span, k::prismatic::SlabOp::Join, e, false)?;
             check(&out, k::PrismOp::Join, (a, b), span).map_err(slab_checked)?;
             out
         }
@@ -3127,6 +3228,7 @@ fn exact_instead(
     nominal: (f64, f64),
     span: (f64, f64),
     removes: bool,
+    pieces: bool,
 ) -> Body {
     if !k::has_implicit_edges(&out) || k::prismatic::not_applicable(body, kp, frame).is_some() {
         return out;
@@ -3136,9 +3238,19 @@ fn exact_instead(
     } else {
         (k::prismatic::SlabOp::Join, k::PrismOp::Join)
     };
-    let Ok(alt) =
-        k::prismatic::prism_boolean(body, kp, &frame.offset(span.0), span.1 - span.0, slab_op)
-    else {
+    let boolean = if pieces {
+        k::prismatic::prism_region_boolean_pieces
+    } else {
+        k::prismatic::prism_region_boolean
+    };
+    let Ok(alt) = boolean(
+        body,
+        kp,
+        &[],
+        &frame.offset(span.0),
+        span.1 - span.0,
+        slab_op,
+    ) else {
         return out;
     };
     let applied = Applied {
@@ -3180,6 +3292,7 @@ fn slab_fallback(
     span: (f64, f64),
     op: k::prismatic::SlabOp,
     truck: DocError,
+    pieces: bool,
 ) -> Result<Body> {
     let note = |m: String| match truck.clone() {
         DocError::Kernel { feature, detail } => DocError::Kernel {
@@ -3198,7 +3311,12 @@ fn slab_fallback(
     if let Some(why) = k::prismatic::not_applicable(body, kp, frame) {
         return Err(note(format!("not applicable: {why}")));
     }
-    k::prismatic::prism_boolean(body, kp, &frame.offset(span.0), span.1 - span.0, op)
+    let boolean = if pieces {
+        k::prismatic::prism_region_boolean_pieces
+    } else {
+        k::prismatic::prism_region_boolean
+    };
+    boolean(body, kp, &[], &frame.offset(span.0), span.1 - span.0, op)
         .map_err(|e| note(e.to_string()))
 }
 
@@ -3365,6 +3483,7 @@ fn shell_tool(
             intersect: false,
             plain: true,
             taper: 0.0,
+            pieces: false,
             multi: false,
             body: e.body,
         },
@@ -3474,6 +3593,7 @@ fn hole_tools(
             intersect: false,
             plain: true,
             taper: 0.0,
+            pieces: false,
             multi: false,
             body: target,
         }
@@ -3931,7 +4051,15 @@ fn legacy_cut(
     let (b, mesh) = match truck {
         Ok(x) => x,
         Err(e) => {
-            let b = slab_fallback(&t, &kp, &s.frame, nominal, k::prismatic::SlabOp::Cut, e)?;
+            let b = slab_fallback(
+                &t,
+                &kp,
+                &s.frame,
+                nominal,
+                k::prismatic::SlabOp::Cut,
+                e,
+                false,
+            )?;
             let (_, m) = verify(&b, nominal).map_err(slab_checked)?;
             (b, m)
         }

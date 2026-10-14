@@ -404,7 +404,7 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
     let (nx, ny, nz) = (30usize, 20usize, 12usize); // 60 x 40 x 24 mm grid
     let t = 6usize; // block thickness in cells (12 mm)
     let mut rng = Rng(0x0dd5_eed5_0000_0077);
-    let (mut accepted, mut refused) = (0, 0);
+    let (mut accepted, mut refused, mut split) = (0, 0, 0);
     let mut log = Vec::new();
     for case in 0..24 {
         let mut s = Session::new();
@@ -538,7 +538,33 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
                     }
                 }
             }
-            if r.ok {
+            if r.ok && s.summary().bodies.len() > 1 {
+                // A cut that separates the block makes one body per piece:
+                // the pieces together must be the exact expected solid, which
+                // must indeed fall apart; then undo it (the oracle below
+                // tracks one body).
+                split += 1;
+                let total: f64 = s
+                    .summary()
+                    .bodies
+                    .iter()
+                    .map(|b| match b.measurements.clone().unwrap().volume {
+                        VolumeResult::Value { volume, .. } => volume,
+                        v => panic!("{v:?}"),
+                    })
+                    .sum();
+                let want = grid_vol(&next);
+                assert!(
+                    (total - want).abs() <= 1e-6 * want,
+                    "{what}: pieces {total} vs exact {want}"
+                );
+                assert!(
+                    !grid_is_single_manifold_solid(&next, [nx, ny, nz]),
+                    "{what}: split although the expected solid is connected"
+                );
+                assert!(s.execute(&Command::Undo).ok);
+                assert!((vol(&s) - before).abs() < 1e-9);
+            } else if r.ok {
                 accepted += 1;
                 occ = next;
                 let (v, want) = (vol(&s), grid_vol(&occ));
@@ -583,8 +609,9 @@ fn flush_coplanar_pockets_and_bosses_are_exact_or_refused() {
     }
     let kinds = |k: &str| log.iter().filter(|l| l.contains(k)).count();
     eprintln!(
-        "flush/coplanar fuzz: {accepted} accepted exact, {refused} refused (all justified \
-         by the exact grid): {} ambiguous side, {} disconnected, {} non-manifold, {} no-op",
+        "flush/coplanar fuzz: {accepted} accepted exact, {split} split into exact pieces \
+         (undone), {refused} refused (all justified by the exact grid): {} ambiguous side, {} \
+         disconnected, {} non-manifold, {} no-op",
         kinds("facing both ways"),
         kinds("disconnected"),
         kinds("not be a manifold"),
