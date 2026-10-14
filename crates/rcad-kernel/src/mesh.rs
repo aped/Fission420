@@ -115,6 +115,9 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
             .map(|f| matches!(f.surface(), truck_modeling::Surface::Plane(_)))
             .collect();
         canonical_planar_diagonals(&mut out, &planar);
+        if weld_across_faces {
+            close_t_junctions(&mut out, WELD_TOLERANCE);
+        }
         Ok(out)
     })?
 }
@@ -306,6 +309,83 @@ fn canonical_planar_diagonals(m: &mut TriMesh, planar: &[bool]) {
         }
         for (x, y) in [(a, d), (d, b), (b, c), (c, a)] {
             stack.push((x.min(y), x.max(y)));
+        }
+    }
+}
+
+/// Splits open edges at T-junctions. Truck 0.4's face triangulation can discretize an edge
+/// shared by two faces differently (one face keeps a boundary sample the other skips), which
+/// leaves a vertex of one face lying on an edge of the other: a crack of zero width that the
+/// welder cannot close. A boundary vertex within `tol` (the weld tolerance, so no looser than
+/// merging itself) of the interior of an open edge splits that edge's triangle. Meshes without
+/// open edges are unchanged; real gaps wider than `tol` stay open and fail watertightness.
+fn close_t_junctions(m: &mut TriMesh, tol: f64) {
+    /// Bound on boundary edges x boundary vertices compared per pass.
+    const MAX_PAIRS: usize = 10_000_000;
+    for _pass in 0..8 {
+        let mut uses: HashMap<(u32, u32), Vec<(usize, usize)>> = HashMap::new();
+        for (t, tri) in m.triangles.iter().enumerate() {
+            for k in 0..3 {
+                let (a, b) = (tri[k], tri[(k + 1) % 3]);
+                uses.entry((a.min(b), a.max(b))).or_default().push((t, k));
+            }
+        }
+        let mut open: Vec<(usize, usize)> = uses
+            .values()
+            .filter(|u| u.len() == 1)
+            .map(|u| u[0])
+            .collect();
+        if open.is_empty() {
+            return;
+        }
+        open.sort_unstable();
+        let mut verts: Vec<u32> = open
+            .iter()
+            .flat_map(|&(t, k)| [m.triangles[t][k], m.triangles[t][(k + 1) % 3]])
+            .collect();
+        verts.sort_unstable();
+        verts.dedup();
+        if open.len().saturating_mul(verts.len()) > MAX_PAIRS {
+            return;
+        }
+        let mut split_any = false;
+        let mut touched = vec![false; m.triangles.len()];
+        for &(t, k) in &open {
+            if touched[t] {
+                continue;
+            }
+            let tri = m.triangles[t];
+            let (a, b, c) = (tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]);
+            let (pa, pb) = (m.positions[a as usize], m.positions[b as usize]);
+            let ab = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+            let len2 = ab.iter().map(|x| x * x).sum::<f64>();
+            if len2 <= tol * tol {
+                continue;
+            }
+            // Nearest-to-a vertex strictly inside the edge; later passes take the rest.
+            let hit = verts
+                .iter()
+                .filter(|&&v| v != a && v != b)
+                .filter_map(|&v| {
+                    let p = m.positions[v as usize];
+                    let ap = [p[0] - pa[0], p[1] - pa[1], p[2] - pa[2]];
+                    let s = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2;
+                    let d2 = (0..3).map(|i| (ap[i] - s * ab[i]).powi(2)).sum::<f64>();
+                    let inside = s * s * len2 > tol * tol && (1.0 - s).powi(2) * len2 > tol * tol;
+                    (s > 0.0 && s < 1.0 && inside && d2 <= tol * tol).then_some((s, v))
+                })
+                .min_by(|x, y| x.0.total_cmp(&y.0));
+            if let Some((_, v)) = hit {
+                // [a, b, c] keeps its winding as [a, v, c] + [v, b, c].
+                m.triangles[t] = [a, v, c];
+                m.triangles.push([v, b, c]);
+                m.tri_face.push(m.tri_face[t]);
+                touched[t] = true;
+                split_any = true;
+            }
+        }
+        if !split_any {
+            return;
         }
     }
 }
@@ -901,6 +981,46 @@ pub fn canonical_mesh(m: &TriMesh) -> TriMesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A unit tetrahedron-like closed surface whose edge (0,1) is split by vertex 4 on one side
+    /// only: a T-junction. `close_t_junctions` must make it watertight; a vertex off the edge by
+    /// more than the tolerance must leave it open.
+    fn t_junction_mesh(offset: f64) -> TriMesh {
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.5, offset, 0.0],
+        ];
+        // Faces of the tetrahedron 0-1-2-3 (outward), with face (0,1,2) split at 4 on edge
+        // (0,1); face (0,3,1) keeps edge (1,0) whole.
+        let triangles = vec![[0, 2, 4], [4, 2, 1], [0, 3, 2], [0, 1, 3], [1, 2, 3]];
+        TriMesh {
+            normals: vec![[0.0, 0.0, 1.0]; positions.len()],
+            tri_face: (0..triangles.len() as u32).collect(),
+            positions,
+            triangles,
+            chord_tolerance: 0.01,
+        }
+    }
+
+    #[test]
+    fn t_junction_is_closed_within_the_weld_tolerance() {
+        let mut m = t_junction_mesh(0.0);
+        assert!(!check_mesh(&m).watertight);
+        close_t_junctions(&mut m, WELD_TOLERANCE);
+        let c = check_mesh(&m);
+        assert!(c.watertight, "{c:?}");
+        assert!((c.mesh_volume.abs() - 1.0 / 6.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn gap_wider_than_the_tolerance_stays_open() {
+        let mut m = t_junction_mesh(-10.0 * WELD_TOLERANCE);
+        close_t_junctions(&mut m, WELD_TOLERANCE);
+        assert!(!check_mesh(&m).watertight);
+    }
 
     fn quad(tris: Vec<[u32; 3]>, pts: Vec<[f64; 3]>) -> TriMesh {
         TriMesh {
