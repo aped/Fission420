@@ -22,6 +22,8 @@ value per effort. Autodesk Fusion is the behavioural reference where behaviour i
 - Sketches on curved faces; 3D sketches; loft guide rails; helical sweeps.
 - Faster curved booleans (seconds to tens of seconds today; Truck's implicit intersection curves
   dominate where no exact replacement exists, `crates/rcad-kernel/src/exact.rs`).
+- Piece identity of split bodies by geometric overlap (today positional, ADR 0003).
+- Revolve of ellipse/spline sections (refused today: Truck cannot mesh the revolved faces).
 - Exact operations on mesh bodies via mesh-to-B-rep reconstruction (out of scope so far).
 
 ## Interchange
@@ -30,7 +32,6 @@ value per effort. Autodesk Fusion is the behavioural reference where behaviour i
 - SVG: Bézier curves, elliptical arcs, `use` expansion, text to outlines.
 - DXF: non-uniform/rational SPLINEs and elliptical arcs, R2000+ export of ellipses/splines,
   blocks/INSERT with transforms, dimension import as constraints.
-- Piece identity of split bodies by geometric overlap (today positional, ADR 0003).
 - IGES, OBJ: possible later; DWG and F3D/F3Z: no plan (closed formats).
 
 ## Product
