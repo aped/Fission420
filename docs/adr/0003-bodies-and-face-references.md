@@ -129,5 +129,8 @@ makes one body per piece, as Autodesk Fusion does, instead of being refused:
 * Faces of the extra pieces made by earlier features are not referencable by role (they resolve
   only on the target body), like a copied body's faces; references that now land on another
   piece report `BrokenReference`.
-* Not covered: tapered and multi-region cuts, pattern/mirror copies, Split Body, Combine,
-  revolve cuts and hole features still refuse a result that falls apart.
+* Split Body uses the same mechanism: each side's first piece is the body behind the plane /
+  the new body; further pieces (behind-side first) get the ids in `SplitBody::pieces`.
+  Drawing section views of bodies that fall apart at the cutting plane use it for display.
+* Not covered: tapered and multi-region cuts, pattern/mirror copies, Combine, revolve cuts and
+  hole features still refuse a result that falls apart.
