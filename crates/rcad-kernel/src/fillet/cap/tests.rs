@@ -71,6 +71,7 @@ fn rounded_at(x0: f64, y0: f64, a: f64, b: f64, rr: f64) -> Profile {
                     center: mv(center),
                     ccw,
                 },
+                other => panic!("rounded rectangles have no {other:?}"),
             })
             .collect(),
     )
