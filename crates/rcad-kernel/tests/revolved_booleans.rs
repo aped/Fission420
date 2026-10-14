@@ -176,3 +176,33 @@ fn revolution_generatrix_is_bounded_in_step() {
     }
     assert_eq!(n, 12, "four revolved edges x three sectors");
 }
+
+/// A cylinder (r 5, axis Z through (20, 0), z −5..15) joined across the side
+/// face x = 20 of a 40 × 40 × 10 block: the side plane, parallel to the axis,
+/// cuts the cylinder along two straight vertical rulings (y = ±5), the top and
+/// bottom planes along half circles. Every intersection edge becomes an exact
+/// curve (no implicit edges, which made tessellation slow). Volume: block +
+/// cylinder − the half cylinder inside the block (π 25 / 2 × 10).
+#[test]
+fn cylinder_across_a_block_side_has_exact_ruling_edges() {
+    let c = Profile::Circle {
+        center: [20.0, 0.0],
+        radius: 5.0,
+    };
+    let cyl = extrude(&c, &Frame::XY.offset(-5.0), 20.0).unwrap();
+    let body = block(20.0, 20.0, 0.0, 10.0);
+    let want = 16000.0 + PI * 25.0 * 20.0 - PI * 25.0 / 2.0 * 10.0;
+    check("cylinder side", &body, &cyl, CombineOp::Join, want, 1);
+    let (out, _) = combine(&body, std::slice::from_ref(&cyl), CombineOp::Join).unwrap();
+    assert!(
+        !has_implicit_edges(&out),
+        "implicit intersection edges remain"
+    );
+    let t = std::time::Instant::now();
+    let m = tessellate(&out, 0.05).unwrap();
+    eprintln!(
+        "cylinder side: {} triangles in {:?}",
+        m.triangles.len(),
+        t.elapsed()
+    );
+}
