@@ -69,7 +69,10 @@ refused. Tolerance range [0, 1] mm.
 `fill_surface {body, tolerance}`: every closed boundary loop (lines, arcs, any edge curves) that
 is **planar** within the tolerance (curved edges sampled at 16 points) gets an exact planar face
 bounded by the loop's own edges; coplanar nested loops of opposite orientation become one face
-with holes (e.g. the two end rings of an open tube); same-orientation or deeper nesting is refused.
+with holes (e.g. the two end rings of an open tube): a loop is a hole of the smallest coplanar
+loop that wholly contains it (every sample point inside, no boundary crossing). Same-orientation
+or deeper nesting (an island inside a hole) is refused, and so are coplanar loops that partially
+overlap (boundaries crossing, or points both inside and outside) or coincide.
 Non-planar loops are refused (not skipped); a body with several shells or orientation conflicts
 must be stitched first. If the result is closed it is a solid.
 
