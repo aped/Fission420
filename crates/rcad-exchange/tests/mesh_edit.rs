@@ -420,3 +420,29 @@ fn decimation_preserves_open_boundaries() {
     let after = diagnose(&out.0, &out.1);
     assert!((after.surface_area - before.surface_area).abs() < 1e-9);
 }
+
+/// A fan of 20 000 triangles around one vertex (all pairs are neighbours and
+/// skipped): the visit budget still bounds the work and the result is partial.
+#[test]
+fn self_intersection_budget_counts_skipped_pairs() {
+    let n = 20_000u32;
+    let mut p = vec![[0.0, 0.0, 0.0]];
+    for i in 0..=n {
+        let a = 2.0 * std::f64::consts::PI * f64::from(i) / f64::from(n + 1);
+        p.push([a.cos(), a.sin(), 0.01 * (f64::from(i) % 3.0)]);
+    }
+    let t: Vec<[u32; 3]> = (1..=n).map(|i| [0, i, i + 1]).collect();
+    let start = std::time::Instant::now();
+    let r = self_intersections(
+        &p,
+        &t,
+        &SelfIntersectionLimits {
+            max_pair_tests: 100_000,
+            ..Default::default()
+        },
+    );
+    assert!(!r.complete, "{r:?}");
+    assert_eq!(r.pairs_visited, 100_000);
+    assert!(r.pairs_tested <= r.pairs_visited);
+    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+}
