@@ -208,6 +208,10 @@ fn volume_method_deserializes_by_variant_name() {
             "BrepBoundaryIntegralRevolution",
             VolumeMethod::BrepBoundaryIntegralRevolution,
         ),
+        (
+            "BrepBoundaryIntegralParametric",
+            VolumeMethod::BrepBoundaryIntegralParametric,
+        ),
         ("TessellationEstimate", VolumeMethod::TessellationEstimate),
     ] {
         // A JSON unit variant is the bare string, exactly what this deserializer feeds.

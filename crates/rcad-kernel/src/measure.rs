@@ -5,7 +5,10 @@ use truck_modeling::*;
 
 mod faces;
 mod mass;
+mod parametric;
 mod revolution;
+
+pub(crate) use parametric::parametric_volume;
 
 pub use faces::{FacePairMeasure, PARALLEL_SIN, face_geometry, measure_face_pair};
 pub use mass::{VolumeProperties, mesh_volume_properties, volume_properties};
@@ -44,6 +47,15 @@ pub enum VolumeMethod {
     /// lofted frusta, revolved cones/tori and swept circular channels. Not a mesh
     /// volume. See `measure/revolution.rs`.
     BrepBoundaryIntegralRevolution,
+    /// Divergence theorem with F = (0, 0, z) over each face's own (u, v)
+    /// parametrisation: Green's theorem turns the flux over the trimmed parameter
+    /// region into a line integral along the face's exact boundary edges, located
+    /// on the surface point by point (Gauss–Legendre in both directions). Any
+    /// smooth surface (tori and spheres about any axes, NURBS); tried after the
+    /// revolution method. Refused (falls back) for implicit intersection edges,
+    /// poles on a boundary or faces crossing a periodic seam. Not a mesh volume.
+    /// See `measure/parametric.rs`.
+    BrepBoundaryIntegralParametric,
     /// Fallback when no exact boundary integral applies (e.g. a sphere): signed
     /// volume of the welded watertight tessellation at two chord tolerances; the
     /// finer value is reported and `error_estimate` is the difference between the
@@ -468,6 +480,17 @@ fn volume(body: &Body) -> VolumeResult {
             }
             Err(e) => reasons.push(format!("revolution: {e}")),
         }
+    }
+    match parametric::center_frame(solid).and_then(|fr| parametric::parametric_moments(solid, &fr))
+    {
+        Ok((hi, lo)) => {
+            return VolumeResult::Value {
+                volume: hi[0],
+                error_estimate: (hi[0] - lo[0]).abs(),
+                method: VolumeMethod::BrepBoundaryIntegralParametric,
+            };
+        }
+        Err(e) => reasons.push(format!("parametric: {e}")),
     }
     match tessellation_volume(body) {
         Ok((volume, error_estimate)) => VolumeResult::Value {
