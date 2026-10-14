@@ -125,7 +125,7 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `open` | `path` | validates format/version/references, regenerates, compares with saved cache |
 | `close` | | |
 | `export_stl` | `path`, `chord?` (mm, default 0.01), `bodies?`, print fields (below) | binary STL in mm (STL has no unit field; the slicer must read mm) of `bodies` (default: all visible bodies; hidden ones only when listed, named in the message), B-rep tessellations and mesh bodies checked as for 3MF; bodies are separate shells in one file (or one file each with `separate_files`), never fused; message names the committed revision; report in `response.export` |
-| `export_step` | `path`, `bodies?` | AP214 via truck-stepio with exact NURBS edge rebuild, one solid per body (default: all visible bodies); mesh bodies refused; refused when an edge can't be written exactly |
+| `export_step` | `path`, `bodies?` | AP214 via truck-stepio with exact NURBS edge rebuild, one solid per body, or one `SHELL_BASED_SURFACE_MODEL` per open surface body (not mixed with solids in one file) (default: all visible bodies); mesh bodies refused; refused when an edge can't be written exactly |
 | `measure` / `inspect` | | measurements / full `summary` |
 
 ### Print export fields (`export_stl`, `export_3mf`; all optional, docs/PRINT_EXPORT.md)

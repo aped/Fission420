@@ -112,5 +112,11 @@ positive volume = outward orientation, volume and bounding box).
 Non-planar patches (N-sided fill, boundary-blend), continuity (G1/G2) control, offset of general
 surfaces and multi-face thicken (offset with mitred joints), swept/lofted surface bodies (only straight extrusion of sketches),
 trimming and extending surfaces, surface-to-solid replace, sewing with geometry fitting (edges are
-merged, not re-fitted), T-splines / freeform modelling, export of surface bodies to STEP as
-`SHELL_BASED_SURFACE_MODEL` (STEP export of open bodies is not supported).
+merged, not re-fitted), T-splines / freeform modelling, solids and surface bodies in one STEP
+file (refused: export the surface bodies separately).
+
+**STEP export of surface bodies:** `export_step` writes each open surface body as a
+`SHELL_BASED_SURFACE_MODEL` with an `OPEN_SHELL` (exact edges and the same generatrix bounding as
+solids), labelled with the body name; never as a solid. Checked: our reader re-imports it as the
+same open shell (`surfaces.rs`), FreeCAD 1.1 reads the open box as 5 valid faces with the right
+bounds.

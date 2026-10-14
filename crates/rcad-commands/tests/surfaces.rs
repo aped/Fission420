@@ -89,12 +89,36 @@ fn open_box_stays_open_then_fills_to_a_solid() {
     tray::ok(&mut t, &json!({"cmd": "open", "path": p}));
     assert!((volume(&t, 2).unwrap() - 24000.0).abs() < 1e-6);
     assert_eq!(volume(&t, 1), None);
-    // The open source body is not exported as a (malformed) solid.
+    // The open source body exports as a surface model (never as a solid),
+    // and reads back as the same open shell: 5 faces, one boundary loop of
+    // 4 free edges.
+    let open = dir.path().join("open.step");
+    tray::ok(
+        &mut t,
+        &json!({"cmd": "export_step", "path": open, "bodies": [1]}),
+    );
+    let text = std::fs::read_to_string(&open).unwrap();
+    assert!(text.contains("SHELL_BASED_SURFACE_MODEL") && text.contains("OPEN_SHELL"));
+    assert!(!text.contains("MANIFOLD_SOLID_BREP"));
+    let mut u = Session::new();
+    tray::ok(&mut u, &json!({"cmd": "new_document"}));
+    tray::ok(&mut u, &json!({"cmd": "import_surfaces", "path": open}));
+    let a = tray::ok(&mut u, &json!({"cmd": "analyze_surface", "body": 1}))
+        .surface_analysis
+        .unwrap();
+    assert!(!a.closed);
+    assert_eq!((a.free_edges.len(), a.boundary_loops.len()), (4, 1));
+    // Solids and surfaces in one file: refused with the reason.
     let r = tray::exec(
         &mut t,
-        &json!({"cmd": "export_step", "path": dir.path().join("open.step"), "bodies": [1]}),
+        &json!({"cmd": "export_step", "path": dir.path().join("mixed.step"), "bodies": [1, 2]}),
     );
     assert!(!r.ok);
+    assert!(
+        format!("{:?}", r.error).contains("separately"),
+        "{:?}",
+        r.error
+    );
     // The repaired solid exports as a STEP solid.
     let out = dir.path().join("box.step");
     tray::ok(
