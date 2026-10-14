@@ -3,6 +3,8 @@
 //! stays within two rows, and the viewport keeps a usable width and position
 //! with the run-7 browser sections expanded (configuration table, drawings
 //! with the dimension editor) and a mesh body's repair panel in the inspector.
+//! It caught the import feature's header ("Import1 (import_mesh)" + Rename… +
+//! Delete) widening the inspector by 26 px; headers now wrap.
 use std::time::{Duration, Instant};
 
 use egui_kittest::{Harness, kittest::Queryable as _};
@@ -43,7 +45,6 @@ fn viewport(h: &Harness<'_, RcadApp>) -> (f32, f32) {
 }
 
 #[test]
-#[ignore = "open finding (run 7): after importing an STL the viewport is 26 px narrower (632 -> 606 at 1272 wide), before any selection; not the repair panel, mesh labels, body header, max-width or scrollbar visibility (all bisected); not yet fixed"]
 fn toolbar_rows_and_viewport_at_1280() {
     let mut h = harness();
     click(&mut h, "New");

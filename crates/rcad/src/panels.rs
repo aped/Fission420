@@ -981,7 +981,10 @@ impl RcadApp {
         let Some(f) = self.summary.features.iter().find(|f| f.id == id).cloned() else {
             return;
         };
-        ui.horizontal(|ui| {
+        // Wrapping row: a long feature name/kind must not widen the
+        // inspector panel (that moved the viewport by 26 px at 1280 after an
+        // STL import, "Import1 (import_mesh)"; layout_1280).
+        ui.horizontal_wrapped(|ui| {
             let kind = match f.kind.as_str() {
                 "cut_through_all" => "cut",
                 k => k,

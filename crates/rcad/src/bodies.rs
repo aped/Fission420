@@ -306,7 +306,8 @@ impl RcadApp {
         let Some(b) = self.summary.bodies.iter().find(|b| b.id == id).cloned() else {
             return;
         };
-        ui.horizontal(|ui| {
+        // Wrapping row (see the feature header in panels.rs).
+        ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!("{} (body)", b.name))
                     .strong()
