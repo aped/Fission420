@@ -45,7 +45,7 @@ pub use edges::{
     DrawingEdge, EDGE_FIT_TOL, EdgeCurve, POLY_SAMPLES, SMOOTH_COS, drawing_edges, sharp_edges,
 };
 pub use faceref::{planar_faces_overlapping, profile_outline};
-pub use fillet::fillet_edge;
+pub use fillet::{fillet_cap_loop, fillet_edge};
 pub use loft::{loft, loft_sections};
 pub use measure::{
     Bounds, FacePlane, InnerLoop, Measurements, VolumeMethod, VolumeProperties, VolumeResult,
