@@ -279,8 +279,15 @@ impl RcadApp {
                 ui.label(RichText::new("Variant export").strong());
                 ui.horizontal(|ui| {
                     ui.label("Folder");
-                    ui.add(egui::TextEdit::singleline(&mut st.export_dir).desired_width(140.0))
+                    ui.add(egui::TextEdit::singleline(&mut st.export_dir).desired_width(112.0))
                         .named("Variant export folder");
+                    crate::panels::browse_button_compact(
+                        ui,
+                        "Variant export folder",
+                        &mut st.export_dir,
+                        crate::file_pick::PickMode::Folder,
+                        crate::file_pick::NONE,
+                    );
                     ui.label("Stem");
                     ui.add(egui::TextEdit::singleline(&mut st.export_stem).desired_width(70.0))
                         .named("Variant export stem");

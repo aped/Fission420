@@ -9,6 +9,8 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 | truck-meshalgo | 0.4.0 | Apache-2.0 | same | rcad-kernel |
 | serde | 1.x | MIT OR Apache-2.0 | crates.io | all |
 | thiserror | 2.x | MIT OR Apache-2.0 | crates.io | all |
+| rfd | 0.17.2 (features `xdg-portal`, `wayland`; no GTK) | MIT | https://github.com/PolyMeilex/rfd | rcad (Browse… file dialogs; on Linux through the XDG desktop portal over D-Bus, pure Rust) |
+| pollster | 0.4.0 | Apache-2.0 OR MIT | crates.io (via rfd) | rcad |
 
 (Updated as crates are added; see section below for the GUI stack.)
 

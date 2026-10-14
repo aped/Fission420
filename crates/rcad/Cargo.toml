@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 rcad-viewport = { path = "../rcad-viewport" }
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "x11", "wgpu"] }
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal", "wayland"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rcad-commands = { path = "../rcad-commands" }
 rcad-document = { path = "../rcad-document" }

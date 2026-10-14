@@ -315,7 +315,13 @@ impl RcadApp {
 
     /// Body of the Import dialog. Returns true when OK may be pressed.
     pub(crate) fn import_form_ui(&self, ui: &mut egui::Ui, form: &mut ImportForm) -> bool {
-        crate::panels::text_field(ui, "Import file path", &mut form.path);
+        crate::panels::path_field(
+            ui,
+            "Import file path",
+            &mut form.path,
+            crate::file_pick::PickMode::Open,
+            crate::file_pick::IMPORT,
+        );
         let fmt = Format::of(&form.path);
         match fmt {
             Some(f) => {
@@ -571,10 +577,22 @@ impl RcadApp {
             .collect();
         crate::panels::feature_combo(ui, "Sketch to export", sketch, &sketches);
         if svg {
-            crate::panels::text_field(ui, "SVG path", path);
+            crate::panels::path_field(
+                ui,
+                "SVG path",
+                path,
+                crate::file_pick::PickMode::Save,
+                crate::file_pick::SVG,
+            );
             ui.small("Writes the sketch's lines, arcs and circles in its local 2D sketch coordinates, mm (SVG y axis points down, so y is negated). Construction geometry and constraints are not written.");
         } else {
-            crate::panels::text_field(ui, "DXF path", path);
+            crate::panels::path_field(
+                ui,
+                "DXF path",
+                path,
+                crate::file_pick::PickMode::Save,
+                crate::file_pick::DXF,
+            );
             ui.small("Writes the sketch's lines, arcs and circles in its local 2D sketch coordinates, mm, as R12 ASCII DXF. Construction geometry and constraints are not written.");
         }
         sketch.is_some()
@@ -803,10 +821,22 @@ impl RcadApp {
         let warn = Color32::from_rgb(255, 200, 120);
         let mut ok = true;
         if form.stl {
-            crate::panels::text_field(ui, "STL path", &mut form.path);
+            crate::panels::path_field(
+                ui,
+                "STL path",
+                &mut form.path,
+                crate::file_pick::PickMode::Save,
+                crate::file_pick::STL,
+            );
             ui.small("Units: coordinates in mm. STL has no unit field, so the slicer must interpret the file as millimetres.");
         } else {
-            crate::panels::text_field(ui, "3MF path", &mut form.path);
+            crate::panels::path_field(
+                ui,
+                "3MF path",
+                &mut form.path,
+                crate::file_pick::PickMode::Save,
+                crate::file_pick::THREEMF,
+            );
             egui::ComboBox::from_label("3MF file unit")
                 .selected_text(format!("{:?}", form.unit))
                 .show_ui(ui, |ui| {

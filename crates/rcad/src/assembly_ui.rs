@@ -468,10 +468,12 @@ impl RcadApp {
                 self.assembly_ui.empty_name.clear();
             }
         });
-        crate::panels::short_text_field(
+        crate::panels::short_path_field(
             ui,
             "External document",
             &mut self.assembly_ui.external_path,
+            crate::file_pick::PickMode::Open,
+            crate::file_pick::EXTERNAL,
         );
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.assembly_ui.external_linked, "Linked");
@@ -1475,7 +1477,13 @@ impl RcadApp {
             }
         }
         ui.horizontal(|ui| {
-            crate::panels::short_text_field(ui, "BOM CSV path", &mut self.assembly_ui.bom_path);
+            crate::panels::short_path_field(
+                ui,
+                "BOM CSV path",
+                &mut self.assembly_ui.bom_path,
+                crate::file_pick::PickMode::Save,
+                crate::file_pick::CSV,
+            );
         });
         {
             let p = self.assembly_ui.bom_path.trim().to_string();

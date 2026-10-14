@@ -144,9 +144,16 @@ impl RcadApp {
                 ui.horizontal(|ui| {
                     ui.label("Export to");
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.drawing_ui.path).desired_width(160.0),
+                        egui::TextEdit::singleline(&mut self.drawing_ui.path).desired_width(132.0),
                     )
                     .named("Drawing export path");
+                    crate::panels::browse_button_compact(
+                        ui,
+                        "Drawing export path",
+                        &mut self.drawing_ui.path,
+                        crate::file_pick::PickMode::Save,
+                        crate::file_pick::DRAWING,
+                    );
                 });
                 for d in &drawings {
                     ui.separator();

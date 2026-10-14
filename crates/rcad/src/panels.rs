@@ -5,6 +5,7 @@
 //! in the inspector, as visible text). Internal ids and solver diagnostics
 //! live in collapsible "Details" sections.
 
+use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
 use rcad_commands::{Command, FeatureSummary};
 use rcad_document::{FeatureId, SketchPlane};
@@ -1958,14 +1959,17 @@ impl RcadApp {
                             ui.small("Removes material in both directions along the sketch normal.");
                         }
                     }
-                    Dialog::SaveAs { path } | Dialog::Open { path } => {
-                        text_field(ui, "File path", path);
+                    Dialog::SaveAs { path } => {
+                        path_field(ui, "File path", path, PickMode::Save, file_pick::DOCUMENT);
+                    }
+                    Dialog::Open { path } => {
+                        path_field(ui, "File path", path, PickMode::Open, file_pick::DOCUMENT);
                     }
                     Dialog::ExportStl(form) | Dialog::Export3mf(form) => {
                         ok_allowed &= self.print_export_ui(ui, form);
                     }
                     Dialog::ExportStep { path, scope } => {
-                        text_field(ui, "STEP path", path);
+                        path_field(ui, "STEP path", path, PickMode::Save, file_pick::STEP);
                         ok_allowed &= self.export_scope_ui(ui, scope, true).is_none();
                         ui.label(
                             "Exact B-rep (AP214); refused if an edge cannot be written exactly.",
@@ -2440,6 +2444,93 @@ pub(crate) fn short_text_field(ui: &mut egui::Ui, label: &str, buf: &mut String)
     field(ui, label, buf, 120.0);
 }
 
+/// A path text field with a **Browse…** button (native file dialog, [`crate::file_pick`]).
+/// The text box keeps the label as its name, so typed input still works.
+pub(crate) fn path_field(
+    ui: &mut egui::Ui,
+    label: &str,
+    buf: &mut String,
+    mode: crate::file_pick::PickMode,
+    filters: crate::file_pick::Filters,
+) {
+    ui.horizontal(|ui| {
+        field(ui, label, buf, 280.0);
+        browse_button_text(ui, label, buf, mode, filters, "Browse…");
+    });
+}
+
+/// [`path_field`] for the narrow Browser column: a compact "…" button and a text box
+/// narrowed by its width, so the column is no wider than with the plain field.
+pub(crate) fn short_path_field(
+    ui: &mut egui::Ui,
+    label: &str,
+    buf: &mut String,
+    mode: crate::file_pick::PickMode,
+    filters: crate::file_pick::Filters,
+) {
+    ui.horizontal(|ui| {
+        field(ui, label, buf, 92.0);
+        browse_button_text(ui, label, buf, mode, filters, "…");
+    });
+}
+
+/// A compact "…" browse button, for fields in fixed-width panels.
+pub(crate) fn browse_button_compact(
+    ui: &mut egui::Ui,
+    key: &str,
+    buf: &mut String,
+    mode: crate::file_pick::PickMode,
+    filters: crate::file_pick::Filters,
+) {
+    browse_button_text(ui, key, buf, mode, filters, "…");
+}
+
+/// The **Browse…** button for the path field named `key` (its accessible name is
+/// "Browse <key>"); a chosen path replaces `buf`.
+fn browse_button_text(
+    ui: &mut egui::Ui,
+    key: &str,
+    buf: &mut String,
+    mode: crate::file_pick::PickMode,
+    filters: crate::file_pick::Filters,
+    text: &str,
+) {
+    use crate::file_pick as fp;
+    if let Some(p) = fp::take(key) {
+        *buf = p.to_string_lossy().into_owned();
+    }
+    let what = match mode {
+        fp::PickMode::Open => "Choose a file",
+        fp::PickMode::Save => "Choose where to save",
+        fp::PickMode::Folder => "Choose a folder",
+    };
+    let clicked = ui
+        .add_enabled(!fp::busy(), egui::Button::new(text).small())
+        .on_hover_text(what)
+        .on_disabled_hover_text("A file dialog is already open")
+        .named(&format!("Browse {key}"))
+        .clicked();
+    if clicked {
+        let (start_dir, file_name) = fp::start_from(buf);
+        let file_name = if mode == fp::PickMode::Save {
+            file_name
+        } else {
+            None
+        };
+        fp::request(
+            ui.ctx(),
+            key,
+            fp::PickRequest {
+                mode,
+                title: format!("{what}: {key}"),
+                filters,
+                start_dir,
+                file_name,
+            },
+        );
+    }
+}
+
 /// Opening a document waits for pending work (other commands just queue).
 fn busy_blocks(d: &Dialog, busy: bool) -> bool {
     busy && matches!(d, Dialog::Open { .. })
@@ -2708,8 +2799,17 @@ impl RcadApp {
     /// Flat-pattern DXF export of a sheet-metal flange feature.
     pub(crate) fn flat_pattern_ui(&mut self, ui: &mut egui::Ui, f: &FeatureSummary) {
         ui.label("Flat pattern (DXF, layers CUT / BEND):");
-        ui.add(egui::TextEdit::singleline(&mut self.flat_path).desired_width(220.0))
-            .named("Flat pattern DXF path");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.flat_path).desired_width(192.0))
+                .named("Flat pattern DXF path");
+            browse_button_compact(
+                ui,
+                "Flat pattern DXF path",
+                &mut self.flat_path,
+                PickMode::Save,
+                file_pick::DXF,
+            );
+        });
         if ui
             .button("Export flat pattern")
             .probe("Export flat pattern")
