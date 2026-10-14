@@ -3940,8 +3940,11 @@ fn linear_pattern(
                 Some(&mut applied),
             )?
             .0;
+            // Stable instance number: `i + j·MAX_PATTERN_COUNT`, so a
+            // FaceRole::Copy reference keeps its (i, j) occurrence when either
+            // count changes (one row: `i`, as before).
             copies.push((
-                k,
+                i + j * crate::MAX_PATTERN_COUNT,
                 ti as u32,
                 ExtrudeOut {
                     start: frame,
@@ -5523,6 +5526,42 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
             }
         }
     }
+    // A later cut that split `owner` into pieces may have divided this face
+    // between the bodies: count the piece bodies' faces in the plane (where
+    // the tool made it) too, so such a face is ambiguous, not silently the
+    // target's fragment.
+    let mut on_pieces = 0;
+    if n > 0 {
+        for (bid, bs) in &st.bodies {
+            let split_off = *bid != owner
+                && bs.created_by != fr.feature
+                && st
+                    .extrudes
+                    .get(&bs.created_by)
+                    .is_some_and(|e| e.body == owner);
+            let BodyGeometry::Brep(pb) = &bs.geometry else {
+                continue;
+            };
+            if !split_off || k::planar_faces_on(pb, &frame) == 0 {
+                continue;
+            }
+            on_pieces += match tool {
+                Some((e, role)) => {
+                    let (outline, curved) = footprint(e, role, &moved_back(&moved, &frame));
+                    let outline: Vec<[f64; 3]> =
+                        outline.into_iter().map(|p| moved.point(p)).collect();
+                    if polygon_area(&outline) > 0.0 {
+                        k::planar_faces_overlapping(pb, &frame, &outline, curved)
+                            .map_err(kernel(from))?
+                            .0
+                    } else {
+                        k::planar_faces_on(pb, &frame)
+                    }
+                }
+                None => k::planar_faces_on(pb, &frame),
+            };
+        }
+    }
     let role = match fr.role {
         FaceRole::ExtrudeSide { entity } => format!("side face of entity {entity}"),
         FaceRole::Imported { face, .. } => format!("imported face {face}"),
@@ -5549,6 +5588,18 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
                 "the {role} of {} no longer exists on body {owner} (removed by a later \
                  feature or edit); re-attach the sketch to another face",
                 fr.feature
+            ),
+        });
+    }
+    if on_pieces > 0 {
+        return Err(DocError::BrokenReference {
+            from,
+            detail: format!(
+                "the {role} of {} is ambiguous: a later cut split body {owner} into separate \
+                 bodies and the face now lies on {} of them; refusing to guess — re-attach \
+                 the sketch",
+                fr.feature,
+                on_pieces + n
             ),
         });
     }

@@ -405,7 +405,8 @@ pub enum FeatureKind {
         direction: [f64; 2],
         /// A second direction (format v8): a rectangular `count` x
         /// `second.count` grid, as Fusion's rectangular pattern. Instance
-        /// `i + j·count` sits at `i·spacing` along `direction` and
+        /// number `i + j·MAX_PATTERN_COUNT` (stable when either count changes)
+        /// sits at `i·spacing` along `direction` and
         /// `j·second.spacing` along `second.direction`; the seed is (0, 0).
         /// Parameters "count2", "spacing2".
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2424,6 +2425,16 @@ impl Document {
                         return self.face_body_depth(a, depth + 1);
                     }
                     _ => {}
+                }
+                // The body the feature's own faces live on: a cut's target
+                // (its extra piece bodies are created, but its faces are
+                // resolved on the target), else the first body it creates.
+                if let FeatureKind::Extrude {
+                    operation: Operation::Cut { target },
+                    ..
+                } = &f.kind
+                {
+                    return Some(*target);
                 }
                 match f.created_bodies().first() {
                     Some(b) => Some(*b),

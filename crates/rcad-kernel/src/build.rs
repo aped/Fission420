@@ -547,11 +547,30 @@ fn revolve_touching_axis(profile: &Profile, frame: &Frame, angle: f64) -> Result
              axis at a single point makes a cone tip or pole, not supported yet)",
         );
     };
+    if n < 3 {
+        return refuse(
+            "the profile needs at least two edges besides the axis edge (a flat-ended section)",
+        );
+    }
     let order: Vec<usize> = (1..n).map(|j| (k + j) % n).collect();
     let (first, last) = (order[0], order[n - 2]);
+    // The rest of the section must stay at least MIN_LENGTH away from the
+    // axis (no point-pinched or sub-MIN_LENGTH neck): exact at the ends,
+    // dense samples in between (lines are exact at their ends; arcs and
+    // spline spans are sampled finely enough for their curvature at part
+    // scale, and the final closed-shell check still applies).
     for &i in &order[1..n - 2] {
-        if on_axis(wire[i].front().point()) || on_axis(wire[i].back().point()) {
-            return refuse("no other point of the profile may lie on the axis");
+        let c = wire[i].oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let near = (0..=256).any(|j| {
+            let p = c.subs(t0 + (t1 - t0) * f64::from(j) / 256.0);
+            dist(p) < tol::MIN_LENGTH
+        });
+        if near {
+            return refuse(&format!(
+                "no other part of the profile may come within {} mm of the axis",
+                tol::MIN_LENGTH
+            ));
         }
     }
     for i in [first, last] {
