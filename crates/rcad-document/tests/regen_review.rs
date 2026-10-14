@@ -387,6 +387,7 @@ fn join_on_a_face_ignores_reverse_so_old_files_still_load() {
                 reverse,
                 region: None,
                 options: Default::default(),
+                pieces: vec![],
             },
         );
         let e = regenerate(&d).unwrap_or_else(|e| panic!("reverse={reverse}: {e}"));

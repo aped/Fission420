@@ -283,3 +283,54 @@ fn enclosed_void_is_refused_by_name() {
     };
     assert!(e.to_string().contains("disconnected"), "{e}");
 }
+
+/// A slot across the whole block leaves two separate solids. The
+/// `_pieces` variant returns them as one shell each (left piece first); the
+/// result check accepts the two-shell result against the nominal cut; each
+/// piece is an exact closed solid of the closed-form volume.
+#[test]
+fn cut_through_the_whole_width_gives_separate_pieces() {
+    let slot = rect(18.0, -1.0, 22.0, 31.0);
+    let start = Frame::XY;
+    let r = prism_region_boolean_pieces(&block(), &slot, &[], &start, 10.0, SlabOp::Cut).unwrap();
+    assert_eq!(r.solid.boundaries().len(), 2);
+    let prism = Prism {
+        profile: &slot,
+        holes: &[],
+        start: &start,
+        length: 10.0,
+    };
+    verify_prism_boolean(&block(), &r, PrismOp::Cut, &prism, (0.0, 10.0)).unwrap();
+    let pieces = crate::split_pieces(&r).unwrap();
+    assert_eq!(pieces.len(), 2);
+    for (p, (x0, x1)) in pieces.iter().zip([(0.0, 18.0), (22.0, 40.0)]) {
+        let m = measure(p).unwrap();
+        assert_eq!((m.shell_count, m.all_shells_closed), (1, true));
+        assert!((volume(p) - (x1 - x0) * 30.0 * 10.0).abs() < 1e-6);
+        assert!((m.bounds.min[0] - x0).abs() < 1e-9 && (m.bounds.max[0] - x1).abs() < 1e-9);
+    }
+    // Three pieces from a two-slot tool region is not possible with one loop;
+    // an L-shaped slot that cuts off a corner gives two unequal pieces.
+    let corner = Profile::Polygon(vec![
+        [30.0, -1.0],
+        [41.0, -1.0],
+        [41.0, 12.0],
+        [32.0, 12.0],
+        [32.0, 31.0],
+        [30.0, 31.0],
+    ]);
+    let r = prism_region_boolean_pieces(&block(), &corner, &[], &start, 10.0, SlabOp::Cut).unwrap();
+    let pieces = crate::split_pieces(&r).unwrap();
+    assert_eq!(pieces.len(), 2);
+    // Left: x 0..30 full depth; right: the corner block x 32..40, y 12..30.
+    assert!((volume(&pieces[0]) - 30.0 * 30.0 * 10.0).abs() < 1e-6);
+    assert!((volume(&pieces[1]) - 8.0 * 18.0 * 10.0).abs() < 1e-6);
+    // The plain variant still refuses, and a void is refused by both.
+    assert!(prism_boolean(&block(), &slot, &start, 10.0, SlabOp::Cut).is_err());
+    let p = pocket(&block(), &rect(10.0, 10.0, 20.0, 20.0), 4.0).unwrap();
+    let plate = rect(5.0, 5.0, 25.0, 25.0);
+    let e =
+        prism_region_boolean_pieces(&p, &plate, &[], &Frame::XY.offset(10.0), 2.0, SlabOp::Join)
+            .unwrap_err();
+    assert!(e.to_string().contains("internal void"), "{e}");
+}

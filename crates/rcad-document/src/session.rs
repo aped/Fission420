@@ -13,6 +13,11 @@ pub struct ParamChange {
     pub new: f64,
 }
 
+/// Most separate bodies one cut may split its target into.
+pub const MAX_PIECES: usize = 64;
+/// Rounds of [`Model::transact`]'s piece assignment (one per splitting cut).
+const MAX_PIECE_ROUNDS: usize = 32;
+
 /// A document plus its current evaluation and history. Every edit goes through
 /// [`Model::transact`]: the edit is applied to a copy, regenerated, and committed only
 /// if regeneration succeeds. On error the previous document and evaluation are kept.
@@ -218,6 +223,48 @@ impl Model {
         regenerate_cached_opts(doc, Some(&mut self.cache), !self.defer_measurements)
     }
 
+    /// Regenerate `doc`; when a cut splits its target into more separate
+    /// pieces than it has body ids for ([`DocError::NeedsPieces`]), assign
+    /// the missing ids (new bodies, named and placed like any new body) in this same transaction and regenerate again. Bounded: each
+    /// round assigns at least one id and a document has finitely many cuts.
+    fn regen_assigning_pieces(&mut self, doc: &mut Document) -> Result<Evaluation> {
+        for _ in 0..MAX_PIECE_ROUNDS {
+            match self.regen(doc) {
+                Err(DocError::NeedsPieces {
+                    feature,
+                    pieces,
+                    assigned,
+                }) if pieces > assigned + 1 && pieces <= MAX_PIECES => {
+                    for _ in assigned + 1..pieces {
+                        let name = doc.default_body_name();
+                        let b = doc.add_body(name);
+                        match &mut doc.feature_mut(feature)?.kind {
+                            crate::FeatureKind::Extrude { pieces, .. }
+                            | crate::FeatureKind::SplitBody { pieces, .. } => pieces.push(b),
+                            _ => {
+                                return Err(DocError::Validation(format!(
+                                    "{feature}: only cuts and splits make separate pieces"
+                                )));
+                            }
+                        }
+                    }
+                }
+                Err(DocError::NeedsPieces {
+                    feature, pieces, ..
+                }) if pieces > MAX_PIECES => {
+                    return Err(DocError::ProductLimit(format!(
+                        "{feature}: the cut would split its target into {pieces} separate bodies \
+                         (at most {MAX_PIECES})"
+                    )));
+                }
+                other => return other,
+            }
+        }
+        Err(DocError::ProductLimit(
+            "too many cuts split their targets in one edit".into(),
+        ))
+    }
+
     /// (hits, misses) of the regeneration cache, for diagnostics.
     pub fn cache_stats(&self) -> (u64, u64) {
         (self.cache.hits, self.cache.misses)
@@ -241,7 +288,7 @@ impl Model {
         let out = edit(&mut candidate)?;
         // Bound values follow their expressions in the same transaction.
         crate::params::apply_expressions(&mut candidate)?;
-        let eval = self.regen(&candidate)?;
+        let eval = self.regen_assigning_pieces(&mut candidate)?;
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
         self.undo.push((label.to_string(), old));

@@ -350,12 +350,18 @@ fn arc_curve(a: Point3, b: Point3, c: Point3) -> Result<NurbsCurve<Vector4>> {
 /// in `frame` coordinates): shared vertices and edges, T-junctions of
 /// straight edges split, every edge used exactly twice in opposite
 /// directions, one connected shell.
+/// The solid bounded by the slab faces. With `pieces`, a result that falls
+/// apart into several separate solids is returned as one `Solid` with one
+/// closed shell per piece (ordered by their bounding boxes' lowest corner,
+/// lexicographically); otherwise it is refused. An enclosed internal void is
+/// always refused.
 pub(super) fn build(
     levels: &[f64],
     slabs: &[Region],
     caps: &[(f64, bool, Region)],
     rings: &Rings,
     frame: &Frame,
+    pieces: bool,
 ) -> Result<Solid> {
     let mut verts = Verts::default();
     let (mut faces, _part) = faces(levels, slabs, caps, rings, &mut verts)?;
@@ -579,6 +585,27 @@ pub(super) fn build(
         let void = all
             .iter()
             .any(|a| all.iter().any(|b| !std::ptr::eq(*a, *b) && inside(a, b)));
+        if pieces && !void {
+            type Box3 = ([f64; 3], [f64; 3]);
+            let mut comps: Vec<(usize, Box3)> = boxes.iter().map(|(r, b)| (*r, *b)).collect();
+            comps.sort_by(|a, b| {
+                (0..3)
+                    .map(|i| a.1.0[i].total_cmp(&b.1.0[i]))
+                    .find(|o| o.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let mut shells: Vec<Vec<Face>> = vec![Vec::new(); comps.len()];
+            for (fi, face) in tfaces.into_iter().enumerate() {
+                let root = find(&mut parent, fi);
+                let k = comps
+                    .iter()
+                    .position(|c| c.0 == root)
+                    .ok_or_else(|| internal("piece of a face lost"))?;
+                shells[k].push(face);
+            }
+            let shells: Vec<Shell> = shells.into_iter().map(Shell::from).collect();
+            return Solid::try_new(shells).map_err(|e| internal(&format!("solid: {e:?}")));
+        }
         return Err(KernelError::InvalidResult(if void {
             "the result would enclose an internal void (a cavity closed on all sides); \
              enclosed internal voids are not supported (leave the cavity open, e.g. with a \

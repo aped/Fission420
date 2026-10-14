@@ -49,6 +49,7 @@ fn raw_cut(target: &Body, profile: &Profile, frame: &Frame) -> Result<Body> {
         0.0,
         tol::BOOLEAN,
         "cut",
+        false,
     )
 }
 
@@ -220,7 +221,8 @@ fn fragile_corner_then_centre_hole_is_cut_exactly() {
         let failed = BOOLEAN_TOLS
             .iter()
             .filter(|&&btol| {
-                subtract_attempt(first, &centre, &[], &start, length, 0.0, btol, "cut").is_err()
+                subtract_attempt(first, &centre, &[], &start, length, 0.0, btol, "cut", false)
+                    .is_err()
             })
             .count();
         eprintln!(

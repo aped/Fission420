@@ -1,8 +1,9 @@
 //! Split Body by a plane:
 //! a holed block split by world and offset planes on two orientations into
 //! two exact solids whose volumes add up; the plane offset is a parameter;
-//! upstream edits regenerate both parts; a plane missing the body and a side
-//! that falls apart are refused unchanged; save/reopen (format v6).
+//! upstream edits regenerate both parts; a plane missing the body
+//! is refused unchanged, a side that falls apart makes one body per piece;
+//! save/reopen (format v6, v8 with pieces).
 mod support;
 use rcad_commands::Session;
 use serde_json::{Value, json};
@@ -110,9 +111,14 @@ fn split_refusals_leave_the_document_unchanged() {
                 "plane": {"Offset": {"base": "WorldXY", "distance": 15.0}}}),
     );
     assert!(!r.ok);
-    // Through the hole's axis region along x = 10: both sides stay connected
-    // (fine); but a U-shaped body split across both arms falls apart.
     assert_eq!(s.model().unwrap().document(), &before);
+}
+
+/// A U-shaped body split across both arms: the side behind the plane falls
+/// apart into the two arm tops, which become separate bodies (one per piece,
+/// as Fusion does), in the same undo step; save/reopen as format v8.
+#[test]
+fn a_side_that_falls_apart_makes_one_body_per_piece() {
     let mut u = Session::new();
     run(
         &mut u,
@@ -130,7 +136,25 @@ fn split_refusals_leave_the_document_unchanged() {
         &json!({"cmd": "split_body", "body": 1,
                 "plane": {"Offset": {"base": "WorldXZ", "distance": -20.0}}}),
     );
-    assert!(!r.ok, "a split leaving two separate arms was accepted");
+    assert!(r.ok, "{:?}", r.error);
+    // Behind (y > 20): left arm top (body 1) and right arm top (body 3);
+    // in front: the base with the lower arms (body 2), area 900 - 200 - 200.
+    let ids: Vec<u32> = u.summary().bodies.iter().map(|b| b.id.0).collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+    assert!((vol(&u, 1) - 500.0).abs() < 1e-6, "{}", vol(&u, 1));
+    assert!((vol(&u, 2) - 2500.0).abs() < 1e-6, "{}", vol(&u, 2));
+    assert!((vol(&u, 3) - 500.0).abs() < 1e-6, "{}", vol(&u, 3));
+    let b3 = u.summary().bodies[2].bounds.unwrap();
+    assert!((b3.min[0] - 20.0).abs() < 1e-9 && (b3.min[1] - 20.0).abs() < 1e-9);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("u.rcad.json");
+    tray::ok(&mut u, &json!({"cmd": "save", "path": path}));
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(v["version"], json!(8));
+    let mut t = Session::new();
+    tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
+    assert_eq!(t.summary().bodies.len(), 3);
+    assert!(u.execute(&rcad_commands::Command::Undo).ok);
     assert_eq!(u.model().unwrap().document(), &before);
 }
 

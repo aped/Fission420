@@ -2684,6 +2684,7 @@ pub fn error_kind(e: &DocError) -> &'static str {
         DocError::Expression { .. } => "Expression",
         DocError::NothingTo(_) => "NothingTo",
         DocError::File(_) => "File",
+        DocError::NeedsPieces { .. } => "NeedsPieces",
     }
 }
 

@@ -2353,7 +2353,7 @@ pub fn render(doc: &Document, eval: &Evaluation, id: DrawingId) -> Result<Drawin
             cut_plane = Some(plane);
             for key in &keys {
                 let Some(body) = breps.get(key) else { continue };
-                match crate::regen::split_by_plane(body, &plane, FeatureId(0))
+                match crate::regen::split_by_plane(body, &plane, FeatureId(0), true)
                     .and_then(|(behind, _)| body_data(&behind, chord))
                 {
                     Ok(d) => section_data.push(d),

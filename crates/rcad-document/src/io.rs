@@ -350,8 +350,15 @@ pub fn v8_feature(doc: &Document) -> Option<&'static str> {
 
 /// v8 part-modeling additions (bodies split off by cuts, ...).
 fn part_v8_feature(doc: &Document) -> Option<&'static str> {
-    let _ = doc;
-    None
+    doc.features.iter().find_map(|f| match &f.kind {
+        crate::FeatureKind::Extrude { pieces, .. } if !pieces.is_empty() => {
+            Some("bodies split off by cuts")
+        }
+        crate::FeatureKind::SplitBody { pieces, .. } if !pieces.is_empty() => {
+            Some("split bodies with several pieces per side")
+        }
+        _ => None,
+    })
 }
 
 /// v8 edge-finishing additions (fillets, ...).
