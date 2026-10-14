@@ -20,8 +20,11 @@
 //! stays correct, only slow. A plane perpendicular to the axis of a
 //! surface of revolution (a lofted or revolved cone/cylinder) meets it in a circle
 //! about the axis, rebuilt as the exact rational arc and verified the same way.
-//! Other intersection types (cylinder ∩ cylinder, plane oblique to the extrusion
-//! or to the revolution axis) are never replaced.
+//! A plane parallel to a cylinder's axis (extruded or revolved), or through a
+//! cone's axis, meets it along straight rulings; those edges become the exact
+//! segment between their vertices once the segment is verified to lie on both
+//! surfaces. Other intersection types (cylinder ∩ cylinder, plane oblique to the
+//! extrusion or to the revolution axis) are never replaced.
 use crate::{KernelError, Result, guarded};
 use truck_modeling::*;
 
@@ -160,15 +163,15 @@ pub(crate) fn exact_edge(
         return Err(unsupported("degenerate plane normal"));
     }
     if let Surface::RevolutedCurve(rev) = other {
-        return plane_revolution_edge(ic, plane, rev, p0, p1);
+        return plane_revolution_edge(ic, plane, rev, p0, p1)
+            .or_else(|_| plane_ruling_edge(ic, plane, other, p0, p1));
     }
     let Surface::NurbsSurface(ns) = other else {
         return Err(unsupported("intersection with a non-NURBS surface"));
     };
     if !is_extrusion_along(ns, n) {
-        return Err(unsupported(
-            "curved face is not extruded along the plane normal",
-        ));
+        return plane_ruling_edge(ic, plane, other, p0, p1)
+            .map_err(|_| unsupported("curved face is not extruded along the plane normal"));
     }
     let full = generating_curve_on(ns, o, n)?;
     let t0 = full
@@ -330,6 +333,62 @@ fn plane_revolution_edge(
         prev = t;
     }
     Ok(Curve::NurbsCurve(arc))
+}
+
+/// A plane meeting a ruled surface along one of its straight rulings: a
+/// cylinder (extruded or revolved) cut by a plane parallel to its axis, or a
+/// cone cut by a plane through its axis. In those cases the edge between its
+/// vertices is exactly the segment `p0 -> p1`. Accepted only when the segment
+/// lies on both surfaces (vertices on the plane, interior samples on the
+/// curved surface) and the original curve's samples lie on the segment in
+/// order. Any other plane section (an ellipse, a hyperbola) fails the
+/// on-surface test and keeps the implicit curve.
+fn plane_ruling_edge(
+    ic: &IntersectionCurve<Leader, Surface>,
+    plane: &Plane,
+    other: &Surface,
+    p0: Point3,
+    p1: Point3,
+) -> Result<Curve> {
+    let n = plane.normal();
+    let o = plane.origin();
+    let d = p1 - p0;
+    let len2 = d.magnitude2();
+    if len2 < 1e-18 {
+        return Err(unsupported("zero-length edge"));
+    }
+    for p in [p0, p1] {
+        if (p - o).dot(n).abs() > REBUILD_TOL {
+            return Err(unsupported("edge vertex not on the plane"));
+        }
+    }
+    for k in 1..8 {
+        let p = p0 + d * (k as f64 / 8.0);
+        let on_surface = other
+            .search_parameter(p, None, 100)
+            .is_some_and(|(u, v)| other.subs(u, v).distance(p) < REBUILD_TOL);
+        if !on_surface {
+            return Err(unsupported("segment does not lie on the curved surface"));
+        }
+    }
+    let (l0, l1) = ic.leader().range_tuple();
+    let mut prev = -1e-9;
+    for k in 0..=VERIFY_SAMPLES + 1 {
+        let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
+        let q = ic
+            .search_triple(l)
+            .ok_or_else(|| unsupported("cannot evaluate original edge"))?
+            .0;
+        let t = (q - p0).dot(d) / len2;
+        let off = (q - (p0 + d * t)).magnitude();
+        if off > VERIFY_TOL || t < prev || !(-1e-9..=1.0 + 1e-9).contains(&t) {
+            return Err(unsupported(
+                "original edge is not the segment between its vertices",
+            ));
+        }
+        prev = t;
+    }
+    Ok(Curve::Line(Line(p0, p1)))
 }
 
 /// Two planes meet in a straight line, so the edge between its vertices is exactly
