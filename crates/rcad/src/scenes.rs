@@ -661,6 +661,7 @@ impl RcadApp {
                         let c = sk.add_point(12.0, -4.0);
                         sk.add_circle(c, 3.0);
                         ed.sketch = sk;
+                        ed.resolve();
                         ed.set_tool(crate::sketch_edit::SketchTool::Project);
                         if let Some(e) = ed.projected.keys().next().copied() {
                             ed.selection = vec![crate::sketch_edit::Item::Entity(e)];
