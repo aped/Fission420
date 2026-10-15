@@ -24,6 +24,7 @@ to get monitor pixels.
     sclickshift X Y               Shift+click at a sketch-plane point
     wclick X Y Z                  world mm
     clickw LABEL                  click the widget the app registered as LABEL
+    dclickw LABEL / rclickw LABEL double-click / right-click that widget
     typew LABEL | TEXT            click a text field by label, select all, type
     clickdim NAME                 click the dimension label NAME (sketch or selected sketch)
     wait_idle [MS]                until the probe reports no work in flight / measuring
@@ -297,7 +298,7 @@ def run(driver, lines, probe=None):
                 driver.move(ax + (bx - ax) * t, ay + (by - ay) * t)
             driver.button(b, False)
             time.sleep(0.1)
-        elif op in ("clickw", "clickdim"):
+        elif op in ("clickw", "clickdim", "dclickw", "rclickw"):
             probe.fresh(driver)
             key = a[0].strip() if a else ""
             if op == "clickdim":
@@ -305,9 +306,12 @@ def run(driver, lines, probe=None):
             x, y = probe.widget(key)
             driver.move(x, y)
             time.sleep(0.05)
-            driver.button("left", True)
-            driver.button("left", False)
-            time.sleep(0.15)
+            b = "right" if op == "rclickw" else "left"
+            for _ in range(2 if op == "dclickw" else 1):
+                driver.button(b, True)
+                driver.button(b, False)
+                time.sleep(0.05)
+            time.sleep(0.1)
         elif op == "typew":
             probe.fresh(driver)
             label, text = (a[0].split("|", 1) + [""])[:2]

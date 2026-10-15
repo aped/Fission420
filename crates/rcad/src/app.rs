@@ -2307,6 +2307,8 @@ impl RcadApp {
         if self.dialog.is_none() {
             self.last_dialog = None;
             self.shell.editing = None;
+            self.shell.pick_armed = false;
+            self.shell.last_pick = self.selected_face;
         }
         if !matches!(
             self.dialog,

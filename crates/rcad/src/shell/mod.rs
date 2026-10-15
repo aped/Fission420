@@ -51,6 +51,10 @@ pub struct ShellState {
     /// Active ribbon tab.
     pub tab: registry::Tab,
     pub show_prefs: bool,
+    /// Face pick seen by the open dialog (new picks feed its input).
+    pub last_pick: Option<u32>,
+    /// The dialog's selection input was cleared and waits for a pick.
+    pub pick_armed: bool,
     /// Feature the open dialog edits (Edit Feature), if any.
     pub editing: Option<rcad_document::FeatureId>,
     /// Theme applied to the context (re-applied when it changes).
@@ -79,6 +83,8 @@ impl Default for ShellState {
             tab: registry::Tab::Solid,
             show_prefs: false,
             editing: None,
+            last_pick: None,
+            pick_armed: false,
             applied_theme: None,
         }
     }
