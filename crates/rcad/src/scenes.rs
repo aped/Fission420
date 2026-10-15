@@ -40,6 +40,7 @@ pub const SCENES: &[&str] = &[
     "tray_refusal",
     "sketch_text",
     "sketch_text_edit",
+    "sketch_project",
 ];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -635,6 +636,38 @@ impl RcadApp {
                 }));
                 v
             }
+            // A sketch on an extrude cap: the cap's edges auto-projected
+            // (purple construction), the Project tool active with its
+            // options, and a hole centre dimensioned to a projected corner.
+            "sketch_project" => vec![
+                Cmd(Command::NewDocument),
+                Cmd(rect(40.0, 20.0, [0.0, 0.0], SketchPlane::WorldXY)),
+                Ui(|a| {
+                    if let Some(f) = a.summary.features.first() {
+                        a.request(Command::extrude(None, f.id, 10.0));
+                    }
+                }),
+                Ui(|a| {
+                    if let Some(f) = a.summary.features.get(1) {
+                        a.begin_sketch(crate::app::SketchTarget::New {
+                            plane: rcad_commands::end_cap_of(f.id),
+                        });
+                    }
+                }),
+                Ui(|a| {
+                    if let Some(s) = a.sketch_session_mut() {
+                        let ed = &mut s.editor;
+                        let mut sk = ed.sketch.clone();
+                        let c = sk.add_point(12.0, -4.0);
+                        sk.add_circle(c, 3.0);
+                        ed.sketch = sk;
+                        ed.set_tool(crate::sketch_edit::SketchTool::Project);
+                        if let Some(e) = ed.projected.keys().next().copied() {
+                            ed.selection = vec![crate::sketch_edit::Item::Entity(e)];
+                        }
+                    }
+                }),
+            ],
             "tray_refusal" => vec![
                 tray(false),
                 Cmd(Command::SetUserParameter {
