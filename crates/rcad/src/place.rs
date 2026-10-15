@@ -464,6 +464,7 @@ mod tests {
             health: Default::default(),
             projections: vec![],
             sheet_relief: None,
+            definition: None,
         };
         let ext = FeatureSummary {
             id: FeatureId(2),
