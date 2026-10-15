@@ -92,6 +92,12 @@ of mass after a known translation and rotation; two bodies; hidden/suppressed; d
 edit; catalog; undo; save/reopen; labelled estimate), `crates/rcad/tests/materials_ui.rs`
 (inspector widgets).
 
-Not done: assemblies with occurrences (no component model yet: a "two occurrences" total is
-two bodies), per-face or layered materials, infill-aware print mass, principal axes / moments
+Assemblies: `mass_properties` also reports component occurrences (`occurrences`, default all
+when `bodies` is absent; `crates/rcad-commands/src/mass.rs`). Each occurrence (one entry per
+nested instance path) counts its component's visible definition bodies placed by the
+occurrence transform (centre of mass moved, inertia rotated), and enters the total; component
+bodies are not also counted as loose bodies. Evidence: `crates/rcad-commands/tests/assembly.rs`
+(`linked_occurrences_follow_the_definition_and_copies_do_not`: three occurrences plus a loose copy), `nested_assembly.rs` (`nested_transforms_bom_and_mass`).
+
+Not done: per-face or layered materials, infill-aware print mass, principal axes / moments
 (the tensor is reported; diagonalisation is left to the client).
