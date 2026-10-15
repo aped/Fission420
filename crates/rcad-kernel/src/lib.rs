@@ -17,6 +17,7 @@ mod fillet;
 mod icurve;
 mod loft;
 mod measure;
+mod memo;
 mod mesh;
 mod ops;
 mod pieces;
