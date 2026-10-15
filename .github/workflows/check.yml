@@ -1,5 +1,12 @@
-# One CI leg: `cargo xtask check` plus the release binaries, optionally packaged and uploaded.
-# Called by ci.yml once per platform; see docs/CI.md.
+# One platform leg of CI, called by ci.yml once per platform. The local gate,
+# `cargo xtask check`, is split across jobs so they run in parallel:
+#
+#   lint (optional) ─ layout, public text, fmt, clippy -D warnings
+#   build ─┬─ test (N shards of one nextest archive) ─┐
+#          └─ replay (acceptance, example replays) ───┴─ package (optional)
+#
+# build compiles once: the release binaries, the nextest test archive and the doc tests.
+# See docs/CI.md.
 name: check
 
 on:
@@ -10,10 +17,16 @@ on:
       container: { type: string, default: "" }
       # false: the leg runs fully and shows red on failure, but does not fail the workflow.
       gate: { type: boolean, default: true }
-      # Archive name suffix; empty: never package.
+      # Run the lint job in this leg (once per workflow is enough).
+      lint: { type: boolean, default: false }
+      # Number of test shards (separate runners sharing one test archive).
+      shards: { type: number, default: 2 }
+      # Archive name suffix (platform); empty: never package.
       artifact: { type: string, default: "" }
       # Package and upload the binaries (main, tags, PRs into main, manual runs).
       publish: { type: boolean, default: false }
+      # Warn when the replays rewrite committed examples (one leg is enough).
+      examples-drift: { type: boolean, default: false }
 
 permissions:
   contents: read
@@ -25,13 +38,196 @@ env:
   # Match the local development toolchain so clippy lints agree (egui 0.36 needs >= 1.95).
   # Bump together with the local toolchain; see docs/CI.md.
   RUST_TOOLCHAIN: "1.99.0"
+  # Pinned cargo-nextest; bump with docs/CI.md.
+  NEXTEST_VERSION: "0.9.148"
+  # The Debian container's system packages. C compiler for lzma-sys (truck-meshalgo ->
+  # vtkio -> xz2); nothing else is linked at build time (wayland/x11/xkbcommon are
+  # dlopen'ed at runtime). fonts-liberation: the sketch-text tests use Liberation Sans.
+  # Keep in step with tools/ci/container_check.sh.
+  DEBIAN_PACKAGES: >-
+    ca-certificates curl git build-essential pkg-config liblzma-dev python3 fonts-liberation
+  # Caches are written by main only; other branches and PRs restore main's caches. This
+  # keeps the 10 GB repository cache from thrashing with per-branch copies.
+  SAVE_CACHE: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
-  check:
-    name: ${{ inputs.name }}
+  lint:
+    name: lint
+    if: inputs.lint
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint-${{ inputs.name }}
+          save-if: ${{ env.SAVE_CACHE }}
+      - name: Lockfile is current
+        run: cargo fetch --locked
+      - name: cargo xtask check --stage lint
+        run: cargo xtask check --stage lint
+
+  build:
+    name: build
     runs-on: ${{ inputs.os }}
     container: ${{ inputs.container }}
-    timeout-minutes: 120
+    timeout-minutes: 90
+    continue-on-error: ${{ !inputs.gate }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      rev: ${{ steps.meta.outputs.rev }}
+    steps:
+      - name: Debian system packages
+        if: inputs.container != ''
+        run: |
+          apt-get update
+          # shellcheck disable=SC2086 # the package list is split on purpose
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $DEBIAN_PACKAGES
+
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@${{ env.NEXTEST_VERSION }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-${{ inputs.name }}
+          save-if: ${{ env.SAVE_CACHE }}
+          # A failing leg still keeps its dependencies warm (main only, see SAVE_CACHE).
+          cache-on-failure: true
+
+      - name: Version and revision
+        id: meta
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          rev=${GITHUB_SHA:0:7}
+          [ -n "$version" ] || { echo "::error::no [workspace.package] version in Cargo.toml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+          # `--version` of both binaries reports it. Set for every build in this job so the
+          # binaries and the test archive share one build of rcad-commands.
+          echo "RCAD_GIT_REV=$rev" >> "$GITHUB_ENV"
+
+      - name: Lockfile is current
+        run: cargo fetch --locked
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p rcad -p rcad-cli
+
+      - name: Build the test archive
+        run: cargo nextest archive --workspace --release --locked --archive-file tests.tar.zst
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tests-${{ inputs.name }}
+          path: tests.tar.zst
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0 # zstd already
+
+      - name: Stage the binaries
+        run: |
+          mkdir -p stage
+          exe=""
+          if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
+          cp "target/release/rcad$exe" "target/release/rcad-cli$exe" stage/
+          py=python3; command -v python3 >/dev/null || py=python
+          "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
+            stage/THIRD_PARTY_LICENSES.txt
+          # tar keeps the executable bit, which an artifact upload drops.
+          tar -cf bin.tar stage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-${{ inputs.name }}
+          path: bin.tar
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Doc tests
+        # nextest does not run doc tests; they reuse this job's release build.
+        run: cargo xtask check --stage doctest
+
+  test:
+    name: test ${{ matrix.shard }}/${{ inputs.shards }}
+    needs: build
+    runs-on: ${{ inputs.os }}
+    container: ${{ inputs.container }}
+    timeout-minutes: 60
+    continue-on-error: ${{ !inputs.gate }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Shard numbers 1..N (a matrix cannot range over an input directly).
+        shard: ${{ fromJSON(inputs.shards == 1 && '[1]' || inputs.shards == 2 && '[1,2]' || inputs.shards == 3 && '[1,2,3]' || '[1,2,3,4]') }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Debian system packages
+        if: inputs.container != ''
+        run: |
+          apt-get update
+          # shellcheck disable=SC2086 # the package list is split on purpose
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $DEBIAN_PACKAGES
+
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/test-font
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@${{ env.NEXTEST_VERSION }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: tests-${{ inputs.name }}
+
+      - name: Tests (shard ${{ matrix.shard }} of ${{ inputs.shards }})
+        # Tests write to CARGO_TARGET_TMPDIR, compiled in as <checkout>/target/tmp; the
+        # checkout path is the same on every runner of one platform.
+        run: |
+          # nextest requires an existing extraction directory.
+          mkdir -p target/tmp "$RUNNER_TEMP/nextest"
+          cargo-nextest nextest run --archive-file tests.tar.zst --workspace-remap . \
+            --extract-to "$RUNNER_TEMP/nextest" --profile ci \
+            --partition "hash:${{ matrix.shard }}/${{ inputs.shards }}"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: junit-${{ inputs.name }}-${{ matrix.shard }}
+          # The store is under the remapped workspace's target/, not the extraction dir.
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: logs-${{ inputs.name }}-test-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  replay:
+    name: acceptance + examples
+    needs: build
+    runs-on: ${{ inputs.os }}
+    container: ${{ inputs.container }}
+    timeout-minutes: 30
     continue-on-error: ${{ !inputs.gate }}
     defaults:
       run:
@@ -39,61 +235,42 @@ jobs:
     steps:
       - name: Debian system packages
         if: inputs.container != ''
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        # C compiler for lzma-sys (truck-meshalgo -> vtkio -> xz2); nothing else is linked
-        # at build time (wayland/x11/xkbcommon are dlopen'ed at runtime). fonts-liberation:
-        # the sketch-text tests use Liberation Sans (2.1.5 in trixie, as on the dev machine).
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config liblzma-dev python3 \
-            fonts-liberation
-
-      - name: Test font (Liberation Sans 2.1.5)
-        if: runner.os != 'Linux'
-        # macOS and Windows do not ship Liberation Sans. Pinned upstream release (SIL OFL 1.1),
-        # byte-identical to Fedora's and Debian's 2.1.5; found through RCAD_FONT_DIRS.
-        run: |
-          url=https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz
-          sum=7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0
-          dir="$RUNNER_TEMP/test-fonts"
-          mkdir -p "$dir"
-          curl -sSLf --retry 3 -o "$dir/lf.tar.gz" "$url"
-          if command -v sha256sum >/dev/null; then got=$(sha256sum "$dir/lf.tar.gz"); else got=$(shasum -a 256 "$dir/lf.tar.gz"); fi
-          # Git Bash's sha256sum prefixes the line with "\" when the path holds backslashes.
-          got=${got#\\}
-          [ "${got%% *}" = "$sum" ] || { echo "::error::font archive checksum mismatch: ${got%% *}"; exit 1; }
-          # Relative archive name: GNU tar reads "D:\..." as a remote host.
-          (cd "$dir" && tar -xzf lf.tar.gz)
-          echo "RCAD_FONT_DIRS=$dir" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2086 # the package list is split on purpose
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $DEBIAN_PACKAGES
 
       - uses: actions/checkout@v7
-
+      - uses: ./.github/actions/test-font
+      # Only xtask is compiled here (no dependencies, seconds).
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
         with:
-          key: ${{ inputs.name }}
-          # Keep a warm cache for legs that still fail (Windows saved none).
-          cache-on-failure: true
+          name: bin-${{ inputs.name }}
 
-      - name: Lockfile is current
-        run: cargo fetch --locked
+      - name: Binaries report the revision
+        run: |
+          tar -xf bin.tar
+          exe=""
+          if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
+          # Relative; xtask makes it absolute (on Windows, bash's $PWD is not a native path).
+          echo "RCAD_CLI=stage/rcad-cli$exe" >> "$GITHUB_ENV"
+          for b in rcad-cli rcad; do
+            v=$("stage/$b$exe" --version)
+            echo "$b: $v"
+            case "$v" in
+              *"${{ needs.build.outputs.version }}"*"${{ needs.build.outputs.rev }}"*) ;;
+              *) echo "::error::$b --version does not report ${{ needs.build.outputs.version }} (${{ needs.build.outputs.rev }})"; exit 1 ;;
+            esac
+          done
 
-      - name: Build release binaries
-        id: build
-        run: cargo build --release --locked -p rcad -p rcad-cli
-
-      - name: cargo xtask check
-        id: check
-        run: cargo xtask check
+      - name: cargo xtask check --stage replay
+        run: cargo xtask check --stage replay
 
       - name: Committed examples unchanged by the replays
-        if: inputs.name == 'ubuntu-24.04'
+        if: inputs.examples-drift
         # Warning only: cached measurements may differ in the last digit between libm
         # versions (developer glibc vs the runner's); a real drift shows up in the diff.
         run: |
@@ -102,57 +279,80 @@ jobs:
             echo "::warning title=examples drift::cargo xtask check rewrote committed examples; regenerate and commit them"
           fi
 
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: logs-${{ inputs.name }}-replay
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package:
+    name: package
+    needs: [build, test, replay]
+    # A gating leg packages only after everything passed; a non-gating leg packages
+    # whenever the build succeeded, and BUILD_INFO.txt records the outcomes.
+    if: >-
+      !cancelled() && inputs.publish && inputs.artifact != ''
+      && needs.build.result == 'success'
+      && (!inputs.gate || (needs.test.result == 'success' && needs.replay.result == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bin-${{ inputs.name }}
       - name: Package
-        id: package
-        if: >-
-          inputs.publish && inputs.artifact != '' && !cancelled()
-          && steps.build.outcome == 'success'
-          && (steps.check.outcome == 'success' || !inputs.gate)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          REV: ${{ needs.build.outputs.rev }}
+          PLATFORM: ${{ inputs.artifact }}
+          WINDOWS: ${{ startsWith(inputs.os, 'windows') }}
+          GATE: ${{ inputs.gate }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          name="r-cad-${{ inputs.artifact }}"
+          name="r-cad-$VERSION-$PLATFORM"
+          tar -xf bin.tar
           mkdir -p "dist/$name"
-          exe=""
-          if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
-          cp "target/release/rcad$exe" "target/release/rcad-cli$exe" "dist/$name/"
-          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          py=python3; command -v python3 >/dev/null || py=python
-          "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
-            "dist/$name/THIRD_PARTY_LICENSES.txt"
-          git checkout -- examples   # ship the committed examples, not replay output
+          mv stage/* "dist/$name/"
+          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cp -r examples "dist/$name/examples"
-          # The example workflows export into artifacts/, which the CLI does not create (L3).
+          # The example workflows export into artifacts/, which the CLI does not create.
           mkdir -p "dist/$name/artifacts" && touch "dist/$name/artifacts/.keep"
           {
+            echo "R-CAD $VERSION ($REV)"
             echo "commit: ${GITHUB_SHA}"
             echo "platform: ${{ inputs.name }}"
             echo "toolchain: ${RUST_TOOLCHAIN}"
-            echo "xtask check: ${{ steps.check.outcome }}"
-            echo "Unsigned prototype build. Not an installer."
+            if [ "$GATE" = "true" ]; then
+              echo "checks: passed (tests, acceptance, example replays)"
+            else
+              echo "checks: not required for this platform; results in the CI run"
+            fi
+            echo "CI run: $RUN_URL"
+            echo "Unsigned build, not an installer. See docs/INSTALL.md in the repository."
           } > "dist/$name/BUILD_INFO.txt"
           cd dist
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a -tzip "$name.zip" "$name" > /dev/null
+          if [ "$WINDOWS" = "true" ]; then
+            archive="$name.zip"
+            zip -qr "$archive" "$name"
           else
-            # tar keeps the executable bit, which a plain artifact upload drops.
-            tar czf "$name.tar.gz" "$name"
+            archive="$name.tar.gz"
+            tar czf "$archive" "$name"
           fi
+          sha256sum "$archive" > "$archive.sha256"
+          cat "$archive.sha256"
 
       - uses: actions/upload-artifact@v7
-        # !cancelled(): without a status function `if` implies success(), which is false on a
-        # non-gating leg whose check failed, so its archive would never upload.
-        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: r-cad-${{ inputs.artifact }}
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: logs-${{ inputs.name }}
-          path: artifacts/
-          if-no-files-found: ignore
           retention-days: 7
