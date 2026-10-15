@@ -4207,10 +4207,7 @@ impl Session {
                 let m = self.model_mut()?;
                 let out = sketch_ops::apply(m, *feature, op)?;
                 r.feature = Some(*feature);
-                r.message = Some(format!(
-                    "sketch op: created {:?}, removed {:?}",
-                    out.created, out.removed
-                ));
+                r.message = Some(out.summary());
             }
             Command::Open { path, safe_mode } => {
                 let _ = safe_mode;
@@ -4940,7 +4937,7 @@ impl Session {
     }
 }
 
-fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
+pub(crate) fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
     use rcad_sketch::Entity;
     // An entity keeps its identity when its endpoints change (the editor can
     // reconnect a line), but not when its kind changes, with one exception: a

@@ -36,7 +36,10 @@ fn sketch_op_round_trips() {
         },
     };
     let j = serde_json::to_string(&c).unwrap();
-    assert!(j.contains(r#""cmd":"sketch_op""#) && j.contains(r#""op":"trim""#), "{j}");
+    assert!(
+        j.contains(r#""cmd":"sketch_op""#) && j.contains(r#""op":"trim""#),
+        "{j}"
+    );
     assert_eq!(round_trip(&c), c);
 }
 
