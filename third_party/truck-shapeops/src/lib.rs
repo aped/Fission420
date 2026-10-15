@@ -20,3 +20,4 @@ pub use healing::{RobustSplitClosedEdgesAndFaces, SplitClosedEdgesAndFaces};
 mod transversal;
 pub use transversal::{and, connected_components, or, ShapeOpsCurve, ShapeOpsSurface};
 mod alternative;
+pub mod fast_curve;

@@ -42,16 +42,15 @@ fn surface_periods<S: ParametricSurface>(surface: &S) -> (Option<f64>, Option<f6
     (surface.u_period(), surface.v_period())
 }
 
-fn create_parameter_boundary<P, C, S>(
-    face: &Face<P, C, S>,
-    wire: &Wire<P, C>,
-    polys: &mut HashMap<EdgeID<C>, PolylineCurve<P>>,
+fn create_parameter_boundary<C, S>(
+    face: &Face<Point3, C, S>,
+    wire: &Wire<Point3, C>,
+    polys: &mut HashMap<EdgeID<C>, PolylineCurve<Point3>>,
     tol: f64,
 ) -> Option<PolylineCurve<Point2>>
 where
-    P: Copy,
-    C: BoundedCurve<Point = P> + ParameterDivision1D<Point = P>,
-    S: Clone + SearchParameter<D2, Point = P> + ParametricSurface,
+    C: BoundedCurve<Point = Point3> + ParameterDivision1D<Point = Point3> + 'static,
+    S: Clone + SearchParameter<D2, Point = Point3> + ParametricSurface,
 {
     let surface = face.surface();
     let periods = surface_periods(&surface);
@@ -60,11 +59,12 @@ where
     let vec = wire.edge_iter().try_fold(vec![p], |mut vec, edge| {
         let poly = polys.entry(edge.id()).or_insert_with(|| {
             let curve = edge.curve();
-            let div = curve.parameter_division(curve.range_tuple(), tol).1;
+            // R-CAD fork: bit-identical, without per-point presearch grids (`fast_curve`).
+            let div = crate::fast_curve::parameter_division(&curve, curve.range_tuple(), tol).1;
             PolylineCurve(div)
         });
         let mut p = *vec.last().unwrap();
-        let closure = |q: &P| -> Option<Point2> {
+        let closure = |q: &Point3| -> Option<Point2> {
             let found: Point2 = surface.search_parameter(*q, Some(p.into()), 100)?.into();
             p = nearest_period(found, p, periods);
             Some(p)
@@ -92,7 +92,7 @@ fn divide_one_face<C, S>(
     tol: f64,
 ) -> Option<Vec<FaceWithShapesOpStatus<C, S>>>
 where
-    C: BoundedCurve<Point = Point3> + ParameterDivision1D<Point = Point3>,
+    C: BoundedCurve<Point = Point3> + ParameterDivision1D<Point = Point3> + 'static,
     S: Clone + SearchParameter<D2, Point = Point3> + ParametricSurface,
 {
     let (mut pre_faces, mut negative_wires) = (Vec::new(), Vec::new());
@@ -172,7 +172,7 @@ pub fn divide_faces<C, S>(
     tol: f64,
 ) -> Option<FacesClassification<Point3, C, S>>
 where
-    C: BoundedCurve<Point = Point3> + ParameterDivision1D<Point = Point3>,
+    C: BoundedCurve<Point = Point3> + ParameterDivision1D<Point = Point3> + 'static,
     S: Clone + SearchParameter<D2, Point = Point3> + ParametricSurface,
 {
     let mut res = FacesClassification::<Point3, C, S>::default();

@@ -50,3 +50,17 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   Exported as `truck_shapeops::connected_components` for callers with the same need. Tests:
   `stable::tests::components_follow_input_order` here, and R-CAD's cross-process test, which runs a
   seeded corpus of 189 cuts in five processes (87 differing results before, none after).
+- `src/fast_curve.rs` (new), `divide_face`, `integrate`, `Cargo.toml`: performance only, results
+  bit-identical. `IntersectionCurve::search_triple` (truck-geometry) projects every point onto a
+  B-spline/NURBS surface after a 51 x 51 `presearch` grid evaluation of that surface, rebuilt for
+  each point; dividing the implicit edges of an earlier boolean's result into boundary polylines
+  took about a quarter of each later boolean. `fast_curve::search_triple` caches each surface's grid
+  (keyed by the exact bits of its knots and control points), picks the same nearest grid point with
+  the same comparisons, and passes it as the hint to truck-geometry's own `double_projection`, so
+  every deciding floating-point operation is unchanged. `fast_curve::parameter_division` runs
+  `algo::curve::parameter_division` on a wrapper whose `subs` uses it; `create_parameter_boundary`
+  divides edges through it (it downcasts to truck-modeling's `Curve`, hence `truck-modeling` as a
+  normal dependency and `'static` on `ShapeOpsCurve` and the divide-face functions). R-CAD's kernel
+  samples intersection curves through `fast_curve::search_triple` as well. Test:
+  `fast_curve::tests::matches_truck_bit_for_bit` (triples, `subs`, `der` and divisions compared bit
+  for bit with truck-geometry on plane–cylinder and cylinder–cylinder curves).
