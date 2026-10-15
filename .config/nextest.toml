@@ -30,11 +30,12 @@ path = "junit.xml"
 # guard against hangs, not performance; on a loaded shared runner one may exceed its bound.
 # One retry each; a retry that passes shows up as FLAKY in the log and in junit.xml.
 [[profile.ci.overrides]]
-filter = "package(rcad) & (binary(exchange_ui) | binary(measure_imports) | binary(frame_pacing))"
+filter = "package(rcad) & (test(/^exchange_ui::/) | test(/^measure_imports::/) | test(/^frame_pacing::/))"
 retries = 1
 
 # The slowest tests start first, so none of them is left to run alone at the end of a shard.
-# Keep the list short: the slowest few test files.
+# Keep the list short: the slowest few test modules. Integration tests live in one binary
+# per crate (tests/it/), so a test's name starts with its file's module name.
 [[profile.ci.overrides]]
-filter = "binary(cross_process_determinism) | binary(arc_fuzz) | binary(gate_fuzz) | binary(rounded_enclosure)"
+filter = "package(rcad-commands) & (test(/^cross_process_determinism::/) | test(/^arc_fuzz::/) | test(/^gate_fuzz::/) | test(/^rounded_enclosure::/))"
 priority = 50

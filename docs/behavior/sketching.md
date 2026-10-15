@@ -193,7 +193,7 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
   only because of extra loops can still be extruded (pick a region).
 * API: `Sketch::regions()` (each with `RegionRef`, depth, area), `Sketch::region_by_ref`,
   `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
-  `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
+  `crates/rcad-commands/tests/it/regions.rs`, `crates/rcad/tests/it/region_pick_ui.rs`.
 * **Crossing, touching and T-joined curves** (as Fusion offers them): when the curves are not
   disjoint simple loops, the regions are the bounded faces of their planar arrangement. Lines,
   arcs and circles are split at their exact intersections (and where an end lies on another
@@ -244,8 +244,8 @@ is a closed loop of the sketch and takes part in region extraction like any othe
   text are named per polygon edge and break when the edge count changes (e.g. a height edit).
 * API/commands: `Sketch::add_text` / `edit_text` / `remove_text` / `text_loops`,
   `rcad_sketch::font`; commands `add_sketch_text`, `edit_sketch_text`, `remove_sketch_text`
-  (docs/COMMANDS.md). Tests: `crates/rcad-sketch/tests/text.rs`,
-  `crates/rcad-commands/tests/sketch_text.rs`, `crates/rcad-commands/tests/text_emboss.rs`
+  (docs/COMMANDS.md). Tests: `crates/rcad-sketch/tests/it/text.rs`,
+  `crates/rcad-commands/tests/it/sketch_text.rs`, `crates/rcad-commands/tests/it/text_emboss.rs`
   (raised/recessed "B8" on an enclosure top face in one multi-region feature, membership
   probes of strokes and counters, string edits that re-resolve or are refused by region name)
   (need the installed font Liberation Sans;
@@ -262,7 +262,7 @@ geometry (`crates/rcad-sketch/src/shapes.rs`).
   (aligned distance between the arc centres, L) and `slot_width` (between the two tangent points
   at the first end, W). Clicking an existing point reuses it as a centre. 3 DOF remain (position
   and direction). Profile area L·W + π(W/2)² (tests: `shapes.rs` unit tests,
-  `crates/rcad/tests/sketch_shapes_ui.rs` extrudes it to that area × depth).
+  `crates/rcad/tests/it/sketch_shapes_ui.rs` extrudes it to that area × depth).
 * **Regular polygon:** set *Sides* (3–64) and *Across flats* in the toolbar, click the centre,
   then a vertex (inscribed: diameter across corners `polygon_d`) or an edge midpoint
   (circumscribed: diameter across flats `polygon_flats`). N lines with vertices on a
@@ -311,9 +311,9 @@ No polyline ever stands in for the geometry.
   transforms. Everything else stays refused (docs/formats/dxf.md, svg.md).
 * Format: sketches with ellipses / splines are written as native format v8.
 
-Tests: `crates/rcad-sketch/src/tests_curves.rs`, `crates/rcad-kernel/tests/ellipse_spline.rs`,
-`crates/rcad-commands/tests/ellipse_spline.rs`, `crates/rcad-exchange/tests/curve_import.rs`,
-`crates/rcad/tests/sketch_curves_ui.rs`.
+Tests: `crates/rcad-sketch/src/tests_curves.rs`, `crates/rcad-kernel/tests/it/ellipse_spline.rs`,
+`crates/rcad-commands/tests/it/ellipse_spline.rs`, `crates/rcad-exchange/tests/it/curve_import.rs`,
+`crates/rcad/tests/it/sketch_curves_ui.rs`.
 
 ## Sketch patterns (Pattern… action)
 
@@ -337,8 +337,8 @@ geometry tied to their sources (`crates/rcad-sketch/src/pattern.rs`):
 * Changing the count means deleting the copies and patterning again (no count parameter).
 * A sketch with pattern constraints is saved as format v6. Tests: `pattern.rs` unit tests (DOF,
   no redundancy, spacing/angle edits, per-copy axis choice at 90°),
-  `crates/rcad-commands/tests/sketch_patterns.rs` (bolt circle, analytic volume, v6, parameter
-  edit and refused overlap), `crates/rcad/tests/sketch_pattern_ui.rs` (dialog).
+  `crates/rcad-commands/tests/it/sketch_patterns.rs` (bolt circle, analytic volume, v6, parameter
+  edit and refused overlap), `crates/rcad/tests/it/sketch_pattern_ui.rs` (dialog).
 
 ## Offset (Offset tool, `O`)
 
@@ -375,9 +375,9 @@ Enter. One undo step.
   minus inner); pick the inner region to extrude or cut the opening (see Regions).
 * Tests: `crates/rcad-sketch/src/tests_offset.rs` (analytic areas: rectangle ± d, L shape
   concave/convex, slot, rounded rectangle, circle; edits; refusals), the finite-difference check
-  `solver.rs::offset_rows_match_finite_differences`, `crates/rcad-commands/tests/offset_lip.rs`
+  `solver.rs::offset_rows_match_finite_differences`, `crates/rcad-commands/tests/it/offset_lip.rs`
   (enclosure lip opening = lip outline offset by −`lip_wall`; lid volume = `lid_volume()` for the
-  baseline and the variant), `crates/rcad/tests/sketch_offset_ui.rs`.
+  baseline and the variant), `crates/rcad/tests/it/sketch_offset_ui.rs`.
 
 ## Sketch corner fillet (Fillet tool)
 
@@ -400,8 +400,8 @@ of the arc, or the refusal reason), Enter. One undo step.
   share its length).
 * Tests: `crates/rcad-sketch/src/tests_fillet.rs` (areas: right corners r²(1 − π/4) each, an
   oblique corner t·r − (π − θ)r²/2; full constraint kept; width and radius edits; refusals),
-  `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
-  regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
+  `crates/rcad-commands/tests/it/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
+  regenerated after width/radius edits), `crates/rcad/tests/it/sketch_fillet_ui.rs`.
 
 ## Project inside the sketch (P, Intersect)
 
@@ -460,8 +460,8 @@ for the world planes; negative values go the other way). The distance is the ske
 `floor + 3` above a cavity floor). The plane follows the base face when the model changes; if the
 face no longer resolves, regeneration reports `BrokenReference` (never another face), and the
 face's feature cannot be deleted while the sketch uses it. Mirror and Hole accept the same plane
-form through the command API. Tests: `crates/rcad-commands/tests/offset_plane.rs`,
-`crates/rcad/tests/offset_plane_ui.rs`.
+form through the command API. Tests: `crates/rcad-commands/tests/it/offset_plane.rs`,
+`crates/rcad/tests/it/offset_plane_ui.rs`.
 
 ## Undo model
 

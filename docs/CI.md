@@ -94,6 +94,22 @@ nextest installed it falls back to `cargo test --workspace --release --no-fail-f
 also runs the doc tests; with nextest, the doc tests run separately
 (`cargo test --workspace --release --doc`), because nextest does not run them.
 
+**One test binary per crate.** Each crate's integration tests are modules of a single
+binary, `tests/it/main.rs` with one `mod` per file in `tests/it/` (shared helpers such as
+`rcad-commands`' `support` and `arc_corpus` are declared once there). Linking one release
+binary per test file against Truck and egui was most of the build time and of the archive's
+size (TEST_BINARIES_PLACEHOLDER). A test's full name starts with its file's module, so
+filters read `cargo test -p rcad-commands --test it arc_fuzz::` or, in nextest,
+`package(rcad-commands) & test(/^arc_fuzz::/)`. Tests that change process-wide state
+stay separate binaries in `tests/`, because plain `cargo test` runs all tests of one binary
+as threads of one process: `rcad-exchange/tests/cancel.rs`,
+`rcad-commands/tests/{cancel_regen,import_cancel}.rs` and
+`rcad/tests/{cancel_regen_ui,import_cancel_ui,stale_state}.rs` set or race the
+process-wide cancellation flag, `rcad/tests/recovery.rs` sets environment variables and
+`rcad/tests/file_picker_ui.rs` replaces the process-wide file-dialog backend. A new test
+that does the same belongs next to them, not in `tests/it/`. (nextest runs every test in
+its own process, so it is not affected either way.)
+
 **Sharding.** The build job compiles the test binaries once into a `cargo nextest archive`;
 each shard downloads it and runs a `hash:k/N` partition (stable as tests are added). The
 slowest test files start first (`priority` in the `ci` profile), so none of them is left
@@ -166,8 +182,8 @@ needs a C compiler:
 - **Debian container:** `build-essential pkg-config liblzma-dev` (`DEBIAN_PACKAGES` in `check.yml`; keep `tools/ci/container_check.sh` in step). With these it links the system liblzma.
 - **Ubuntu, macOS and Windows:** the runner images already have what it needs. MSVC builds the bundled source.
 
-Test-only runtime dependency: the sketch-text tests (`rcad-sketch/tests/text.rs`,
-`rcad-commands/tests/{sketch_text,text_emboss,rounded_enclosure}.rs`, `rcad/tests/sketch_text_ui.rs`)
+Test-only runtime dependency: the sketch-text tests (`rcad-sketch/tests/it/text.rs`,
+`rcad-commands/tests/it/{sketch_text,text_emboss,rounded_enclosure}.rs`, `rcad/tests/it/sketch_text_ui.rs`)
 need the **Liberation Sans** font and fail, with that message, when it is missing
 (`RCAD_SKIP_FONT_TESTS=1` skips them explicitly). The Ubuntu image has it; the Debian container
 installs `fonts-liberation` (2.1.5); on macOS and Windows the local action
@@ -257,20 +273,20 @@ test fails on that platform; **R** = runtime risk, no test failure expected; **C
 
 | id | sev | platforms | where | what breaks | status |
 |---|---|---|---|---|---|
-| F1 | T | Windows | `crates/rcad-commands/src/scenarios.rs`; compared in `tests/scenario_examples.rs` | Workflow paths built with `Path::join` serialised as `artifacts\scenario_a.stl`, never equal to the committed `artifacts/scenario_a.stl`. | **applied** (`0538511`): a `portable(out, name)` helper joins the paths with `/`. Not yet confirmed on a Windows runner (W1 stopped every Windows run since at clippy). |
-| F2 | T | Windows | `examples/imported_step_hole.rcad.json` embeds a STEP fixture byte-for-byte; `tests/imports.rs` compares them. | With `core.autocrlf=true` (the runner default) the fixture is checked out with CRLF. | **applied:** root `.gitattributes` (`* text=auto eol=lf`, mesh and archive files binary). |
+| F1 | T | Windows | `crates/rcad-commands/src/scenarios.rs`; compared in `tests/it/scenario_examples.rs` | Workflow paths built with `Path::join` serialised as `artifacts\scenario_a.stl`, never equal to the committed `artifacts/scenario_a.stl`. | **applied** (`0538511`): a `portable(out, name)` helper joins the paths with `/`. Not yet confirmed on a Windows runner (W1 stopped every Windows run since at clippy). |
+| F2 | T | Windows | `examples/imported_step_hole.rcad.json` embeds a STEP fixture byte-for-byte; `tests/it/imports.rs` compares them. | With `core.autocrlf=true` (the runner default) the fixture is checked out with CRLF. | **applied:** root `.gitattributes` (`* text=auto eol=lf`, mesh and archive files binary). |
 | F3 | T? | macOS, Windows | Committed workflows hold solved floats compared exactly (`hypot`/`atan2` through libm). | glibc, Apple libm and the UCRT do not promise last-bit-identical results. | Checked on the first Windows and macOS runs: did not occur. If it ever does, compare workflow numbers with a relative tolerance (about 1e-9). |
 | F4 | T | Debian container, macOS, Windows | `crates/rcad-sketch/src/font.rs` (`font_dirs`); the sketch-text tests | No Liberation Sans on those systems. | **applied:** `fonts-liberation` in the container, the pinned download on macOS/Windows (`.github/actions/test-font`), and `font_dirs` searches the macOS and Windows font folders. |
-| W1 | T (build) | Windows | `crates/rcad-commands/tests/persistence_failures.rs` | Used `std::os::unix` and `Permissions::from_mode` unconditionally, so clippy failed to compile the test on Windows (Actions run ID 38595093305). | **applied:** the two read-only-directory tests and the import are `#[cfg(unix)]`; they still run on Linux and macOS. `clippy --all-targets -D warnings` for `x86_64-pc-windows-msvc` and `aarch64-apple-darwin` passes from Linux (see Reproducing locally). |
+| W1 | T (build) | Windows | `crates/rcad-commands/tests/it/persistence_failures.rs` | Used `std::os::unix` and `Permissions::from_mode` unconditionally, so clippy failed to compile the test on Windows (Actions run ID 38595093305). | **applied:** the two read-only-directory tests and the import are `#[cfg(unix)]`; they still run on Linux and macOS. `clippy --all-targets -D warnings` for `x86_64-pc-windows-msvc` and `aarch64-apple-darwin` passes from Linux (see Reproducing locally). |
 | M1 | T | macOS | `crates/rcad/tests/recovery.rs` (`autosave_crash_recover_and_save`) | Compared the canonical path the app reopens (`/private/var/folders/…`) with the raw temporary path (`/var/folders/…`, a symlink). | **applied:** the test canonicalizes its temporary directory. |
 | M2 | T (race) | slow runners; seen on macOS | `crates/rcad/tests/stale_state.rs` (`import_cancel_then_other_format`) | The test queued `NewDocument` and opened the Import form without waiting. A document switch closes every dialog except a pending import, so a late `NewDocument` reply closed the form before its path was typed ("No nodes found matching … Import file path"; the tree showed no dialog and *Sketch1* already present). | **applied:** `queue_slow_work` waits for the new document before queueing the slow edits, as `new_document_while_import_pending` already did. No retry. |
-| L1 | T? | macOS, Windows | `crates/rcad-commands/tests/gate_fuzz.rs`; `crates/rcad-kernel/src/ops/tests.rs` | Accept/refuse counts tuned on one Linux run; Truck's circle/NURBS code uses libm `sin`/`cos`. | Did not occur on macOS. If one diverges, give the threshold a documented margin; never drop the case. |
+| L1 | T? | macOS, Windows | `crates/rcad-commands/tests/it/gate_fuzz.rs`; `crates/rcad-kernel/src/ops/tests.rs` | Accept/refuse counts tuned on one Linux run; Truck's circle/NURBS code uses libm `sin`/`cos`. | Did not occur on macOS. If one diverges, give the threshold a documented margin; never drop the case. |
 | L2 | R | Windows | `crates/rcad-cli/src/main.rs`; `rcad --sync` | Geometry on the main thread, which gets 1 MiB on Windows. | **applied (mitigation):** `.cargo/config.toml` links MSVC binaries with `/STACK:8388608`. Long term: run the CLI body on a thread with an explicit stack size. |
 | L3 | R | all | `xtask/src/main.rs` | The example replays write to `artifacts/` but never create it. | **applied:** `cargo xtask check --stage replay` creates `artifacts/`; release archives ship an empty one. |
 | L4 | R | Windows, macOS | `crates/rcad/src/recovery.rs` (`recovery_dirs`) | The autosave directory is `RCAD_RECOVERY_DIR`, then `XDG_STATE_HOME`, then `HOME/.local/state`. Windows usually has no `HOME`, so autosave is silently off; on macOS it lands in a Linux-style path. | Open. Fall back to `%LOCALAPPDATA%` on Windows and `~/Library/Application Support` on macOS. |
 | L5 | R | Windows | `crates/rcad-document/src/io.rs` (atomic save) | Copies the target's permissions onto the temp file before the rename; a read-only target or one held open by another process makes the rename fail (the previous file survives). | Open. Do not copy the read-only bit on Windows; retry the rename briefly on `PermissionDenied`. |
-| L6 | T? | slow runners | `crates/rcad/tests/exchange_ui.rs` (20 s), `tests/measure_imports.rs` (30 s), `tests/frame_pacing.rs` | Wall-clock limits tuned on a 9800X3D. | **CI mitigation:** one retry each in the nextest `ci` profile, reported as `FLAKY`. Still worth raising the limits to about 120 s; they guard against hangs, not performance. |
-| L7 | T (intermittent) | macOS | `crates/rcad-commands/tests/export_determinism.rs` (`bracket_exports_and_saves_are_byte_identical`) | Two saves of the mounting bracket differed in the cached `TessellationEstimate` volume (Actions run ID 38346875644), likely a summation order that follows allocation order. | **applied:** the saved cache volume is rounded to 1e-6 mm³ (`CACHE_VOLUME_STEPS` in `crates/rcad-document/src/io.rs`). Not failed on macOS since; the canonical-order sum is the real fix. |
+| L6 | T? | slow runners | `crates/rcad/tests/it/exchange_ui.rs` (20 s), `tests/it/measure_imports.rs` (30 s), `tests/it/frame_pacing.rs` | Wall-clock limits tuned on a 9800X3D. | **CI mitigation:** one retry each in the nextest `ci` profile, reported as `FLAKY`. Still worth raising the limits to about 120 s; they guard against hangs, not performance. |
+| L7 | T (intermittent) | macOS | `crates/rcad-commands/tests/it/export_determinism.rs` (`bracket_exports_and_saves_are_byte_identical`) | Two saves of the mounting bracket differed in the cached `TessellationEstimate` volume (Actions run ID 38346875644), likely a summation order that follows allocation order. | **applied:** the saved cache volume is rounded to 1e-6 mm³ (`CACHE_VOLUME_STEPS` in `crates/rcad-document/src/io.rs`). Not failed on macOS since; the canonical-order sum is the real fix. |
 | C1 | C | Windows | `crates/rcad/src/main.rs` | The GUI binary opens a console window. | `#![cfg_attr(windows, windows_subsystem = "windows")]` once a log location exists. |
 | C2 | C | non-Linux | `crates/rcad/Cargo.toml`, `crates/rcad-viewport/Cargo.toml` | eframe's `wayland`/`x11` features do nothing there. | None. |
 | C3 | C | all | `tools/heavy.sh`, `tools/*freecad*`, `tools/print/slice_bambu.sh` | Local-only tooling. | None for CI. |
@@ -301,12 +317,12 @@ These are headless, need no external tools, and use analytic expected values, no
 
 | file | covers |
 |---|---|
-| `crates/rcad-commands/tests/native_formats.rs` (`v4_printable_documents`, `v4_parameters_drive_a_loaded_document`, `committed_printable_examples`) | Frozen v4 documents with parameters and expressions (`tests/fixtures/native_v4/`) open, regenerate to analytic volumes, re-save identically, and still respond to parameter edits. The enclosure, coupon and mounting-bracket examples are now opened by a test, not only rewritten by the replays. |
-| `crates/rcad-document/tests/native_fuzz.rs` | Every truncation of a v3 and a v4 file is a `DocError::File`. 600 deterministic byte mutations never panic, in loading or in regeneration. A v1–v3 file carrying parameters or expressions is refused. Malformed `version` headers are refused. |
-| `crates/rcad-commands/tests/print_goldens.rs` | The committed, externally validated `examples/print/*` (3MF, STL, STEP) are read back. Mesh files must be closed and manifold, rest at z = 0, and have volumes inside the analytic chord-bound interval. STEP files must re-import as one closed solid with the exact volume. |
-| `crates/rcad-kernel/tests/step_curved_roundtrip.rs` | STEP export then re-import of curved bodies (rounded rectangle, slot, D-shape, 270° sector, chamfered block) against analytic volume, bounds and a watertight mesh. `revolve_washer_roundtrip`: the half-turn washer, written with `SURFACE_OF_REVOLUTION` faces, reads back with the Pappus volume and bounds; the full-turn washer (a face reaching the seam angle) must either be refused with an error naming `SURFACE_OF_REVOLUTION` or read back with the exact volume. |
-| `crates/rcad-exchange/tests/stl_fixtures.rs` (two sweeps) | Every prefix and byte flip of the binary and ASCII STL fixtures; binary prefixes must be `Truncated`. |
-| `crates/rcad-exchange/tests/dxf_fixtures.rs` (two sweeps) | Every prefix and byte substitution of three real DXF fixtures, with partial import both on and off. Any accepted result must be finite. |
+| `crates/rcad-commands/tests/it/native_formats.rs` (`v4_printable_documents`, `v4_parameters_drive_a_loaded_document`, `committed_printable_examples`) | Frozen v4 documents with parameters and expressions (`tests/fixtures/native_v4/`) open, regenerate to analytic volumes, re-save identically, and still respond to parameter edits. The enclosure, coupon and mounting-bracket examples are now opened by a test, not only rewritten by the replays. |
+| `crates/rcad-document/tests/it/native_fuzz.rs` | Every truncation of a v3 and a v4 file is a `DocError::File`. 600 deterministic byte mutations never panic, in loading or in regeneration. A v1–v3 file carrying parameters or expressions is refused. Malformed `version` headers are refused. |
+| `crates/rcad-commands/tests/it/print_goldens.rs` | The committed, externally validated `examples/print/*` (3MF, STL, STEP) are read back. Mesh files must be closed and manifold, rest at z = 0, and have volumes inside the analytic chord-bound interval. STEP files must re-import as one closed solid with the exact volume. |
+| `crates/rcad-kernel/tests/it/step_curved_roundtrip.rs` | STEP export then re-import of curved bodies (rounded rectangle, slot, D-shape, 270° sector, chamfered block) against analytic volume, bounds and a watertight mesh. `revolve_washer_roundtrip`: the half-turn washer, written with `SURFACE_OF_REVOLUTION` faces, reads back with the Pappus volume and bounds; the full-turn washer (a face reaching the seam angle) must either be refused with an error naming `SURFACE_OF_REVOLUTION` or read back with the exact volume. |
+| `crates/rcad-exchange/tests/it/stl_fixtures.rs` (two sweeps) | Every prefix and byte flip of the binary and ASCII STL fixtures; binary prefixes must be `Truncated`. |
+| `crates/rcad-exchange/tests/it/dxf_fixtures.rs` (two sweeps) | Every prefix and byte substitution of three real DXF fixtures, with partial import both on and off. Any accepted result must be finite. |
 
 The STEP round-trip uses our own writer and reader, so it guards against regressions but
 is not independent interoperability evidence. FreeCAD remains the independent check

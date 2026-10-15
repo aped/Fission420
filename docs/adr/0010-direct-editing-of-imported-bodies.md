@@ -124,7 +124,7 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   `step_in/mod.rs` tries both normals per solid and keeps the one that tessellates watertight
   and consistently oriented; with neither the solid is refused (observed: a face reaching the
   seam angle, R-CAD-written spheres with poles). Tests: `surfaces_of_revolution_written_by_r_cad_read_back`
-  (`crates/rcad-kernel/tests/step_export_assembly.rs`: re-exported imported cylinder and torus,
+  (`crates/rcad-kernel/tests/it/step_export_assembly.rs`: re-exported imported cylinder and torus,
   same volume) and `revolve_washer_roundtrip` (`step_curved_roundtrip.rs`). No test
   re-imports a direct-edited export (`edits_compose_and_export` checks only that it is written),
   so re-import of edited bodies is not claimed beyond those limits (docs/formats/step.md).

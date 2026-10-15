@@ -104,16 +104,16 @@ be interrupted and still completes, and Undo removes it in one step.
   the sketch unchanged. For stored text whose font is missing the dialog says so (placement edits
   still work). Glyph outlines are drawn as thin closed curves and become profile regions
   (counters are holes; docs/behavior/sketching.md "Sketch text"). Code: `sketch_edit.rs`
-  (`text_*`), `text_ui.rs`, `sketch_view.rs`; UI test `crates/rcad/tests/sketch_text_ui.rs`.
+  (`text_*`), `text_ui.rs`, `sketch_view.rs`; UI test `crates/rcad/tests/it/sketch_text_ui.rs`.
 * **Slot / Polygon tools:** Slot = three clicks (centre, centre, width point); Polygon = centre +
   vertex, with *Sides* and *Across flats* shown in the toolbar while the tool is active. Dashed
   previews follow the cursor. Both create constrained, dimensioned ordinary geometry
   (docs/behavior/sketching.md "Slot and regular polygon"). UI test
-  `crates/rcad/tests/sketch_shapes_ui.rs`.
+  `crates/rcad/tests/it/sketch_shapes_ui.rs`.
 * **Pattern… (sketch toolbar):** enabled when curves are selected; dialog *Rectangular* /
   *Circular*, *Instances*, *Step x/y (mm)* (+ *Second direction*), or *Angle between (°)* and
   *Centre x/y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
-  the spacing/angle become dimensions. UI test `crates/rcad/tests/sketch_pattern_ui.rs`.
+  the spacing/angle become dimensions. UI test `crates/rcad/tests/it/sketch_pattern_ui.rs`.
 
 ## Edit Feature, messages and first run
 
@@ -141,6 +141,6 @@ be interrupted and still completes, and Undo removes it in one step.
 * **Start card** (empty view): New Sketch on XY, Open Document…, Start from a template (the
   printable-part templates), how to sketch on another plane or a face, and the navigation keys.
 * **File ▸ About R-CAD:** package version, license and source repository.
-* **Glyphs:** `tests/glyphs.rs` fails on any character in the app's string literals that the UI
+* **Glyphs:** `tests/it/glyphs.rs` fails on any character in the app's string literals that the UI
   font cannot draw (it would show as an empty box).
-UI tests: `crates/rcad/tests/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`.
+UI tests: `crates/rcad/tests/it/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`.

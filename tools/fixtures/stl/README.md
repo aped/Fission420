@@ -1,7 +1,7 @@
 # STL fixtures: provenance
 
 Committed under `crates/rcad-exchange/tests/fixtures/stl/`, used by
-`crates/rcad-exchange/tests/stl_fixtures.rs`. Regenerate with `tools/fixtures/stl/gen_freecad.sh`
+`crates/rcad-exchange/tests/it/stl_fixtures.rs`. Regenerate with `tools/fixtures/stl/gen_freecad.sh`
 (FreeCAD 1.1.4 flatpak `org.freecad.FreeCAD`, headless `FreeCADCmd`, plus Python stdlib).
 
 | file | writer | content | proves |

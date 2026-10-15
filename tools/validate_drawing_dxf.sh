@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # External check of the drawing DXF of the 40 x 30 x 10 block with a Ø8 through hole
-# (written by `cargo test -p rcad-commands --test drawings` to artifacts/drawings/sheets/block.dxf)
+# (written by `cargo test -p rcad-commands --test it drawings::` to artifacts/drawings/sheets/block.dxf)
 # with FreeCAD's DXF importer (flatpak org.freecad.FreeCAD) as the independent reader.
 # Expected values are hand-derived for the three standard views at 1:1:
 #   VISIBLE: 12 lines, total 2(40+10) + 2(40+30) + 2(30+10) = 320 mm, 1 circle (the hole, top view)

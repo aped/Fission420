@@ -1,7 +1,7 @@
 # 3MF fixtures: provenance
 
 Committed under `crates/rcad-exchange/tests/fixtures/threemf/`, used by
-`crates/rcad-exchange/tests/threemf_fixtures.rs`. Expected values are analytic (stated in
+`crates/rcad-exchange/tests/it/threemf_fixtures.rs`. Expected values are analytic (stated in
 the generators and asserted in the tests).
 
 | file | writer | content | expected |

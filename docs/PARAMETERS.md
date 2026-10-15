@@ -108,7 +108,7 @@ that claims an older version but contains parameters or expressions is refused.
   expression; a bound value shows its expression with `= value` beside the label.
   **Apply** sends `set_parameter` for unbound numbers (keeps the engine's coalescing of
   rapid edits) and `set_expression` otherwise.
-* Tests: `crates/rcad/tests/parameters_ui.rs` (real widgets: add, bind, edit, undo,
+* Tests: `crates/rcad/tests/it/parameters_ui.rs` (real widgets: add, bind, edit, undo,
   refused edit, rename, delete disabled, unbind; the enclosure's fit clearance; two-face
   measurement).
 

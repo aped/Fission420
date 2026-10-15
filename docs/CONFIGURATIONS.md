@@ -65,10 +65,10 @@ appearance or sketch dimensions not bound to a user parameter, nested configurat
 sub-assemblies, configuration-specific drawings (a drawing shows the active configuration;
 export it once per configuration).
 
-Evidence: `crates/rcad-commands/tests/configurations.rs` (two variants, shared edit,
-batch export, refusals, reopen), `crates/rcad-commands/tests/product_configurations.rs`
+Evidence: `crates/rcad-commands/tests/it/configurations.rs` (two variants, shared edit,
+batch export, refusals, reopen), `crates/rcad-commands/tests/it/product_configurations.rs`
 (80/100 mm enclosure assembly with an optional fan occurrence and drain hole;
 per variant assembly volume/mass, BOM and drawing dimensions; shared height edit; export
-names; no silent overwrite; table edit + undo; reopen), `crates/rcad/tests/extrude_history_ui.rs`,
-`crates/rcad/tests/config_table_ui.rs` (table editing, one undo step, duplicate refused,
+names; no silent overwrite; table edit + undo; reopen), `crates/rcad/tests/it/extrude_history_ui.rs`,
+`crates/rcad/tests/it/config_table_ui.rs` (table editing, one undo step, duplicate refused,
 variant export through the widgets).

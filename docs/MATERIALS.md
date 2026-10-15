@@ -83,20 +83,20 @@ Frame and units: **world** coordinates and axes; mm, mm³, g/cm³, g, g·mm².
   bodies are not in the evaluated model and are refused when listed.
 * `BodySummary.mass` is density × the body's measured volume (cheap; no centroid).
 
-Evidence: `crates/rcad-kernel/tests/mass_properties.rs` (box, cylinder, tube, off-centre hole,
+Evidence: `crates/rcad-kernel/tests/it/mass_properties.rs` (box, cylinder, tube, off-centre hole,
 hole along X, tilted wedge vs. polygon formulas, frustum with coaxial and off-axis holes vs.
 Boole-rule integrals, torus, half ring vs. Pappus, sphere estimate, tetrahedron exactness of
-the cubature, Gauss–Legendre exactness), `crates/rcad-commands/tests/mass_properties.rs`
+the cubature, Gauss–Legendre exactness), `crates/rcad-commands/tests/it/mass_properties.rs`
 (property oracle: 20 × 30 × 40 box at 1.2 g/cm³ = 24 cm³, 28.8 g; centre
 of mass after a known translation and rotation; two bodies; hidden/suppressed; density unit
-edit; catalog; undo; save/reopen; labelled estimate), `crates/rcad/tests/materials_ui.rs`
+edit; catalog; undo; save/reopen; labelled estimate), `crates/rcad/tests/it/materials_ui.rs`
 (inspector widgets).
 
 Assemblies: `mass_properties` also reports component occurrences (`occurrences`, default all
 when `bodies` is absent; `crates/rcad-commands/src/mass.rs`). Each occurrence (one entry per
 nested instance path) counts its component's visible definition bodies placed by the
 occurrence transform (centre of mass moved, inertia rotated), and enters the total; component
-bodies are not also counted as loose bodies. Evidence: `crates/rcad-commands/tests/assembly.rs`
+bodies are not also counted as loose bodies. Evidence: `crates/rcad-commands/tests/it/assembly.rs`
 (`linked_occurrences_follow_the_definition_and_copies_do_not`: three occurrences plus a loose copy), `nested_assembly.rs` (`nested_transforms_bom_and_mass`).
 
 Not done: per-face or layered materials, infill-aware print mass, principal axes / moments

@@ -90,7 +90,7 @@ Numbers use the shortest exact `f64` decimal form.
 * The sketch solver's size limit bounds the importable drawing size.
 
 ## Fixture evidence
-`crates/rcad-exchange/tests/dxf_fixtures.rs` with FreeCAD-written and hand-written fixtures
+`crates/rcad-exchange/tests/it/dxf_fixtures.rs` with FreeCAD-written and hand-written fixtures
 (`tools/fixtures/dxf/README.md`): arc centres/radii/sweeps, bounds, `Sketch::profile()` closure
 and analytic area (600 + 50π, 800 − 12.5π, 500, 1290.32), unit scaling (in, override), mirrored
 OCS arc, unsupported diagnostics (all-or-nothing, partial, layer filter), join tolerance,
@@ -99,4 +99,4 @@ malformed/limit inputs and a garbage-input no-panic sweep; export → reimport r
 (`tools/fixtures/dxf/validate_export.sh`, `ezdxf_check.py`): all PASS.
 
 ## Command-level evidence
-Acceptance scenario D (`crates/rcad-commands/src/acceptance/formats.rs`, steps "D.7"-"D.11"): FreeCAD contour -> sketch -> edit -> extrude -> STEP (FreeCAD-validated), DXF export read back by our importer and by FreeCAD (`tools/check_formats.sh`), declared inch and unitless files, reload without the sources; DXF onto an imported STEP face: `crates/rcad-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.
+Acceptance scenario D (`crates/rcad-commands/src/acceptance/formats.rs`, steps "D.7"-"D.11"): FreeCAD contour -> sketch -> edit -> extrude -> STEP (FreeCAD-validated), DXF export read back by our importer and by FreeCAD (`tools/check_formats.sh`), declared inch and unitless files, reload without the sources; DXF onto an imported STEP face: `crates/rcad-commands/tests/it/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.

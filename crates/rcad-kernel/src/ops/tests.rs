@@ -303,4 +303,4 @@ fn join_and_cut_with_tools_with_inner_loops() {
 // The engulfed-hole cut is a Truck 0.6 result
 // that `cut_prism` still returns; it is detected by `validate::tests::
 // swallowed_hole_cut_is_detected` and refused by the document
-// (rcad-commands/tests/geometry_gate.rs).
+// (rcad-commands/tests/it/geometry_gate.rs).

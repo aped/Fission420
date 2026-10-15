@@ -83,7 +83,7 @@ T-junctions; every edge must be used twice in opposite directions; one connected
 ## Consequences
 
 * Canonical engulfed-hole cut exact: 40000 − 640π mm³, 4 cylinder patches all of radius 8,
-  no radius-5 surface (`prismatic::arc_tests`, `tests/slab_arcs.rs`, `tests/geometry_gate.rs`).
+  no radius-5 surface (`prismatic::arc_tests`, `tests/it/slab_arcs.rs`, `tests/it/geometry_gate.rs`).
   Off-centre partial overlap (Ø16 4 mm off the Ø10) exact, also through the legacy
   `CutThroughAll` command.
 * A cylindrical wall is split into ≤ quarter-turn faces, and at every vertex any level has on
@@ -102,14 +102,14 @@ T-junctions; every edge must be used twice in opposite directions; one connected
   Truck outcomes in different processes (156 vs 161 accepted of ~190 on one stream).
   *Amended:* the cause was the order of `Shell::connected_components` (face addresses);
   the fork now uses an order-stable version (third_party/truck-shapeops/R-CAD-CHANGES.md),
-  and `crates/rcad-commands/tests/cross_process_determinism.rs` requires identical outcomes,
+  and `crates/rcad-commands/tests/it/cross_process_determinism.rs` requires identical outcomes,
   volume bits, refusal texts and STEP text for the whole corpus in five processes.
 
 ## Addendum to ADR 0005: target faces are probed too
 
 The arc corpus found a closed Truck result that the result check accepted although it
 was wrong: a Ø11 cut externally tangent to the wall of an earlier 1 mm pocket returned the
-body with that pocket *filled again* (+72.27 mm³, `tests/arc_fuzz.rs::
+body with that pocket *filled again* (+72.27 mm³, `tests/it/arc_fuzz.rs::
 tangent_round_cut_beside_a_shallow_rounded_pocket`). The check probed result faces only,
 and a refilled void leaves no result face. `verify_prisms_boolean` now also probes both
 sides of the target's faces whose triangles overlap the tool neighbourhood (largest

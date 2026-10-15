@@ -3,7 +3,7 @@
 # threaded pair, split bar (examples/<name>_workflow.json), checked end to end:
 #   0. replay: rcad-cli runs every committed workflow from a scratch directory; every step
 #      as expected and the saved document byte-identical to examples/<name>.rcad.json;
-#   1. exports: crates/rcad-commands/tests/printable_corpus.rs (ignored test) writes placed
+#   1. exports: crates/rcad-commands/tests/it/printable_corpus.rs (ignored test) writes placed
 #      per-body STLs, a 3MF per part, one STEP per body, the closed-form expectations
 #      (spec.json, step_expected.json) and toolpath probes per plate;
 #   2. tools/print/check_print_mesh.py (independent, stdlib Python) against spec.json;
@@ -44,10 +44,10 @@ for p in $PARTS; do
   res "saved document of $p identical to the committed one" $?
 done
 
-note "## 1. exports (cargo test --test printable_corpus -- --ignored)"
+note "## 1. exports (cargo test --test it printable_corpus:: -- --ignored)"
 rm -rf "$EXP"; mkdir -p "$EXP"
 RCAD_EVERYDAY_OUT=$EXP tools/heavy.sh cargo test -p rcad-commands --release \
-  --test printable_corpus export_everyday_parts -- --ignored > "$OUT/export.log" 2>&1
+  --test it printable_corpus::export_everyday_parts -- --ignored > "$OUT/export.log" 2>&1
 res "export test" $?
 ls "$EXP" | sed 's/^/    /' >> "$SUM"
 

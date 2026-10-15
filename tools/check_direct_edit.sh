@@ -58,7 +58,7 @@ check direct_remove_boss.step "$V0 - pi*25*5" "[0,0,0,60,40,20]" \
 check direct_composed.step "$V0 + 3*$TOP - pi*(25-16)*23 + pi*9*11" "[0,0,0,60,40,25]" \
   "[[19.9,20,10],[20.1,20,10],[30,12,15],[30,12,22.9],[10,5,22.9],[15,20,22.9]]" \
   "[False, True, True, True, True, False]"
-# Through the command API (crates/rcad-commands/tests/direct_edit.rs, RCAD_EVIDENCE_DIR):
+# Through the command API (crates/rcad-commands/tests/it/direct_edit.rs, RCAD_EVIDENCE_DIR):
 # top +4 (bound parameter "lift"), through hole D12 (24 deep), blind hole removed (12 deep).
 if [ -f "$DIR/direct_cmd_lift4.step" ]; then
   check direct_cmd_lift4.step "$V0 + 4*$TOP - pi*20*24 + pi*9*12" "[0,0,0,60,40,25]" \

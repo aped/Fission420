@@ -4,7 +4,7 @@ Status: base/projected views on a sheet, annotations, driven dimensions (partial
 projection, hidden lines, dimensions), `crates/rcad-kernel/src/edges.rs` (exact B-rep edges),
 `crates/rcad-exchange/src/drawing.rs` (sheet primitives, SVG writer),
 `crates/rcad-exchange/src/pdf.rs` (PDF writer), `crates/rcad-exchange/src/drawing_dxf.rs` (DXF writer), `crates/rcad-commands/src/drawings.rs`
-(commands). Tests: `crates/rcad-commands/tests/drawings.rs`.
+(commands). Tests: `crates/rcad-commands/tests/it/drawings.rs`.
 
 ## What is stored and what is computed
 
@@ -138,7 +138,7 @@ decimals.
 
 ## Verification
 
-`crates/rcad-commands/tests/drawings.rs` reads its own output back with two small readers
+`crates/rcad-commands/tests/it/drawings.rs` reads its own output back with two small readers
 written in the test (an XML tag/attribute scanner and a PDF xref + content-stream
 interpreter), independent of the writer's types:
 
@@ -233,12 +233,12 @@ build refuses such a file instead of dropping the annotations).
   model's referenceable faces and holes, tolerance type and values, **Add dimension**;
   note text, **Add note**), each annotation listed under its view with a × button.
 
-Evidence: `crates/rcad-commands/tests/drawing_annotations.rs` (thickness ±0.1, hole position
+Evidence: `crates/rcad-commands/tests/it/drawing_annotations.rs` (thickness ±0.1, hole position
 deviation, hole limits; values follow a Ø/position/thickness edit; deleting the hole makes
 both hole dimensions dangling with no value and no stale text in the SVG; undo restores;
 save/reopen as v7 gives the same report; assembly sheet: BOM rows/quantities/part numbers/
 materials, suppressed occurrence → quantity 2, balloons 1 and 2, notes, toggles, PDF/DXF
-export), `crates/rcad/tests/drawings_ui.rs`
+export), `crates/rcad/tests/it/drawings_ui.rs`
 (`annotate_a_drawing_and_make_an_assembly_drawing_from_the_browser`: the same through the
 real widgets).
 

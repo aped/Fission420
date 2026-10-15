@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # External (FreeCAD / OpenCascade) validation of the sheet-metal and surface
 # acceptance outputs, written by
-#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test sheet_surface_acceptance
+#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test it sheet_surface_acceptance::
 # usage: tools/heavy.sh tools/validate_sheet_surface.sh DIR
 # Expected values are closed form (derived here, not read from R-CAD):
 #   U-channel, width 40, K 0.4, straights between tangent points 60 + 20 + 20, two 90° bends:

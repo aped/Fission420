@@ -33,7 +33,7 @@ The product side needed three related fixes:
 
 ## Verification
 Each fork change has a test that fails on the previous code. Product-path cases
-(`crates/rcad-kernel/tests/revolved_booleans.rs`) go through `combine`: Truck, then the
+(`crates/rcad-kernel/tests/it/revolved_booleans.rs`) go through `combine`: Truck, then the
 independent membership check, then exact volume within 1e-6 of the closed form. The cases are a
 groove on 4 seams, a collar, a countersink cone and a ring boss. FreeCAD reads all of them as one
 valid solid with zero symmetric difference against its own primitive-built solids

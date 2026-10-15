@@ -6,7 +6,7 @@
 # with all glyph regions in one Join; then a length edit that the cavity, lid
 # and text follow, an excessive radius refused, undo/redo, save/close/reopen
 # and STEP export. Expected volumes: closed-form (rounded rectangle areas;
-# glyph area of B8 at 12 mm from tests/rounded_enclosure.rs = 103.380146 mm²).
+# glyph area of B8 at 12 mm from tests/it/rounded_enclosure.rs = 103.380146 mm²).
 clickw New
 wait_idle
 typew New parameter name | length

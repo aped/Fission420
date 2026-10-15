@@ -153,8 +153,8 @@ Colours, layers, PMI, product structure (beyond names and flattened placements),
 instance names, and the original face partition of periodic faces. Units are converted to mm
 once; the source unit is reported but not kept on the geometry.
 
-### Fixture evidence (`cargo test --release -p rcad-kernel --test step_import`)
-Expected values are analytic. Timings: `--test step_import_report -- --ignored --nocapture`,
+### Fixture evidence (`cargo test --release -p rcad-kernel --test it step_import::`)
+Expected values are analytic. Timings: `--test it step_import_report:: -- --ignored --nocapture`,
 release build, Ryzen 7 9800X3D; most of the sphere/torus time is the tessellation-based
 orientation check.
 
@@ -192,4 +192,4 @@ revolved cylinder face) -> exact volume.
   volumes within 7e-7 mm^3 of analytic).
 
 ## Command-level evidence
-Acceptance scenario C (`crates/rcad-commands/src/acceptance/formats.rs`, steps "C.1"-"C.8") runs these fixtures through `Session::execute`: import, imported-face sketch + through-all cut, save/delete source/reopen, export validated by FreeCAD (`tools/check_formats.sh`), curved/unit/multi-solid imports and failed imports leaving the document unchanged. Edge cases: `crates/rcad-commands/tests/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.
+Acceptance scenario C (`crates/rcad-commands/src/acceptance/formats.rs`, steps "C.1"-"C.8") runs these fixtures through `Session::execute`: import, imported-face sketch + through-all cut, save/delete source/reopen, export validated by FreeCAD (`tools/check_formats.sh`), curved/unit/multi-solid imports and failed imports leaving the document unchanged. Edge cases: `crates/rcad-commands/tests/it/imports.rs`. Summary matrix: `docs/FORMAT_SUPPORT.md`.

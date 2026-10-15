@@ -7,7 +7,7 @@
 # volume 12000 - 90*pi (analytic, computed here) within max(0.001, V*1e-7).
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
-cargo test --release -q -p rcad-kernel --test step_import imported_box_can_be_cut_measured_and_exported || exit 1
+cargo test --release -q -p rcad-kernel --test it step_import::imported_box_can_be_cut_measured_and_exported || exit 1
 FILE="$REPO/target/tmp/imported_box_hole.step"
 mkdir -p "$REPO/artifacts/step_import"
 cp "$FILE" "$REPO/artifacts/step_import/imported_box_hole.step"

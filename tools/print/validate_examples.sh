@@ -2,7 +2,7 @@
 # Print-export validation of the REAL printable examples (rcad_commands::printables):
 # enclosure baseline + variant (base + lid), clearance coupon (plate + peg), mounting bracket,
 # organizer tray baseline / variant 1 / finished.
-#   1. crates/rcad-commands/tests/print_examples.rs (ignored test) replays the example workflows
+#   1. crates/rcad-commands/tests/it/print_examples.rs (ignored test) replays the example workflows
 #      and writes placed per-body STLs, multi-object 3MFs, one STEP per body, and analytic
 #      expectations (spec.json for the mesh checker, step_expected.json for FreeCAD);
 #   2. tools/print/check_print_mesh.py (independent, stdlib Python) against spec.json;
@@ -30,10 +30,10 @@ note() { echo "$*" | tee -a "$SUM"; }
 res() { if [ "$2" -ne 0 ]; then FAIL=1; note "  $1: FAIL (exit $2)"; else note "  $1: ok"; fi; }
 
 note "# validate_examples.sh $(date -Is)  commit $(git rev-parse --short HEAD 2>/dev/null)"
-note "## 1. exports (cargo test --test print_examples -- --ignored)"
+note "## 1. exports (cargo test --test it print_examples:: -- --ignored)"
 rm -rf "$EXP"; mkdir -p "$EXP"
 RCAD_PRINT_EXAMPLES_OUT=$EXP tools/heavy.sh cargo test -p rcad-commands --release \
-  --test print_examples -- --ignored > "$OUT/export.log" 2>&1
+  --test it print_examples:: -- --ignored > "$OUT/export.log" 2>&1
 res "export test" $?
 ls "$EXP" | sed 's/^/    /' >> "$SUM"
 

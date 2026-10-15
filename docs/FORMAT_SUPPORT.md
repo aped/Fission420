@@ -25,7 +25,7 @@ The desktop app's Import… dialog (`crates/rcad/src/exchange.rs`) accepts `.ste
 `.stl`, `.3mf`, `.dxf` and `.svg`, asks for units only when needed (always for STL; for
 STEP/DXF/SVG after the file declared none; never for 3MF) and a plane for DXF/SVG. The Export
 menu has STL, STEP, 3MF (body selection), DXF and SVG (one sketch) dialogs (docs/UI.md rows
-Import/Export). App tests (`crates/rcad/tests/exchange_ui.rs`) drive import of all five
+Import/Export). App tests (`crates/rcad/tests/it/exchange_ui.rs`) drive import of all five
 formats and export of STEP, STL, DXF and 3MF; Export SVG… is not driven by an app test (the
 command is covered by acceptance 3S).
 
@@ -64,7 +64,7 @@ DXF/SVG profiles with **holes and counters**, and malformed or unsupported
 STEP/STL/3MF/DXF/SVG files (truncated, NaN, unknown unit, required beam-lattice extension,
 singular transform); provenance in `tools/fixtures/corpus/MANIFEST.md`. FreeCAD is the
 independent CAD implementation; no file from another CAD vendor yet.), checked by
-`crates/rcad-commands/tests/format_corpus.rs` against FreeCAD read-back or closed-form values;
+`crates/rcad-commands/tests/it/format_corpus.rs` against FreeCAD read-back or closed-form values;
 malformed files must fail with a bounded error and leave no partial document. A curved
 STEP solid's tessellation-estimated volume (sphere) is compared within its stated error;
 the binary STL's volume against the exact rational sum over its float32 vertices (FreeCAD's
@@ -174,8 +174,8 @@ export and Cut of a mesh body are refused and nothing is written; the mesh body 
 **Print export** ([`PRINT_EXPORT.md`](PRINT_EXPORT.md)): strict solid checks (closed edges,
 manifold vertices, orientation, positive volume; bounded self-intersection check as a warning), `angle_deg`,
 export-only placement/layout, P1S/manual bed fit, `separate_files`, `allow_open_meshes`,
-per-body report. Evidence: `crates/rcad-commands/tests/print_export.rs`,
-`crates/rcad-kernel/tests/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,
+per-body report. Evidence: `crates/rcad-commands/tests/it/print_export.rs`,
+`crates/rcad-kernel/tests/it/mesh_checks.rs`, `tools/print/validate_print_exports.sh` (Python,
 FreeCAD, Bambu Studio 2.8.2.61 slicing; logs `artifacts/print/validation/`).
 
 **Mesh inspection and edits** ([`MESH.md`](MESH.md)): duplicates, per-component
@@ -220,7 +220,7 @@ linetype and colour; design intent (constraints); sketch placement on export.
 `rcad_exchange::threemf::{read, write}` ([`formats/threemf.md`](formats/threemf.md)), exposed
 as `import_3mf` (base feature `Import3mf`, source embedded, one mesh body per
 build item, display/export only) and `export_3mf` (`bodies` default all visible, `unit`,
-`chord`, print options: [`PRINT_EXPORT.md`](PRINT_EXPORT.md); geometry only, no slicer settings). Command-level evidence: `crates/rcad-commands/tests/bodies.rs::threemf_import_and_multi_body_export_round_trip`
+`chord`, print options: [`PRINT_EXPORT.md`](PRINT_EXPORT.md); geometry only, no slicer settings). Command-level evidence: `crates/rcad-commands/tests/it/bodies.rs::threemf_import_and_multi_body_export_round_trip`
 (FreeCAD two-box fixture imported; three-body export in inch re-imported with exact
 volumes). UI: Import… and Export 3MF… (`exchange_ui.rs::threemf_import_export_and_svg_sketch`
 imports the FreeCAD two-box fixture without a unit prompt and exports all visible bodies).
@@ -257,7 +257,7 @@ non-SVG namespace (Inkscape `sodipodi:`/`inkscape:`, RDF). Export: lines, arcs, 
 local sketch coordinates, mm, y negated; construction geometry and constraints are not
 written.
 
-Evidence: `crates/rcad-exchange/tests/svg_fixtures.rs` (15 tests: hand-written `plate_mm.svg`,
+Evidence: `crates/rcad-exchange/tests/it/svg_fixtures.rs` (15 tests: hand-written `plate_mm.svg`,
 FreeCAD-generated `freecad_plate.svg`, the edge cases above); acceptance 3S (FreeCAD SVG →
 sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_scenario_steps.sh`
 (FreeCAD validates the 3S STEP and reads the exported SVG with `importSVG`: total edge length
@@ -315,7 +315,7 @@ docs/DRAWINGS.md). Written only when a document has a drawing (`io::v6_feature`,
 
 **Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. A file with any other
 format name is refused with an error naming the format found; the extension is never
-checked. Evidence: `crates/rcad-document/tests/format_name.rs`.
+checked. Evidence: `crates/rcad-document/tests/it/format_name.rs`.
 
 **v4** = v3 plus named user parameters and feature expression bindings
 (docs/PARAMETERS.md); v3 files load unchanged (frozen v3 documents in
@@ -337,7 +337,7 @@ separate a body (ADR 0003); a document without them is written at its older vers
 
 ## Qualification scenario: external exchange
 
-`crates/rcad-commands/tests/exchange_qualification.rs` (6 tests, typed command API), on files
+`crates/rcad-commands/tests/it/exchange_qualification.rs` (6 tests, typed command API), on files
 made by another implementation (FreeCAD 1.1.4, `tools/fixtures/corpus/`) or hand-written from
 the specifications:
 
@@ -375,10 +375,10 @@ Reproduce (from the repository root):
 cargo run --release -p rcad-cli -- acceptance --out artifacts/acceptance   # scenarios C and D are the "C." / "D." steps
 tools/external_validation.sh artifacts/acceptance                          # FreeCAD checks incl. tools/check_formats.sh
 tools/check_scenario_steps.sh                                                  # scenario STEP exports incl. 3S + exported SVG via FreeCAD
-cargo test --release -p rcad-commands --test imports --test native_formats --test bodies
-cargo test --release -p rcad-kernel --test step_import --test step_export_multi
+cargo test --release -p rcad-commands --test it -- imports:: native_formats:: bodies::
+cargo test --release -p rcad-kernel --test it -- step_import:: step_export_multi::
 cargo test --release -p rcad-exchange
-cargo test --release -p rcad --test exchange_ui
+cargo test --release -p rcad --test it exchange_ui::
 tools/check_step_multi.sh; tools/fixtures/stl/validate_writer.sh; tools/fixtures/dxf/validate_export.sh
 tools/fixtures/threemf/validate_writer.sh
 ```
@@ -390,13 +390,13 @@ Test results below are from `cargo xtask check` (log `artifacts/verify/xtask.log
 | Acceptance C.1-C.8, D.1-D.11, 3S | `crates/rcad-commands/src/acceptance/formats.rs`, `bodies.rs` (`scenario_svg`); reports `artifacts/acceptance/acceptance_report.json` (written by `cargo xtask check`) | all checks PASS (855 total, all scenarios; C 120, D 90, 3S 10) |
 | FreeCAD validation of C/D exports | `tools/check_formats.sh` (called by `tools/external_validation.sh`); per-file results `artifacts/acceptance/{scenario_c,scenario_d_slot}_step_check_freecad.txt`, `scenario_d_mesh_stl_check_*.{json,txt}`, `scenario_d_slot_dxf_check_freecad.txt`, `formats_check.txt`; log `artifacts/verify/external_validation.log` | PASS: scenario_c 1 valid solid, V err 2.1e-7 mm³, bbox 40×30×10, hole loops at z 0/10 centred (20,15) area 9π, point probes; scenario_d_slot V err −2.9e-8; mesh STL V 1000; DXF area 800 + 50π |
 | FreeCAD validation of 3S (SVG) | `tools/check_scenario_steps.sh`; log `artifacts/verify/check_scenario_steps.log` | PASS: `svg_plate.step` V err 4.6e-7, bounds, probes; `svg_plate.svg` via `importSVG` length 220 + 20π, 60 × 40 |
-| Command-level import edge cases | `crates/rcad-commands/tests/imports.rs`; 3MF: `bodies.rs::threemf_import_and_multi_body_export_round_trip` | 12 + 8 pass |
-| UI import/export dialogs | `crates/rcad/tests/exchange_ui.rs` | 6 pass |
-| Native v1/v2/v3 | `crates/rcad-commands/tests/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |
-| Kernel STEP import/export | `crates/rcad-kernel/tests/step_import.rs`, `step_export_multi.rs` | 13 + 4 pass (1 ignored: artifact writer for `tools/check_step_multi.sh`) |
-| STL/DXF adapters | `crates/rcad-exchange/tests/stl_fixtures.rs`, `dxf_fixtures.rs`, `dxf_scale.rs` + unit tests in `src/{stl,mesh,dxf}`; validators `tools/fixtures/stl/validate_writer.sh`, `tools/fixtures/dxf/validate_export.sh`, logs `artifacts/verify/stl_validate.log`, `artifacts/verify/dxf_validate.log` | 7 + 13 + 2 pass |
-| 3MF adapter | `crates/rcad-exchange/tests/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/verify/threemf_validate.log` | 9 + 6 pass; writer checked by the Python stdlib reader and FreeCAD |
-| SVG adapter | `crates/rcad-exchange/tests/svg_fixtures.rs` | 15 pass |
+| Command-level import edge cases | `crates/rcad-commands/tests/it/imports.rs`; 3MF: `bodies.rs::threemf_import_and_multi_body_export_round_trip` | 12 + 8 pass |
+| UI import/export dialogs | `crates/rcad/tests/it/exchange_ui.rs` | 6 pass |
+| Native v1/v2/v3 | `crates/rcad-commands/tests/it/native_formats.rs` (v1 fixture, 5 frozen v2 documents, 7 examples) | 4 pass |
+| Kernel STEP import/export | `crates/rcad-kernel/tests/it/step_import.rs`, `step_export_multi.rs` | 13 + 4 pass (1 ignored: artifact writer for `tools/check_step_multi.sh`) |
+| STL/DXF adapters | `crates/rcad-exchange/tests/it/stl_fixtures.rs`, `dxf_fixtures.rs`, `dxf_scale.rs` + unit tests in `src/{stl,mesh,dxf}`; validators `tools/fixtures/stl/validate_writer.sh`, `tools/fixtures/dxf/validate_export.sh`, logs `artifacts/verify/stl_validate.log`, `artifacts/verify/dxf_validate.log` | 7 + 13 + 2 pass |
+| 3MF adapter | `crates/rcad-exchange/tests/it/threemf_fixtures.rs` + unit tests in `threemf.rs`/`zip.rs`; writer: `tools/fixtures/threemf/validate_writer.sh`, log `artifacts/verify/threemf_validate.log` | 9 + 6 pass; writer checked by the Python stdlib reader and FreeCAD |
+| SVG adapter | `crates/rcad-exchange/tests/it/svg_fixtures.rs` | 15 pass |
 | Replayable workflows | `examples/imported_step_hole_workflow.json`, `examples/dxf_stl_import_workflow.json` (`rcad-cli run`, from the repository root) with saved documents `examples/*.rcad.json` | replayed by `imports.rs` |
 
 `artifacts/` is not versioned; rerun the commands above to regenerate the logs.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # External validation of the rounded labelled enclosure acceptance test:
 #   1. the acceptance test writes the native document, workflow, expected values and
-#      STEP/STL/3MF exports (crates/rcad-commands/tests/rounded_enclosure.rs);
+#      STEP/STL/3MF exports (crates/rcad-commands/tests/it/rounded_enclosure.rs);
 #   2. FreeCAD reads the STEP: 2 valid solids at the analytic volumes;
 #   3. the independent Python mesh checker (tools/print/check_print_mesh.py) with a spec
 #      derived from the expected values (volume tolerance = curved area x export chord);
@@ -15,7 +15,7 @@ mkdir -p "$OUT"; OUT=$(readlink -f "$OUT"); ROOT=$(pwd); FAIL=0
 mark() { if [ "$1" -ne 0 ]; then FAIL=1; echo "   -> FAIL (exit $1)"; else echo "   -> ok"; fi; }
 echo "== 1. acceptance test + exports"
 RCAD_EVIDENCE_DIR=$OUT tools/heavy.sh cargo test -p rcad-commands --release \
-  --test rounded_enclosure > "$OUT/test.log" 2>&1; mark $?
+  --test it rounded_enclosure:: > "$OUT/test.log" 2>&1; mark $?
 echo "== 2. FreeCAD STEP"
 tools/heavy.sh flatpak run --env=RCAD_STEP="$OUT/rounded_enclosure.step" --env=RCAD_EXPECT_SOLIDS=2 \
   --filesystem="$ROOT" --filesystem="$OUT" --command=FreeCADCmd org.freecad.FreeCAD \

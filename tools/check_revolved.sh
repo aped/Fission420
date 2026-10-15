@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Independent FreeCAD (OpenCascade) validation of revolved Join/Cut results written by
-#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --test revolved_booleans
+#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --test it revolved_booleans::
 # usage: tools/heavy.sh tools/check_revolved.sh DIR
 # Two independent checks per file:
 # 1. FreeCAD reads one valid solid; bounds (1e-6 mm) and inside/outside probes hand-derived from
-#    the test geometry (crates/rcad-kernel/tests/revolved_booleans.rs); volume against the closed
+#    the test geometry (crates/rcad-kernel/tests/it/revolved_booleans.rs); volume against the closed
 #    form to 5e-5 relative. OpenCascade's integration of our exports is off by up to ~1e-5
 #    relative because the writer gives planar faces no pcurves and OCC's own pcurves for their
 #    circular edges are approximations (see tools/check_direct_edit.sh). Our exact volumes are
@@ -59,7 +59,7 @@ check revolved_collar.step "3384*pi" "[-14,-14,0,14,14,30]" \
 check revolved_countersink.step "4000 - 50.625*pi" "[-10,-10,-10,10,10,0]" \
   "[[0,0,-1],[3,0,-0.5],[5.3,0,-0.5],[2,0,-4],[1.2,0,-4],[0,0,-9]]" \
   "[True, False, True, True, False, True]"
-# Cup drawn against the axis (new body, written by crates/rcad-commands/tests/revolve_options.rs
+# Cup drawn against the axis (new body, written by crates/rcad-commands/tests/it/revolve_options.rs
 # when RCAD_EVIDENCE_DIR is set): outer R 25 x 60 on world Y, wall 2, floor 5.
 check revolved_cup_floor5.step "pi*(625*60 - 529*55)" "[-25,0,-25,25,60,25]" \
   "[[24,30,0],[0,30,0],[0,2,0],[26,30,0],[0,4,0],[0,6,0],[0,30,24]]" \

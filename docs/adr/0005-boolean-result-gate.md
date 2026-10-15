@@ -67,7 +67,7 @@ and validating with the same boolean is not independent.
   tried and fails in Truck on the second half. The supported route is to edit the existing
   hole's dimension (control test). Kernel limitation, not fixed.
 * Thin skin / flange joins and their linear, circular and mirror copies are now **exact**
-  (`crates/rcad-commands/tests/geometry_gate.rs`, each with an adjacent control).
+  (`crates/rcad-commands/tests/it/geometry_gate.rs`, each with an adjacent control).
 * Verification is to the validation tessellation's tolerance: a defect thinner than the probe
   offset on a curved face, or confined to a face region that no probe reaches, could pass.
   The check is a strong guard against wrong whole faces (the observed failure mode), not a

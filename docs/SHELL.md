@@ -45,10 +45,10 @@ corners become concentric arcs of radius r − t) and the floor is `thickness` t
 
 ## Evidence
 
-`crates/rcad-commands/tests/shell.rs`: 80×50×25 open-top shell t = 2 equals the enclosure base
+`crates/rcad-commands/tests/it/shell.rs`: 80×50×25 open-top shell t = 2 equals the enclosure base
 19592 mm³ with point probes of the four walls, floor, cavity and open top; parameter edits to
 100×65×30, t = 2.4 (36823.296 mm³) with probes; undo/redo; start-cap opening; a rounded
 rectangle 60×40 r 6 shell matching w·h − (4 − π)r² for outer and offset profiles; refusals
 (thickness ≥ distance, walls meeting, corner radius collapse, inner loops, non-New-Body
-source). `crates/rcad/tests/shell_ui.rs`: Shell… in the inspector, thickness edited from
+source). `crates/rcad/tests/it/shell_ui.rs`: Shell… in the inspector, thickness edited from
 the inspector.

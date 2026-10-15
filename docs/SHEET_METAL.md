@@ -110,7 +110,7 @@ is not supported, and the pattern would silently miss them.
 `examples/sheet_u_channel_workflow.json` / `examples/sheet_u_channel.rcad.json`: base 60 × 40,
 t 1, R 2, K 0.4, 90° up flanges of length 20 on the two 40 mm edges. Straights between tangent
 points 60 + 20 + 20; flat length 100 + 2·(π/2)·(2 + 0.4·1) = **107.539822 mm**.
-Verified in `crates/rcad-commands/tests/sheet_flanges.rs` and `sheet_surface_acceptance.rs`
+Verified in `crates/rcad-commands/tests/it/sheet_flanges.rs` and `sheet_surface_acceptance.rs`
 (closed-form volume, bounding box, point membership, independent DXF parse; thickness/radius
 edit to t 2, R 3; refused self-overlapping flanges) and externally by FreeCAD
 (`tools/validate_sheet_surface.sh`: folded and flat STEP volume/bbox/validity, DXF closed CUT

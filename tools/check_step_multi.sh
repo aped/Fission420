@@ -12,7 +12,7 @@
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DIR="$REPO/artifacts/step_multi"
-cargo test --release -q -p rcad-kernel --test step_export_multi -- --ignored write_multi_step_artifact || exit 1
+cargo test --release -q -p rcad-kernel --test it -- --ignored step_export_multi::write_multi_step_artifact || exit 1
 if ! flatpak info org.freecad.FreeCAD >/dev/null 2>&1; then
   echo "FreeCAD flatpak not installed: external multi-body STEP validation NOT RUN"
   exit 2

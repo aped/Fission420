@@ -13,7 +13,7 @@
 set -u -o pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DIR="$REPO/artifacts/step_curves"
-cargo test --release -q -p rcad-kernel --test ellipse_spline -- --ignored write_curve_step_artifacts || exit 1
+cargo test --release -q -p rcad-kernel --test it -- --ignored ellipse_spline::write_curve_step_artifacts || exit 1
 if ! flatpak info org.freecad.FreeCAD >/dev/null 2>&1; then
   echo "FreeCAD flatpak not installed: external curve STEP validation NOT RUN"
   exit 2

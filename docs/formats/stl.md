@@ -45,7 +45,7 @@ an open mesh never gets a volume.
 * Mixed or non-UTF-8 ASCII STL is rejected rather than guessed.
 
 ## Fixture evidence
-`crates/rcad-exchange/tests/stl_fixtures.rs` with fixtures from FreeCAD 1.1.4 and Python
+`crates/rcad-exchange/tests/it/stl_fixtures.rs` with fixtures from FreeCAD 1.1.4 and Python
 (`tools/fixtures/stl/README.md`): ASCII = binary geometry, box closed with volume 1000 / area 700,
 open box 4 boundary edges and no volume, `solid`-header binary detected, truncated / malformed /
 NaN / unterminated / over-limit inputs rejected with the right error. Writer output validated by

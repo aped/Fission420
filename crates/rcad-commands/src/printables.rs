@@ -5,7 +5,7 @@
 //! editing parameters (in the Parameters panel or with `set_user_parameter`),
 //! never by re-entering dimensions. The replayable workflows
 //! `examples/{enclosure,clearance_coupon,mounting_bracket}_workflow.json` are
-//! generated from these builders (see `tests/printable_examples.rs`).
+//! generated from these builders (see `tests/it/printable_examples.rs`).
 //!
 //! Construction (honest labels): the enclosure cavity is a blind rectangular
 //! Cut from the base's top face (an editable pocket, not a generic Shell); the

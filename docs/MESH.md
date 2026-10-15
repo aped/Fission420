@@ -109,11 +109,11 @@ Performance (release build, one 159 200-triangle UV sphere r 50): self-intersect
 * `rcad-exchange` unit tests (`mesh_repair::tests`): clean cube only welds; flipped,
   duplicate, degenerate fixed; inside-out cube turned outward; tolerance weld closes a crack;
   planar hole filled, over-limit hole counted once; non-planar hole left open; bad options.
-* `crates/rcad-commands/tests/mesh_repair.rs`: STL import → diagnosis → preview (no change)
+* `crates/rcad-commands/tests/it/mesh_repair.rs`: STL import → diagnosis → preview (no change)
   → apply (new closed body, 8000 mm³ mass-properties volume, source kept/hidden) → undo/redo
   → parameter edit and refusal → save/reopen v7; B-rep and unknown bodies refused.
-* `crates/rcad/tests/mesh_repair_ui.rs`: the same through the inspector widgets.
-* `rcad-exchange` `tests/mesh_edit.rs` (voxel solids with volumes known by counting cubes,
+* `crates/rcad/tests/it/mesh_repair_ui.rs`: the same through the inspector widgets.
+* `rcad-exchange` `tests/it/mesh_edit.rs` (voxel solids with volumes known by counting cubes,
   a UV sphere): duplicates and per-component bounds/volume; self-intersection finds
   interpenetrating shells, none on a clean block, partial when bounded; transform volume ×
   25.4³ and rotated bounds, mirroring refused; plane cuts (through vertices, oblique, generic:
@@ -122,11 +122,11 @@ Performance (release build, one 159 200-triangle UV sphere r 50): self-intersect
   < 80 of 192 triangles); sphere within 0.1 mm (re-measured independently), exact targets,
   early stop note; open plate boundary and area preserved. `mesh_query` unit tests: point-
   triangle regions, touching vs crossing pairs, grid search equals brute force.
-* `crates/rcad-commands/tests/mesh_edit.rs`: STL import → inspect (read only) → transform
+* `crates/rcad-commands/tests/it/mesh_edit.rs`: STL import → inspect (read only) → transform
   preview/apply (inch preset) → two-sided cut (16000 + 48000 mm³) → decimation (64000 mm³,
   deviation ≤ 0.001) → undo/redo → cut offset parameter (24000 + 40000) and refused
   parameters → save v8 / reopen; B-rep and unknown bodies refused.
-* `crates/rcad/tests/mesh_edit_ui.rs`: inspection, self-intersection check, plane cut
+* `crates/rcad/tests/it/mesh_edit_ui.rs`: inspection, self-intersection check, plane cut
   preview/apply and the inch preset through the inspector widgets.
 * External, edits: `tools/validate_mesh_edit.sh <rcad-cli>` replays
   `tools/fixtures/mesh_edit_workflow.json` on FreeCAD's ASCII sphere (corpus `m2`): two-sided

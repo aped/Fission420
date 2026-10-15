@@ -39,7 +39,7 @@ y negated. Stroke only, no fill. Losses: constraints, dimensions, construction g
 sketch placement (plane) — the same contract as DXF export.
 
 ## Evidence
-* `crates/rcad-exchange/tests/svg_fixtures.rs` (15 tests): hand-written fixture
+* `crates/rcad-exchange/tests/it/svg_fixtures.rs` (15 tests): hand-written fixture
   `plate_mm.svg` (arc, circle, translated group; exact region area), FreeCAD-generated
   `freecad_plate.svg` (`tools/fixtures/svg/generate_freecad_svg.py`; reflected group
   transform, arcs; analytic region area 2400 − 36π − (80 + 16π)), units/override, transforms,

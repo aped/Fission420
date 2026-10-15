@@ -399,7 +399,7 @@ const FALLBACK_REFINE: f64 = 4.0;
 /// triangulation is not guaranteed to honour the chord exactly or to refine
 /// uniformly, saddle regions (e.g. a torus' inner half) partially cancel, and
 /// features smaller than the chord can be missed entirely. Observed (torus R 40,
-/// r 10, tests/volume_general.rs): errors at chord rel 1e-3 / 3e-4 / 1e-4 were
+/// r 10, tests/it/volume_general.rs): errors at chord rel 1e-3 / 3e-4 / 1e-4 were
 /// -4.4e-3 / -1.1e-3 / -3.3e-4 relative (linear in the chord), estimate / error ~3,
 /// ~180 ms for revolve + measure (revolve measures once itself) at the chosen 1e-4.
 fn tessellation_volume(body: &Body) -> std::result::Result<(f64, f64), String> {

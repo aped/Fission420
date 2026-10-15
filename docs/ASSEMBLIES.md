@@ -199,8 +199,8 @@ this definition), Joint…, Explode…, Delete. **Create empty** component; **Al
 explicit / cylinder-face / two-face-edge axis, slot or in-plane direction, initial values and
 limits per DOF, DOF feedback before creation); joint **Edit…** per value and limits; **Bill of
 materials** (flattened), **Structured BOM**, **Check interference** (selectable results),
-**Exploded view**. Evidence: `crates/rcad/tests/assembly_ui.rs`,
-`crates/rcad/tests/assembly_tree_ui.rs` (egui_kittest real widgets).
+**Exploded view**. Evidence: `crates/rcad/tests/it/assembly_ui.rs`,
+`crates/rcad/tests/it/assembly_tree_ui.rs` (egui_kittest real widgets).
 
 ## Not supported (refused or absent)
 
@@ -221,9 +221,9 @@ materials** (flattened), **Structured BOM**, **Check interference** (selectable 
 
 ## Evidence
 
-`crates/rcad-commands/tests/assembly.rs` (flat model), `nested_assembly.rs` (nesting,
+`crates/rcad-commands/tests/it/assembly.rs` (flat model), `nested_assembly.rs` (nesting,
 paths, cyclic refusal, BOM, mass, joints inside sub-assemblies, activation, hidden, explode,
 independent copy, alignment, cylindrical/pin-slot/planar/ball joints, v7 save/reopen),
 `hinge_acceptance.rs` (hinge acceptance, flat and nested, plus the committed
 `examples/hinge_assembly_workflow.json` replay), `slider_acceptance.rs` (slider acceptance),
-`crates/rcad-kernel/tests/step_export_assembly.rs`, `tools/check_step_assembly.sh` (FreeCAD).
+`crates/rcad-kernel/tests/it/step_export_assembly.rs`, `tools/check_step_assembly.sh` (FreeCAD).

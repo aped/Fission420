@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Independent FreeCAD (OpenCascade) validation of the slab-construction fixtures
 # (ADR 0007) written by
-#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test slab_arcs --test rim_notch
+#   RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test it -- slab_arcs:: rim_notch::
 # usage: tools/heavy.sh tools/check_slab_arcs.sh DIR
 # Expected volumes, bounds and probe classifications are analytic (derived here, not read
 # from R-CAD output). Checks per file: STEP readable, exactly one solid, isValid

@@ -6,7 +6,7 @@
 # case (expected solid without the countersink) must NOT vanish, so a silently failing
 # boolean cannot pass.
 # Files from: RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-kernel --lib direct
-#             RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test direct_edit
+#             RCAD_EVIDENCE_DIR=DIR cargo test --release -p rcad-commands --test it direct_edit::
 # usage: tools/heavy.sh tools/check_direct_edit_expected.sh DIR
 set -u -o pipefail
 DIR=$(realpath "${1:?usage: check_direct_edit_expected.sh DIR}")
@@ -50,7 +50,7 @@ check direct_composed.step "$(blk 23 5 0 1)" 0 $TOL
 check direct_cmd_lift4.step "$(blk 24 6 0 1)" 0 $TOL
 CONE="; exp=b.cut(Part.makeCone(4,9,5,V(15,20,16)))"
 check csink_block_d16.step "$(blk 20 4 1 1)$CONE" 0 $TOL
-# Countersink feature through the command API (rcad-commands tests/countersink.rs): plate
+# Countersink feature through the command API (rcad-commands tests/it/countersink.rs): plate
 # 60x40x10, D8 hole at (30,20), D12 x 82 deg countersink from the top.
 check csink_plate_d8_d12_82.step "h=2/math.tan(math.radians(41)); b=Part.makeBox(60,40,10).cut(Part.makeCylinder(4,20,V(30,20,-5))); exp=b.cut(Part.makeCone(4,4+(h+1)*2/h,h+1,V(30,20,10-h)))" 0 $TOL
 # Tapered tools (kernel taper::tests, RCAD_EVIDENCE_DIR=DIR): block 40x30x10; a 10x10

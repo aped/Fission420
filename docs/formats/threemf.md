@@ -69,7 +69,7 @@ colours are written; no components/instancing is written (each body is a full me
 exact B-rep geometry is tessellated by the caller (3MF is a mesh format).
 
 ## Evidence
-* `crates/rcad-exchange/tests/threemf_fixtures.rs` (9 tests) on FreeCAD-written and
+* `crates/rcad-exchange/tests/it/threemf_fixtures.rs` (9 tests) on FreeCAD-written and
   hand-written fixtures (`tools/fixtures/threemf/README.md`): FreeCAD two-object file,
   inch + rotated item, components + mirror, colours/warnings, production refused,
   bad index, no build, DOCTYPE, decompression bound, lying size header, missing `.rels`,
