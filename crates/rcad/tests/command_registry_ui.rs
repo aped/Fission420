@@ -5,7 +5,10 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::Key;
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use rcad::shell::{KeymapLayer, registry};
 use rcad::{ExecMode, RcadApp};
 
@@ -156,4 +159,32 @@ fn help_sheet_follows_the_key_layer() {
     assert!(h.query_by_label_contains("E extrude").is_none());
     h.get_by_label_contains("F fit view");
     h.get_by_label_contains("R center rect");
+}
+
+/// S opens the command search over the registry: Enter runs the first
+/// enabled match, disabled matches keep their reason, Esc closes.
+#[test]
+fn command_search_runs_registry_commands() {
+    let mut h = harness();
+    h.key_press(Key::S);
+    settle(&mut h);
+    h.get_by_label("Search commands").type_text("new");
+    let _ = h.try_run();
+    h.get_by_label("Search result New");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    assert!(h.state().summary().open, "Enter ran New");
+    assert!(h.query_by_label("Search commands").is_none());
+    // A command that cannot run yet is listed disabled.
+    click(&mut h, "Command search");
+    h.get_by_label("Search commands").type_text("extr");
+    let _ = h.try_run();
+    assert!(
+        h.get_by_label("Search result Extrude…")
+            .accesskit_node()
+            .is_disabled()
+    );
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    assert!(h.query_by_label("Search commands").is_none());
 }

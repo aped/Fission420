@@ -2348,6 +2348,7 @@ impl RcadApp {
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
         self.prefs_ui(&ctx);
+        self.command_search_ui(&ctx);
         self.section_window(&ctx);
         self.import_summary_ui(&ctx);
         self.reattach_ui(&ctx);

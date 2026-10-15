@@ -14,6 +14,7 @@ pub mod keymap;
 pub mod prefs;
 pub mod registry;
 pub mod ribbon;
+pub mod search;
 pub mod timeline;
 
 pub use keymap::KeymapLayer;
@@ -59,6 +60,8 @@ pub struct ShellState {
     pub last_pick: Option<u32>,
     /// The dialog's selection input was cleared and waits for a pick.
     pub pick_armed: bool,
+    /// Command search query while the search popup is open.
+    pub search: Option<String>,
     /// Feature the open dialog edits (Edit Feature), if any.
     pub editing: Option<rcad_document::FeatureId>,
     /// Theme applied to the context (re-applied when it changes).
@@ -87,6 +90,7 @@ impl Default for ShellState {
             tab: registry::Tab::Solid,
             show_prefs: false,
             editing: None,
+            search: None,
             last_pick: None,
             pick_revision: None,
             pick_armed: false,
