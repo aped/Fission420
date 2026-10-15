@@ -69,8 +69,7 @@ jobs:
           - name: windows-x64
             os: windows-2025
             artifact: windows-x86_64
-            # Not gating until one full Windows run is green (docs/CI.md, Gating).
-            gate: false
+            gate: true
           - name: macos-arm64
             os: macos-15
             artifact: macos-arm64

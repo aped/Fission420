@@ -16,7 +16,7 @@ ci.yml
 ├─ debian-13 ───── check.yml: build ─┬─ test 1/2, test 2/2
 │                                    └─ acceptance+examples
 ├─ macos-arm64 ─── same as Ubuntu without lint   (main, v* tags, PRs into main, manual)
-├─ windows-x64 ─── same as Ubuntu without lint   (same; not gating yet)
+├─ windows-x64 ─── same as Ubuntu without lint   (same)
 └─ release (v* tags): needs every leg; draft GitHub release with SHA256SUMS
 ```
 
@@ -55,15 +55,15 @@ nextest retries listed under [Tests](#tests-nextest).
 | ubuntu-24.04 | `ubuntu-24.04` | yes | `r-cad-<version>-linux-x86_64.tar.gz` (glibc 2.39 baseline, so it also runs on Debian 13 and current Fedora) |
 | debian-13 | `ubuntu-24.04` + container `debian:trixie` | yes | none (it would need a newer glibc than the Ubuntu build; this leg only gates) |
 | macos-arm64 | `macos-15` (Apple silicon) | yes | `r-cad-<version>-macos-arm64.tar.gz` |
-| windows-x64 | `windows-2025` (MSVC) | **not yet** | `r-cad-<version>-windows-x86_64.zip` |
+| windows-x64 | `windows-2025` (MSVC) | yes | `r-cad-<version>-windows-x86_64.zip` |
 
 A **non-gating** leg runs everything and shows red when it fails, but its jobs carry
 `continue-on-error`, so the workflow still succeeds. It packages whenever its build
 succeeded; `BUILD_INFO.txt` then says the checks were not required and links the run. A
 gating leg packages only after its tests and replays passed.
 
-To change a leg's gating, set `gate:` for it in `ci.yml`. Windows becomes gating once one
-full Windows run is green (until now no Windows run got past clippy; see the status below).
+To change a leg's gating, set `gate:` for it in `ci.yml`. All four legs gate since the first
+fully green Windows run (see the status below).
 
 ### Caching
 
@@ -307,14 +307,11 @@ CRLF; cross-document float comparisons use tolerances apart from F3.
 |---|---|---|---|---|
 | early runs (one job per leg) | pass, 9–27 min | pass, 9–28 min | pass twice, then L7 | F1 |
 | Actions run ID 38595093305 (`48e0dfa`, one job per leg) | pass, 35 min (test stage 1787 s, of which about 820 s compiling the test binaries) | pass | M1, M2 (fixed since) | W1 at clippy after 4 min (fixed since) |
+| Actions run ID 38785732631 (`5122bdb`, split pipeline, ~200 test binaries, cold cache) | build 27 min; `cross_process_determinism` timed out at 900 s | pass | **pass** (first green macOS run) | first full test run: the same timeout, plus a JSON path escape in `sheet_surface_acceptance` (fixed in `1882dc0`) |
+| Actions run ID 38794623302 (`6e31cf2`, one test binary per crate, faster kernel) | **pass, about 11 min** (build 6, shards 4 + 2, replays 1) | pass | pass | only the path-escape test |
+| Actions run ID 38797613278 (`1882dc0`) | pass | pass | pass | **pass** (first green Windows run; now gating) |
 
-The split pipeline described above has not run on GitHub yet when this was written; the
-first run on `main` confirms (or corrects) the wall-clock estimate and is the first Windows
-run to get past clippy. Next, in value order:
-
-1. Confirm macOS green with the M1/M2 fixes (it is gating now).
-2. Get one full Windows run green, then set `gate: true` for it.
-3. Fix L4 and L5; raise the L6 limits.
+Next, in value order: fix L4 and L5; raise the L6 limits.
 
 ## Regression tests added with CI
 

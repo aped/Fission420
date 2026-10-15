@@ -87,8 +87,8 @@ CI publishes unsigned builds for **Linux x86_64**, **Windows x64** and **macOS A
 versions (`v*`) produce a draft release with the same archives. Each archive holds `rcad`, `rcad-cli`, the example
 documents and a `BUILD_INFO.txt` that says whether that platform's tests passed.
 
-> Windows and macOS builds are produced on every run but are not yet test-gated; see
-> [`docs/CI.md`](docs/CI.md) for the known platform issues.
+> Linux, Windows and macOS builds are all test-gated: an archive is published only after
+> that platform's full test suite and example replays passed; see [`docs/CI.md`](docs/CI.md).
 
 ### From source
 
@@ -193,8 +193,8 @@ case fails loudly instead of producing wrong geometry; a running regeneration ca
 cancelled from the toolbar. Example exports are validated in CAD and slicer software but
 have **not** been physically printed (sliced is not printed).
 
-Linux (Bazzite / Fedora atomic) is the primary development platform. Windows and macOS
-builds are produced by CI and are being brought up to the same test bar.
+Linux (Bazzite / Fedora atomic) is the primary development platform; Windows and macOS
+builds pass the same CI test suite.
 
 The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
