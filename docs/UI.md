@@ -141,6 +141,19 @@ be interrupted and still completes, and Undo removes it in one step.
 * **Start card** (empty view): New Sketch on XY, Open Document…, Start from a template (the
   printable-part templates), how to sketch on another plane or a face, and the navigation keys.
 * **File ▸ About R-CAD:** package version, license and source repository.
+* **File ▸ Quit (Ctrl+Q):** the same unsaved-changes guard as closing the window.
+* **Esc** closes an open About, Help or Preferences window first; in model mode, after a
+  placement, dialog or dimension edit, it clears a refusal notice before the selection.
+* **Plain names:** faces and sketch planes are named "Body1: Extrude1 end cap" / "on Extrude1 end
+  cap" (the reference is on hover in the inspector); the status bar volume line omits an error
+  bound that shows nothing at its precision and counts solids in words.
+* **Units:** dialog value fields say `(mm)` or `(deg)` (test `tests/it/value_labels.rs`).
+* **Tooltips:** workspace tabs and the Loft/Sweep, Planes and Templates dropdowns explain
+  themselves.
+* **Column widths:** a browser or inspector width the user drags is saved in the preferences and
+  restored at the next start.
+* **Scenes** open repository files by paths relative to the working directory when it is the
+  repository, so screenshots show `examples/…`.
 * **Glyphs:** `tests/it/glyphs.rs` fails on any character in the app's string literals that the UI
   font cannot draw (it would show as an empty box).
-UI tests: `crates/rcad/tests/it/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`.
+UI tests: `crates/rcad/tests/it/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`, `polish_ui.rs`, `value_labels.rs`.
