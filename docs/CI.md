@@ -4,7 +4,7 @@
 publishes release archives. Each platform is one call of the reusable workflow
 `.github/workflows/check.yml`, which splits the gate into parallel jobs. Linux
 (Bazzite/Fedora atomic) stays the primary development environment: `cargo xtask check` with
-no arguments still runs everything, in one process, exactly as before.
+no arguments still runs everything in one process.
 
 ## Pipeline
 
@@ -43,9 +43,10 @@ nextest retries listed under [Tests](#tests-nextest).
   finish.
 - **Retention:** test archives and staged binaries 1 day (they only feed later jobs of the
   same run); archives, JUnit reports and failure logs 7 days.
-- A push runs 9 Linux jobs (lint; per Linux leg build, two shards, replay) and, on
-  `main`, 10 more for Windows and macOS (including packaging). Standard runners are free for this public repository;
-  the job count stays well under the 20 concurrent jobs (5 macOS) of the free plan.
+- A push runs 9 Linux jobs (lint; per Linux leg build, two shards, replay) and, on `main`,
+  10 more for Windows and macOS (including packaging). Standard runners are free for this
+  public repository; the job count stays under the 20 concurrent jobs (5 macOS) of the free
+  plan.
 
 ### Gating
 
@@ -129,7 +130,6 @@ job. Split: build job about 18–20 min (binaries, archive, upload, doc tests) �
 the replay job (about 4 min) → package 1 min. About **27–30 min** end to end, bounded by
 compiling the test binaries; lint reports within about 3 min. These are estimates until the
 first run of this pipeline on GitHub.
-
 
 ## `cargo xtask check` stages
 
