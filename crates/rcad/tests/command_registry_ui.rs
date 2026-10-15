@@ -5,7 +5,10 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::Key;
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use rcad::shell::{KeymapLayer, registry};
 use rcad::{ExecMode, RcadApp};
 
@@ -156,4 +159,133 @@ fn help_sheet_follows_the_key_layer() {
     assert!(h.query_by_label_contains("E extrude").is_none());
     h.get_by_label_contains("F fit view");
     h.get_by_label_contains("R center rect");
+}
+
+/// S opens the command search over the registry: Enter runs the first
+/// enabled match, disabled matches keep their reason, Esc closes.
+#[test]
+fn command_search_runs_registry_commands() {
+    let mut h = harness();
+    h.key_press(Key::S);
+    settle(&mut h);
+    h.get_by_label("Search commands").type_text("new");
+    let _ = h.try_run();
+    h.get_by_label("Search result New");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    assert!(h.state().summary().open, "Enter ran New");
+    assert!(h.query_by_label("Search commands").is_none());
+    // A command that cannot run yet is listed disabled.
+    click(&mut h, "Command search");
+    h.get_by_label("Search commands").type_text("extr");
+    let _ = h.try_run();
+    assert!(
+        h.get_by_label("Search result Extrude…")
+            .accesskit_node()
+            .is_disabled()
+    );
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    assert!(h.query_by_label("Search commands").is_none());
+}
+
+/// Every former command-bar, Inspector and browser action is reachable from
+/// the ribbon, the application bar or its menus, or a context menu, and the
+/// selection-dependent ones are enabled exactly when their selection exists.
+#[test]
+fn every_former_action_is_reachable_with_its_enabled_rule() {
+    use rcad::shell::CmdId as C;
+    use rcad::shell::registry::Place;
+    // Placement: every registry command sits on the ribbon, the app bar, the
+    // File / Export / View menus (the former top bar and inspector actions
+    // are all registry commands, see every_command_bar_action_is_in_the_registry).
+    for d in registry::COMMANDS {
+        assert!(
+            d.places.iter().any(|p| matches!(
+                p,
+                Place::Ribbon { .. }
+                    | Place::AppBar
+                    | Place::File
+                    | Place::FileExport
+                    | Place::View
+            )),
+            "{} is not reachable",
+            d.label
+        );
+    }
+    let mut h = harness();
+    // Without a document: modelling commands are disabled with a reason.
+    for id in [
+        C::Extrude,
+        C::Hole,
+        C::Fillet,
+        C::Chamfer,
+        C::Shell,
+        C::MoveCopy,
+        C::SplitBody,
+        C::Combine,
+        C::Material,
+        C::Pattern,
+        C::Mirror,
+        C::Align,
+        C::DirectEdit,
+    ] {
+        assert!(h.state().command_enabled(id).is_err(), "{id:?}");
+    }
+    click(&mut h, "New");
+    h.get_by_label("Templates").click();
+    let _ = h.try_run();
+    click(&mut h, "Rectangle on XY…");
+    click(&mut h, "OK");
+    click(&mut h, "Extrude…");
+    click(&mut h, "OK");
+    // Face commands need a face (Shell is enabled by the selected New Body
+    // extrusion: its scoped shell).
+    assert_eq!(h.state().command_enabled(C::Shell), Ok(()));
+    for id in [C::Hole, C::Fillet, C::Chamfer] {
+        assert!(
+            h.state().command_enabled(id).is_err(),
+            "{id:?} without a face"
+        );
+    }
+    let top = h
+        .state()
+        .faces()
+        .iter()
+        .find(|f| {
+            f.plane
+                .is_some_and(|p| p.normal[2] > 0.99 && p.point[2] > 0.0)
+        })
+        .map(|f| f.group)
+        .expect("top face");
+    h.state_mut().select_face(Some(top));
+    let _ = h.try_run();
+    for id in [
+        C::Hole,
+        C::Fillet,
+        C::Chamfer,
+        C::Shell,
+        C::MoveCopy,
+        C::Measure,
+    ] {
+        assert_eq!(h.state().command_enabled(id), Ok(()), "{id:?} with a face");
+    }
+    // Browser actions: History row context menu and the timeline marker menu.
+    h.state_mut().select_face(None);
+    settle(&mut h);
+    h.get_by_label("Extrude1").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Edit Feature Extrude1");
+    h.get_by_label("Rename…");
+    h.get_by_label("Delete feature");
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    h.get_by_label("Sketch1").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Edit Sketch");
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    h.get_by_label("Timeline Extrude1").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Roll History Marker Here");
 }

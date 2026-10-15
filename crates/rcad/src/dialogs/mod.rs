@@ -26,7 +26,7 @@ pub fn operation_ui(
             (ExtrudeOp::Cut, "Cut"),
             (ExtrudeOp::Intersect, "Intersect"),
         ] {
-            ui.radio_value(op, o, l).probe(&format!("{what} {l}"));
+            ui.radio_value(op, o, l).named(&format!("{what} {l}"));
         }
     });
     if *op == ExtrudeOp::NewBody {
@@ -45,7 +45,7 @@ pub fn operation_ui(
         .show_ui(ui, |ui| {
             for b in &solids {
                 ui.selectable_value(target, Some(b.id), &b.name)
-                    .probe(&format!("{what} target {}", b.name));
+                    .named(&format!("{what} target {}", b.name));
             }
         })
         .response

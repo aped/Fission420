@@ -103,6 +103,7 @@ pub enum CmdId {
     DrawingViews,
     // SELECT
     ClearSelection,
+    CommandSearch,
     // MESH
     MeshRepair,
     MeshEdit,
@@ -414,6 +415,11 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [k(Key::F1)], classic: [k(Key::F1)],
         places: [Place::AppBar], mm: None,
         enabled: always, run: |a| a.show_help = !a.show_help),
+    def!(CommandSearch, "Command search", Select,
+        "Find any command by name and run it",
+        fusion: [k(Key::S)], classic: [],
+        places: [Place::AppBar], mm: None,
+        enabled: always, run: |a| a.open_command_search()),
     // ----- View -----
     def!(Fit, "Fit view", View, "Fit the model in the view (in a sketch: look at the sketch)",
         fusion: [k(Key::F6)], classic: [k(Key::F)],
@@ -874,6 +880,7 @@ mod tests {
         CmdId::NewDrawing,
         CmdId::DrawingViews,
         CmdId::ClearSelection,
+        CmdId::CommandSearch,
         CmdId::MeshRepair,
         CmdId::MeshEdit,
         CmdId::SheetFlange,
