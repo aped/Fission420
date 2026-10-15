@@ -355,6 +355,17 @@ pub fn apply(
             labels(&rep.conflicting)
         )));
     }
+    let collapsed = sk.collapsed_curves();
+    if !collapsed.is_empty() {
+        return Err(refused(format!(
+            "the sketch would collapse {} to zero size; change or delete a constraint first",
+            collapsed
+                .iter()
+                .map(|e| format!("entity {}", e.0))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
     if checked && rep.status == SolveStatus::OverConstrained {
         return Err(refused(format!(
             "this would over-constrain the sketch (redundant with: {})",

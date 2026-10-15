@@ -280,10 +280,36 @@ fn drop_freed(sk: &mut Sketch, freed: &[PointId]) -> usize {
 }
 
 impl Sketch {
+    /// Curves the current geometry has collapsed: lines whose ends coincide
+    /// and arcs whose radius vanished (within the solve tolerance). A solve
+    /// that converges to such a state (e.g. Horizontal plus Vertical on one
+    /// line) is not a valid sketch edit.
+    pub fn collapsed_curves(&self) -> Vec<EntityId> {
+        let tol = crate::solve_tolerance(self.scale());
+        self.entities
+            .iter()
+            .filter(|e| match e {
+                Entity::Line { a, b, .. } => match (self.point_xy(*a), self.point_xy(*b)) {
+                    (Some(p), Some(q)) => dist(p, q) <= tol,
+                    _ => false,
+                },
+                Entity::Arc { center, start, .. } => {
+                    match (self.point_xy(*center), self.point_xy(*start)) {
+                        (Some(c), Some(p)) => dist(c, p) <= tol,
+                        _ => false,
+                    }
+                }
+                Entity::Circle { radius, .. } => *radius <= tol,
+                _ => false,
+            })
+            .map(Entity::id)
+            .collect()
+    }
+
     /// Trim and Extend compute intersections with lines, arcs and circles
     /// only: in a sketch with an ellipse or spline they refuse rather than
     /// ignore those curves.
-    fn free_form_refusal(&self, tool: &str) -> Result<(), SketchError> {
+    pub fn free_form_refusal(&self, tool: &str) -> Result<(), SketchError> {
         if self
             .entities
             .iter()

@@ -35,7 +35,15 @@ compete. Opening another document while a sketch is open discards the session wi
 | 3-Point Arc (A) | start point, end point, then a point the arc passes through (counter-clockwise storage; orientation follows the third point). Collinear points are refused |
 | Ellipse (toolbar) | centre, then the end of one axis, then a point whose distance from that axis is the other radius. See [Ellipses and splines](#ellipses-and-splines) |
 | Spline (toolbar) | click control points; Enter or right-click finishes an open spline (≥ 4 points), clicking the first point again closes it (≥ 3). Nothing is added before it is finished |
+| Trim (T) | click the span of a line, arc or circle to remove: it is cut at the nearest crossings with other curves either side of the click (a curve with no crossing is deleted). A line cut in the middle splits in two (the new piece gets a fresh id and the first one's Horizontal/Vertical); a circle becomes an arc with the same id and centre (its diameter dimension becomes a radius); an arc cut in the middle splits into two arcs with an equal-radius constraint. Cut ends reuse an existing point at the crossing, else are held on the cutting curve (`PointOnLine` / `PointOnCircle`). Constraints that no longer apply are removed and counted in the status line (equal length, a length dimension spanning a split line, a tangency no piece still touches) |
+| Extend (E) | click a line near its free end: the end moves along the line to the nearest curve its extension crosses; a connected end, an arc, or an extension that meets nothing is refused |
+| Break (toolbar) | click the span of a line, arc or circle: it is split at the nearest crossings either side of the click and nothing is removed. Line pieces stay collinear (the far end of each new piece is held on the first piece's line, so the DOF count is unchanged); arc pieces share the centre and get an equal-radius constraint; a circle needs two crossings and becomes two arcs (the clicked span is the new one). Refused when the span has no crossing |
 | Dimension (D) | click a line (horizontal line → `width`, vertical → `height`, other → aligned `length`), a circle (`diameter`), an arc (`radius`), an ellipse (first `major_radius`, then `minor_radius`), or two points (horizontal or vertical distance, whichever is larger). The inline editor opens immediately |
+
+Trim, Extend and Break are `rcad_sketch::Sketch::{trim, extend, break_at}`; the editor and the
+headless `sketch_op` command (docs/COMMANDS.md) run the same code, then solve; a change that does
+not solve, or that collapses a curve to zero size (e.g. Horizontal plus Vertical on one line), is
+refused and the sketch is unchanged.
 
 Constraint buttons act on the selection and are disabled with the reason as hover text:
 Horizontal / Vertical (lines, glyph `H`/`V`), Parallel / Perpendicular (two lines, `//` / `90`),

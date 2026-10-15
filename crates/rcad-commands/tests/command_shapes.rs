@@ -75,3 +75,47 @@ fn health_defaults_to_healthy() {
     let back: FeatureHealth = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
     assert_eq!(back, e);
 }
+
+#[test]
+fn granular_sketch_ops_have_snake_case_tags_and_round_trip() {
+    use rcad_commands::sketch_ops::PointRef;
+    let ops = [
+        SketchOp::AddLine {
+            a: PointRef::Id(0),
+            b: PointRef::At([10.0, 0.0]),
+            construction: false,
+        },
+        SketchOp::AddDimension {
+            constraint: rcad_sketch::Constraint::Diameter {
+                circle: rcad_sketch::EntityId(3),
+                dim: rcad_sketch::Dimension::new("hole", 6.0),
+            },
+            expression: Some("w / 8".into()),
+        },
+        SketchOp::BreakAt {
+            entity: 1,
+            at: [5.0, 0.0],
+        },
+        SketchOp::DeleteConstraint { index: 2 },
+    ];
+    for op in ops {
+        let c = Command::SketchOp {
+            feature: FeatureId(1),
+            op,
+        };
+        assert_eq!(round_trip(&c), c);
+    }
+    let j = r#"{"cmd":"sketch_op","feature":1,"op":{"op":"add_line","a":0,"b":[1.5,2]}}"#;
+    let c: Command = serde_json::from_str(j).unwrap();
+    assert!(matches!(
+        c,
+        Command::SketchOp {
+            op: SketchOp::AddLine {
+                a: PointRef::Id(0),
+                b: PointRef::At([1.5, 2.0]),
+                construction: false
+            },
+            ..
+        }
+    ));
+}

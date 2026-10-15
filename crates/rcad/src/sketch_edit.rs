@@ -831,6 +831,22 @@ impl SketchEditor {
             ));
             return false;
         }
+        let collapsed: Vec<EntityId> = solved
+            .collapsed_curves()
+            .into_iter()
+            .filter(|e| !before.collapsed_curves().contains(e))
+            .collect();
+        if !collapsed.is_empty() {
+            self.fail(format!(
+                "Rejected: this would collapse {} to zero size.",
+                collapsed
+                    .iter()
+                    .map(|e| format!("entity {}", e.0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            return false;
+        }
         if refuse_redundant && rep.status == SolveStatus::OverConstrained {
             self.fail(format!(
                 "Rejected: this would over-constrain the sketch (redundant with: {}).",
@@ -1597,6 +1613,10 @@ impl SketchEditor {
     /// Extend the line end nearest to the click along the line to the nearest
     /// curve it would cross. The end must be free (used by no other curve).
     fn extend_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Err(why) = self.sketch.free_form_refusal("Extend") {
+            self.fail(why.to_string());
+            return;
+        }
         // A line, or the end point of exactly one line.
         let (e, picked_end) = match self.pick(pos, screen, view) {
             Some(Item::Entity(e)) => (e, None),
@@ -1632,6 +1652,10 @@ impl SketchEditor {
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Err(why) = self.sketch.free_form_refusal("Trim") {
+            self.fail(why.to_string());
+            return;
+        }
         let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
             self.fail("Click the part of a line to remove (away from its endpoints).".into());
             return;
@@ -1650,6 +1674,10 @@ impl SketchEditor {
     }
 
     fn break_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Err(why) = self.sketch.free_form_refusal("Break") {
+            self.fail(why.to_string());
+            return;
+        }
         let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
             self.fail("Click the span of a curve to break off at its crossings.".into());
             return;
