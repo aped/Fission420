@@ -539,8 +539,9 @@ pub fn save_file(path: &Path, doc: &Document, eval: Option<&Evaluation>) -> Resu
 }
 
 /// Write `bytes` to `path` atomically: unique sibling temp file (`create_new`), fsync,
-/// copy the target's permissions if it exists, rename over the target, fsync the
-/// directory (best effort). The rename replaces a symlink at `path` rather than its
+/// copy the target's permissions if it exists (Unix only), rename over the target
+/// (retried briefly on Windows, see [`RENAME_TRIES`]), fsync the directory (best effort).
+/// On any error the previous file is untouched and the temp file is removed. The rename replaces a symlink at `path` rather than its
 /// target (documented limitation).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -567,12 +568,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             .create_new(true)
             .open(&tmp)?;
         f.write_all(bytes)?;
-        if let Ok(meta) = std::fs::metadata(path) {
+        // Unix: keep the target's mode. Windows: the only permission is the read-only
+        // attribute, which would make the next save fail; a read-only target is refused
+        // by the rename instead (the previous file stays).
+        if !cfg!(windows)
+            && let Ok(meta) = std::fs::metadata(path)
+        {
             f.set_permissions(meta.permissions())?;
         }
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)?;
+        rename_retrying(&tmp, path, RENAME_TRIES)?;
         if let Ok(d) = std::fs::File::open(&dir) {
             let _ = d.sync_all(); // directory fsync is best-effort (not all filesystems support it)
         }
@@ -583,6 +589,38 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         return Err(DocError::File(format!("write {}: {e}", path.display())));
     }
     Ok(())
+}
+
+/// Attempts at the final rename. On Windows another process (a virus scanner, the search
+/// indexer, a file manager preview) may hold the target open briefly, which fails the
+/// rename with access denied or a sharing violation; elsewhere such errors are not
+/// transient.
+const RENAME_TRIES: u32 = if cfg!(windows) { 5 } else { 1 };
+
+/// Whether a failed rename may succeed if tried again shortly: `PermissionDenied`
+/// (Windows `ERROR_ACCESS_DENIED`), and on Windows `ERROR_SHARING_VIOLATION` (32) and
+/// `ERROR_LOCK_VIOLATION` (33), which std reports as uncategorized.
+fn transient_rename_error(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied
+        || (cfg!(windows) && matches!(e.raw_os_error(), Some(32 | 33)))
+}
+
+/// `rename(from, to)`, retried on a transient error up to `tries` attempts in all, with
+/// 10, 20, 40, 80 ms pauses (about 150 ms for five attempts). Other errors, and the last
+/// transient one, are returned; `from` is left for the caller to remove.
+fn rename_retrying(from: &Path, to: &Path, tries: u32) -> std::io::Result<()> {
+    let mut pause = std::time::Duration::from_millis(10);
+    let mut left = tries.max(1);
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if transient_rename_error(&e) && left > 1 => {
+                left -= 1;
+                std::thread::sleep(pause);
+                pause *= 2;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Load and validate a native file. Does not regenerate (see `Model::from_document`).
@@ -766,4 +804,122 @@ pub fn migrate_to_v3(doc: &mut Document) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{rename_retrying, transient_rename_error};
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    /// Keeps a rename to the returned target failing until dropped: on Unix the target's
+    /// directory is read-only; on Windows the target is held open without delete sharing,
+    /// as a scanner or indexer would. `None` when the user is not subject to permissions.
+    struct Refusal {
+        to: PathBuf,
+        #[cfg(windows)]
+        _held: Option<std::fs::File>,
+    }
+
+    fn refuse(dir: &Path) -> Option<Refusal> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            let to = dir.join("target.json");
+            std::fs::write(&to, b"old").unwrap();
+            let held = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&to)
+                .unwrap();
+            Some(Refusal {
+                to,
+                _held: Some(held),
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let sub = dir.join("ro");
+            std::fs::create_dir(&sub).unwrap();
+            set_readonly(&sub, true);
+            if std::fs::write(sub.join("probe"), b"").is_ok() {
+                set_readonly(&sub, false);
+                return None;
+            }
+            Some(Refusal {
+                to: sub.join("target.json"),
+            })
+        }
+    }
+
+    impl Drop for Refusal {
+        fn drop(&mut self) {
+            #[cfg(not(windows))]
+            set_readonly(self.to.parent().unwrap(), false);
+        }
+    }
+
+    #[cfg_attr(windows, allow(dead_code))]
+    fn set_readonly(path: &Path, ro: bool) {
+        let mut p = std::fs::metadata(path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        p.set_readonly(ro);
+        std::fs::set_permissions(path, p).unwrap();
+    }
+
+    #[test]
+    fn rename_retries_a_refused_rename_a_bounded_number_of_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("from.tmp");
+        std::fs::write(&from, b"new").unwrap();
+        let Some(refusal) = refuse(dir.path()) else {
+            eprintln!("SKIP: permissions are not enforced for this user (root?)");
+            return;
+        };
+        let to = refusal.to.clone();
+        let e = rename_retrying(&from, &to, 1).unwrap_err();
+        assert!(transient_rename_error(&e), "{e:?}");
+        let t = Instant::now();
+        let e = rename_retrying(&from, &to, 4).unwrap_err();
+        assert!(transient_rename_error(&e), "{e:?}");
+        // Three pauses (10 + 20 + 40 ms), then the error: bounded, not a hang.
+        let retried = t.elapsed();
+        assert!(retried >= Duration::from_millis(70), "{retried:?}");
+        assert!(retried < Duration::from_secs(10), "{retried:?}");
+        // The source stays for the caller to remove; the target is unchanged.
+        assert!(from.exists());
+        drop(refusal);
+        if cfg!(windows) {
+            assert_eq!(std::fs::read(&to).unwrap(), b"old");
+        } else {
+            assert!(!to.exists());
+        }
+        // Once allowed, the same call succeeds.
+        rename_retrying(&from, &to, 4).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"new");
+    }
+
+    /// The case the retry exists for: another process lets go of the target while the
+    /// save waits.
+    #[test]
+    fn rename_succeeds_when_the_target_is_released_during_the_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("from.tmp");
+        std::fs::write(&from, b"new").unwrap();
+        let Some(refusal) = refuse(dir.path()) else {
+            eprintln!("SKIP: permissions are not enforced for this user (root?)");
+            return;
+        };
+        let to = refusal.to.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(15));
+            drop(refusal);
+        });
+        // 10 + 20 + 40 + 80 ms of pauses: the release after 15 ms falls inside them.
+        let r = rename_retrying(&from, &to, 5);
+        release.join().unwrap();
+        r.unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"new");
+        assert!(!from.exists());
+    }
 }
