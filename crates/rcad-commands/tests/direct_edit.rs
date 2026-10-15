@@ -222,16 +222,17 @@ fn offset_resize_remove_with_parameters_undo_and_reopen() {
     assert!(s.summary().features.iter().any(|f| f.id == rm));
 
     // Save and reopen: rebuilt from the embedded STEP bytes (the source path
-    // is not used), same volume; file format v6.
+    // is not used), same volume; file format v9 (prints of the referenced
+    // imported faces; the direct edits themselves need v6).
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("direct_edit");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("direct_edit.rcad.json");
     ok(&mut s, Command::Save { path: path.clone() });
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("\"version\": 6"), "v6 file");
+    assert!(text.contains("\"version\": 9"), "v9 file");
     // A file labelled v5 holding a direct edit is refused, not misread.
     let v5 = dir.join("direct_edit_as_v5.rcad.json");
-    std::fs::write(&v5, text.replace("\"version\": 6", "\"version\": 5")).unwrap();
+    std::fs::write(&v5, text.replace("\"version\": 9", "\"version\": 5")).unwrap();
     let r = Session::new().execute(&Command::Open {
         path: v5,
         safe_mode: false,

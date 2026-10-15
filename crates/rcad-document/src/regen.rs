@@ -10,7 +10,7 @@ use crate::{LinkedCurve, ProjectSource, ProjectionLink};
 use rcad_kernel::{self as k, Body, Frame, Measurements};
 use rcad_sketch::{EntityId, Profile as SketchProfile, SolveReport};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// How a semantic face reference resolved in this evaluation.
@@ -62,6 +62,10 @@ pub struct FeatureResult {
     /// Health after this regeneration (never persisted in documents).
     #[serde(default)]
     pub health: crate::FeatureHealth,
+    /// Cuts and splits that separate a body: a point inside each piece, by
+    /// body id ([`crate::Feature::piece_seeds`], adopted by the model).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub piece_seeds: BTreeMap<BodyId, Vec<[f64; 3]>>,
 }
 
 /// A triangle-mesh body (STL import). Never treated as an exact solid.
@@ -167,6 +171,9 @@ pub struct Evaluation {
     /// nothing but their import and direct edits (for picking a face to edit
     /// directly). Absent for any other body.
     pub imported_face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
+    /// Planar faces of each imported body as imported, by (import feature,
+    /// body): the source of [`crate::Feature::face_prints`].
+    pub import_planes: BTreeMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     /// Solved placements of the component occurrences (docs/ASSEMBLIES.md).
     pub occurrences: Vec<crate::assembly::EvalOccurrence>,
 }
@@ -255,6 +262,7 @@ impl Evaluation {
             body: None,
             measurements: None,
             imported_face_ids: BTreeMap::new(),
+            import_planes: BTreeMap::new(),
             occurrences: vec![],
         }
     }
@@ -399,6 +407,12 @@ struct Snapshot {
     /// Chamfer features: the chamfer face's frame (outward normal) and body.
     chamfers: HashMap<FeatureId, (Frame, BodyId)>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
+    /// Imported faces whose plane no longer matches their stored print
+    /// ([`crate::Feature::face_prints`]): (import, body, face) -> why.
+    import_moved: HashMap<(FeatureId, BodyId, u32), String>,
+    /// Planar faces of each imported body as imported (never changed by
+    /// direct edits, unlike `imported_faces`).
+    import_planes: BTreeMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     /// Face identity of imported bodies (direct edits).
     face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
     bodies: BTreeMap<BodyId, BodyState>,
@@ -450,6 +464,8 @@ impl Snapshot {
             copies: HashMap::new(),
             chamfers: HashMap::new(),
             imported_faces: HashMap::new(),
+            import_moved: HashMap::new(),
+            import_planes: BTreeMap::new(),
             face_ids: BTreeMap::new(),
             bodies: BTreeMap::new(),
             created: Vec::new(),
@@ -797,6 +813,7 @@ fn regen_impl(
             body: None,
             notes: vec![],
             health: crate::FeatureHealth::healthy(),
+            piece_seeds: BTreeMap::new(),
         };
         if f.suppressed || doc.is_rolled_back(id) {
             // Not evaluated (no dependent is evaluated: `check_suppression`).
@@ -882,6 +899,7 @@ fn regen_impl(
                         body: None,
                         notes: r.notes,
                         health: crate::FeatureHealth::failed(e.clone(), repair_hint(doc, id, &e)),
+                        piece_seeds: BTreeMap::new(),
                     };
                     st.mark_failed(doc, f, id);
                     st.first_error.get_or_insert(e);
@@ -976,14 +994,13 @@ fn regen_impl(
         body: None,
         measurements: None,
         imported_face_ids,
+        import_planes: st.import_planes,
         occurrences: doc.assembly.evaluate()?,
     };
     eval.refresh_legacy_view();
     Ok(Regen::Done(Box::new(eval)))
 }
 
-/// Evaluate feature `f` (at evaluation index `i`) on `st`, filling `r`.
-/// On error `st` may be partially changed; the caller restores it.
 /// The message of a caught panic payload (`&str` or `String`), else a placeholder.
 pub fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
     p.downcast_ref::<&str>()
@@ -992,6 +1009,218 @@ pub fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or_else(|| "panic with a non-text payload".into())
 }
 
+/// Imported faces of import `import` that any feature references
+/// (`FaceRole::Imported`), found in the serialized definitions so every kind
+/// of reference counts.
+pub(crate) fn imported_face_refs(doc: &Document, import: FeatureId) -> BTreeSet<(BodyId, u32)> {
+    fn walk(v: &serde_json::Value, import: u64, out: &mut BTreeSet<(BodyId, u32)>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if m.get("feature").and_then(|f| f.as_u64()) == Some(import)
+                    && let Some(i) = m.get("role").and_then(|r| r.get("Imported"))
+                    && let (Some(b), Some(f)) = (
+                        i.get("body").and_then(|b| b.as_u64()),
+                        i.get("face").and_then(|f| f.as_u64()),
+                    )
+                    && let (Ok(b), Ok(f)) = (u32::try_from(b), u32::try_from(f))
+                {
+                    out.insert((BodyId(b), f));
+                }
+                for x in m.values() {
+                    walk(x, import, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, import, out)),
+            _ => {}
+        }
+    }
+    let mut out = BTreeSet::new();
+    for f in &doc.features {
+        if let Ok(v) = serde_json::to_value(&f.kind) {
+            walk(&v, u64::from(import.0), &mut out);
+        }
+    }
+    out
+}
+
+/// A cut's or split's piece ids: the ids the feature holds, its stored
+/// seeds, and where to put the seeds of this evaluation.
+type Pieces<'a> = (
+    &'a [BodyId],
+    &'a BTreeMap<BodyId, Vec<[f64; 3]>>,
+    &'a mut BTreeMap<BodyId, Vec<[f64; 3]>>,
+);
+
+/// Body ids for the pieces of a cut or split (ADR 0003, piece identity).
+/// `parts` come in the positional order and `required` (the target; for a
+/// split the target and the new body) must each receive a piece; `spare`
+/// are the feature's extra piece ids.
+///
+/// Ids with seeds are matched first: repeatedly, the (id, piece) pair with
+/// the most of the id's seed points inside the piece is taken, provided
+/// that count is the unique maximum for the id (over free pieces) and the
+/// maximum for the piece (over unmatched ids; when pieces rejoined, the
+/// earliest id, the target first, keeps the piece). Ids without seeds (new ids,
+/// documents written before seeds) then take the remaining pieces in
+/// positional order. A required id left unmatched by its seeds is a broken
+/// reference (the piece is never guessed); a spare one makes no body (a
+/// later feature that targets it fails explicitly). More unclaimed pieces
+/// than free ids is [`DocError::NeedsPieces`]. On success `seeds_out`
+/// receives fresh seeds for every id that got a piece (when the result has
+/// several pieces).
+fn assign_pieces(
+    id: FeatureId,
+    parts: Vec<Body>,
+    required: &[BodyId],
+    spare: &[BodyId],
+    seeds: &BTreeMap<BodyId, Vec<[f64; 3]>>,
+    seeds_out: &mut BTreeMap<BodyId, Vec<[f64; 3]>>,
+) -> Result<Vec<(BodyId, Body)>> {
+    if parts.len() < required.len() {
+        return Err(DocError::Kernel {
+            feature: id,
+            detail: format!(
+                "the result has {} piece(s), {} expected",
+                parts.len(),
+                required.len()
+            ),
+        });
+    }
+    let ids: Vec<BodyId> = required.iter().chain(spare).copied().collect();
+    let mut owner: Vec<Option<BodyId>> = vec![None; parts.len()];
+    // Ids whose identity comes from seeds (matched or not).
+    let mut seeded: BTreeSet<BodyId> = BTreeSet::new();
+    let with_seed: Vec<(BodyId, &[[f64; 3]])> = ids
+        .iter()
+        .filter_map(|b| seeds.get(b).filter(|v| !v.is_empty()).map(|v| (*b, &v[..])))
+        .collect();
+    // A single piece needs no matching: it keeps the target.
+    if parts.len() > 1 && !with_seed.is_empty() {
+        let points: Vec<[f64; 3]> = with_seed
+            .iter()
+            .flat_map(|(_, v)| v.iter().copied())
+            .collect();
+        let inside: Vec<Vec<Option<bool>>> = parts
+            .iter()
+            .map(|p| k::point_membership(p, &points))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(kernel(id))?;
+        // count[k][j]: seeds of id k inside piece j.
+        let mut count = vec![vec![0usize; parts.len()]; with_seed.len()];
+        let mut at = 0;
+        for (k, (_, v)) in with_seed.iter().enumerate() {
+            for _ in 0..v.len() {
+                for (j, row) in inside.iter().enumerate() {
+                    if row[at] == Some(true) {
+                        count[k][j] += 1;
+                    }
+                }
+                at += 1;
+            }
+        }
+        let mut matched = vec![false; with_seed.len()];
+        loop {
+            let unique_max = |vals: &mut dyn Iterator<Item = usize>, v: usize| {
+                let mut n = 0;
+                for x in vals {
+                    if x > v {
+                        return false;
+                    }
+                    n += usize::from(x == v);
+                }
+                n == 1
+            };
+            let mut best: Option<(usize, usize, usize)> = None;
+            for k in (0..with_seed.len()).filter(|&k| !matched[k]) {
+                for j in (0..parts.len()).filter(|&j| owner[j].is_none()) {
+                    let c = count[k][j];
+                    if c == 0 || best.is_some_and(|(b, _, _)| c <= b) {
+                        continue;
+                    }
+                    let row_ok = unique_max(
+                        &mut (0..parts.len())
+                            .filter(|&jj| owner[jj].is_none())
+                            .map(|jj| count[k][jj]),
+                        c,
+                    );
+                    // Pieces that rejoined hold the seeds of several ids:
+                    // the earliest id (the target first) keeps the piece.
+                    let col_ok = (0..with_seed.len())
+                        .filter(|&kk| kk != k && !matched[kk])
+                        .all(|kk| count[kk][j] < c || (count[kk][j] == c && kk > k));
+                    if row_ok && col_ok {
+                        best = Some((c, k, j));
+                    }
+                }
+            }
+            let Some((_, k, j)) = best else { break };
+            matched[k] = true;
+            owner[j] = Some(with_seed[k].0);
+        }
+        for (k, (b, _)) in with_seed.iter().enumerate() {
+            seeded.insert(*b);
+            if !matched[k] && required.contains(b) {
+                let holders = count[k].iter().filter(|&&c| c > 0).count();
+                let why = if holders == 0 {
+                    "no piece of the result contains its reference points".to_string()
+                } else {
+                    format!("its reference points do not single out one of {holders} pieces")
+                };
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: format!(
+                        "the piece that is {b} can no longer be identified ({why}); edit the \
+                         feature to assign the pieces again"
+                    ),
+                });
+            }
+        }
+    }
+    // Ids without seeds take the unclaimed pieces in positional order.
+    let mut free = ids.iter().filter(|b| !seeded.contains(b)).copied();
+    let mut short = 0;
+    for o in owner.iter_mut().filter(|o| o.is_none()) {
+        match free.next() {
+            Some(b) => *o = Some(b),
+            None => short += 1,
+        }
+    }
+    if short > 0 {
+        return Err(DocError::NeedsPieces {
+            feature: id,
+            pieces: spare.len() + short + 1,
+            assigned: spare.len(),
+        });
+    }
+    if let Some(b) = required.iter().find(|b| !owner.contains(&Some(**b))) {
+        return Err(DocError::BrokenReference {
+            from: id,
+            detail: format!("no piece of the result is left for {b}"),
+        });
+    }
+    let mut out: Vec<(BodyId, Body)> = owner.into_iter().flatten().zip(parts).collect();
+    // Required ids first, then the others in the feature's order.
+    out.sort_by_key(|(b, _)| ids.iter().position(|x| x == b));
+    if out.len() > 1 {
+        for (i, (b, piece)) in out.iter().enumerate() {
+            let others: Vec<&Body> = out
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i)
+                .map(|(_, (_, p))| p)
+                .collect();
+            // A piece too thin for seeds keeps positional identity.
+            if let Ok(v) = k::piece_seeds(piece, &others) {
+                let round = |x: f64| (x * 1e6).round() / 1e6 + 0.0;
+                seeds_out.insert(*b, v.into_iter().map(|p| p.map(round)).collect());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Evaluate feature `f` (at evaluation index `i`) on `st`, filling `r`.
+/// On error `st` may be partially changed; the caller restores it.
 fn eval_feature(
     doc: &Document,
     id: FeatureId,
@@ -1207,7 +1436,7 @@ fn eval_feature(
                 *reverse,
                 region.as_ref(),
                 options,
-                pieces,
+                (pieces, &f.piece_seeds, &mut r.piece_seeds),
             )?;
             r.body = Some(out.body);
             st.extrudes.insert(id, out);
@@ -1245,8 +1474,23 @@ fn eval_feature(
             }
             r.notes = imp.notes.clone();
             for (solid, body) in imp.solids.into_iter().zip(bodies) {
-                st.imported_faces
-                    .insert((id, *body), Arc::new(solid.planar_faces));
+                let planes = Arc::new(solid.planar_faces);
+                for p in f.face_prints.iter().filter(|p| p.body == *body) {
+                    let now = planes.iter().find(|x| x.index == p.face);
+                    if !now.is_some_and(|x| p.matches_face(x)) {
+                        st.import_moved.insert(
+                            (id, *body, p.face),
+                            format!(
+                                "imported face {} of {body} is no longer the face that was \
+                                 referenced (the file now imports another face at that \
+                                 index); pick the face again",
+                                p.face
+                            ),
+                        );
+                    }
+                }
+                st.import_planes.insert((id, *body), planes.clone());
+                st.imported_faces.insert((id, *body), planes);
                 st.face_ids.insert(
                     *body,
                     crate::direct::ImportedFaceIds::at_import(id, k::face_count(&solid.body)),
@@ -1435,9 +1679,10 @@ fn eval_feature(
             width,
             flip,
             body,
+            geometric_order,
         } => {
             let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-            let chain = crate::sheet::line_chain(&so.solved)
+            let chain = crate::sheet::flange_chain(&so.solved, *geometric_order)
                 .map_err(|m| DocError::Validation(format!("{id}: sheet metal profile: {m}")))?;
             let part =
                 crate::sheet::contour_flange(id, &chain, *thickness, *radius, *k_factor, *flip)?;
@@ -1759,24 +2004,23 @@ fn eval_feature(
                     detail: "split: an empty side".into(),
                 });
             };
-            let rest: Vec<Body> = behind.chain(front).collect();
-            if rest.len() > pieces.len() {
-                return Err(DocError::NeedsPieces {
-                    feature: id,
-                    pieces: rest.len() + 1,
-                    assigned: pieces.len(),
-                });
-            }
-            replace_body(st, id, *body, b0);
-            create_body(
-                st,
+            // Positional order: the first piece of each side, then the other
+            // pieces behind-side first (used only for ids without a seed).
+            let parts: Vec<Body> = [b0, f0].into_iter().chain(behind).chain(front).collect();
+            let assigned = assign_pieces(
                 id,
-                *new_body,
-                BodyGeometry::Brep(f0),
-                BodySource::Modeled,
+                parts,
+                &[*body, *new_body],
+                pieces,
+                &f.piece_seeds,
+                &mut r.piece_seeds,
             )?;
-            for (piece, b) in rest.into_iter().zip(pieces) {
-                create_body(st, id, *b, BodyGeometry::Brep(piece), BodySource::Modeled)?;
+            for (b, piece) in assigned {
+                if b == *body {
+                    replace_body(st, id, b, piece);
+                } else {
+                    create_body(st, id, b, BodyGeometry::Brep(piece), BodySource::Modeled)?;
+                }
             }
             r.body = Some(*new_body);
         }
@@ -1933,6 +2177,14 @@ fn eval_feature(
             let bid = doc.face_body(face).ok_or_else(|| {
                 DocError::Validation(format!("{id}: a direct edit needs an imported face"))
             })?;
+            if let FaceRole::Imported { body, face: index } = face.role
+                && let Some(why) = st.import_moved.get(&(face.feature, body, index))
+            {
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: why.clone(),
+                });
+            }
             let target = brep_target(st, id, bid)?;
             let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
             let pivot = match face.role {
@@ -2158,7 +2410,7 @@ fn extrude_feature(
     reverse: bool,
     pick: Option<&rcad_sketch::RegionRef>,
     opts: &ExtrudeOptions,
-    piece_ids: &[BodyId],
+    (piece_ids, seeds, seeds_out): Pieces<'_>,
 ) -> Result<ExtrudeOut> {
     let s = st
         .sketches
@@ -2480,28 +2732,20 @@ fn extrude_feature(
                 let w = format!("region {}", i + 2);
                 cut = apply_tool(&cut, &o, &frame, Some(&w), id, None)?.0;
             }
-            let mut parts = k::split_pieces(&cut).map_err(kernel(id))?.into_iter();
-            let first = parts.next().ok_or_else(|| DocError::Kernel {
-                feature: id,
-                detail: "cut: empty result".into(),
-            })?;
-            let rest: Vec<Body> = parts.collect();
-            if rest.len() > piece_ids.len() {
-                return Err(DocError::NeedsPieces {
+            let parts = k::split_pieces(&cut).map_err(kernel(id))?;
+            if parts.is_empty() {
+                return Err(DocError::Kernel {
                     feature: id,
-                    pieces: rest.len() + 1,
-                    assigned: piece_ids.len(),
+                    detail: "cut: empty result".into(),
                 });
             }
-            replace_body(st, id, target, first);
-            for (piece, body) in rest.into_iter().zip(piece_ids) {
-                create_body(
-                    st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(piece),
-                    BodySource::Modeled,
-                )?;
+            let mut assigned =
+                assign_pieces(id, parts, &[target], piece_ids, seeds, seeds_out)?.into_iter();
+            if let Some((_, first)) = assigned.next() {
+                replace_body(st, id, target, first);
+            }
+            for (body, piece) in assigned {
+                create_body(st, id, body, BodyGeometry::Brep(piece), BodySource::Modeled)?;
             }
             out.body = target;
             out.multi = !extra.is_empty();
@@ -5790,6 +6034,12 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
     let mut tool_of: Option<(&ExtrudeOut, FaceRole)> = None;
     let (frame, owner) = match fr.role {
         FaceRole::Imported { body, face } => {
+            if let Some(why) = st.import_moved.get(&(fr.feature, body, face)) {
+                return Err(DocError::BrokenReference {
+                    from,
+                    detail: why.clone(),
+                });
+            }
             let faces =
                 st.imported_faces
                     .get(&(fr.feature, body))

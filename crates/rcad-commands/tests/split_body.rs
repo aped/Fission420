@@ -3,7 +3,7 @@
 //! two exact solids whose volumes add up; the plane offset is a parameter;
 //! upstream edits regenerate both parts; a plane missing the body
 //! is refused unchanged, a side that falls apart makes one body per piece;
-//! save/reopen (format v6, v8 with pieces).
+//! save/reopen (format v9: the split records its pieces' identity).
 mod support;
 use rcad_commands::Session;
 use serde_json::{Value, json};
@@ -92,7 +92,7 @@ fn split_by_offset_planes_on_two_orientations() {
     let path = dir.path().join("s.rcad.json");
     tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(v["version"], json!(6));
+    assert_eq!(v["version"], json!(9), "piece identity seeds (v9)");
     let mut t = Session::new();
     tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
@@ -150,7 +150,7 @@ fn a_side_that_falls_apart_makes_one_body_per_piece() {
     let path = dir.path().join("u.rcad.json");
     tray::ok(&mut u, &json!({"cmd": "save", "path": path}));
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(v["version"], json!(8));
+    assert_eq!(v["version"], json!(9), "piece identity seeds (v9)");
     let mut t = Session::new();
     tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
     assert_eq!(t.summary().bodies.len(), 3);

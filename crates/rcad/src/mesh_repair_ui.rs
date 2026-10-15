@@ -53,6 +53,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Mesh check / repair")
             .id_salt(("mesh_repair", body.0))
+            .open(self.shell.take_focus(crate::shell::Focus::MeshRepair))
             .show(ui, |ui| {
                 if let Some(d) = &diag {
                     ui.label(format!(

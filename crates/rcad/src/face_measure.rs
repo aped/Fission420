@@ -100,6 +100,15 @@ impl RcadApp {
         })
     }
 
+    /// INSPECT ▸ Measure: exact geometry of `info`'s face, and measure from it
+    /// to the next selected face.
+    pub(crate) fn start_exact_measure(&mut self, info: &crate::view3d::FaceInfo) {
+        if let Some(pick) = self.face_pick(info.group) {
+            self.exact_measure.from = Some((pick, info.description.clone()));
+            self.measure_faces(pick, None);
+        }
+    }
+
     fn measure_faces(&mut self, a: FacePick, b: Option<FacePick>) {
         self.exact_measure.pending = Some((a, b));
         self.request(Command::MeasureFaces { a, b });

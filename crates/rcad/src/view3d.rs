@@ -1301,9 +1301,7 @@ impl RcadApp {
                     .probe("Open Document…")
                     .clicked()
                 {
-                    self.dialog = Some(crate::app::Dialog::Open {
-                        path: self.default_path("rcad.json"),
-                    });
+                    self.open_dialog(false);
                 }
             });
             ui.weak("Help: F1 · Navigate: MMB orbit, RMB pan, wheel zoom");

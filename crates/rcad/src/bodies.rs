@@ -663,60 +663,62 @@ impl RcadApp {
             .map(|o| (o.id, o.name.clone()))
             .collect();
         let mut send = None;
-        ui.collapsing("Combine with…", |ui| {
-            if others.is_empty() {
-                ui.weak("No other solid body to combine with.");
-                return;
-            }
-            let f = &mut self.body_props;
-            if !f
-                .combine_tool
-                .is_some_and(|t| others.iter().any(|o| o.0 == t))
-            {
-                f.combine_tool = Some(others[0].0);
-            }
-            let name = |id: Option<BodyId>| {
-                others
-                    .iter()
-                    .find(|o| Some(o.0) == id)
-                    .map_or(String::new(), |o| o.1.clone())
-            };
-            egui::ComboBox::from_label("Tool body")
-                .selected_text(name(f.combine_tool))
-                .show_ui(ui, |ui| {
-                    for (id, n) in &others {
-                        ui.selectable_value(&mut f.combine_tool, Some(*id), n);
-                    }
+        egui::CollapsingHeader::new("Combine with…")
+            .open(self.shell.take_focus(crate::shell::Focus::Combine))
+            .show(ui, |ui| {
+                if others.is_empty() {
+                    ui.weak("No other solid body to combine with.");
+                    return;
+                }
+                let f = &mut self.body_props;
+                if !f
+                    .combine_tool
+                    .is_some_and(|t| others.iter().any(|o| o.0 == t))
+                {
+                    f.combine_tool = Some(others[0].0);
+                }
+                let name = |id: Option<BodyId>| {
+                    others
+                        .iter()
+                        .find(|o| Some(o.0) == id)
+                        .map_or(String::new(), |o| o.1.clone())
+                };
+                egui::ComboBox::from_label("Tool body")
+                    .selected_text(name(f.combine_tool))
+                    .show_ui(ui, |ui| {
+                        for (id, n) in &others {
+                            ui.selectable_value(&mut f.combine_tool, Some(*id), n);
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut f.combine_op, 0, "Join");
+                    ui.radio_value(&mut f.combine_op, 1, "Cut");
+                    ui.radio_value(&mut f.combine_op, 2, "Intersect");
                 });
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut f.combine_op, 0, "Join");
-                ui.radio_value(&mut f.combine_op, 1, "Cut");
-                ui.radio_value(&mut f.combine_op, 2, "Intersect");
-            });
-            ui.checkbox(&mut f.keep_tools, "Keep tool body")
+                ui.checkbox(&mut f.keep_tools, "Keep tool body")
                 .on_hover_text(
                     "Off: the tool body is consumed (it disappears; its features stay in History)",
                 );
-            if ui.button("Combine").probe("Combine").clicked()
-                && let Some(t) = f.combine_tool
-            {
-                send = Some(Command::Combine {
-                    name: None,
-                    target,
-                    tools: vec![t],
-                    op: match f.combine_op {
-                        0 => rcad_kernel::CombineOp::Join,
-                        1 => rcad_kernel::CombineOp::Cut,
-                        _ => rcad_kernel::CombineOp::Intersect,
-                    },
-                    keep_tools: f.keep_tools,
-                });
-            }
-            ui.small(
-                "Checked independently against both bodies; refused (nothing changes) when \
+                if ui.button("Combine").probe("Combine").clicked()
+                    && let Some(t) = f.combine_tool
+                {
+                    send = Some(Command::Combine {
+                        name: None,
+                        target,
+                        tools: vec![t],
+                        op: match f.combine_op {
+                            0 => rcad_kernel::CombineOp::Join,
+                            1 => rcad_kernel::CombineOp::Cut,
+                            _ => rcad_kernel::CombineOp::Intersect,
+                        },
+                        keep_tools: f.keep_tools,
+                    });
+                }
+                ui.small(
+                    "Checked independently against both bodies; refused (nothing changes) when \
                  Truck fails or the check disagrees. Bodies that only touch usually fail.",
-            );
-        });
+                );
+            });
         if let Some(c) = send {
             self.request(c);
         }
@@ -727,56 +729,58 @@ impl RcadApp {
     /// values stay editable parameters (tx, ty, tz, angle_deg).
     fn move_ui(&mut self, ui: &mut egui::Ui, body: rcad_document::BodyId) {
         let mut send = None;
-        let header = ui.collapsing("Move / Copy", |ui| {
-            let f = &mut self.move_form;
-            ui.horizontal(|ui| {
-                for (i, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
-                    crate::panels::num_field(ui, &format!("{l} (mm)"), &mut f.t[i]);
+        let header = egui::CollapsingHeader::new("Move / Copy")
+            .open(self.shell.take_focus(crate::shell::Focus::MoveCopy))
+            .show(ui, |ui| {
+                let f = &mut self.move_form;
+                ui.horizontal(|ui| {
+                    for (i, l) in ["ΔX", "ΔY", "ΔZ"].iter().enumerate() {
+                        crate::panels::num_field(ui, &format!("{l} (mm)"), &mut f.t[i]);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    crate::panels::num_field(ui, "Rotate (°)", &mut f.angle);
+                    ui.label("about");
+                    ui.radio_value(&mut f.axis, 0, "X");
+                    ui.radio_value(&mut f.axis, 1, "Y");
+                    ui.radio_value(&mut f.axis, 2, "Z");
+                });
+                ui.checkbox(
+                    &mut f.copy,
+                    "Copy (keep the original; the copy is independent)",
+                )
+                .probe("Copy body");
+                let parse = |t: &str| t.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+                let vals = (
+                    parse(&f.t[0]),
+                    parse(&f.t[1]),
+                    parse(&f.t[2]),
+                    parse(&f.angle),
+                );
+                let label = if f.copy { "Copy body" } else { "Move body" };
+                if let (Some(x), Some(y), Some(z), Some(a)) = vals {
+                    if ui.button(label).probe(label).clicked() {
+                        let mut axis = [0.0; 3];
+                        axis[f.axis] = 1.0;
+                        send = Some(Command::MoveBody {
+                            name: None,
+                            body,
+                            translate: [x, y, z],
+                            origin: [0.0; 3],
+                            axis: Some(axis),
+                            angle_deg: a,
+                            copy: f.copy,
+                            body_name: None,
+                        });
+                    }
+                } else {
+                    ui.add_enabled(false, egui::Button::new(label));
                 }
-            });
-            ui.horizontal(|ui| {
-                crate::panels::num_field(ui, "Rotate (°)", &mut f.angle);
-                ui.label("about");
-                ui.radio_value(&mut f.axis, 0, "X");
-                ui.radio_value(&mut f.axis, 1, "Y");
-                ui.radio_value(&mut f.axis, 2, "Z");
-            });
-            ui.checkbox(
-                &mut f.copy,
-                "Copy (keep the original; the copy is independent)",
-            )
-            .probe("Copy body");
-            let parse = |t: &str| t.trim().parse::<f64>().ok().filter(|v| v.is_finite());
-            let vals = (
-                parse(&f.t[0]),
-                parse(&f.t[1]),
-                parse(&f.t[2]),
-                parse(&f.angle),
-            );
-            let label = if f.copy { "Copy body" } else { "Move body" };
-            if let (Some(x), Some(y), Some(z), Some(a)) = vals {
-                if ui.button(label).probe(label).clicked() {
-                    let mut axis = [0.0; 3];
-                    axis[f.axis] = 1.0;
-                    send = Some(Command::MoveBody {
-                        name: None,
-                        body,
-                        translate: [x, y, z],
-                        origin: [0.0; 3],
-                        axis: Some(axis),
-                        angle_deg: a,
-                        copy: f.copy,
-                        body_name: None,
-                    });
-                }
-            } else {
-                ui.add_enabled(false, egui::Button::new(label));
-            }
-            ui.small(
-                "Faces made before the move keep their references (sketches, fillets, holes \
+                ui.small(
+                    "Faces made before the move keep their references (sketches, fillets, holes \
                  follow the body). Patterns/mirrors of features made before the move are refused.",
-            );
-        });
+                );
+            });
         header.header_response.probe("Move / Copy");
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.scale_factor).desired_width(50.0))
@@ -807,6 +811,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Split by plane")
             .id_salt(("split_ui", body.0))
+            .open(self.shell.take_focus(crate::shell::Focus::Split))
             .show(ui, |ui| {
                 let (base, offset) = &mut self.split_form;
                 ui.horizontal(|ui| {

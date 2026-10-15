@@ -215,8 +215,8 @@ materials** (flattened), **Structured BOM**, **Check interference** (selectable 
 * Picking or sketching on a placed copy: face selection, measurement and sketch frames refer to
   the definition bodies (the picked instance path is known and used for alignment and
   highlighting).
-* STEP import preserving hierarchy (it flattens, see above); 3MF assembly structure (objects
-  are flat).
+* Hierarchy from plain `import_step` (it flattens; `import_step_assembly` keeps products and
+  usages, see above); 3MF assembly structure (objects are flat).
 * Collision avoidance, dynamic simulation, motion studies.
 
 ## Evidence

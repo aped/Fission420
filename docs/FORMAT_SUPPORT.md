@@ -12,12 +12,12 @@ ADR 0004 (format adapters).
 | Format | Import | Export | Geometry type | Units | Reachable through |
 |---|---|---|---|---|---|
 | Native `.rcad.json` v1, v2 | **yes** (migrated on load) | no | parametric history | mm | `Open` |
-| Native v3 to v7 | **yes** | **yes** (v4 or the lowest later version that holds the document) | history + bodies + embedded import sources | mm | `Open` / `Save` |
+| Native v1 to v9 (v1/v2 migrate on load) | **yes** | **yes** (v4 or the lowest later version that holds the document) | history + bodies + embedded import sources | mm | `Open` / `Save` |
 | STEP `.step/.stp` (ISO 10303-21; entity subset, tested with AP214 files) | **yes, exact B-rep subset** | **yes**, exact B-rep, one solid per body | B-rep solid | declared unit honoured; override only when none is declared | `import_step`, `export_step`; UI Import…, Export STEP… |
 | STL `.stl` | **yes**, ASCII + binary | **yes**, binary | triangle mesh (mesh body) | none in file: unit choice required; export writes mm | `import_stl`, `export_stl` (print options: docs/PRINT_EXPORT.md); UI Import…, Export STL… |
 | DXF `.dxf` (ASCII) | **yes**, 2D sketch subset | **yes**, R12 LINE/ARC/CIRCLE | 2D sketch (unconstrained) | `$INSUNITS` honoured; choice required when absent | `import_dxf`, `export_dxf`; UI Import…, Export DXF (sketch)… |
 | 3MF `.3mf` | **yes**, core subset → one mesh body per build item | **yes**, one object per body (B-rep tessellated, solid-checked; meshes as imported, solid-checked unless `allow_open_meshes`) | triangle meshes | declared unit honoured (default mm); export unit selectable (default mm) | `import_3mf`, `export_3mf`; UI Import…, Export 3MF… |
-| SVG `.svg` | **yes**: lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes**: sketch lines/arcs/circles | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg`; UI Import…, Export SVG (sketch)… |
+| SVG `.svg` | **yes**: lines, rects, circles, circular arcs, `M L H V Z A` paths → unconstrained sketch; Béziers/elliptical arcs/text/`use` reported | **yes**: sketch lines/arcs/circles, ellipses (two elliptical `A` arcs), splines (cubic Bézier `C` spans) | 2D sketch | root physical size + viewBox, else unit choice required; y flipped | `import_svg`, `export_svg`; UI Import…, Export SVG (sketch)… |
 | IGES, OBJ, DWG, F3D/F3Z | no (roadmap) | no | | | |
 
 "Reachable through" lists the typed command (`crates/rcad-commands`, also `rcad-cli run`).
@@ -43,16 +43,16 @@ interchange does not carry another application's feature history.
 |---|---|---|---|---|---|---|---|
 | STEP | import (`import_step`) | exact B-rep subset (planes, cylinders, cones, spheres, tori, B-splines per formats/step.md); open shells as surface bodies on request | declared unit honoured (inch parts and inch assemblies tested); override only when none | **flattened** (one body per placed solid, nested rotated + translated occurrences composed; reported) | solid names kept; colours **no, loss reported** ("colours/styles ignored: N STYLED_ITEM …" in the import notes) | exact surfaces; volumes exact or labelled estimates | assembly structure (use `import_step_assembly`), colours (reported), PMI |
 | STEP | import (`import_step_assembly`) | as above | as above (inch assembly tested) | **products and usages preserved** as components and linked occurrences (two nested rotated + translated levels tested) | product names kept; colours no (reported) | as above | colours, PMI, external references |
-| STEP | export (`export_step`) | one solid per exact body | mm | none (flat bodies) | body names; colours no | exact B-rep | mesh bodies and open surface bodies refused |
+| STEP | export (`export_step`) | one solid per exact body; open surface bodies as `SHELL_BASED_SURFACE_MODEL` (`OPEN_SHELL`), never as solids | mm | none (flat bodies) | body names; colours no | exact B-rep | mesh bodies refused (skipped when no bodies are named); solids and surface bodies in one file refused |
 | STEP | export (`export_assembly` `step_assembly`) | per occurrence | mm | PRODUCT per component, NAUO + CDSR per occurrence (FreeCAD-checked) | names; colours no | exact | suppressed occurrences omitted (by design) |
 | STL | import | triangles (ASCII, binary); several shells in one file stay one mesh body (components counted, per-component bounds/volume in the diagnosis) | none in file: unit choice required; the dialog shows "Interpreted as …" (mm, cm, m, inch); wrong-unit meshes can be rescaled afterwards (mesh transform presets) | none | no / no | mesh as stored (f32 exact) | everything but triangles |
 | STL | export | triangles (B-rep tessellated at chord / facet angle, both shown in the dialog) | mm | none (one shell per body, or one file per body) | no / no (file names per body with `separate_files`) | tessellation (stated chord) | exactness, units, names |
-| 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit (mm, cm, inch, … tested; unknown unit refused) | flattened | object names; object-level colour only | mesh as stored | per-triangle colours, textures; required extensions other than materials (production, beam lattice) **refused**; singular transforms refused |
-| 3MF | export | one object per body, body selection | selectable (default mm) | none; with `item_transforms` the export placement is kept per object as its build item `transform` (objects as modeled) | names; object colours | tessellation | exactness; no printer/process settings (geometry only) |
+| 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit (mm, cm, inch, … tested; unknown unit refused) | flattened | object names; colours no (the reader parses object-level `displaycolor`, but bodies have no colour, so it is dropped) | mesh as stored | all colours (object colours dropped, per-triangle ones reported), textures; required extensions other than materials (production, beam lattice) **refused**; singular transforms refused |
+| 3MF | export | one object per body, body selection | selectable (default mm) | none; with `item_transforms` the export placement is kept per object as its build item `transform` (objects as modeled) | names; colours no (the writer supports object colours, the export commands pass none) | tessellation | exactness, colours; no printer/process settings (geometry only) |
 | DXF | import | LINE, ARC, CIRCLE, LWPOLYLINE/POLYLINE subset → unconstrained sketch; splines refused by name | `$INSUNITS`, else choice | none | no | exact lines/arcs | splines, text, blocks beyond the subset |
 | DXF | export (sketch / flat pattern / drawing) | R12 LINE/ARC/CIRCLE(+TEXT, SOLID for drawings) | mm, `$INSUNITS` 4 | layers only | layer names | exact lines/arcs | splines (none produced) |
 | SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
-| SVG / PDF | export (sketch, drawings) | lines/arcs (PDF: Béziers ≤ 2.8e-4·r) | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
+| SVG / PDF | export (sketch, drawings) | lines/arcs/circles; SVG sketch export also ellipses (elliptical `A` arcs) and splines (exact cubic Bézier `C` spans); PDF: arcs as Béziers ≤ 2.8e-4·r | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
 
 Qualification corpus: `tools/fixtures/corpus/` (44 manifest entries:
 12 STEP parts (mm and inch, rotated placements, holes, counterbore, chamfer, fillet, cone,
@@ -326,10 +326,12 @@ file as base64 blobs, so a document reopens after the source file is moved or de
 and every body). v1 and v2 files migrate on load (first solid feature gets body B1; feature
 ids unchanged); newer versions are refused. Evidence: `native_formats.rs` opens the v1
 fixture, five frozen v2 documents
-(`crates/rcad-commands/tests/fixtures/native_v2/`; the committed `examples/*.rcad.json` are
-re-saved as v3 whenever their workflows replay, e.g. in `cargo xtask check`), and every
-committed example, checks the analytic volume, re-saves as v3 and reopens to an identical
-document. Size limit 256 MiB per file, 128 MiB per import source.
+(`crates/rcad-commands/tests/fixtures/native_v2/`), three frozen v8 documents with
+split pieces (`crates/rcad-commands/tests/fixtures/native_v8/`), and every committed
+example (re-saved whenever their workflows replay, e.g. in `cargo xtask check`, at the
+lowest version that holds each document), checks the analytic volume, re-saves and reopens
+to an identical document. v9 adds the piece identity seeds of cuts and splits that
+separate a body (ADR 0003); a document without them is written at its older version. Size limit 256 MiB per file, 128 MiB per import source.
 
 ## Qualification scenario: external exchange
 

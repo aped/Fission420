@@ -57,7 +57,9 @@ closed shells only is refused. Without the option (`import_step`, external compo
 regeneration of older documents) surface models are ignored with a warning, so a
 bad surface model never breaks a solid import; a file with only surface models is refused with a
 pointer to `import_surfaces`.
-`OPEN_SHELL` inside a `MANIFOLD_SOLID_BREP` stays an error. Surface bodies are not exported.
+`OPEN_SHELL` inside a `MANIFOLD_SOLID_BREP` stays an error. Surface bodies are exported as a
+`SHELL_BASED_SURFACE_MODEL` with one `OPEN_SHELL` each (`MANIFOLD_SURFACE_SHAPE_REPRESENTATION`,
+`crates/rcad-kernel/src/step.rs`); a file mixing solids and surface bodies is refused.
 
 Unsupported (explicit error): `BREP_WITH_VOIDS` (voids would be lost), `OPEN_SHELL` as a
 solid's shell, `FACETED_BREP` and other non-solid models (reported as "no MANIFOLD_SOLID_BREP

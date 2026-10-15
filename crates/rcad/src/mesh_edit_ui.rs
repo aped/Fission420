@@ -267,7 +267,11 @@ impl RcadApp {
         let force = std::mem::take(&mut self.mesh_edit.open_panels);
         let header = egui::CollapsingHeader::new("Mesh edit")
             .id_salt(("mesh_edit", body.0))
-            .open(force.then_some(true))
+            .open(
+                force
+                    .then_some(true)
+                    .or(self.shell.take_focus(crate::shell::Focus::MeshEdit)),
+            )
             .show(ui, |ui| {
                 let st = &mut self.mesh_edit;
                 st.shown = Some((body, ui.ctx().cumulative_pass_nr()));

@@ -7,7 +7,7 @@
 
 use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{Command, ExtrudeOp, FeatureSummary};
+use rcad_commands::{Command, FeatureSummary};
 use rcad_document::{BodyId, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::SolveStatus;
@@ -20,6 +20,23 @@ use crate::sketch_edit::{Item, SketchTool};
 const OK_COLOR: Color32 = Color32::from_rgb(120, 220, 120);
 const UNDER_COLOR: Color32 = Color32::from_rgb(120, 190, 255);
 const BAD_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
+const WARN_COLOR: Color32 = Color32::from_rgb(240, 190, 80);
+
+/// Hover text of a feature's health: message, cause and repair hint.
+fn health_text(f: &FeatureSummary) -> String {
+    let h = &f.health;
+    let mut t = h
+        .message
+        .clone()
+        .unwrap_or_else(|| format!("{:?}", h.state));
+    if let Some(up) = h.upstream {
+        t.push_str(&format!("\nCaused by the failure of feature {}", up.0));
+    }
+    if let Some(hint) = &h.hint {
+        t.push_str(&format!("\nTo repair: {hint}"));
+    }
+    t
+}
 
 /// Button that is disabled with a visible reason on hover.
 fn action(ui: &mut egui::Ui, label: &str, blocker: Option<&str>) -> bool {
@@ -50,526 +67,112 @@ pub(crate) fn state_text(f: &FeatureSummary) -> Option<(String, Color32)> {
 impl RcadApp {
     // ----- command bars -----
 
-    pub(crate) fn toolbar(&mut self, ui: &mut egui::Ui, busy: bool) {
-        let open = self.summary.open;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("R-CAD");
-            ui.separator();
+    /// The View menu: fit, section view, standard views.
+    pub(crate) fn view_menu(&mut self, ui: &mut egui::Ui) {
+        use crate::shell::{CmdId as C, registry};
+        ui.menu_button("View", |ui| {
+            let fit = registry::def(C::Fit);
             if ui
-                .button("New")
-                .probe("New")
-                .on_hover_text("New document (Ctrl+N)")
-                .clicked()
-            {
-                self.guarded(Guarded::New);
-            }
-            if ui
-                .button("Open…")
-                .probe("Open…")
-                .on_hover_text("Open (Ctrl+O)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Open {
-                    path: self.default_path("rcad.json"),
-                });
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Save"))
-                .probe("Save")
-                .on_hover_text("Save (Ctrl+S)")
-                .clicked()
-            {
-                self.save();
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Save As…"))
-                .probe("Save As…")
-                .on_hover_text("Save as (Ctrl+Shift+S)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::SaveAs {
-                    path: self.default_path("rcad.json"),
-                });
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Import…"))
-                .probe("Import…")
-                .on_hover_text("Import STEP / STL / DXF into this document (one undoable step)")
-                .on_disabled_hover_text("Open or create a document first")
-                .clicked()
-            {
-                self.open_import_dialog();
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Close"))
-                .probe("Close")
-                .clicked()
-            {
-                self.guarded(Guarded::Close);
-            }
-            let export = ui.menu_button("Export", |ui| {
-                if ui
-                    .add_enabled(open, egui::Button::new("Export STL…"))
-                    .probe("Export STL…")
-                    .clicked()
-                {
-                    self.open_print_export_dialog(true);
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(open, egui::Button::new("Export STEP…"))
-                    .probe("Export STEP…")
-                    .clicked()
-                {
-                    self.dialog = Some(Dialog::ExportStep {
-                        path: self.default_path("step"),
-                        scope: self.default_export_scope(),
-                    });
-                    ui.close();
-                }
-                let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
-                if ui
-                    .add_enabled(
-                        open && has_sketch,
-                        egui::Button::new("Export DXF (sketch)…"),
-                    )
-                    .probe("Export DXF (sketch)…")
-                    .on_disabled_hover_text("Needs a sketch")
-                    .clicked()
-                {
-                    let sketch = self
-                        .selected
-                        .filter(|id| {
-                            self.summary
-                                .features
-                                .iter()
-                                .any(|f| f.id == *id && f.kind == "sketch")
-                        })
-                        .or_else(|| self.unused_sketch());
-                    self.dialog = Some(Dialog::ExportDxf {
-                        path: self.default_path("dxf"),
-                        sketch,
-                        svg: false,
-                    });
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        open && has_sketch,
-                        egui::Button::new("Export SVG (sketch)…"),
-                    )
-                    .probe("Export SVG (sketch)…")
-                    .on_disabled_hover_text("Needs a sketch")
-                    .clicked()
-                {
-                    let sketch = self
-                        .selected
-                        .filter(|id| {
-                            self.summary
-                                .features
-                                .iter()
-                                .any(|f| f.id == *id && f.kind == "sketch")
-                        })
-                        .or_else(|| self.unused_sketch());
-                    self.dialog = Some(Dialog::ExportDxf {
-                        path: self.default_path("svg"),
-                        sketch,
-                        svg: true,
-                    });
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(open, egui::Button::new("Export 3MF…"))
-                    .probe("Export 3MF…")
-                    .clicked()
-                {
-                    self.open_print_export_dialog(false);
-                    ui.close();
-                }
-            });
-            crate::probe::note("Export", export.response.rect);
-            ui.separator();
-            // Fixed labels so the bar never shifts; the action is in the tooltip.
-            let undo_tip = match &self.summary.can_undo {
-                Some(l) => format!("Undo: {l} (Ctrl+Z)"),
-                None => "Nothing to undo".into(),
-            };
-            if ui
-                .add_enabled(self.summary.can_undo.is_some(), egui::Button::new("Undo"))
-                .probe("Undo")
-                .on_hover_text(&undo_tip)
-                .on_disabled_hover_text(&undo_tip)
-                .clicked()
-            {
-                self.request(Command::Undo);
-            }
-            let redo_tip = match &self.summary.can_redo {
-                Some(l) => format!("Redo: {l} (Ctrl+Shift+Z)"),
-                None => "Nothing to redo".into(),
-            };
-            if ui
-                .add_enabled(self.summary.can_redo.is_some(), egui::Button::new("Redo"))
-                .probe("Redo")
-                .on_hover_text(&redo_tip)
-                .on_disabled_hover_text(&redo_tip)
-                .clicked()
-            {
-                self.request(Command::Redo);
-            }
-            ui.separator();
-            self.modeling_buttons(ui, busy);
-            ui.separator();
-            ui.menu_button("View", |ui| {
-                if ui.button("Fit (F)").probe("Fit (F)").clicked() {
-                    self.fit_view();
-                    ui.close();
-                }
-                let label = if self.section.is_some() {
-                    "Section view off"
-                } else {
-                    "Section view…"
-                };
-                if ui
-                    .button(label)
-                    .probe("Section view…")
-                    .on_hover_text("Display-only clipping plane (not capped); the model and exports are unchanged")
-                    .clicked()
-                {
-                    self.toggle_section();
-                    ui.close();
-                }
-                for (key, preset) in crate::view3d::VIEW_KEYS {
-                    if ui
-                        .button(format!("{} ({})", preset.label(), key.name()))
-                        .clicked()
-                    {
-                        self.set_view(*preset);
-                        ui.close();
-                    }
-                }
-            })
-            .response
-            .probe("View");
-            if ui
-                .button("Fit view")
-                .probe("Fit view")
-                .on_hover_text("F")
+                .button(format!("Fit ({})", fit.key_text(self.shell.prefs.keymap)))
+                .probe("Fit (F)")
                 .clicked()
             {
                 self.fit_view();
+                ui.close();
             }
-            if ui
-                .button("Help")
-                .probe("Help")
-                .on_hover_text("F1")
-                .clicked()
-            {
-                self.show_help = !self.show_help;
-            }
-            if busy {
-                ui.separator();
-                ui.spinner();
-                ui.label("Regenerating…");
-                // Stops the running regeneration at the next feature; the
-                // edit is then not committed (the model keeps its last state).
-                if ui
-                    .small_button("Cancel")
-                    .named("Cancel regeneration")
-                    .on_hover_text(
-                        "Stop this regeneration at the next feature: the edit is not applied \
-                         and the model stays as it was (a kernel operation already running \
-                         finishes first)",
-                    )
-                    .clicked()
-                {
-                    self.engine.cancel_running();
-                }
-            }
-        });
-    }
-
-    fn modeling_buttons(&mut self, ui: &mut egui::Ui, _busy: bool) {
-        let open = self.summary.open;
-        // Create Sketch: on the selected supported face, otherwise world XY.
-        let face = self.selected_face().cloned();
-        let (plane, blocker): (Option<SketchPlane>, Option<String>) = if !open {
-            (None, Some("Open or create a document first".into()))
-        } else {
-            match &face {
-                Some(f) => match (f.reference, f.sketch_blocker()) {
-                    (Some(r), _) => (Some(SketchPlane::Face(r)), None),
-                    (None, Some(why)) => (None, Some(format!("Selected face: {why}"))),
-                    (None, None) => (None, None),
-                },
-                None => (Some(SketchPlane::WorldXY), None),
-            }
-        };
-        let hover = match &plane {
-            Some(SketchPlane::Face(_)) => "Sketch on the selected face",
-            _ => "Sketch on the world XY plane (select a cap face first to sketch on it)",
-        };
-        let r = ui
-            .add_enabled(blocker.is_none(), egui::Button::new("Create Sketch"))
-            .probe("Create Sketch");
-        let r = match &blocker {
-            Some(b) => r.on_disabled_hover_text(b),
-            None => r.on_hover_text(hover),
-        };
-        if r.clicked()
-            && let Some(plane) = plane
-        {
-            self.begin_sketch(SketchTarget::New { plane });
-        }
-        // The world origin planes, whatever is selected (Fusion's Create
-        // Sketch offers the origin planes too).
-        let planes = ui.add_enabled_ui(open, |ui| {
-            ui.menu_button("Planes", |ui| {
-                for (label, plane) in [
-                    ("Sketch on XY", SketchPlane::WorldXY),
-                    ("Sketch on XZ", SketchPlane::WorldXZ),
-                    ("Sketch on YZ", SketchPlane::WorldYZ),
-                ] {
-                    if ui.button(label).probe(label).clicked() {
-                        self.begin_sketch(SketchTarget::New { plane });
-                        ui.close();
-                    }
-                }
-            })
-        });
-        planes
-            .inner
-            .response
-            .named("Sketch plane menu")
-            .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)");
-        if action(
-            ui,
-            "Sketch on offset plane…",
-            (!open).then_some("Open or create a document first"),
-        ) {
-            self.open_offset_plane_dialog();
-        }
-        let sketch_sel = self
-            .selected
-            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
-            .filter(|f| f.kind == "sketch")
-            .cloned();
-        let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
-        let extrude_block = if !has_sketch {
-            Some("Create a sketch with a closed profile first".to_string())
-        } else {
-            sketch_sel.as_ref().and_then(|s| self.extrude_blocker(s))
-        };
-        if action(ui, "Extrude…", extrude_block.as_deref()) {
-            let sketch = sketch_sel
-                .as_ref()
-                .map(|s| s.id)
-                .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
-                self, sketch,
-            )));
-        }
-        // Circles keep the hole-style Cut dialog (through all or blind
-        // pocket); any other closed profile opens Extrude preset to Cut,
-        // Through All (the general cut).
-        let circle_block = sketch_sel.as_ref().and_then(|s| self.cut_blocker(s));
-        let general = circle_block.is_some()
-            && extrude_block.is_none()
-            && sketch_sel
-                .as_ref()
-                .is_some_and(|s| s.profile_error.is_none() && self.consumer_of(s.id).is_none());
-        let cut_block = if !has_sketch {
-            Some("Create a closed sketch profile first".to_string())
-        } else if !self.has_body() {
-            Some("Create a body first (Extrude)".to_string())
-        } else if general {
-            None
-        } else {
-            circle_block
-        };
-        if action(ui, "Cut through all…", cut_block.as_deref()) {
-            let sketch = sketch_sel
-                .as_ref()
-                .map(|s| s.id)
-                .or_else(|| self.unused_sketch());
-            if general {
-                let mut form = crate::extrude::ExtrudeForm::new(self, sketch);
-                form.op = ExtrudeOp::Cut;
-                form.through_all = true;
-                self.dialog = Some(Dialog::Extrude(form));
+            let label = if self.section.is_some() {
+                "Section view off"
             } else {
-                self.dialog = Some(Dialog::Cut {
-                    sketch,
-                    blind: false,
-                    depth: "5".into(),
-                });
-            }
-        }
-        let revolve_block = if !has_sketch {
-            Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
-        } else {
-            sketch_sel
-                .as_ref()
-                .and_then(|s| s.profile_error.as_ref())
-                .map(|e| format!("Profile is not usable: {e}"))
-        };
-        if action(ui, "Revolve…", revolve_block.as_deref()) {
-            self.dialog = Some(Dialog::Revolve {
-                sketch: self.unused_sketch(),
-                angle: "360".into(),
-                axis: Default::default(),
-                reverse: false,
-            });
-        }
-        if ui
-            .add_enabled(self.summary.open, egui::Button::new("Thread…"))
-            .probe("Thread…")
-            .on_hover_text("Modeled thread (faceted solid, stated 60° V test profile): a rod or a square nut on World XY")
-            .clicked()
-        {
-            self.dialog = Some(Dialog::Thread {
-                diameter: "20".into(),
-                pitch: "2".into(),
-                length: "12".into(),
-                nut: false,
-                nut_width: "30".into(),
-                left_hand: false,
-            });
-        }
-        // Exact loft / sweep (new bodies from two sketches).
-        ui.menu_button("Loft / Sweep", |ui| {
+                "Section view…"
+            };
             if ui
-                .add_enabled(has_sketch, egui::Button::new("Loft…"))
-                .probe("Loft…")
-                .on_hover_text("New body between two closed profiles on parallel planes (exact; same-count polygons with parallel edges, or coaxial circles)")
+                .button(label)
+                .probe("Section view…")
+                .on_hover_text(registry::def(C::Section).tooltip)
                 .clicked()
             {
-                self.dialog = Some(Dialog::LoftSweep {
-                    a: None,
-                    b: None,
-                    sweep: false,
-                    via: None,
-                });
+                self.toggle_section();
                 ui.close();
             }
-            if ui
-                .add_enabled(has_sketch, egui::Button::new("Sweep…"))
-                .probe("Sweep…")
-                .on_hover_text("New body: a closed profile swept along a line/arc path sketch starting at the profile sketch's origin (exact)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::LoftSweep {
-                    a: None,
-                    b: None,
-                    sweep: true,
-                    via: None,
-                });
-                ui.close();
-            }
-        })
-        .response
-        .probe("Loft / Sweep");
-        let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
-        let templates = ui.menu_button("Templates", |ui| {
-            ui.weak("Printable parts (new document with editable parameters)");
-            for t in [
-                crate::app::PrintTemplate::Enclosure,
-                crate::app::PrintTemplate::Coupon,
-                crate::app::PrintTemplate::Bracket,
-                crate::app::PrintTemplate::Tray,
+            for id in [
+                C::ViewTop,
+                C::ViewFront,
+                C::ViewRight,
+                C::ViewLeft,
+                C::ViewBack,
+                C::ViewIso,
             ] {
+                let d = registry::def(id);
                 if ui
-                    .button(t.label())
-                    .probe(t.label())
-                    .on_hover_text(
-                        "Starts a new document; change its sizes in the Parameters panel",
-                    )
+                    .button(format!(
+                        "{} ({})",
+                        d.label,
+                        d.key_text(self.shell.prefs.keymap)
+                    ))
                     .clicked()
                 {
-                    self.guarded(Guarded::NewTemplate(t));
+                    (d.run)(self);
                     ui.close();
                 }
             }
-            ui.separator();
-            ui.weak("Dimensioned sketch templates (dialogs)");
-            if ui
-                .add_enabled(open, egui::Button::new("Rectangle on XY…"))
-                .probe("Rectangle on XY…")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Rectangle {
-                    width: "80".into(),
-                    height: "50".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
+        })
+        .response
+        .probe("View");
+    }
+
+    /// Spinner + Cancel while a regeneration runs.
+    pub(crate) fn regenerating_chip(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.spinner();
+        ui.label("Regenerating…");
+        // Stops the running regeneration at the next feature; the
+        // edit is then not committed (the model keeps its last state).
+        if ui
+            .small_button("Cancel")
+            .named("Cancel regeneration")
+            .on_hover_text(
+                "Stop this regeneration at the next feature: the edit is not applied \
+                 and the model stays as it was (a kernel operation already running \
+                 finishes first)",
+            )
+            .clicked()
+        {
+            self.engine.cancel_running();
+        }
+    }
+
+    /// Templates: printable parts, dimensioned sketch templates, placement tools.
+    pub(crate) fn templates_menu(&mut self, ui: &mut egui::Ui) {
+        use crate::shell::CmdId as C;
+        ui.weak("Printable parts (new document with editable parameters)");
+        for id in [
+            C::TemplateEnclosure,
+            C::TemplateCoupon,
+            C::TemplateBracket,
+            C::TemplateTray,
+        ] {
+            if self.cmd_button(ui, id) {
                 ui.close();
             }
-            if ui
-                .add_enabled(open, egui::Button::new("Rectangle on XZ…"))
-                .probe("Rectangle on XZ…")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::RectangleXz {
-                    width: "20".into(),
-                    height: "10".into(),
-                    cx: "30".into(),
-                    cz: "5".into(),
-                });
+        }
+        ui.separator();
+        ui.weak("Dimensioned sketch templates (dialogs)");
+        for id in [C::RectangleXY, C::RectangleXZ, C::CircleOnFace] {
+            if self.cmd_button(ui, id) {
                 ui.close();
             }
-            if ui
-                .add_enabled(has_extrude, egui::Button::new("Circle on face…"))
-                .probe("Circle on face…")
-                .on_disabled_hover_text("Needs an extrusion")
-                .clicked()
-            {
-                let last = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude");
-                self.dialog = Some(Dialog::CircleOnFace {
-                    extrude: last.map(|f| f.id),
-                    diameter: "10".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
+        }
+        ui.separator();
+        ui.weak("Drag to place");
+        for id in [C::PlaceRectangle, C::PlaceHole] {
+            if self.cmd_button(ui, id) {
                 ui.close();
             }
-            ui.separator();
-            ui.weak("Drag to place");
-            let current = self.placement.as_ref().map(|p| p.tool);
-            if ui
-                .add_enabled(
-                    open,
-                    egui::Button::new("Place rectangle").selected(current == Some(Tool::Rectangle)),
-                )
-                .clicked()
-            {
-                self.start_tool(Tool::Rectangle);
-                ui.close();
-            }
-            if ui
-                .add_enabled(has_extrude, egui::Button::new("Place hole"))
-                .probe("Place hole")
-                .on_disabled_hover_text("Needs an extrusion")
-                .clicked()
-            {
-                if let Some(e) = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude")
-                {
-                    let extrude = e.id;
-                    self.start_tool(Tool::Hole { extrude });
-                }
-                ui.close();
-            }
-        });
-        crate::probe::note("Templates", templates.response.rect);
+        }
+    }
+
+    /// While a placement tool runs: its target and a cancel button.
+    pub(crate) fn placement_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(Tool::Hole { extrude }) = self.placement.as_ref().map(|p| p.tool) {
             let extrudes: Vec<FeatureSummary> = self
                 .summary
@@ -598,6 +201,7 @@ impl RcadApp {
     }
 
     pub(crate) fn sketch_toolbar(&mut self, ui: &mut egui::Ui) {
+        let layer = self.shell.prefs.keymap;
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
@@ -614,7 +218,10 @@ impl RcadApp {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
                         .probe(t.label())
-                        .on_hover_text(format!("{} ({})", t.hint(), t.shortcut()))
+                        .on_hover_text(match crate::shell::keymap::sketch_key_for(layer, t) {
+                            Some(k) => format!("{} ({k})", t.hint()),
+                            None => t.hint().to_string(),
+                        })
                         .clicked()
                     {
                         ed.set_tool(t);
@@ -753,6 +360,7 @@ impl RcadApp {
         ui.add_space(4.0);
         ui.separator();
         ui.label(RichText::new("History").strong());
+        self.health_banner(ui);
         if self.summary.features.is_empty() {
             ui.weak("Empty document. Use Create Sketch to start.");
         }
@@ -762,6 +370,7 @@ impl RcadApp {
         });
         let mut clicked = None;
         let mut edit = None;
+        let mut edit_feature = None;
         let mut rename = None;
         let mut delete = None;
         let feats = self.summary.features.clone();
@@ -808,29 +417,61 @@ impl RcadApp {
                         .weak()
                         .small(),
                 );
+                use rcad_document::HealthState as H;
                 let label = if f.suppressed {
                     RichText::new(&f.name).weak().strikethrough()
                 } else if f.rolled_back {
                     RichText::new(&f.name).weak().italics()
                 } else {
-                    RichText::new(&f.name)
+                    match f.health.state {
+                        H::Error => RichText::new(&f.name).color(BAD_COLOR),
+                        H::Warning => RichText::new(&f.name).color(WARN_COLOR),
+                        _ => RichText::new(&f.name),
+                    }
                 };
                 let r = ui.selectable_label(sel, label).probe(&f.name);
                 if f.suppressed {
                     ui.label(RichText::new("suppressed").weak().small());
                 } else if f.rolled_back {
                     ui.label(RichText::new("rolled back").weak().small());
+                } else if matches!(f.health.state, H::Error | H::Warning) {
+                    let (sym, c) = if f.health.state == H::Error {
+                        ("⚠ error", BAD_COLOR)
+                    } else {
+                        ("⚠ warning", WARN_COLOR)
+                    };
+                    if ui
+                        .add(egui::Button::new(RichText::new(sym).color(c).small()).frame(false))
+                        .named(&format!("Health {}", f.name))
+                        .on_hover_text(health_text(f))
+                        .clicked()
+                    {
+                        clicked = Some(f.id);
+                    }
                 }
                 if r.clicked() {
                     clicked = Some(f.id);
                 }
-                if r.double_clicked() && f.kind == "sketch" {
-                    edit = Some(f.id);
+                if r.double_clicked() {
+                    if f.kind == "sketch" {
+                        edit = Some(f.id);
+                    } else {
+                        edit_feature = Some(f.id);
+                    }
                 }
                 r.context_menu(|ui| {
                     if f.kind == "sketch" && ui.button("Edit Sketch").probe("Edit Sketch").clicked()
                     {
                         edit = Some(f.id);
+                        ui.close();
+                    }
+                    if f.kind != "sketch"
+                        && ui
+                            .button("Edit Feature")
+                            .named(&format!("Edit Feature {}", f.name))
+                            .clicked()
+                    {
+                        edit_feature = Some(f.id);
                         ui.close();
                     }
                     if ui.button("Rename…").probe("Rename…").clicked() {
@@ -880,6 +521,9 @@ impl RcadApp {
                 self.select(Some(id));
                 self.begin_sketch(SketchTarget::Existing(id));
             }
+            if let Some(id) = edit_feature {
+                self.edit_feature(id);
+            }
             if let Some(id) = rename {
                 self.rename = Some((id, self.feature_name(id)));
             }
@@ -888,6 +532,63 @@ impl RcadApp {
                 self.delete_selected_feature();
             }
         }
+    }
+
+    /// "Opened with errors" banner above History: how many features fail,
+    /// the first one's reason, and Roll back before it (safe mode in place).
+    fn health_banner(&mut self, ui: &mut egui::Ui) {
+        use rcad_document::HealthState as H;
+        let failed: Vec<FeatureSummary> = self
+            .summary
+            .features
+            .iter()
+            .filter(|f| f.health.state == H::Error)
+            .cloned()
+            .collect();
+        let Some(first) = failed.first() else {
+            return;
+        };
+        egui::Frame::group(ui.style())
+            .fill(Color32::from_rgb(70, 30, 30))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "⚠ {} feature{} with errors: not evaluated",
+                        failed.len(),
+                        if failed.len() == 1 { "" } else { "s" }
+                    ))
+                    .color(BAD_COLOR)
+                    .strong(),
+                )
+                .named("Document has errors");
+                ui.label(RichText::new(format!("{}: {}", first.name, health_text(first))).small());
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button("Review")
+                        .named("Review first error")
+                        .on_hover_text("Select the first failing feature")
+                        .clicked()
+                    {
+                        self.select(Some(first.id));
+                    }
+                    let before = self
+                        .summary
+                        .features
+                        .iter()
+                        .position(|f| f.id == first.id)
+                        .and_then(|i| i.checked_sub(1))
+                        .map(|i| self.summary.features[i].id);
+                    if let Some(at) = before
+                        && ui
+                            .small_button("Roll back before it")
+                            .named("Roll back before the first error")
+                            .on_hover_text("Move the timeline marker before the first failing feature (one undo step)")
+                            .clicked()
+                    {
+                        self.request(Command::SetRollback { at: Some(at) });
+                    }
+                });
+            });
     }
 
     // ----- inspector -----
@@ -1927,10 +1628,17 @@ impl RcadApp {
 
     // ----- windows -----
 
-    pub(crate) fn dialog_ui(&mut self, ctx: &egui::Context, busy: bool) {
+    /// The docked command dialog: one panel at the right of the canvas
+    /// (its width is remembered in the preferences). Number fields take
+    /// expressions with units and parameter names (red with the reason when
+    /// invalid; OK is then disabled). Enter = OK, Esc = Cancel.
+    pub(crate) fn dialog_ui(&mut self, outer: &mut egui::Ui, busy: bool) {
+        let ctx = outer.ctx().clone();
+        let _ = outer;
         let Some(mut dlg) = self.dialog.take() else {
             return;
         };
+        crate::dialogs::set_expression_env(&self.summary.parameters);
         let features = self.summary.features.clone();
         let sketches: Vec<&FeatureSummary> =
             features.iter().filter(|f| f.kind == "sketch").collect();
@@ -1950,23 +1658,33 @@ impl RcadApp {
                 i.key_pressed(egui::Key::Escape),
             )
         });
-        egui::Window::new(dlg.title())
+        let width = self.shell.prefs.dialog_width.unwrap_or(360.0);
+        let title = match self.shell.editing {
+            Some(f) => format!("Edit {}", self.feature_name(f)),
+            None => dlg.title().to_string(),
+        };
+        // Docked at the right edge of the canvas, under the ribbon (Fusion's
+        // command-dialog position); one dialog at a time.
+        let screen = ctx.content_rect();
+        let view = self.view_rect.unwrap_or(screen);
+        let max_h = (view.height() - 90.0).max(120.0);
+        let dock = egui::Window::new(&title)
+            .id(egui::Id::new("rcad_command_dialog"))
             .collapsible(false)
-            .resizable(false)
+            .resizable([true, false])
+            .default_width(width)
+            .min_width(260.0)
             .anchor(
-                if matches!(dlg, Dialog::Extrude(_)) {
-                    // Beside the browser, clear of the model and its preview.
-                    egui::Align2::LEFT_TOP
-                } else {
-                    egui::Align2::CENTER_TOP
-                },
-                if matches!(dlg, Dialog::Extrude(_)) {
-                    [self.view_rect.map_or(270.0, |r| r.min.x + 8.0), 40.0]
-                } else {
-                    [0.0, 60.0]
-                },
+                egui::Align2::RIGHT_TOP,
+                [view.max.x - screen.max.x - 8.0, view.min.y - screen.min.y + 8.0],
             )
-            .show(ctx, |ui| {
+            .show(&ctx, |ui| {
+                crate::dialogs::begin_fields();
+                // Fields scroll; OK / Cancel stay at the bottom in view.
+                egui::ScrollArea::vertical()
+                    .id_salt("dialog_scroll")
+                    .max_height(max_h)
+                    .show(ui, |ui| {
                 match &mut dlg {
                     Dialog::Rectangle {
                         width,
@@ -2003,7 +1721,28 @@ impl RcadApp {
                         nut,
                         nut_width,
                         left_hand,
+                        plane,
+                        cx,
+                        cy,
                     } => {
+                        let place = match plane {
+                            SketchPlane::Face(r) => format!(
+                                "On {} {}",
+                                self.feature_name(r.feature),
+                                crate::face_role_label(&r.role)
+                            ),
+                            _ => "On world XY".to_string(),
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(place);
+                            if matches!(plane, SketchPlane::Face(_))
+                                && ui.small_button("Use world XY").probe("Thread on world XY").clicked()
+                            {
+                                *plane = SketchPlane::WorldXY;
+                            }
+                        });
+                        num_field(ui, "Thread axis X (mm)", cx);
+                        num_field(ui, "Thread axis Y (mm)", cy);
                         num_field(ui, "Thread diameter (mm)", diameter);
                         num_field(ui, "Thread pitch (mm)", pitch);
                         num_field(ui, "Thread length (mm)", length);
@@ -2020,8 +1759,12 @@ impl RcadApp {
                         angle,
                         axis,
                         reverse,
+                        op,
+                        target,
                     } => {
                         feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
+                        let bodies = self.summary.bodies.clone();
+                        ok_allowed &= crate::dialogs::operation_ui(ui, "Revolve", op, target, &bodies);
                         num_field(ui, "Revolve angle (deg)", angle);
                         // Lines of the chosen sketch can be the axis.
                         let lines: Vec<rcad_sketch::EntityId> = sketch
@@ -2107,8 +1850,73 @@ impl RcadApp {
                     Dialog::SaveAs { path } => {
                         path_field(ui, "File path", path, PickMode::Save, file_pick::DOCUMENT);
                     }
-                    Dialog::Open { path } => {
+                    Dialog::Open { path, safe_mode } => {
                         path_field(ui, "File path", path, PickMode::Open, file_pick::DOCUMENT);
+                        ui.checkbox(safe_mode, "Safe mode (roll back before the first failing feature)")
+                            .probe("Safe mode");
+                    }
+                    Dialog::ExportAssembly { path } => {
+                        path_field(ui, "STEP path", path, PickMode::Save, file_pick::STEP);
+                        ui.small("One STEP product per component (reused definitions written once), occurrences with their placements.");
+                    }
+                    Dialog::ShellFace { face, thickness } => {
+                        ui.label(format!(
+                            "Open face: {} {}",
+                            self.feature_name(face.feature),
+                            crate::face_role_label(&face.role)
+                        ));
+                        num_field(ui, "Shell thickness (mm)", thickness);
+                        ui.small("Hollows the body under this face (left open) to walls and floor of this thickness; bodies prismatic along the face normal.");
+                    }
+                    Dialog::Align { from, to } => {
+                        ui.label(format!(
+                            "Move the body of {} {}",
+                            self.feature_name(from.feature),
+                            crate::face_role_label(&from.role)
+                        ));
+                        let mine = self.selected_face().and_then(|f| f.body);
+                        let targets: Vec<(String, rcad_document::FaceRef)> = self
+                            .summary
+                            .features
+                            .iter()
+                            .flat_map(|g| {
+                                g.faces
+                                    .iter()
+                                    .filter(|fc| Some(fc.body) != mine)
+                                    .map(move |fc| {
+                                        (format!("{} {}", g.name, crate::face_role_label(&fc.reference.role)), fc.reference)
+                                    })
+                            })
+                            .collect();
+                        let current = targets
+                            .iter()
+                            .find(|(_, r)| Some(*r) == *to)
+                            .map_or("(choose)".to_string(), |(l, _)| l.clone());
+                        egui::ComboBox::from_label("Align onto face")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                for (l, r) in &targets {
+                                    ui.selectable_value(to, Some(*r), l).probe(&format!("Align onto {l}"));
+                                }
+                            })
+                            .response
+                            .probe("Align onto face");
+                        ok_allowed &= to.is_some();
+                    }
+                    Dialog::RigidGroup { occurrences } => {
+                        ui.label("Occurrences to lock together:");
+                        for (_, name, on) in occurrences.iter_mut() {
+                            ui.checkbox(on, name.as_str()).probe(&format!("Rigid {name}"));
+                        }
+                        ok_allowed &= occurrences.iter().filter(|o| o.2).count() >= 2;
+                    }
+                    Dialog::DriveJoints { joints } => {
+                        for (_, name, values) in joints.iter_mut() {
+                            for (i, v) in values.iter_mut().enumerate() {
+                                num_field(ui, &format!("{name} value {}", i + 1), v);
+                            }
+                        }
+                        ui.small("Degrees for rotations, mm for slides; each joint is one undo step.");
                     }
                     Dialog::ExportStl(form) | Dialog::Export3mf(form) => {
                         ok_allowed &= self.print_export_ui(ui, form);
@@ -2355,14 +2163,31 @@ impl RcadApp {
                         }
                     }
                 }
+                    });
+                let invalid = crate::dialogs::invalid_fields();
+                if let Some(why) = &invalid {
+                    ui.colored_label(BAD_COLOR, why);
+                }
+                ok_allowed &= invalid.is_none();
+                ui.separator();
                 ui.horizontal(|ui| {
                     ok = ui
-                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
+                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK"))
+                        .probe("OK")
                         .clicked();
                     cancel = ui.button("Cancel").probe("Cancel").clicked();
                 });
                 ui.weak("Enter = OK · Esc = Cancel");
             });
+        // Remember a width the user dragged (not every layout jitter).
+        let w = dock.map_or(width, |d| d.response.rect.width());
+        if (w - width).abs() > 4.0 && w <= 640.0 && !ctx.input(|i| i.pointer.any_down()) {
+            self.shell.prefs.dialog_width = Some(w.round());
+            self.save_prefs();
+        }
+        for e in crate::dialogs::take_left_invalid() {
+            self.diag(true, "Input", e);
+        }
         AUTOFOCUS.with(|a| a.set(false));
         ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
@@ -2414,14 +2239,40 @@ impl RcadApp {
                 }
             }
         }
-        if ok {
+        if ok && let Dialog::DriveJoints { joints } = &dlg {
+            let mut cmds = vec![];
+            for (joint, name, values) in joints {
+                let v: Result<Vec<f64>, String> = values
+                    .iter()
+                    .map(|t| crate::app::parse_num(name, t))
+                    .collect();
+                match v {
+                    Ok(values) => cmds.push(Command::SetJointValues {
+                        joint: *joint,
+                        values,
+                    }),
+                    Err(e) => error = Some(e),
+                }
+            }
+            if error.is_none() {
+                self.last_dialog = None;
+                for c in cmds {
+                    self.request(c);
+                }
+                return;
+            }
+        } else if ok {
             self.last_dialog = None;
-            match build_command(&dlg) {
-                Ok(Command::Open {
-                    path,
-                    safe_mode: false,
-                }) => {
-                    self.guarded(Guarded::Open(path));
+            let built = self
+                .redefine_command(&dlg)
+                .unwrap_or_else(|| build_command(&dlg));
+            match built {
+                Ok(Command::Open { path, safe_mode }) => {
+                    self.guarded(if safe_mode {
+                        Guarded::OpenSafe(path)
+                    } else {
+                        Guarded::Open(path)
+                    });
                     return;
                 }
                 Ok(cmd) => {
@@ -2460,7 +2311,9 @@ impl RcadApp {
             Guarded::New | Guarded::NewAndSketch | Guarded::NewTemplate(_) => {
                 "creating a new document"
             }
-            Guarded::Open(_) | Guarded::OpenCopy(_) => "opening another document",
+            Guarded::Open(_) | Guarded::OpenSafe(_) | Guarded::OpenCopy(_) => {
+                "opening another document"
+            }
             Guarded::Close => "closing",
             Guarded::Exit => "quitting",
         };
@@ -2561,27 +2414,71 @@ impl RcadApp {
     }
 
     pub(crate) fn help_ui(&mut self, ctx: &egui::Context) {
+        use crate::shell::{KeymapLayer, keymap, registry};
         let mut open = self.show_help;
+        let layer = self.shell.prefs.keymap;
         egui::Window::new("Help")
             .open(&mut open)
             .collapsible(false)
-            .default_width(460.0)
+            .default_width(520.0)
             .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Keyboard layer:");
+                    for l in [KeymapLayer::Fusion, KeymapLayer::Classic] {
+                        if ui
+                            .selectable_label(layer == l, l.label())
+                            .named(&format!("Keymap {}", l.label()))
+                            .clicked()
+                        {
+                            self.set_keymap(l);
+                            self.save_prefs();
+                        }
+                    }
+                });
                 ui.label(RichText::new("Navigation").strong());
                 ui.label(rcad_viewport::NAV_HELP);
                 ui.label("In sketch mode the left button draws; use the middle button to orbit and the right button to pan.");
-                ui.label("Views: F fit · 7 top · 1 front · 3 right · 0 isometric.");
+                ui.label(format!(
+                    "Views: {}",
+                    registry::shortcut_line(layer, |d| matches!(
+                        d.places.first(),
+                        Some(registry::Place::View)
+                    ))
+                ));
                 ui.separator();
                 ui.label(RichText::new("Document").strong());
-                ui.label("Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo");
+                ui.label(registry::shortcut_line(layer, |d| {
+                    d.places
+                        .iter()
+                        .any(|p| matches!(p, registry::Place::File | registry::Place::AppBar))
+                }));
+                ui.separator();
+                ui.label(RichText::new("Modeling").strong());
+                ui.label(registry::shortcut_line(layer, |d| {
+                    d.places
+                        .iter()
+                        .any(|p| matches!(p, registry::Place::Ribbon { .. }))
+                }));
                 ui.separator();
                 ui.label(RichText::new("Sketch").strong());
-                ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · A 3-point arc · D dimension");
+                ui.label(keymap::sketch_help(layer));
                 ui.label("Constraints: lines for Horizontal/Vertical; two lines for Parallel/Perpendicular/Equal length/Angle (degrees, counter-clockwise); two points for Coincident; a line + a point for Midpoint/On line; a line + arc sharing an end for Tangent; two arcs/circles for Equal radius. X toggles construction (reference) geometry, which profiles ignore.");
-                ui.label("Del delete · Enter end line chain · Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
+                ui.label("Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
                 ui.label("Snaps: existing points (shared endpoint), horizontal/vertical alignment (adds an H/V constraint), grid (position only).");
                 ui.label("Ctrl+Z inside a sketch undoes sketch steps; Finish Sketch records one document undo step; Cancel Sketch discards the session.");
                 ui.separator();
+                egui::CollapsingHeader::new("All commands")
+                    .id_salt("help_all_commands")
+                    .show(ui, |ui| {
+                        egui::Grid::new("help_commands").striped(true).show(ui, |ui| {
+                            for d in registry::COMMANDS {
+                                ui.label(d.label);
+                                ui.label(d.key_text(layer));
+                                ui.label(registry::placement_text(d));
+                                ui.end_row();
+                            }
+                        });
+                    });
                 ui.label("Shortcuts are ignored while a text field has focus.");
             });
         self.show_help = open;
@@ -2594,20 +2491,38 @@ thread_local! {
 }
 
 fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32) {
+    field_checked(ui, label, buf, width, false);
+}
+
+/// A labelled text field; `numeric`: a value input (expression with units,
+/// checked against the document's parameters, red with the reason when it
+/// does not evaluate).
+fn field_checked(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32, numeric: bool) {
+    // Empty is left to the command (optional fields such as the facet angle).
+    let err = if numeric && !buf.trim().is_empty() {
+        crate::dialogs::check_value(label, buf).err()
+    } else {
+        None
+    };
     ui.horizontal(|ui| {
         let l = ui.label(label);
-        let r = ui
-            .add(egui::TextEdit::singleline(buf).desired_width(width))
-            .labelled_by(l.id)
-            .probe(label);
+        let mut edit = egui::TextEdit::singleline(buf).desired_width(width);
+        if err.is_some() {
+            edit = edit.text_color(BAD_COLOR);
+        }
+        let r = ui.add(edit).labelled_by(l.id).probe(label);
         if AUTOFOCUS.with(|a| a.replace(false)) {
             r.request_focus();
+        }
+        if let Some(e) = &err {
+            crate::dialogs::note_invalid(label, e, r.lost_focus());
+            r.on_hover_text(e.as_str());
         }
     });
 }
 
 pub(crate) fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
-    field(ui, label, buf, 90.0);
+    field_checked(ui, label, buf, 90.0, true);
 }
 
 pub(crate) fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
@@ -2881,6 +2796,7 @@ impl RcadApp {
         let active = self.summary.active_configuration.clone();
         let header = egui::CollapsingHeader::new(format!("Configurations ({})", configs.len()))
             .id_salt("configurations_panel")
+            .open(self.shell.take_focus(crate::shell::Focus::Configurations))
             .show(ui, |ui| {
                 for c in &configs {
                     ui.horizontal(|ui| {
@@ -2991,6 +2907,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Sheet metal flange")
             .id_salt(("sheet_ui", f.id.0))
+            .open(self.shell.take_focus(crate::shell::Focus::SheetFlange))
             .show(ui, |ui| {
                 let b = &mut self.sheet_form;
                 for (i, l) in ["Thickness (mm)", "Inner bend radius (mm)", "K-factor", "Width (mm)"]

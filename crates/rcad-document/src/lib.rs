@@ -26,7 +26,8 @@ pub use direct::ImportedFaceIds;
 pub use health::{FeatureHealth, HealthState};
 pub use io::{
     FORMAT_NAME, FORMAT_VERSION, LEGACY_FORMAT_NAMES, MAX_FILE_BYTES, MIN_FORMAT_VERSION,
-    NativeFile, load_file, migrate_to_v3, parse_native, read_bounded, save_file, write_atomic,
+    NativeFile, load_file, migrate_to_v3, parse_native, read_bounded, required_version, save_file,
+    write_atomic,
 };
 pub use material::{DensityUnit, Material};
 pub use model::*;

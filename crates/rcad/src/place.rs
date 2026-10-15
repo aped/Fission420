@@ -465,6 +465,7 @@ mod tests {
             projections: vec![],
             projection_entities: vec![],
             sheet_relief: None,
+            definition: None,
         };
         let ext = FeatureSummary {
             id: FeatureId(2),

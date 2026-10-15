@@ -129,6 +129,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Sheet metal base face")
             .id_salt(("sheet_base_ui", f.id.0))
+            .open(self.shell.take_focus(crate::shell::Focus::SheetBase))
             .show(ui, |ui| {
                 let form = &mut self.sheet_surface;
                 for (i, l) in [
@@ -181,6 +182,7 @@ impl RcadApp {
         let closed = f.profile_error.is_none();
         let header = egui::CollapsingHeader::new("Surface from sketch")
             .id_salt(("surface_sketch_ui", f.id.0))
+            .open(self.shell.take_focus(crate::shell::Focus::SurfaceFromSketch))
             .show(ui, |ui| {
                 let form = &mut self.sheet_surface;
                 if ui
