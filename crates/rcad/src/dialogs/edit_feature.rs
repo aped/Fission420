@@ -212,9 +212,9 @@ pub(crate) fn redefined(dlg: &Dialog, old: &FeatureKind) -> Result<FeatureKind, 
 
 /// The definition a dialog's command describes, for the dialog kinds whose
 /// command maps one to one onto the stored feature (fillets, chamfers,
-/// shells, patterns, mirror, loft, sweep, thread). Values the dialog does
-/// not show (created bodies, the chord tolerance, a nut's clearance, a
-/// mirror plane's tilt) are kept from `old`.
+/// shells, patterns, mirror, loft, sweep, thread, align). Values the
+/// dialog does not show (created bodies, the chord tolerance, a nut's
+/// clearance, a mirror plane's tilt, an align offset) are kept from `old`.
 fn kind_from_command(cmd: Command, old: &FeatureKind) -> Result<FeatureKind, String> {
     use FeatureKind as K;
     Ok(match (cmd, old) {
@@ -350,6 +350,11 @@ fn kind_from_command(cmd: Command, old: &FeatureKind) -> Result<FeatureKind, Str
             }),
             body: *body,
         },
+        (Command::AlignBody { from, to, .. }, K::AlignBody { offset, .. }) => K::AlignBody {
+            from,
+            to,
+            offset: *offset,
+        },
         _ => return Err("this dialog cannot redefine that feature".into()),
     })
 }
@@ -397,7 +402,7 @@ fn zero(v: f64) -> bool {
 }
 
 /// The dialog for a stored fillet, chamfer, shell, pattern, mirror, loft,
-/// sweep or thread, prefilled (a bound value shows its expression). None
+/// sweep, thread or align, prefilled (a bound value shows its expression). None
 /// for definitions the dialog cannot show (a pattern along a slanted
 /// direction, a loft with several middle sections).
 pub(crate) fn prefill(def: &FeatureKind, expressions: &BTreeMap<String, String>) -> Option<Dialog> {
@@ -591,6 +596,10 @@ pub(crate) fn prefill(def: &FeatureKind, expressions: &BTreeMap<String, String>)
             cx: fmt_value(center[0]),
             cy: fmt_value(center[1]),
         },
+        K::AlignBody { from, to, .. } => Dialog::Align {
+            from: *from,
+            to: Some(*to),
+        },
         _ => return None,
     })
 }
@@ -674,7 +683,7 @@ pub(crate) fn typed_expressions(
 impl RcadApp {
     /// Edit Feature: sketches reopen the sketch editor; extrusions,
     /// revolves, holes, fillets, chamfers, shells, patterns, mirrors,
-    /// lofts, sweeps and threads reopen their dialog prefilled; other kinds
+    /// lofts, sweeps, threads and aligns reopen their dialog prefilled; other kinds
     /// say where their values are edited.
     pub fn edit_feature(&mut self, id: FeatureId) {
         let Some(f) = self.summary.features.iter().find(|f| f.id == id).cloned() else {
@@ -888,6 +897,11 @@ mod tests {
                     clearance: 0.2,
                 }),
                 body: BodyId(5),
+            },
+            FeatureKind::AlignBody {
+                from: top,
+                to: face(5, FaceRole::ExtrudeStartCap),
+                offset: 1.5,
             },
         ];
         for def in defs {
