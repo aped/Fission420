@@ -51,6 +51,9 @@ pub struct ShellState {
     /// Active ribbon tab.
     pub tab: registry::Tab,
     pub show_prefs: bool,
+    /// Model revision shown when the current face was picked (commands
+    /// built from the pick run only at that revision).
+    pub pick_revision: Option<u64>,
     /// Face pick seen by the open dialog (new picks feed its input).
     pub last_pick: Option<u32>,
     /// The dialog's selection input was cleared and waits for a pick.
@@ -84,6 +87,7 @@ impl Default for ShellState {
             show_prefs: false,
             editing: None,
             last_pick: None,
+            pick_revision: None,
             pick_armed: false,
             applied_theme: None,
         }

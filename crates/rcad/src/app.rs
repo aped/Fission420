@@ -1613,6 +1613,7 @@ impl RcadApp {
         self.doc_dim_edit = None;
         match group.and_then(|g| self.faces.iter().find(|f| f.group == g).cloned()) {
             Some(info) => {
+                self.shell.pick_revision = Some(self.summary.revision);
                 self.selected = info.owner;
                 self.selected_face = Some(info.group);
                 self.selected_body = info.body;
@@ -2839,6 +2840,22 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
 
 /// `plane` moved `distance` mm along its normal (a construction plane), or
 /// `plane` itself for a zero distance.
+/// Dialogs whose command names faces picked in the view: they run only at
+/// the model revision of the pick.
+pub(crate) fn built_from_pick(d: &Dialog) -> bool {
+    match d {
+        Dialog::Hole { .. }
+        | Dialog::ShellFace { .. }
+        | Dialog::Chamfer { .. }
+        | Dialog::FilletLoop { .. }
+        | Dialog::Align { .. }
+        | Dialog::DirectEdit(_) => true,
+        Dialog::Pattern { mirror_face, .. } => mirror_face.is_some(),
+        Dialog::Thread { plane, .. } => matches!(plane, SketchPlane::Face(_)),
+        _ => false,
+    }
+}
+
 pub(crate) fn offset_plane(plane: SketchPlane, distance: f64) -> SketchPlane {
     use rcad_document::PlaneBase;
     let base = match plane {

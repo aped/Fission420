@@ -173,6 +173,8 @@ pub(crate) fn joint_dialog(
             face: g - db.groups.start,
         })
     });
+    // Faces picked in the view: the joint runs only at the pick's revision.
+    let pick_revision = app.shell.pick_revision;
     let Some(d) = app.assembly_ui.joint_dialog.as_mut() else {
         return;
     };
@@ -366,7 +368,16 @@ pub(crate) fn joint_dialog(
                         r.scroll_to_me(Some(egui::Align::Max));
                     }
                     if r.clicked() {
-                        send.push(c.clone());
+                        let picked = d.face_a.is_some()
+                            || d.face_b.is_some()
+                            || d.child_face.is_some();
+                        send.push(match pick_revision {
+                            Some(revision) if picked => Command::AtRevision {
+                                revision,
+                                command: Box::new(c.clone()),
+                            },
+                            _ => c.clone(),
+                        });
                         d.pending = true;
                     }
                 }

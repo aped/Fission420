@@ -2340,6 +2340,11 @@ impl RcadApp {
                     return;
                 }
                 Ok(cmd) => {
+                    let cmd = if crate::app::built_from_pick(&dlg) {
+                        self.at_pick_revision(cmd)
+                    } else {
+                        cmd
+                    };
                     let keep = matches!(
                         dlg,
                         Dialog::ExportStl(_) | Dialog::Export3mf(_) | Dialog::Import(_)

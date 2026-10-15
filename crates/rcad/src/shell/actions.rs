@@ -696,6 +696,18 @@ impl RcadApp {
         }
     }
 
+    /// `cmd`, refused as stale if the model moved on since the face it
+    /// was built from was picked (`Command::AtRevision`).
+    pub(crate) fn at_pick_revision(&self, cmd: Command) -> Command {
+        match self.shell.pick_revision {
+            Some(revision) => Command::AtRevision {
+                revision,
+                command: Box::new(cmd),
+            },
+            None => cmd,
+        }
+    }
+
     pub(crate) fn focus(&mut self, f: Focus) {
         self.shell.focus = Some(f);
     }
