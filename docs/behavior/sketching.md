@@ -56,7 +56,10 @@ unpinned; never the origin, not projected geometry; glyph `Fix`), **Concentric**
 circles/arcs with different centre points: centres coincide, 2 equations, `Con`), **Collinear**
 (two lines that share no end point: the second's ends lie on the first's line, 2 equations;
 lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a line: the points
-mirror each other about the line's infinite extension, 2 equations, `Sym`; two points that are
+mirror each other about the line's infinite extension, 2 equations, `Sym`; or two lines, or two
+circles, then the mirror line, in that selection order: lines get their ends mirrored pairwise
+as drawn, an end they share is held on the mirror line; circles get mirrored centres and equal
+radii; arcs are refused by name; two points that are
 close to each other and near the line can solve onto the line itself, which the zero-size guard
 refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
@@ -105,7 +108,8 @@ rubber band shows the live length / size / radius.
   (refused by name). A dimension whose value conflicts (inconsistent) is still refused.
   `toggle_driven` (editor) turns a driven dimension driving only when it is no longer redundant.
   Stored as `"driven": true` on the dimension (absent = driving, so older files load unchanged).
-* **Branch-flip guard**: a typed dimension value is solved directly; if an arc's sweep jumps by
+* **Branch-flip guard**: a typed dimension value (and a parameter edit of a sketch dimension:
+  `set_parameter`, or a bound expression whose value changes) is solved directly; if an arc's sweep jumps by
   more than 90° (its centre crossed the chord: a different shape) or a line reverses direction,
   the edit is re-solved by continuation in 16 steps; if a step still jumps, the edit is refused
   ("would flip arc N"), the field stays open and the sketch is unchanged (`rcad_sketch::guard`).

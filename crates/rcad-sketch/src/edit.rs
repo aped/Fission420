@@ -242,6 +242,91 @@ impl Sketch {
         n
     }
 
+    /// Constraints making entities `a` and `b` mirror images about the line
+    /// `line` (Fusion's Symmetry on two like entities):
+    /// * two lines: their end points pairwise `Symmetric`, paired the way the
+    ///   current geometry is closest to (an end shared by both lines is held
+    ///   on the mirror line instead);
+    /// * two circles: centres `Symmetric` plus `EqualRadius`.
+    ///
+    /// Arcs and mixed kinds are refused by name. Does not modify the sketch.
+    pub fn symmetric_entities(
+        &self,
+        a: EntityId,
+        b: EntityId,
+        line: EntityId,
+    ) -> Result<Vec<Constraint>, crate::SketchError> {
+        let refused = |m: &str| crate::SketchError::Refused(format!("Symmetry: {m}"));
+        let (Some(Entity::Line { a: m0, b: m1, .. }), Some(ea), Some(eb)) =
+            (self.entity(line), self.entity(a), self.entity(b))
+        else {
+            return Err(refused(
+                "select two lines or two circles and the mirror line",
+            ));
+        };
+        if a == b || a == line || b == line {
+            return Err(refused(
+                "needs two different entities and a separate mirror line",
+            ));
+        }
+        let (Some(p0), Some(p1)) = (self.point_xy(*m0), self.point_xy(*m1)) else {
+            return Err(refused("the mirror line has no end points"));
+        };
+        let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
+        let l2 = dx * dx + dy * dy;
+        if l2 <= 0.0 {
+            return Err(refused("the mirror line has zero length"));
+        }
+        let mirror = |q: [f64; 2]| {
+            let t = ((q[0] - p0[0]) * dx + (q[1] - p0[1]) * dy) / l2;
+            let f = [p0[0] + t * dx, p0[1] + t * dy];
+            [2.0 * f[0] - q[0], 2.0 * f[1] - q[1]]
+        };
+        let d = |u: [f64; 2], v: [f64; 2]| (u[0] - v[0]).hypot(u[1] - v[1]);
+        let xy = |p: PointId| self.point_xy(p).unwrap_or([0.0, 0.0]);
+        match (ea, eb) {
+            (Entity::Line { a: a0, b: a1, .. }, Entity::Line { a: b0, b: b1, .. }) => {
+                let straight = d(mirror(xy(*a0)), xy(*b0)) + d(mirror(xy(*a1)), xy(*b1));
+                let crossed = d(mirror(xy(*a0)), xy(*b1)) + d(mirror(xy(*a1)), xy(*b0));
+                let pairs = if straight <= crossed {
+                    [(*a0, *b0), (*a1, *b1)]
+                } else {
+                    [(*a0, *b1), (*a1, *b0)]
+                };
+                let mut out = Vec::new();
+                for (p, q) in pairs {
+                    if p != q {
+                        out.push(Constraint::Symmetric { a: p, b: q, line });
+                    } else if p != *m0 && p != *m1 {
+                        // A shared end mirrors onto itself: it lies on the line.
+                        out.push(Constraint::PointOnLine { point: p, line });
+                    }
+                }
+                Ok(out)
+            }
+            (Entity::Circle { center: ca, .. }, Entity::Circle { center: cb, .. }) => {
+                if ca == cb {
+                    return Err(refused("the circles share their centre point"));
+                }
+                Ok(vec![
+                    Constraint::Symmetric {
+                        a: *ca,
+                        b: *cb,
+                        line,
+                    },
+                    Constraint::EqualRadius { a, b },
+                ])
+            }
+            (Entity::Arc { .. }, _) | (_, Entity::Arc { .. }) => Err(refused(
+                "arcs are not supported yet (lines and circles are); make their end points \
+                 symmetric pairwise instead",
+            )),
+            _ => Err(refused(
+                "select two lines or two circles and the mirror line",
+            )),
+        }
+    }
+
     /// Remove the `FixedPoint` pins of `points` (never the origin's).
     /// Returns how many were removed. Does not solve.
     pub fn unfix_points(&mut self, points: &[PointId]) -> usize {

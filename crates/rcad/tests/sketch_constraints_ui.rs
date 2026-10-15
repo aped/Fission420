@@ -173,3 +173,59 @@ fn concentric_fix_collinear_and_symmetric_from_the_inspector() {
         h.state().sketch_session().unwrap().editor.feedback
     );
 }
+
+/// Two circles selected, then the mirror line: Symmetric mirrors the
+/// centres and makes the radii equal.
+#[test]
+fn symmetric_circles_about_a_line_from_the_inspector() {
+    let mut h = harness();
+    click(&mut h, "New");
+    click(&mut h, "Create Sketch");
+    click(&mut h, "Line");
+    sk_click(&mut h, [20.0, -30.0]);
+    sk_click(&mut h, [20.0, 30.0]);
+    h.key_press(egui::Key::Escape);
+    settle(&mut h);
+    click(&mut h, "Circle");
+    sk_click(&mut h, [5.0, 10.0]);
+    sk_click(&mut h, [8.0, 10.0]);
+    sk_click(&mut h, [33.0, 12.0]);
+    sk_click(&mut h, [37.0, 12.0]);
+    click(&mut h, "Select");
+    sk_click(&mut h, [8.0, 10.0]);
+    sk_click_mod(&mut h, [37.0, 12.0], Modifiers::SHIFT);
+    sk_click_mod(&mut h, [20.0, -20.0], Modifiers::SHIFT);
+    click(&mut h, "Symmetric");
+    let s = sketch(&h);
+    let circles: Vec<([f64; 2], f64)> = s
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Circle { center, radius, .. } => Some((s.point_xy(*center)?, *radius)),
+            _ => None,
+        })
+        .collect();
+    let [(c1, r1), (c2, r2)] = circles.as_slice() else {
+        panic!("{circles:?}")
+    };
+    // The mirror line is free too: reflect c1 about where it ended up.
+    let (p, q) = s
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Line { a, b, .. } => Some((s.point_xy(*a)?, s.point_xy(*b)?)),
+            _ => None,
+        })
+        .unwrap();
+    let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+    let t = ((c1[0] - p[0]) * dx + (c1[1] - p[1]) * dy) / (dx * dx + dy * dy);
+    let foot = [p[0] + t * dx, p[1] + t * dy];
+    let image = [2.0 * foot[0] - c1[0], 2.0 * foot[1] - c1[1]];
+    assert!(
+        (image[0] - c2[0]).abs() < 1e-7
+            && (image[1] - c2[1]).abs() < 1e-7
+            && (r1 - r2).abs() < 1e-8,
+        "{circles:?}: {:?}",
+        h.state().sketch_session().unwrap().editor.feedback
+    );
+}

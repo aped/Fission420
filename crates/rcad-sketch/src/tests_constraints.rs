@@ -129,3 +129,93 @@ fn symmetric_points_reflect_about_an_oblique_line() {
             .any(|c| matches!(c, Constraint::Symmetric { .. }))
     );
 }
+
+/// Fixed mirror line through (5, 0) at 30°, as in the point-pair test.
+fn mirror_sketch() -> (Sketch, EntityId, [f64; 2], f64) {
+    let mut s = Sketch::default();
+    let (t, c) = (30f64.to_radians(), [5.0, 0.0]);
+    let l0 = s.add_point(c[0], c[1]);
+    let l1 = s.add_point(c[0] + 10.0 * t.cos(), c[1] + 10.0 * t.sin());
+    let line = s.add_line(l0, l1);
+    s.fix_points(&[l0, l1]);
+    (s, line, c, t)
+}
+
+fn reflect(c: [f64; 2], t: f64, p: [f64; 2]) -> [f64; 2] {
+    let (dx, dy) = (p[0] - c[0], p[1] - c[1]);
+    let (c2, s2) = ((2.0 * t).cos(), (2.0 * t).sin());
+    [c[0] + c2 * dx + s2 * dy, c[1] + s2 * dx - c2 * dy]
+}
+
+#[test]
+fn symmetric_lines_mirror_end_to_end() {
+    let (mut s, line, c, t) = mirror_sketch();
+    let a0 = s.add_point(10.0, 6.0);
+    let a1 = s.add_point(14.0, 9.0);
+    let a = s.add_line(a0, a1);
+    s.fix_points(&[a0, a1]);
+    // b drawn roughly mirrored but reversed (b0 near the image of a1).
+    let (ia0, ia1) = (reflect(c, t, [10.0, 6.0]), reflect(c, t, [14.0, 9.0]));
+    let b0 = s.add_point(ia1[0] + 0.7, ia1[1] - 0.4);
+    let b1 = s.add_point(ia0[0] - 0.5, ia0[1] + 0.6);
+    let b = s.add_line(b0, b1);
+    assert_eq!(s.clone().solve().dof, 4);
+    let cs = s.symmetric_entities(a, b, line).unwrap();
+    assert_eq!(cs.len(), 2);
+    s.constraints.extend(cs);
+    let r = s.solve();
+    assert_eq!((r.status, r.dof), (SolveStatus::FullyConstrained, 0));
+    at(&s, b0, ia1);
+    at(&s, b1, ia0);
+}
+
+#[test]
+fn symmetric_circles_mirror_centre_and_radius() {
+    let (mut s, line, c, t) = mirror_sketch();
+    let ca = s.add_point(10.0, 6.0);
+    let a = s.add_circle(ca, 3.0);
+    s.fix_points(&[ca]);
+    s.constraints.push(Constraint::Diameter {
+        circle: a,
+        dim: Dimension::new("d", 6.0),
+    });
+    let want = reflect(c, t, [10.0, 6.0]);
+    let cb = s.add_point(want[0] + 1.0, want[1] - 1.0);
+    let b = s.add_circle(cb, 2.0);
+    let cs = s.symmetric_entities(a, b, line).unwrap();
+    s.constraints.extend(cs);
+    let r = s.solve();
+    assert_eq!((r.status, r.dof), (SolveStatus::FullyConstrained, 0));
+    at(&s, cb, want);
+    let Some(Entity::Circle { radius, .. }) = s.entity(b) else {
+        unreachable!()
+    };
+    assert!((radius - 3.0).abs() <= SOLVED);
+}
+
+#[test]
+fn symmetric_entities_refuse_arcs_mixed_kinds_and_the_mirror_itself() {
+    let (mut s, line, _, _) = mirror_sketch();
+    let p = s.add_point(0.0, 5.0);
+    let q = s.add_point(3.0, 5.0);
+    let l = s.add_line(p, q);
+    let c = s.add_point(0.0, -5.0);
+    let k = s.add_circle(c, 1.0);
+    for (a, b) in [(l, k), (l, line), (l, l)] {
+        assert!(s.symmetric_entities(a, b, line).is_err(), "{a:?} {b:?}");
+    }
+    let (cc, s0, e0) = (
+        s.add_point(0.0, 10.0),
+        s.add_point(1.0, 10.0),
+        s.add_point(0.0, 11.0),
+    );
+    let arc = s.next_entity_id();
+    s.entities.push(Entity::Arc {
+        id: arc,
+        center: cc,
+        start: s0,
+        end: e0,
+    });
+    let err = s.symmetric_entities(arc, k, line).unwrap_err();
+    assert!(err.to_string().contains("arcs"), "{err}");
+}

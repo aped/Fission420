@@ -81,6 +81,10 @@ pub enum SketchOp {
         #[serde(default = "yes")]
         fix: bool,
     },
+    /// Make entities `a` and `b` (two lines, or two circles) mirror images
+    /// about line `line` (`Sketch::symmetric_entities`). Refused if
+    /// redundant or conflicting.
+    SymmetricEntities { a: u32, b: u32, line: u32 },
     /// Make dimension `name` driven (it measures) or driving (refused while
     /// it is redundant).
     SetDriven { name: String, driven: bool },
@@ -381,6 +385,13 @@ fn edit(
             out.note = format!("{} {n} point(s)", if *fix { "fixed" } else { "unfixed" });
             Ok(*fix)
         }
+        SketchOp::SymmetricEntities { a, b, line } => {
+            let cs = sk
+                .symmetric_entities(EntityId(*a), EntityId(*b), EntityId(*line))
+                .map_err(sketch_err)?;
+            sk.constraints.extend(cs);
+            Ok(true)
+        }
         SketchOp::SetDriven { name, driven } => {
             let mut found = false;
             for c in &mut sk.constraints {
@@ -608,5 +619,6 @@ fn op_label(op: &SketchOp) -> &'static str {
         SketchOp::Fix { fix: true, .. } => "Fix",
         SketchOp::Fix { .. } => "Unfix",
         SketchOp::SetDriven { .. } => "Driven / driving",
+        SketchOp::SymmetricEntities { .. } => "Symmetry",
     }
 }

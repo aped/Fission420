@@ -324,6 +324,9 @@ impl RcadApp {
         if let Some(text) = text {
             s.editor.feedback = Some(crate::sketch_edit::Feedback { error, text });
         }
+        // The camera is not re-framed here: the session was already oriented
+        // when it opened, and moving the view under the user's next click
+        // (or a script's) would shift what that click hits.
     }
 
     fn links_of(&self, id: FeatureId) -> Vec<Vec<rcad_sketch::EntityId>> {

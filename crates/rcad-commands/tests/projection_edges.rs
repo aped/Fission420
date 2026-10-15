@@ -3,8 +3,9 @@
 //! circle on a face oblique to the sketch becomes the exact ellipse, a
 //! section yields the body's outline and holes in the sketch plane.
 //! Upstream edits move the geometry, a vanished edge breaks the link by name,
-//! unlink freezes, refusals name the reason, undo and save/reopen (format
-//! v8). Expected geometry and volumes are closed-form.
+//! unlink freezes, refusals name the reason, undo and save/reopen. Edges a
+//! cut leaves in another feature's face follow that cut by identity.
+//! Expected geometry and volumes are closed-form.
 mod support;
 use rcad_commands::Session;
 use rcad_sketch::Entity;
@@ -127,12 +128,13 @@ fn parallel_edges_follow_upstream_edits_undo_and_reopen() {
     tray::ok(&mut s, &json!({"cmd": "undo"}));
     let sk = solved(&s, 4);
     assert!(lines(&sk).iter().any(|(a, _)| (a[0] - 20.0).abs() < 1e-9));
-    // Save / reopen: format v8, same document.
+    // Save / reopen: same document. Format v9: the hole rim is bound to the
+    // cut feature that made it (a v8 reader would bind it by position).
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("edges.rcad.json");
     tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(v["version"], json!(8));
+    assert_eq!(v["version"], json!(9));
     let mut t = Session::new();
     tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
@@ -497,4 +499,137 @@ fn oblique_face_with_an_arc_projects_its_straight_edges() {
         r.error
     );
     assert_eq!(s.model().unwrap().document(), &before);
+}
+
+/// The tool identity stored for a projected curve: (`from`, `from_tool`).
+fn link_identity(s: &Session, sketch: u32) -> Vec<(Option<u32>, Option<u32>)> {
+    let doc = s.model().unwrap().document();
+    let f = doc
+        .features
+        .iter()
+        .find(|f| f.id.0 == sketch)
+        .expect("sketch");
+    match &f.kind {
+        rcad_document::FeatureKind::Sketch { links, .. } => links
+            .iter()
+            .flat_map(|l| l.loops.iter().flatten())
+            .map(|c| (c.from.map(|e| e.0), c.from_tool.map(|t| t.0)))
+            .collect(),
+        _ => panic!("not a sketch"),
+    }
+}
+
+/// The rim a through cut leaves in the block's top face carries the cut
+/// feature and its circle entity; resizing and moving the hole moves the
+/// projected circle by that identity.
+#[test]
+fn hole_rim_follows_its_cut_by_identity() {
+    let mut s = Session::new();
+    holed_block(
+        &mut s,
+        json!({"Offset": {"base": "WorldXY", "distance": 20.0}}),
+    );
+    tray::ok(&mut s, &top_edge([14.5, 0.0, 10.0]));
+    let ids = link_identity(&s, 5);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0].1, Some(4), "bound to the cut feature: {ids:?}");
+    assert!(ids[0].0.is_some());
+    for (name, value) in [("diameter", 6.0), ("center_x", -8.0), ("center_y", 5.0)] {
+        tray::ok(
+            &mut s,
+            &json!({"cmd": "set_parameter", "feature": 3, "name": name, "value": value}),
+        );
+    }
+    let c = circles(&solved(&s, 4));
+    assert_eq!(c.len(), 1, "{c:?}");
+    assert!(
+        near(c[0].0, [-8.0, 5.0]) && (c[0].1 - 3.0).abs() < 1e-9,
+        "{c:?}"
+    );
+}
+
+/// Two holes; the projected rim of one follows its own hole when that hole
+/// moves past the other (position alone cannot tell them apart: the edge
+/// moved farther than its size, which the nearness fallback refuses).
+#[test]
+fn projected_rim_follows_its_own_hole_past_another() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 60.0, "height": 30.0}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_circle",
+                   "diameter": 6.0, "center": [15.0, 0.0]}),
+            json!({"cmd": "extrude", "sketch": 3, "op": "cut", "target": 1, "through_all": true}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_circle",
+                   "diameter": 6.0, "center": [0.0, 0.0]}),
+            json!({"cmd": "extrude", "sketch": 5, "op": "cut", "target": 1, "through_all": true}),
+            json!({"cmd": "create_sketch", "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+        ],
+    );
+    // Project the rim of the first hole (cut feature 4).
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "project", "sketch": 7,
+                "source": {"Edge": {"feature": 2, "role": "ExtrudeEndCap"}}, "at": [18.5, 0.0, 10.0]}),
+    );
+    assert_eq!(link_identity(&s, 7)[0].1, Some(4));
+    let rim = |s: &Session| {
+        let c = circles(&solved(s, 6));
+        assert_eq!(c.len(), 1, "{c:?}");
+        c[0].0
+    };
+    assert!(near(rim(&s), [15.0, 0.0]));
+    // Move the first hole across the second, to the far side.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "center_x", "value": -15.0}),
+    );
+    assert!(near(rim(&s), [-15.0, 0.0]), "{:?}", rim(&s));
+    // And the other hole moving does not drag it.
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 5, "name": "center_x", "value": 10.0}),
+    );
+    assert!(near(rim(&s), [-15.0, 0.0]), "{:?}", rim(&s));
+    // Undo restores the earlier binding.
+    tray::ok(&mut s, &json!({"cmd": "undo"}));
+    tray::ok(&mut s, &json!({"cmd": "undo"}));
+    assert!(near(rim(&s), [15.0, 0.0]));
+}
+
+/// A blind pocket's rim in the top face also carries its cut (the face lies
+/// at the end of the tool's span); its diameter edit is followed.
+#[test]
+fn blind_pocket_rim_follows_its_cut() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &[
+            json!({"cmd": "new_document"}),
+            json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_rectangle",
+                   "width": 40.0, "height": 30.0}),
+            json!({"cmd": "extrude", "sketch": 1, "distance": 10.0}),
+            json!({"cmd": "create_sketch", "plane": {"Offset": {"base": "WorldXY", "distance": 10.0}},
+                   "template": "centered_circle", "diameter": 8.0, "center": [10.0, 0.0]}),
+            json!({"cmd": "extrude", "sketch": 3, "op": "cut", "target": 1, "distance": 4.0}),
+            json!({"cmd": "create_sketch", "plane": {"Offset": {"base": "WorldXY", "distance": 20.0}},
+                   "template": "polygon", "vertices": [[80.0, 80.0], [81.0, 80.0], [80.0, 81.0]]}),
+        ],
+    );
+    tray::ok(&mut s, &top_edge([14.5, 0.0, 10.0]));
+    assert_eq!(link_identity(&s, 5)[0].1, Some(4));
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "diameter", "value": 12.0}),
+    );
+    let c = circles(&solved(&s, 4));
+    assert!(
+        near(c[0].0, [10.0, 0.0]) && (c[0].1 - 6.0).abs() < 1e-9,
+        "{c:?}"
+    );
 }

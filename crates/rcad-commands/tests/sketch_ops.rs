@@ -397,3 +397,128 @@ fn fix_and_driven_dimensions_through_ops() {
     );
     let _ = id;
 }
+
+/// A parameter edit of a sketch dimension goes through the branch-flip
+/// guard: a radius that would push one fillet past the next is refused with
+/// the document unchanged; a tenfold width edit keeps every fillet a quarter
+/// arc (closed-form area w·h − (4 − π)·r²).
+#[test]
+fn parameter_edits_are_guarded_against_branch_flips() {
+    let mut sk = Sketch::default();
+    let p: Vec<PointId> = [[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [0.0, 10.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    sk.origin = Some(p[0]);
+    let l: Vec<EntityId> = (0..4).map(|i| sk.add_line(p[i], p[(i + 1) % 4])).collect();
+    sk.constraints.extend([
+        Constraint::FixedPoint {
+            p: p[0],
+            x: 0.0,
+            y: 0.0,
+        },
+        Constraint::Horizontal { line: l[0] },
+        Constraint::Horizontal { line: l[2] },
+        Constraint::Vertical { line: l[1] },
+        Constraint::Vertical { line: l[3] },
+        Constraint::HorizontalDistance {
+            a: p[0],
+            b: p[1],
+            dim: Dimension::new("w", 20.0),
+        },
+        Constraint::VerticalDistance {
+            a: p[1],
+            b: p[2],
+            dim: Dimension::new("h", 10.0),
+        },
+    ]);
+    assert!(sk.solve().is_success());
+    for (i, c) in p.iter().enumerate() {
+        sk.fillet_corner(*c, 2.0, Some(if i == 0 { "r" } else { "rr" }))
+            .unwrap();
+    }
+    let mut s = Session::new();
+    assert!(s.execute(&Command::NewDocument).ok);
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{r:?}");
+    let f = r.feature.unwrap();
+    let rev = revision(&s);
+    let r = s.execute(&Command::SetParameter {
+        feature: f,
+        name: "r".into(),
+        value: 9.0,
+    });
+    assert!(!r.ok, "{r:?}");
+    assert!(
+        r.error.unwrap().to_string().contains("would flip"),
+        "refused by name"
+    );
+    assert_eq!(revision(&s), rev);
+    let r = s.execute(&Command::SetParameter {
+        feature: f,
+        name: "w".into(),
+        value: 200.0,
+    });
+    assert!(r.ok, "{r:?}");
+    let mut sk = stored(&s, f);
+    assert!(sk.solve().is_success());
+    let area = sk.regions().unwrap()[0].area;
+    let want = 200.0 * 10.0 - (4.0 - std::f64::consts::PI) * 4.0;
+    assert!((area - want).abs() < 1e-6, "{area} vs {want}");
+}
+
+/// Two lines mirrored about the vertical axis line x = 0 through the
+/// `symmetric_entities` op: the second line's ends land on the images of the
+/// first's (which is fixed), paired as drawn.
+#[test]
+fn symmetric_entities_op_mirrors_lines() {
+    let mut s = Session::new();
+    let f = empty_sketch(&mut s);
+    for json in [
+        r#"{"op":"add_line","a":[0,-20],"b":[0,20]}"#,
+        r#"{"op":"add_line","a":[5,2],"b":[12,9]}"#,
+        r#"{"op":"add_line","a":[-6,3],"b":[-11,10]}"#,
+    ] {
+        assert!(op(&mut s, f, json).ok, "{json}");
+    }
+    let sk = stored(&s, f);
+    let ids: Vec<u32> = sk.entities.iter().map(|e| e.id().0).collect();
+    let pts: Vec<u32> = sk
+        .points
+        .iter()
+        .filter(|p| Some(p.id) != sk.origin)
+        .map(|p| p.id.0)
+        .collect();
+    assert!(
+        op(
+            &mut s,
+            f,
+            &format!(r#"{{"op":"fix","points":{:?}}}"#, &pts[..4])
+        )
+        .ok
+    );
+    let r = op(
+        &mut s,
+        f,
+        &format!(
+            r#"{{"op":"symmetric_entities","a":{},"b":{},"line":{}}}"#,
+            ids[1], ids[2], ids[0]
+        ),
+    );
+    assert!(r.ok, "{r:?}");
+    let sk = stored(&s, f);
+    let Some(Entity::Line { a, b, .. }) = sk.entity(EntityId(ids[2])).cloned() else {
+        panic!()
+    };
+    let (pa, pb) = (sk.point_xy(a).unwrap(), sk.point_xy(b).unwrap());
+    for (got, want) in [(pa, [-5.0, 2.0]), (pb, [-12.0, 9.0])] {
+        assert!(
+            (got[0] - want[0]).abs() < 1e-8 && (got[1] - want[1]).abs() < 1e-8,
+            "{got:?} vs {want:?}"
+        );
+    }
+}

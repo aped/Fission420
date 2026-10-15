@@ -1560,6 +1560,39 @@ mod tests {
         }
     }
 
+    /// The rows `Sketch::symmetric_entities` produces for two lines and for
+    /// two circles against central finite differences.
+    #[test]
+    fn symmetric_entity_rows_match_finite_differences() {
+        let mut s = Sketch::default();
+        for (x, y) in [
+            (0.4, -0.3),
+            (9.1, 1.2),
+            (2.0, 6.0),
+            (5.0, 9.0),
+            (8.0, -3.5),
+            (11.0, -6.0),
+            (1.0, 3.0),
+            (7.0, -1.0),
+        ] {
+            s.add_point(x, y);
+        }
+        let m = s.add_line(PointId(0), PointId(1));
+        let a = s.add_line(PointId(2), PointId(3));
+        let b = s.add_line(PointId(4), PointId(5));
+        let c1 = s.add_circle(PointId(6), 2.0);
+        let c2 = s.add_circle(PointId(7), 2.5);
+        let mut cs = s.symmetric_entities(a, b, m).unwrap();
+        cs.extend(s.symmetric_entities(c1, c2, m).unwrap());
+        s.constraints = cs;
+        s.validate().unwrap();
+        let sys = System::build(&s);
+        assert_eq!(sys.eqs.len(), 4 + 2 + 1);
+        let x0 = sys.initial.clone();
+        let err = fd_error(&sys, &x0, 1e-6);
+        assert!(err < 1e-7, "Jacobian vs finite differences: {err:e}");
+    }
+
     /// Two lines L1 = P0->P1, L2 = P2->P3, point P4; every line relation.
     fn line_relations(pts: [(f64, f64); 5]) -> Sketch {
         let mut s = Sketch::default();
