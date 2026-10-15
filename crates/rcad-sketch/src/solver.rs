@@ -808,11 +808,18 @@ impl System {
                         });
                     }
                 }
-                Constraint::Symmetric { a, b, line } => {
+                Constraint::Symmetric {
+                    a,
+                    b,
+                    line,
+                    perpendicular_only,
+                } => {
                     if let (Some(&p), Some(&q), Some(&(l0, l1))) =
                         (point_col.get(a), point_col.get(b), lines.get(line))
                     {
-                        push(Eq::MidLine { p, q, a: l0, b: l1 });
+                        if !perpendicular_only {
+                            push(Eq::MidLine { p, q, a: l0, b: l1 });
+                        }
                         push(Eq::PerpLine { p, q, a: l0, b: l1 });
                     }
                 }
@@ -1534,6 +1541,7 @@ mod tests {
                 a: PointId(6),
                 b: PointId(7),
                 line: la,
+                perpendicular_only: false,
             },
         ];
         s.validate().unwrap();
@@ -1582,12 +1590,32 @@ mod tests {
         let b = s.add_line(PointId(4), PointId(5));
         let c1 = s.add_circle(PointId(6), 2.0);
         let c2 = s.add_circle(PointId(7), 2.5);
+        // Two arcs (centre, start, end each).
+        let mut arc = |c: (f64, f64), p: (f64, f64), q: (f64, f64)| {
+            let ids = [
+                s.add_point(c.0, c.1),
+                s.add_point(p.0, p.1),
+                s.add_point(q.0, q.1),
+            ];
+            let id = s.next_entity_id();
+            s.entities.push(Entity::Arc {
+                id,
+                center: ids[0],
+                start: ids[1],
+                end: ids[2],
+            });
+            id
+        };
+        let a1 = arc((4.0, 8.0), (7.5, 8.5), (3.0, 11.0));
+        let a2 = arc((10.0, 2.0), (9.0, 6.5), (13.0, 3.0));
         let mut cs = s.symmetric_entities(a, b, m).unwrap();
         cs.extend(s.symmetric_entities(c1, c2, m).unwrap());
+        cs.extend(s.symmetric_entities(a1, a2, m).unwrap());
         s.constraints = cs;
         s.validate().unwrap();
         let sys = System::build(&s);
-        assert_eq!(sys.eqs.len(), 4 + 2 + 1);
+        // lines 4, circles 2 + 1, arcs 2 + 2 + 1, plus the arcs' own rows 2.
+        assert_eq!(sys.eqs.len(), 4 + 3 + 5 + 2);
         let x0 = sys.initial.clone();
         let err = fd_error(&sys, &x0, 1e-6);
         assert!(err < 1e-7, "Jacobian vs finite differences: {err:e}");

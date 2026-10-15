@@ -43,6 +43,9 @@ struct Pending {
     auto: bool,
     /// Finish after the commit (Finish Sketch with typed expressions).
     finish: bool,
+    /// A dimension click to replay once the edge is projected
+    /// (auto-project on reference).
+    replay: Option<([f64; 2], crate::sketch_edit::View)>,
 }
 
 /// Per-session projection state.
@@ -63,9 +66,11 @@ impl RcadApp {
     /// After sketch input: resolve a Project / Intersect click against the
     /// model (face or body under the cursor) and start the projection.
     pub(crate) fn sketch_project_poll(&mut self) {
+        let on_reference = self.shell.prefs.auto_project_on_reference;
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
+        s.editor.auto_project_on_reference = on_reference;
         let Some(pick) = s.editor.project_pick.take() else {
             return;
         };
@@ -126,12 +131,20 @@ impl RcadApp {
             }
         };
         let at = (!pick.section).then_some(at);
+        let replay = pick.replay;
         // A projected edge is an open curve, which would make the sketch's
         // profile fail (profiles need closed loops): it comes in as
         // construction (reference) geometry. A section is closed loops and
         // stays profile geometry.
         let construction = !pick.section;
         self.start_projection(source, at, construction, pick.linked, false);
+        if let Some(p) = self
+            .sketch
+            .as_mut()
+            .and_then(|s| s.project.pending.as_mut())
+        {
+            p.replay = replay;
+        }
     }
 
     /// Commit the session's work if needed, then project `source`.
@@ -154,8 +167,8 @@ impl RcadApp {
             stage: Stage::Commit,
             auto,
             finish: false,
+            replay: None,
         };
-        s.editor.cancel_gesture();
         let cmd = match s.target.clone() {
             // Typed expressions are committed with the sketch (Edit Sketch
             // would refuse a changed bound dimension).
@@ -316,6 +329,7 @@ impl RcadApp {
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
+        let replay = s.project.pending.as_ref().and_then(|p| p.replay);
         s.project.pending = None;
         s.committing = false;
         if let Some(sk) = sk {
@@ -323,6 +337,12 @@ impl RcadApp {
         }
         if let Some(text) = text {
             s.editor.feedback = Some(crate::sketch_edit::Feedback { error, text });
+        }
+        // Auto-project on reference: the dimension click now lands on the
+        // projected edge.
+        if let (Some((pos, view)), false) = (replay, error) {
+            s.editor.pointer_move(pos, None, &view);
+            s.editor.click(pos, None, &view, false);
         }
         // The camera is not re-framed here: the session was already oriented
         // when it opened, and moving the view under the user's next click
@@ -379,6 +399,7 @@ impl RcadApp {
             stage: Stage::Unlink,
             auto: false,
             finish: false,
+            replay: None,
         });
         s.committing = true;
         self.request(Command::UnlinkProjection { sketch: id, link });
@@ -421,6 +442,7 @@ impl RcadApp {
             stage,
             auto: false,
             finish: true,
+            replay: None,
         });
         s.committing = true;
         self.request(cmd);
@@ -476,12 +498,12 @@ impl RcadApp {
     /// The auto-project preference (a new sketch on a planar face starts
     /// with the face's edges projected as construction).
     pub fn set_auto_project_faces(&mut self, on: bool) {
-        self.auto_project_faces = on;
+        self.shell.prefs.auto_project_face_edges = on;
     }
 
     /// Start the automatic face-edge projection of a new sketch on a face.
     pub(crate) fn auto_project_host_face(&mut self) {
-        if !self.auto_project_faces {
+        if !self.shell.prefs.auto_project_face_edges {
             return;
         }
         let Some(SketchTarget::New {
@@ -494,14 +516,10 @@ impl RcadApp {
     }
 }
 
-/// Project tool options, Unlink for a selected projected curve, and the
-/// auto-project preference (sketch toolbar). Returns true when Unlink was
+/// Project tool options and Unlink for a selected projected curve (sketch
+/// toolbar). The auto-project preferences live in Preferences. Returns true when Unlink was
 /// clicked (the caller runs `unlink_selected_projection`).
-pub(crate) fn options_ui(
-    ui: &mut egui::Ui,
-    ed: &mut crate::sketch_edit::SketchEditor,
-    auto_project: &mut bool,
-) -> bool {
+pub(crate) fn options_ui(ui: &mut egui::Ui, ed: &mut crate::sketch_edit::SketchEditor) -> bool {
     use crate::probe::Probe;
     if matches!(
         ed.tool,
@@ -510,12 +528,6 @@ pub(crate) fn options_ui(
         ui.checkbox(&mut ed.project_linked, "Projection Link")
             .probe("Projection Link")
             .on_hover_text("On: the projected curves follow the model. Off: an unlinked copy.");
-        ui.checkbox(auto_project, "Auto-project face edges")
-            .probe("Auto-project face edges")
-            .on_hover_text(
-                "A new sketch on a planar face starts with the face's edges projected as \
-                 construction geometry",
-            );
     }
     let projected_selected = ed
         .selection

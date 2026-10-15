@@ -324,7 +324,7 @@ impl RcadApp {
                         ed.set_tool(t);
                     }
                 }
-                if crate::sketch_project::options_ui(ui, ed, &mut self.auto_project_faces) {
+                if crate::sketch_project::options_ui(ui, ed) {
                     unlink = true;
                 }
             });

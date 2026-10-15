@@ -490,6 +490,24 @@ impl RcadApp {
                 ui.small(
                     "The help sheet (F1) lists every command and its key in the active layer.",
                 );
+                ui.label(RichText::new("Sketch").strong());
+                changed |= ui
+                    .checkbox(
+                        &mut self.shell.prefs.auto_project_face_edges,
+                        "Auto-project face edges",
+                    )
+                    .named("Pref auto-project face edges")
+                    .changed();
+                changed |= ui
+                    .checkbox(
+                        &mut self.shell.prefs.auto_project_on_reference,
+                        "Auto-project edges on reference",
+                    )
+                    .named("Pref auto-project edges on reference")
+                    .on_hover_text(
+                        "Dimensioning a model edge in the sketch editor projects that edge first",
+                    )
+                    .changed();
             });
         self.shell.show_prefs = open;
         if changed {

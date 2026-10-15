@@ -59,7 +59,10 @@ lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a li
 mirror each other about the line's infinite extension, 2 equations, `Sym`; or two lines, or two
 circles, then the mirror line, in that selection order: lines get their ends mirrored pairwise
 as drawn, an end they share is held on the mirror line; circles get mirrored centres and equal
-radii; arcs are refused by name; two points that are
+radii; two arcs get mirrored centres, b's start on the image of a's end and b's end on the
+image of a's start (reflection reverses orientation), using only the rows that keep the system
+square: the last end gets only its perpendicular row, a shared end gets none, two arcs sharing
+both ends (a lens) get equal radii only; mixed kinds are refused by name; two points that are
 close to each other and near the line can solve onto the line itself, which the zero-size guard
 refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
@@ -398,8 +401,13 @@ of the arc, or the refusal reason), Enter. One undo step.
   dimensioned and constrained to at once. **Projection Link** (shown with the tools, on by
   default) off copies the curves unlinked.
 * **Auto-project face edges** (Fusion's default, on): a new sketch on a planar face starts with
-  that face's edges projected, as construction so they stay out of profiles. The checkbox (shown
-  with the Project tool) turns it off for later sketches.
+  that face's edges projected, as construction so they stay out of profiles. Preferences ▸
+  Sketch ▸ "Auto-project face edges" turns it off (saved in the preferences file).
+* **Auto-project edges on reference** (Preferences ▸ Sketch, off by default, saved in the
+  preferences file): with the Dimension tool, a click on a model edge where no sketch geometry
+  is under the cursor projects that edge (as construction, linked) and then replays the click on
+  it, so the dimension refers to the projected edge (a two-point dimension already started keeps
+  its first point). A projected edge is fixed, so a length dimension on it is driven.
 * **Unlink projection** (shown when a projected curve is selected) breaks its link: the curves
   stay as plain fixed geometry.
 * Projection reads the model, so it is a document step: the sketch so far is committed first

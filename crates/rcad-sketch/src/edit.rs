@@ -247,9 +247,12 @@ impl Sketch {
     /// * two lines: their end points pairwise `Symmetric`, paired the way the
     ///   current geometry is closest to (an end shared by both lines is held
     ///   on the mirror line instead);
-    /// * two circles: centres `Symmetric` plus `EqualRadius`.
+    /// * two circles: centres `Symmetric` plus `EqualRadius`;
+    /// * two arcs: centres mirrored, b's start the image of a's end and b's
+    ///   end of a's start (reflection reverses orientation), with only the
+    ///   rows that keep the system square (equal radii follow).
     ///
-    /// Arcs and mixed kinds are refused by name. Does not modify the sketch.
+    /// Mixed kinds are refused by name. Does not modify the sketch.
     pub fn symmetric_entities(
         &self,
         a: EntityId,
@@ -296,7 +299,12 @@ impl Sketch {
                 let mut out = Vec::new();
                 for (p, q) in pairs {
                     if p != q {
-                        out.push(Constraint::Symmetric { a: p, b: q, line });
+                        out.push(Constraint::Symmetric {
+                            a: p,
+                            b: q,
+                            line,
+                            perpendicular_only: false,
+                        });
                     } else if p != *m0 && p != *m1 {
                         // A shared end mirrors onto itself: it lies on the line.
                         out.push(Constraint::PointOnLine { point: p, line });
@@ -313,13 +321,57 @@ impl Sketch {
                         a: *ca,
                         b: *cb,
                         line,
+                        perpendicular_only: false,
                     },
                     Constraint::EqualRadius { a, b },
                 ])
             }
+            (
+                Entity::Arc {
+                    center: ca,
+                    start: sa,
+                    end: ea,
+                    ..
+                },
+                Entity::Arc {
+                    center: cb,
+                    start: sb,
+                    end: eb,
+                    ..
+                },
+            ) => {
+                if ca == cb {
+                    return Err(refused("the arcs share their centre point"));
+                }
+                // Reflection reverses orientation: b's start mirrors a's
+                // end and b's end mirrors a's start. Square system for b's
+                // six unknowns: centre (2), start (2), b's own equal-radius
+                // row (1), and only the perpendicular row for its end (1):
+                // the rest follows from its circle. A shared end gets no row
+                // (it is not moved onto the mirror line).
+                let sym =
+                    |a: PointId, b: PointId, perpendicular_only: bool| Constraint::Symmetric {
+                        a,
+                        b,
+                        line,
+                        perpendicular_only,
+                    };
+                if ea == sb && sa == eb {
+                    // Both ends shared (a lens): b's own row puts its centre
+                    // on the chord's bisector; equal radii pick the image.
+                    return Ok(vec![Constraint::EqualRadius { a, b }]);
+                }
+                let mut out = vec![sym(*ca, *cb, false)];
+                if ea != sb {
+                    out.push(sym(*ea, *sb, false));
+                }
+                if sa != eb {
+                    out.push(sym(*sa, *eb, true));
+                }
+                Ok(out)
+            }
             (Entity::Arc { .. }, _) | (_, Entity::Arc { .. }) => Err(refused(
-                "arcs are not supported yet (lines and circles are); make their end points \
-                 symmetric pairwise instead",
+                "an arc mirrors only another arc (lines and circles mirror their own kind)",
             )),
             _ => Err(refused(
                 "select two lines or two circles and the mirror line",
@@ -444,7 +496,7 @@ impl Sketch {
             Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
             Constraint::Concentric { a, b } => format!("Concentric #{} and #{}", a.0, b.0),
             Constraint::Collinear { a, b } => format!("Collinear L{} and L{}", a.0, b.0),
-            Constraint::Symmetric { a, b, line } => {
+            Constraint::Symmetric { a, b, line, .. } => {
                 format!("{} and {} symmetric about L{}", p(a), p(b), line.0)
             }
             Constraint::Offset { pairs, dim } => format!(
