@@ -48,8 +48,8 @@ fn refused_key_press_shows_a_dismissible_notice() {
     h.key_press(Key::E);
     settle(&mut h);
     let n = h.state().notice().expect("a notice").to_string();
-    assert!(n.starts_with("Extrude"), "{n}");
-    assert!(n.len() > "Extrude…: ".len() + 10, "says why: {n}");
+    assert!(n.starts_with("Extrude: "), "{n}");
+    assert!(n.len() > "Extrude: ".len() + 10, "says why: {n}");
     click(&mut h, "Dismiss notice");
     assert_eq!(h.state().notice(), None);
     assert!(h.query_by_label("Dismiss notice").is_none());
@@ -96,7 +96,7 @@ fn title_and_status_bar_show_the_name_and_unsaved_state() {
     h.state_mut().request(rectangle());
     settle(&mut h);
     assert_eq!(h.state().window_title(), "● Untitled — R-CAD");
-    h.get_by_label("● unsaved changes");
+    h.get_by_label("• unsaved changes");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bracket.rcad.json");
     h.state_mut().request(Command::Save { path: path.clone() });

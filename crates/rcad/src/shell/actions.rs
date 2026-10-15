@@ -725,7 +725,8 @@ impl RcadApp {
         let d = registry::def(id);
         match (d.enabled)(self) {
             Ok(()) => (d.run)(self),
-            Err(why) => self.notify(format!("{}: {why}", d.label)),
+            // "Extrude: …", not "Extrude…: …".
+            Err(why) => self.notify(format!("{}: {why}", d.label.trim_end_matches('…'))),
         }
     }
 

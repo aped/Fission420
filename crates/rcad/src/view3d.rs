@@ -1214,14 +1214,26 @@ impl RcadApp {
                 ));
             }
         } else if let Some(b) = self.banner.clone() {
-            let text = format!("✖ [{}] {}", b.kind, b.text);
-            let galley = painter.layout(
-                text,
-                egui::FontId::proportional(14.0),
-                PALETTE.conflict,
-                // Room for the Dismiss button before the view cube.
-                (top.width() - 100.0).max(200.0),
+            // What did not happen, in plain words, then the reason and the
+            // next step (the log keeps the technical text and kind).
+            let (heading, body) = crate::messages::banner_text(&b);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &format!("✖ {heading}\n"),
+                0.0,
+                egui::TextFormat::simple(egui::FontId::proportional(14.5), PALETTE.conflict),
             );
+            job.append(
+                &body,
+                0.0,
+                egui::TextFormat::simple(
+                    egui::FontId::proportional(13.0),
+                    Color32::from_rgb(240, 205, 205),
+                ),
+            );
+            // Room for the Dismiss button before the view cube.
+            job.wrap.max_width = (top.width() - 100.0).max(200.0);
+            let galley = painter.layout_job(job);
             let r = egui::Rect::from_min_size(
                 egui::pos2(rect.min.x + 10.0, y),
                 galley.size() + egui::vec2(12.0, 10.0),
@@ -1304,7 +1316,7 @@ impl RcadApp {
         // Wrapped to the view (room for ×); the bottom edge stays above the
         // selected-face line however many lines it takes.
         let galley = painter.layout(
-            format!("ⓘ {text}"),
+            text,
             egui::FontId::proportional(13.5),
             color,
             (rect.width() - 150.0).max(160.0),

@@ -214,7 +214,7 @@ fn full_workflow_through_widgets() {
     let d = h.state().diagnostics().last().expect("diagnostic").clone();
     assert!(d.error, "{d:?}");
     assert!(d.text.contains("rejected"), "{d:?}");
-    h.get_by_label_contains("Last error [");
+    h.get_by_label_contains("Last error: ");
     assert_eq!(h.state().summary(), &before, "document unchanged");
     assert_eq!(field_value(&h, "distance (mm)").as_deref(), Some("10"));
     assert_volume(&h, V_100X50);

@@ -1553,9 +1553,12 @@ impl RcadApp {
         if let Some(e) = self.diagnostics.iter().rev().find(|d| d.error) {
             ui.add(
                 egui::Label::new(
-                    RichText::new(format!("Last error [{}]: {}", e.kind, e.text))
-                        .small()
-                        .color(ui.visuals().error_fg_color),
+                    RichText::new({
+                        let (heading, body) = crate::messages::banner_text(e);
+                        format!("Last error: {heading}. {body}")
+                    })
+                    .small()
+                    .color(ui.visuals().error_fg_color),
                 )
                 .wrap(),
             );
@@ -1667,7 +1670,7 @@ impl RcadApp {
                     .as_ref()
                     .map_or("Untitled".into(), |p| p.display().to_string());
                 let state = if self.has_unsaved_changes() {
-                    RichText::new("● unsaved changes").color(Color32::from_rgb(255, 200, 90))
+                    RichText::new("• unsaved changes").color(Color32::from_rgb(255, 200, 90))
                 } else if self.summary.path.is_none() {
                     RichText::new("not saved yet").weak()
                 } else {
@@ -2943,7 +2946,7 @@ impl RcadApp {
                     ui.horizontal(|ui| {
                         let is_active = active.as_deref() == Some(c.name.as_str());
                         let t = if is_active {
-                            RichText::new(format!("● {}", c.name)).strong()
+                            RichText::new(format!("• {}", c.name)).strong()
                         } else {
                             RichText::new(&c.name)
                         };
