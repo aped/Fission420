@@ -217,6 +217,23 @@ impl RcadApp {
                 if prefs.clicked() {
                     self.shell.show_prefs = !self.shell.show_prefs;
                 }
+                if ui
+                    .add(IconButton {
+                        icon: None,
+                        caption: "Search",
+                        name: "Command search",
+                        small: true,
+                        dropdown: false,
+                    })
+                    .probe("Command search")
+                    .on_hover_text(format!(
+                        "Find any command by name ({})",
+                        registry::def(C::CommandSearch).key_text(self.shell.prefs.keymap)
+                    ))
+                    .clicked()
+                {
+                    self.open_command_search();
+                }
                 // The sketch bar has its own Help button while sketching.
                 if self.sketch.is_none() {
                     self.cmd_icon_button(ui, C::Help, true);

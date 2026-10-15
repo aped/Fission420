@@ -2304,6 +2304,11 @@ impl RcadApp {
                     .id_salt("browser_scroll")
                     .show(ui, |ui| {
                         self.history(ui);
+                        if self.summary.open {
+                            // After History so the long-standing rows keep
+                            // their place in the column.
+                            self.browser_sketch_nodes(ui);
+                        }
                         ui.add_space(8.0);
                         ui.separator();
                         self.diagnostics_ui(ui);
@@ -2319,7 +2324,12 @@ impl RcadApp {
                         if self.sketch.is_some() {
                             self.sketch_inspector(ui);
                         } else {
-                            self.inspector_ui(ui, busy);
+                            self.right_tabs(ui);
+                            if self.shell.properties {
+                                self.properties_ui(ui);
+                            } else {
+                                self.inspector_ui(ui, busy);
+                            }
                         }
                     });
             });
@@ -2348,6 +2358,7 @@ impl RcadApp {
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
         self.prefs_ui(&ctx);
+        self.command_search_ui(&ctx);
         self.section_window(&ctx);
         self.import_summary_ui(&ctx);
         self.reattach_ui(&ctx);

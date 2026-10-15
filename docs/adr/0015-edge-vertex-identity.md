@@ -129,3 +129,24 @@ point) or reports `BrokenReference`; a positional retarget counts as a failure.
 * Not solved: references into geometry whose topology changes class under an edit (a face that
   vanishes because an offset exceeds a concave radius, an edge that splits into two). Those are
   reported as broken, not remapped.
+
+## Implementation status
+
+The decision stays proposed; stages 1 and 2 are implemented, partly differently from the text
+above:
+
+* Pieces (rule 5): seeds are stored per feature (`Feature::piece_seeds`, format v9) in world
+  coordinates, not in the definition frame, and refreshed after every commit, so they follow
+  gradual edits. Each piece gets up to five points (deepest, away from the other pieces, then
+  spread by farthest-point sampling); ids are matched by how many of their points each piece
+  holds (the deepest counts twice), greedily by unique maximum, the earliest id keeping a
+  rejoined piece. A target its seeds cannot identify is a `BrokenReference`; an extra id makes no
+  body and the unclaimed piece gets a new id. Seeds are added when a document is opened without
+  marking it changed. The `PieceSlot` migration was not needed (seeds live beside the ids).
+* Imported faces (rule 6): `Feature::face_prints` on the import holds normal, plane offset and
+  area of every referenced planar face, taken when the face is first referenced; a mismatch
+  makes references to that face broken.
+* Stale picks: `Command::AtRevision`.
+* Picking: edge polylines, vertex points and the BVH in `rcad-viewport/src/pick.rs`, not yet
+  used by the application's selection; no `EdgeRef`/`VertexRef` is stored yet (stage 4).
+* Health (stage 2): `docs/behavior/health.md`.

@@ -161,7 +161,7 @@ class Probe:
             driver.move(x, y)
             time.sleep(0.05)
 
-    def widget(self, key, timeout=3.0):
+    def widget(self, key, timeout=3.0, driver=None):
         deadline = time.time() + timeout
         while True:
             w = self.load().get("widgets", {})
@@ -171,6 +171,11 @@ class Probe:
             if time.time() > deadline:
                 raise RuntimeError(f"widget {key!r} not on screen; have {sorted(w)[:40]}")
             time.sleep(0.05)
+            if driver is not None:
+                # Nudge the pointer so an idle app draws another frame.
+                x, y = driver.last
+                driver.move(x + 1.0, y)
+                driver.move(x, y)
 
     def doc_value(self, path):
         v = self.load().get("doc")
@@ -303,7 +308,7 @@ def run(driver, lines, probe=None):
             key = a[0].strip() if a else ""
             if op == "clickdim":
                 key = "dim:" + key
-            x, y = probe.widget(key)
+            x, y = probe.widget(key, driver=driver)
             driver.move(x, y)
             time.sleep(0.05)
             b = "right" if op == "rclickw" else "left"
@@ -315,7 +320,7 @@ def run(driver, lines, probe=None):
         elif op == "typew":
             probe.fresh(driver)
             label, text = (a[0].split("|", 1) + [""])[:2]
-            x, y = probe.widget(label.strip())
+            x, y = probe.widget(label.strip(), driver=driver)
             driver.move(x, y)
             time.sleep(0.05)
             driver.button("left", True)

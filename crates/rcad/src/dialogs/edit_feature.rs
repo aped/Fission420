@@ -184,6 +184,28 @@ pub(crate) fn redefined(dlg: &Dialog, old: &FeatureKind) -> Result<FeatureKind, 
                 merge,
             })
         }
+        (Dialog::Hole { .. }, FeatureKind::Hole { target, .. }) => {
+            let Command::Hole {
+                plane,
+                center,
+                diameter,
+                depth,
+                counterbore,
+                ..
+            } = crate::app::build_command(dlg)?
+            else {
+                return Err("not a hole".into());
+            };
+            Ok(FeatureKind::Hole {
+                plane,
+                center,
+                diameter,
+                depth,
+                counterbore: counterbore
+                    .map(|[diameter, depth]| rcad_document::Counterbore { diameter, depth }),
+                target: *target,
+            })
+        }
         _ => Err("this dialog cannot redefine that feature".into()),
     }
 }
@@ -207,6 +229,13 @@ pub(crate) fn typed_expressions(
     match dlg {
         Dialog::Extrude(f) => put("distance", &f.distance),
         Dialog::Revolve { angle, .. } => put("angle_deg", angle),
+        Dialog::Hole {
+            diameter, cx, cy, ..
+        } => {
+            put("diameter", diameter);
+            put("center_x", cx);
+            put("center_y", cy);
+        }
         _ => {}
     }
     (!m.is_empty() || !old.is_empty()).then_some(m)
@@ -247,6 +276,42 @@ impl RcadApp {
                     reverse: *reverse,
                     op,
                     target,
+                })
+            }
+            Some(FeatureKind::Hole {
+                plane,
+                center,
+                diameter,
+                depth,
+                counterbore,
+                ..
+            }) => {
+                let (face, offset) = match plane {
+                    rcad_document::SketchPlane::Face(r) => (Some(*r), 0.0),
+                    rcad_document::SketchPlane::Offset {
+                        base: rcad_document::PlaneBase::Face(r),
+                        distance,
+                        ..
+                    } => (Some(*r), *distance),
+                    _ => (None, 0.0),
+                };
+                let e = |n: &str, v: f64| {
+                    f.expressions
+                        .get(n)
+                        .cloned()
+                        .unwrap_or_else(|| fmt_value(v))
+                };
+                face.map(|face| Dialog::Hole {
+                    face,
+                    cx: e("center_x", center[0]),
+                    cy: e("center_y", center[1]),
+                    diameter: e("diameter", *diameter),
+                    through: depth.is_none(),
+                    depth: fmt_value(depth.unwrap_or(8.0)),
+                    counterbore: counterbore.is_some(),
+                    cb_diameter: fmt_value(counterbore.map_or(10.0, |c| c.diameter)),
+                    cb_depth: fmt_value(counterbore.map_or(5.0, |c| c.depth)),
+                    offset: fmt_value(offset),
                 })
             }
             _ => None,

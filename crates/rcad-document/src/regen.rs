@@ -199,6 +199,34 @@ impl Evaluation {
         self.bodies.iter().find(|b| b.id == id)
     }
 
+    /// The semantic reference of face `face` of `body`: `face` is the index in
+    /// the body's B-rep face order, the same index as the display mesh's
+    /// `tri_face` and the kernel's edge and vertex tables, so a viewport pick
+    /// maps to a [`FaceRef`] here. Some only when the face is planar, exactly
+    /// one referenceable face ([`Evaluation::faces`]) lies in its plane with
+    /// its outward normal, and that plane holds no other face of the body (the
+    /// rule references resolve by, ADR 0003). None for curved faces, faces
+    /// without a role and ambiguous planes: a pick is never bound by guess.
+    pub fn face_ref_of(&self, body: BodyId, face: usize) -> Option<FaceRef> {
+        let b = self.body_by_id(body)?.geometry.brep()?;
+        if face >= k::face_count(b) {
+            return None;
+        }
+        let k::DirectFace::Plane { origin, normal } = k::face_geometry(b, face).ok()? else {
+            return None;
+        };
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let mut hits = self.faces.iter().filter(|c| {
+            let d = [0, 1, 2].map(|i| origin[i] - c.frame.origin[i]);
+            c.body == body
+                && dot(c.frame.z, normal) > 1.0 - 1e-9
+                && dot(d, c.frame.z).abs() <= k::tol::KERNEL_LINEAR
+                && k::planar_faces_on(b, &c.frame) == 1
+        });
+        let hit = hits.next()?;
+        hits.next().is_none().then_some(hit.reference)
+    }
+
     /// Id of the body behind the legacy [`Evaluation::body`] view.
     pub fn active_body(&self) -> Option<BodyId> {
         let last = self
@@ -1246,6 +1274,10 @@ fn eval_feature(
     st: &mut Snapshot,
     r: &mut FeatureResult,
 ) -> Result<()> {
+    #[cfg(feature = "test-hooks")]
+    if f.name == "__panic__" {
+        panic!("injected test panic in {id}");
+    }
     match &f.kind {
         FeatureKind::Sketch {
             plane,
