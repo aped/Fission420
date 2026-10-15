@@ -1659,18 +1659,23 @@ impl RcadApp {
             }
             ui.separator();
             if self.summary.open {
+                // One reading of the save state: a new document is
+                // "Untitled · not saved yet", never "saved … unsaved".
                 let path = self
                     .summary
                     .path
                     .as_ref()
-                    .map_or("unsaved".into(), |p| p.display().to_string());
-                let dirty = if self.summary.dirty {
-                    RichText::new("* modified").color(Color32::from_rgb(255, 200, 90))
+                    .map_or("Untitled".into(), |p| p.display().to_string());
+                let state = if self.has_unsaved_changes() {
+                    RichText::new("● unsaved changes").color(Color32::from_rgb(255, 200, 90))
+                } else if self.summary.path.is_none() {
+                    RichText::new("not saved yet").weak()
                 } else {
                     RichText::new("saved").weak()
                 };
-                ui.label(dirty);
-                ui.label(RichText::new(format!("rev {} · {path}", self.summary.revision)).weak());
+                ui.label(RichText::new(path).weak());
+                ui.label(state).probe("Save state");
+                ui.label(RichText::new(format!("rev {}", self.summary.revision)).weak().small());
             } else {
                 ui.label("no document");
             }
@@ -2570,9 +2575,55 @@ impl RcadApp {
                         });
                     });
                 ui.label("Shortcuts are ignored while a text field has focus.");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.weak(format!("R-CAD {}", about::VERSION));
+                    if ui.small_button("About R-CAD").clicked() {
+                        self.shell.show_about = true;
+                    }
+                });
             });
         self.show_help = open;
     }
+
+    /// File ▸ About R-CAD: version, license and source of this build.
+    pub(crate) fn about_ui(&mut self, ctx: &egui::Context) {
+        let mut open = self.shell.show_about;
+        egui::Window::new("About R-CAD")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
+            .show(ctx, |ui| {
+                ui.heading("R-CAD");
+                ui.label(format!("Version {}", about::VERSION))
+                    .probe("About version");
+                ui.label("Local-first parametric mechanical CAD in Rust.");
+                ui.label(format!("License: {}", about::LICENSE));
+                ui.horizontal(|ui| {
+                    ui.label("Source:");
+                    ui.hyperlink(about::REPOSITORY);
+                });
+                ui.small(
+                    "Geometry is exact B-rep (f64, millimetres); the display mesh is \
+                     derived from it. Third-party components and their licenses are \
+                     listed in docs/DEPENDENCIES.md.",
+                );
+            });
+        self.shell.show_about = open;
+    }
+}
+
+/// Build facts shown by About (from the package manifest).
+mod about {
+    pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+    pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
+    /// The manifest's `repository`, or the project's public repository
+    /// when the manifest names none.
+    pub const REPOSITORY: &str = match env!("CARGO_PKG_REPOSITORY").as_bytes() {
+        [] => "https://github.com/aped/R-CAD",
+        _ => env!("CARGO_PKG_REPOSITORY"),
+    };
 }
 
 thread_local! {

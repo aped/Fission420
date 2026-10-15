@@ -69,3 +69,54 @@ fn refused_key_press_shows_a_dismissible_notice() {
     settle(&mut h);
     assert_eq!(h.state().notice(), None);
 }
+
+fn rectangle() -> Command {
+    Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 10.0,
+            height: 10.0,
+            center: None,
+        },
+    }
+}
+
+/// The window title and the status bar agree on the document name and
+/// its save state: a new document is "Untitled" and not saved yet (never
+/// "saved … unsaved"); an edit marks it; Save names it and clears the mark.
+#[test]
+fn title_and_status_bar_show_the_name_and_unsaved_state() {
+    let mut h = harness();
+    assert_eq!(h.state().window_title(), "R-CAD");
+    click(&mut h, "New");
+    assert_eq!(h.state().window_title(), "Untitled — R-CAD");
+    h.get_by_label("not saved yet");
+    assert!(h.query_by_label("saved").is_none());
+    h.state_mut().request(rectangle());
+    settle(&mut h);
+    assert_eq!(h.state().window_title(), "● Untitled — R-CAD");
+    h.get_by_label("● unsaved changes");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bracket.rcad.json");
+    h.state_mut().request(Command::Save { path: path.clone() });
+    settle(&mut h);
+    assert_eq!(h.state().window_title(), "bracket.rcad.json — R-CAD");
+    h.get_by_label("saved");
+    h.get_by_label(&path.display().to_string());
+    // The next edit marks it again.
+    h.state_mut().request(rectangle());
+    settle(&mut h);
+    assert!(h.state().window_title().starts_with("● "));
+}
+
+/// File ▸ About R-CAD shows this build's version, license and source.
+#[test]
+fn about_shows_version_license_and_source() {
+    let mut h = harness();
+    click(&mut h, "File menu");
+    click(&mut h, "About R-CAD");
+    h.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+    h.get_by_label(&format!("License: {}", env!("CARGO_PKG_LICENSE")));
+    assert!(h.query_by_label_contains("github.com").is_some());
+}

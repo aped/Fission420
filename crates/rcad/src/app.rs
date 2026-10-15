@@ -761,7 +761,8 @@ impl RcadApp {
             || self.sketch.as_ref().is_some_and(|s| s.editor.modified())
     }
 
-    /// Window title with the document name and a dirty marker.
+    /// Window title with the document name and a marker for unsaved
+    /// changes (an open sketch with edits counts).
     pub fn window_title(&self) -> String {
         if !self.summary.open {
             return "R-CAD".into();
@@ -774,7 +775,11 @@ impl RcadApp {
             .map_or("Untitled".into(), |n| n.to_string_lossy().into_owned());
         format!(
             "{}{name} — R-CAD",
-            if self.summary.dirty { "● " } else { "" }
+            if self.has_unsaved_changes() {
+                "● "
+            } else {
+                ""
+            }
         )
     }
 
@@ -2383,6 +2388,7 @@ impl RcadApp {
         self.recovery_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
+        self.about_ui(&ctx);
         self.prefs_ui(&ctx);
         self.command_search_ui(&ctx);
         self.section_window(&ctx);

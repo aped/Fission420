@@ -316,6 +316,10 @@ impl RcadApp {
         if self.cmd_button(ui, C::Close) {
             ui.close();
         }
+        ui.separator();
+        if self.cmd_button(ui, C::About) {
+            ui.close();
+        }
     }
 
     /// Workspace tabs (plus the contextual SKETCH tab while a sketch is open).
