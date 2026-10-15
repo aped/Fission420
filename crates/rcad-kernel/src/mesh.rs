@@ -1054,6 +1054,46 @@ pub fn edge_polylines(body: &Body, chord: f64) -> Result<Vec<EdgePolyline>> {
     })
 }
 
+/// One B-rep vertex for display and picking: its position and the faces
+/// around it (indices as in [`TriMesh::tri_face`], sorted, distinct). A
+/// provisional key for this evaluation only (ADR 0015), never stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VertexPoint {
+    pub position: [f64; 3],
+    pub faces: Vec<u32>,
+}
+
+/// The vertex table of `body` (see [`VertexPoint`]), ordered by position
+/// rounded to 1e-6 mm (independent of the kernel's topology order).
+pub fn vertex_points(body: &Body) -> Result<Vec<VertexPoint>> {
+    guarded("vertex points", || {
+        let q = |p: [f64; 3]| p.map(|c| (c * 1.0e6).round() as i64);
+        // Vertex id -> position in `out`; only looked up.
+        let mut slot = HashMap::new();
+        let mut out: Vec<VertexPoint> = Vec::new();
+        for (fi, face) in body.solid.face_iter().enumerate() {
+            for v in face.boundaries().iter().flat_map(|w| w.vertex_iter()) {
+                let k = *slot.entry(v.id()).or_insert_with(|| {
+                    let p = v.point();
+                    out.push(VertexPoint {
+                        position: [p.x, p.y, p.z],
+                        faces: Vec::new(),
+                    });
+                    out.len() - 1
+                });
+                if !out[k].faces.contains(&(fi as u32)) {
+                    out[k].faces.push(fi as u32);
+                }
+            }
+        }
+        for v in &mut out {
+            v.faces.sort_unstable();
+        }
+        out.sort_by_key(|v| q(v.position));
+        out
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
