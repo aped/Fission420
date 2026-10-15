@@ -311,7 +311,7 @@ impl RcadApp {
         if self.cmd_button(ui, C::Import) {
             ui.close();
         }
-        ui.menu_button("Export ▸", |ui| {
+        ui.menu_button("Export", |ui| {
             for d in registry::at(Place::FileExport) {
                 if self.cmd_button(ui, d.id) {
                     ui.close();

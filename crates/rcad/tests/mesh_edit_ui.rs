@@ -167,7 +167,7 @@ fn inspect_cut_and_transform_a_mesh_body_from_the_inspector() {
     click(&mut h, &lower);
     click(&mut h, "Mesh edit");
     click(&mut h, "Transform");
-    click(&mut h, "inch → mm (×25.4)");
+    click(&mut h, "inch to mm (×25.4)");
     click(&mut h, "Apply as new body");
     assert_eq!(h.state().summary().bodies.len(), 4);
     let want = 2000.0 * 25.4f64.powi(3);

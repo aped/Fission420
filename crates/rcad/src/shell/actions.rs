@@ -104,10 +104,10 @@ impl RcadApp {
         if have >= n {
             Ok(())
         } else if n == 1 {
-            Err("Needs a component occurrence (ASSEMBLE ▸ New Component)".into())
+            Err("Needs a component occurrence (ASSEMBLE › New Component)".into())
         } else {
             Err(format!(
-                "Needs at least {n} component occurrences (ASSEMBLE ▸ New Component)"
+                "Needs at least {n} component occurrences (ASSEMBLE › New Component)"
             ))
         }
     }
@@ -123,14 +123,14 @@ impl RcadApp {
         {
             Ok(())
         } else {
-            Err("Needs a joint with a free value (ASSEMBLE ▸ Joint)".into())
+            Err("Needs a joint with a free value (ASSEMBLE › Joint)".into())
         }
     }
 
     pub(crate) fn need_drawing(&self) -> Result<(), String> {
         self.need_open()?;
         if self.summary.drawings.is_empty() {
-            Err("Needs a drawing (INSERT ▸ New Drawing)".into())
+            Err("Needs a drawing (INSERT › New Drawing)".into())
         } else {
             Ok(())
         }

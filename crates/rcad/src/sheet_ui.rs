@@ -380,7 +380,7 @@ impl RcadApp {
                             Some((
                                 id.0,
                                 format!(
-                                    "Line {} ({}, {}) → ({}, {})",
+                                    "Line {} ({}, {}) to ({}, {})",
                                     id.0,
                                     f1(a.0),
                                     f1(a.1),
@@ -574,7 +574,7 @@ impl RcadApp {
                         egui::Button::new("Thicken"),
                     )
                     .probe("Thicken surface")
-                    .on_hover_text("One planar or cylindrical face → exact solid (new body)")
+                    .on_hover_text("One planar or cylindrical face to an exact solid (new body)")
                     .clicked()
                 {
                     send.push(Command::ThickenSurface(ThickenArgs {

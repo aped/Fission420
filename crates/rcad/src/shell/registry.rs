@@ -832,10 +832,10 @@ pub fn shortcut_line(layer: KeymapLayer, pick: fn(&CommandDef) -> bool) -> Strin
 pub fn placement_text(d: &CommandDef) -> String {
     match d.places.first() {
         Some(Place::File) => "File".into(),
-        Some(Place::FileExport) => "File ▸ Export".into(),
+        Some(Place::FileExport) => "File › Export".into(),
         Some(Place::AppBar) => "Application bar".into(),
         Some(Place::View) => "View".into(),
-        Some(Place::Ribbon { tab, group, .. }) => format!("{} ▸ {}", tab.label(), group.label()),
+        Some(Place::Ribbon { tab, group, .. }) => format!("{} › {}", tab.label(), group.label()),
         None => String::new(),
     }
 }

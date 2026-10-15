@@ -293,7 +293,7 @@ impl RcadApp {
                     EditKind::Transform => {
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Unit presets:");
-                            for (label, s) in [("inch → mm (×25.4)", "25.4"), ("m → mm (×1000)", "1000")] {
+                            for (label, s) in [("inch to mm (×25.4)", "25.4"), ("m to mm (×1000)", "1000")] {
                                 if ui.button(label).named(label).clicked() {
                                     for k in 0..3 {
                                         st.t[k] = s.into();

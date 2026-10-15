@@ -642,7 +642,7 @@ impl RcadApp {
                 ui.label(RichText::new("1 selected").strong())
                     .on_hover_text(item);
                 if ui
-                    .small_button("✕")
+                    .small_button("×")
                     .named(&format!("Clear {what}"))
                     .on_hover_text("Clear: pick another face in the view")
                     .clicked()
