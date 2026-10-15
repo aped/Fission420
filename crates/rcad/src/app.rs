@@ -2322,10 +2322,11 @@ impl RcadApp {
             }
         });
         egui::Panel::bottom("rcad_status").show(ui, |ui| self.status_bar(ui, busy));
-        egui::Panel::left("rcad_browser")
+        use crate::shell::prefs::{PANEL_MAX, PANEL_MIN};
+        let browser = egui::Panel::left("rcad_browser")
             .resizable(true)
-            .default_size(260.0)
-            .max_size(560.0)
+            .default_size(self.shell.prefs.browser_width.unwrap_or(260.0))
+            .max_size(PANEL_MAX)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("browser_scroll")
@@ -2341,9 +2342,9 @@ impl RcadApp {
                         self.diagnostics_ui(ui);
                     });
             });
-        egui::Panel::right("rcad_inspector")
+        let inspector = egui::Panel::right("rcad_inspector")
             .resizable(true)
-            .default_size(290.0)
+            .default_size(self.shell.prefs.inspector_width.unwrap_or(290.0))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("inspector_scroll")
@@ -2360,6 +2361,39 @@ impl RcadApp {
                         }
                     });
             });
+        // Remember a column width the user dragged: when a column's drawn
+        // width changed while the pointer was down, egui's stored size of
+        // each column (what `default_size` sets) is saved once the button is
+        // released. Layout changes on their own are never saved.
+        let drawn = [
+            browser.response.rect.width().round(),
+            inspector.response.rect.width().round(),
+        ];
+        let down = ui.ctx().input(|i| i.pointer.any_down());
+        let last = self.shell.panel_widths.replace(drawn);
+        if down && last.is_some_and(|l| l != drawn) {
+            self.shell.panel_dragged = true;
+        }
+        if !down && std::mem::take(&mut self.shell.panel_dragged) {
+            let stored = |name: &str, fallback: f32| {
+                egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::new(name))
+                    .map_or(fallback, |s| s.outer_rect.width())
+                    .round()
+            };
+            let widths = [
+                stored("rcad_browser", drawn[0]),
+                stored("rcad_inspector", drawn[1]),
+            ];
+            for (w, saved) in widths.into_iter().zip([
+                &mut self.shell.prefs.browser_width,
+                &mut self.shell.prefs.inspector_width,
+            ]) {
+                if (PANEL_MIN..=PANEL_MAX).contains(&w) {
+                    *saved = Some(w);
+                }
+            }
+            self.save_prefs();
+        }
         self.dialog_ui(ui, busy);
         egui::CentralPanel::no_frame().show(ui, |ui| {
             // The timeline runs along the bottom of the canvas (the browser

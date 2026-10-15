@@ -664,6 +664,15 @@ impl RcadApp {
         (self.shell.top_chips.clone(), self.shell.view_cube)
     }
 
+    /// Current preferences.
+    pub fn prefs(&self) -> &super::prefs::Prefs {
+        &self.shell.prefs
+    }
+    /// Browser and inspector column widths drawn last frame.
+    pub fn panel_widths(&self) -> Option<[f32; 2]> {
+        self.shell.panel_widths
+    }
+
     /// Active key layer.
     pub fn keymap(&self) -> super::KeymapLayer {
         self.shell.prefs.keymap

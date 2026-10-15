@@ -12,6 +12,9 @@ use super::KeymapLayer;
 
 pub const PREFS_VERSION: u32 = 1;
 const MAX_RECENT: usize = 8;
+/// Accepted widths of a side column (points); others fall back to the default.
+pub const PANEL_MIN: f32 = 160.0;
+pub const PANEL_MAX: f32 = 560.0;
 
 /// Colour theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -44,6 +47,12 @@ pub struct Prefs {
     /// Width of the docked command-dialog area (points).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialog_width: Option<f32>,
+    /// Widths of the browser (left) and inspector (right) columns the user
+    /// dragged (points).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_width: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspector_width: Option<f32>,
     /// Most recent first.
     #[serde(default)]
     pub recent: Vec<PathBuf>,
@@ -69,6 +78,8 @@ impl Default for Prefs {
             keymap: KeymapLayer::Fusion,
             theme: Theme::FollowOs,
             dialog_width: None,
+            browser_width: None,
+            inspector_width: None,
             recent: vec![],
             auto_project_face_edges: true,
             auto_project_on_reference: false,
@@ -109,6 +120,11 @@ impl Prefs {
                     .is_some_and(|w| !w.is_finite() || !(200.0..=900.0).contains(&w))
                 {
                     p.dialog_width = None;
+                }
+                for w in [&mut p.browser_width, &mut p.inspector_width] {
+                    if w.is_some_and(|w| !w.is_finite() || !(PANEL_MIN..=PANEL_MAX).contains(&w)) {
+                        *w = None;
+                    }
                 }
                 (p, None)
             }
@@ -153,6 +169,8 @@ mod tests {
             keymap: KeymapLayer::Classic,
             theme: Theme::Dark,
             dialog_width: Some(340.0),
+            browser_width: Some(300.0),
+            inspector_width: Some(320.0),
             ..Prefs::default()
         };
         for i in 0..12 {
@@ -171,6 +189,17 @@ mod tests {
         let (d, why) = Prefs::load(&path);
         assert_eq!(d.keymap, KeymapLayer::Fusion);
         assert!(why.unwrap().contains("newer"));
+        // A column width out of range falls back to the default.
+        std::fs::write(
+            &path,
+            r#"{"version": 1, "browser_width": 5000, "inspector_width": 250}"#,
+        )
+        .unwrap();
+        let (d, why) = Prefs::load(&path);
+        assert_eq!(
+            (d.browser_width, d.inspector_width, why),
+            (None, Some(250.0), None)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
