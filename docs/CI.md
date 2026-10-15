@@ -98,8 +98,12 @@ also runs the doc tests; with nextest, the doc tests run separately
 binary, `tests/it/main.rs` with one `mod` per file in `tests/it/` (shared helpers such as
 `rcad-commands`' `support` and `arc_corpus` are declared once there). Linking one release
 binary per test file against Truck and egui was most of the build time and of the archive's
-size (TEST_BINARIES_PLACEHOLDER). A test's full name starts with its file's module, so
-filters read `cargo test -p rcad-commands --test it arc_fuzz::` or, in nextest,
+size. Measured on the development machine, a clean `cargo nextest archive --workspace
+--release` (fresh target dir, 4 build jobs) took 996 s and wrote 1.18 GB with 199 test
+binaries that hold tests, and 244 s and 116 MB with 23 (the unit-test binaries, six `it`
+binaries and the eight separate ones below); the same 1345 tests run in both. The machine
+was shared with other builds during both runs, more heavily during the first, so the ratio
+is approximate. A test's full name starts with its file's module, so filters read `cargo test -p rcad-commands --test it arc_fuzz::` or, in nextest,
 `package(rcad-commands) & test(/^arc_fuzz::/)`. Tests that change process-wide state
 stay separate binaries in `tests/`, because plain `cargo test` runs all tests of one binary
 as threads of one process: `rcad-exchange/tests/cancel.rs`,
@@ -132,20 +136,21 @@ clock. One test dominates: `cross_process_determinism` (213 s), then `arc_fuzz::
 
 On a 4-vCPU runner a shard takes about max(sum / 4, longest test) times the runner's
 slowdown. With two shards that is about 235 s of local time against about 215 s with
-three: the single 213 s test bounds both, so a third runner (another 1.2 GB download and
+three: the single 213 s test bounds both, so a third runner (another archive download and
 about a minute of setup) buys almost nothing. Revisit when the slowest tests get faster.
 
-The archive is about 1.2 GB (zstd; 203 binaries). The build job uploads it once (artifact
+The archive is about 120 MB (zstd). The build job uploads it once (artifact
 compression off, it is already compressed) and each shard downloads it.
 
-**Expected wall clock (Linux leg, warm cache).** From Actions run ID 38595093305 on
-`ubuntu-24.04`: release binaries 88 s, compiling the release test binaries about 820 s,
-running them with `cargo test` 1050 s, acceptance 105 s, replays about 50 s; 35 min in one
-job. Split: build job about 18–20 min (binaries, archive, upload, doc tests) → shards about
-6–9 min each (download, the heaviest shard at roughly 1.5–2× local speed) in parallel with
-the replay job (about 4 min) → package 1 min. About **27–30 min** end to end, bounded by
-compiling the test binaries; lint reports within about 3 min. These are estimates until the
-first run of this pipeline on GitHub.
+**Expected wall clock (Linux leg, warm cache).** Before the test binaries were merged
+(Actions run ID 38595093305, `ubuntu-24.04`): release binaries 88 s, compiling the release
+test binaries about 820 s, running them with `cargo test` 1050 s, acceptance 105 s, replays
+about 50 s; 35 min in one job. With one test binary per crate the test build should shrink
+roughly in proportion to the local measurement above (to about 4–6 min), so the build job
+is about 8–10 min (binaries, archive, upload, doc tests) → shards about 6–9 min each in
+parallel with the replay job (about 4 min) → package 1 min: about **15–20 min** end to end,
+now bounded by the slowest tests rather than by linking. Lint reports within about 3 min.
+These are estimates until a GitHub run of this layout confirms them.
 
 ## `cargo xtask check` stages
 
