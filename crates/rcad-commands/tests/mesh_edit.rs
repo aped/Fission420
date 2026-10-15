@@ -243,3 +243,50 @@ fn refusals() {
     assert!(!s.execute(&c).ok);
     assert_eq!(s.summary().revision, rev);
 }
+
+/// Deleting a mesh edit made with "hide source" shows the source again (the
+/// derived body is gone, so the source is the geometry); undo restores both.
+#[test]
+fn deleting_a_hiding_edit_shows_the_source_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let stl = dir.path().join("cube.stl");
+    std::fs::write(&stl, cube_stl()).unwrap();
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    ok(
+        &mut s,
+        Command::ImportStl {
+            path: stl,
+            units_to_mm: Some(1.0),
+        },
+    );
+    let visible = |s: &Session, id: u32| {
+        s.summary()
+            .bodies
+            .iter()
+            .find(|b| b.id == BodyId(id))
+            .map(|b| b.visible)
+    };
+    let r = ok(
+        &mut s,
+        Command::EditMesh(EditMeshArgs {
+            body: BodyId(1),
+            op: MeshEditOp::Transform(MeshTransform {
+                scale: [2.0; 3],
+                ..Default::default()
+            }),
+            preview: false,
+            body_name: None,
+            hide_source: true,
+        }),
+    );
+    let feature = r.feature.unwrap();
+    assert_eq!(visible(&s, 1), Some(false));
+    assert_eq!(visible(&s, 2), Some(true));
+    ok(&mut s, Command::DeleteFeature { feature });
+    assert_eq!(visible(&s, 1), Some(true), "source shown again");
+    assert_eq!(visible(&s, 2), None, "derived body gone");
+    ok(&mut s, Command::Undo);
+    assert_eq!(visible(&s, 1), Some(false));
+    assert_eq!(visible(&s, 2), Some(true));
+}

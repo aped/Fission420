@@ -2912,6 +2912,18 @@ impl Document {
                 }
             }
         }
+        // A derive with "hide source" hid it; with the derived body gone the
+        // source is the geometry again, so it is shown, unless another
+        // remaining derive still uses (and may have hidden) it. The hide is
+        // not recorded per feature, so a source the user hid by hand is
+        // shown too: visible beats a part that silently disappears.
+        let still_derived = self
+            .features
+            .iter()
+            .any(|f| f.derived_body().is_some_and(|(s, _)| s == source));
+        if !still_derived && let Ok(b) = self.body_mut(source) {
+            b.visible = true;
+        }
     }
 
     /// Drop body entries no feature creates (after deleting a body's creator).
