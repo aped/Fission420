@@ -194,8 +194,8 @@ fn the_check_is_not_vacuous() {
 
 #[test]
 fn round_tapered_cut_is_exact_or_refused() {
-    // Truck 0.6 cannot boolean revolved cones (`spike_countersink_cone`): either an exact,
-    // checked result or a named failure, never a wrong body.
+    // Either an exact, checked result or a named failure, never a wrong body. With the
+    // truck-shapeops fork this case takes the exact branch (unpatched Truck 0.6 failed).
     let blk = block();
     let prof = Profile::Circle {
         center: [20.0, -15.0],

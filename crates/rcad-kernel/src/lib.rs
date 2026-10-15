@@ -58,9 +58,9 @@ pub use measure::{
 };
 pub use measure::{FacePairMeasure, PARALLEL_SIN, face_geometry, measure_face_pair};
 pub use mesh::{
-    CANONICAL_GRID, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED, TriMesh,
-    canonical_mesh, check_mesh, max_facet_angle_deg, tessellate, tessellate_display, weld_exact,
-    write_stl_binary,
+    CANONICAL_GRID, EdgePolyline, MeshCheck, RigidTransform, SELF_INTERSECTION_NOT_CHECKED,
+    TriMesh, VertexPoint, canonical_mesh, check_mesh, edge_polylines, max_facet_angle_deg,
+    tessellate, tessellate_display, vertex_points, weld_exact, write_stl_binary,
 };
 pub use ops::{
     bounds, coplanar_face_side, cut_prism, cut_region, cut_region_pieces, extent_along,

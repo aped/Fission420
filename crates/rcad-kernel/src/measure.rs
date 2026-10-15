@@ -507,6 +507,30 @@ fn volume(body: &Body) -> VolumeResult {
     }
 }
 
+/// Volume and its error estimate from an exact boundary integral only (the Z/X/Y,
+/// revolution or parametric methods), for construction self-checks. A body for
+/// which only the tessellation estimate exists is `Err` with the reason: an
+/// estimate is not a bound (`docs/TOLERANCES.md`), so a check that widened its
+/// tolerance by it could accept a wrong result.
+pub(crate) fn verified_volume(body: &Body) -> std::result::Result<(f64, f64), String> {
+    match measure(body).map_err(|e| e.to_string())?.volume {
+        VolumeResult::Value {
+            method: VolumeMethod::TessellationEstimate,
+            ..
+        } => Err(
+            "no exact volume integral applies to this body; only a tessellation \
+                  estimate is available"
+                .into(),
+        ),
+        VolumeResult::Value {
+            volume,
+            error_estimate,
+            ..
+        } => Ok((volume, error_estimate)),
+        VolumeResult::Unavailable { reason } => Err(reason),
+    }
+}
+
 /// Number of B-rep faces (cheap; no geometry evaluation).
 pub fn face_count(body: &Body) -> usize {
     body.solid.face_iter().count()

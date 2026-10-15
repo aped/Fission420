@@ -2,7 +2,7 @@
 //! bounds and probes from the analytic tube; STEP (FreeCAD:
 //! tools/check_sweep.sh).
 use super::*;
-use crate::{VolumeResult, export_step, point_membership};
+use crate::{VolumeResult, export_step, measure, point_membership};
 use std::f64::consts::PI;
 
 fn evidence(b: &Body, name: &str) {

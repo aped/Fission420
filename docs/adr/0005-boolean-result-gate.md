@@ -86,3 +86,18 @@ are not classified within `h_curved` (three times the check chord) of a tool wal
 mesh of a curved tool wall is only chord-accurate, so a probe closer than that could disagree
 with the exact tool test without any defect. Seen on a second through hole whose top point lay
 on a large target triangle's centroid (test `second_hole_through_a_thin_wall_is_accepted_in_either_order`).
+*Amended (planar walls):* the `h_curved` margin applies only to the side wall of a tool whose
+profile has a circular or cubic segment. Planar tool walls and every tool cap are exact, so
+probes beside them keep the float-noise margin; a void refilled 0.005 mm from a planar cut
+wall is refused (`validate::tests::refilled_slot_beside_a_planar_tool_wall_is_refused`).
+Each target triangle is probed at its centroid and at three points toward its corners, all
+checked: a long strip of a curved wall can have its centroid on a tool cap while only one end
+lies beside the tool (a section cut that refilled a through hole was accepted before).
+
+### Construction self-checks use exact volumes
+Loft, sweep, single-edge fillet and chamfer, and the cap-loop blends compare the result's
+volume with a closed form. They use only an exact boundary integral (axis, revolution or
+parametric method); a body for which only the tessellation estimate exists is refused with
+"cannot verify the volume", since the estimate is not a bound and widening the tolerance by it
+could accept a wrong result. Section sketches (`section_curves`) run this result check on
+their cut before reading the section loops.

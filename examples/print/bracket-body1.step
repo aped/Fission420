@@ -2,7 +2,7 @@ ISO-10303-21;
 HEADER;
 FILE_DESCRIPTION(('Shape Data from Truck'), '2;1');
 FILE_NAME('', '2026-10-12T08:53:45', (''), (''), 'truck', 'Fission420', '');
-FILE_SCHEMA(('ISO-10303-042'));
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
 ENDSEC;
 DATA;
 #1 = APPLICATION_PROTOCOL_DEFINITION('international standard', 'automotive_design', 2000, #2);

@@ -24,6 +24,7 @@ mod grid;
 mod math;
 mod mesh;
 mod overlay;
+mod pick;
 mod triad;
 
 pub use camera::{Camera, Ray, ViewPreset, pixels_per_mm};
@@ -33,6 +34,7 @@ pub use mesh::{Aabb, MeshError, RenderMesh, SectionPlane, box_mesh, ray_triangle
 pub use overlay::{
     Overlay, OverlayLabel, OverlayPolyline, overlay_shapes, paint_overlay, ray_plane,
 };
+pub use pick::{Pick, PickEdge, PickScene, PickVertex, PixelTolerance};
 pub use triad::{axis_triad_origin, axis_triad_shapes};
 
 /// Tint palette index of highlighted assembly occurrences.

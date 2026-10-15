@@ -645,9 +645,10 @@ fn revolve_touching_axis(profile: &Profile, frame: &Frame, angle: f64) -> Result
 mod tests;
 
 /// Subtract an arbitrary solid `tool` from `target` (tolerances retried), the
-/// result checked to be one closed shell. Test-only: the countersink spike
-/// (`validate::tests::spike_countersink_cone`) shows Truck 0.6 cannot cut a
-/// revolved cone, so no product path uses it.
+/// result checked to be one closed shell. Test-only (the countersink spike,
+/// `validate::tests::spike_countersink_cone`, which with the truck-shapeops
+/// fork cuts the revolved cone exactly); product paths use the checked prism
+/// booleans or direct constructions.
 #[cfg(test)]
 pub(crate) fn subtract_solid(target: &Body, tool: &Body, what: &str) -> Result<Body> {
     let mut failures = Vec::new();

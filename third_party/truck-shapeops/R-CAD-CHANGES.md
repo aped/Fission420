@@ -39,3 +39,14 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   that was often the face's outer boundary, so pieces overlapped and `Solid::new` panicked ("This
   shell is not oriented and closed"). Test: `ring_boss_through_a_face_nests_loops`, which fails on
   the previous code.
+- `src/transversal/stable.rs` (new), `integrate`, `faces_classification`: order-stable connected
+  components. truck-topology's `Shell::connected_components` builds its face adjacency in a hash
+  map keyed by face addresses and starts each component at the first key it iterates, so the
+  order of the result solid's shells and faces, and of the unknown face groups classified by
+  `integrate_by_component`, followed the allocation addresses of the process. The next boolean
+  then walked faces in a different order, and the same document could be accepted in one process
+  and refused in another, or give volumes differing in the last bits. The replacement is a
+  union-find over face indices: components in the order of their first face, faces in input order.
+  Exported as `truck_shapeops::connected_components` for callers with the same need. Tests:
+  `stable::tests::components_follow_input_order` here, and R-CAD's cross-process test, which runs a
+  seeded corpus of 189 cuts in five processes (87 differing results before, none after).

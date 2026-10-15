@@ -134,10 +134,38 @@ pub fn section_curves(body: &Body, frame: &Frame) -> Result<Vec<Vec<Curve2>>> {
         [hi[0] + m, hi[1] + m],
         [lo[0] - m, hi[1] + m],
     ]);
-    let kept = crate::cut_region_pieces(body, &cutter, &[], frame, hi[2] + m)
+    let len = hi[2] + m;
+    let kept = crate::cut_region_pieces(body, &cutter, &[], frame, len)
         .map_err(|e| KernelError::InvalidInput(format!("section: cutting the body failed: {e}")))?;
+    checked_section_loops(body, &cutter, frame, len, &kept)
+}
+
+/// The section loops read from `kept`, the body with everything in front of
+/// `frame`'s plane cut away by the slab `cutter` x `len`, after the cut passed
+/// the boolean result check (ADR 0005): a closed but wrong cut (a refilled
+/// hole, a kept wall) would otherwise become sketch geometry.
+fn checked_section_loops(
+    body: &Body,
+    cutter: &crate::Profile,
+    frame: &Frame,
+    len: f64,
+    kept: &Body,
+) -> Result<Vec<Vec<Curve2>>> {
+    let prism = crate::Prism {
+        profile: cutter,
+        holes: &[],
+        start: frame,
+        length: len,
+    };
+    crate::verify_prisms_boolean(body, kept, crate::PrismOp::Cut, &[(&prism, (0.0, len))])
+        .map_err(|e| {
+            KernelError::InvalidInput(format!(
+                "section: the kernel's cut at the plane failed its check, so the section \
+                 cannot be trusted: {e}"
+            ))
+        })?;
     let mut loops = Vec::new();
-    for f in coplanar_faces(&kept, frame) {
+    for f in coplanar_faces(kept, frame) {
         loops.extend(face_loops(&f, frame)?);
     }
     if loops.is_empty() {
@@ -387,5 +415,26 @@ mod tests {
         }
         // No face in an empty plane.
         assert!(face_boundary_curves(&b, &Frame::XY.offset(5.0)).is_err());
+    }
+    /// The section is read only from a cut that passed the result check: a
+    /// closed but wrong cut (here: the hole refilled) is refused instead of
+    /// becoming one rectangular loop, and the right cut gives both loops.
+    #[test]
+    fn section_refuses_a_wrong_closed_cut() {
+        let rect = Profile::Polygon(vec![[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]]);
+        let plain = extrude(&rect, &Frame::XY, 10.0).unwrap();
+        let hole = Profile::Circle {
+            center: [20.0, 15.0],
+            radius: 4.0,
+        };
+        let holed = cut_prism(&plain, &hole, &Frame::XY.offset(-1.0), 12.0).unwrap();
+        let at = Frame::XY.offset(5.0);
+        let cutter = Profile::Polygon(vec![[-5.0, -5.0], [45.0, -5.0], [45.0, 35.0], [-5.0, 35.0]]);
+        let right = crate::cut_region_pieces(&holed, &cutter, &[], &at, 10.0).unwrap();
+        let loops = checked_section_loops(&holed, &cutter, &at, 10.0, &right).unwrap();
+        assert_eq!(loops.len(), 2);
+        let wrong = crate::cut_region_pieces(&plain, &cutter, &[], &at, 10.0).unwrap();
+        let e = checked_section_loops(&holed, &cutter, &at, 10.0, &wrong).unwrap_err();
+        assert!(e.to_string().contains("section: the kernel's cut"), "{e}");
     }
 }

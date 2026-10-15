@@ -125,15 +125,12 @@ pub fn fillet_edge(body: &Body, f1: &Frame, f2: &Frame, r: f64) -> Result<Body> 
     // been added (concave).
     let area = t * r - (std::f64::consts::PI - theta) * r * r / 2.0;
     let want = area * (smax - smin);
-    let vol = |b: &Body| match crate::measure(b)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => Ok((volume, error_estimate)),
-        crate::VolumeResult::Unavailable { reason } => Err(KernelError::InvalidInput(format!(
-            "fillet: cannot verify the removed volume ({reason})"
-        ))),
+    let vol = |b: &Body| {
+        crate::measure::verified_volume(b).map_err(|reason| {
+            KernelError::InvalidInput(format!(
+                "fillet: cannot verify the removed volume ({reason})"
+            ))
+        })
     };
     let ((v0, e0), (v1, e1)) = (vol(body)?, vol(&out)?);
     let removed = if convex { v0 - v1 } else { v1 - v0 };

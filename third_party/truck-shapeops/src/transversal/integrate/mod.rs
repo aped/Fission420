@@ -177,7 +177,7 @@ pub fn and<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         let [res, _] = process_one_pair_of_shells(&and_shell, shell, tol)?;
         and_shell = res;
     }
-    let boundaries = and_shell.connected_components();
+    let boundaries = connected_components(&and_shell);
     Some(Solid::new(boundaries))
 }
 
@@ -200,7 +200,7 @@ pub fn or<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         let [_, res] = process_one_pair_of_shells(&or_shell, shell, tol)?;
         or_shell = res;
     }
-    let boundaries = or_shell.connected_components();
+    let boundaries = connected_components(&or_shell);
     Some(Solid::new(boundaries))
 }
 

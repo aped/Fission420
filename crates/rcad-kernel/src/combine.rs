@@ -11,7 +11,10 @@
 //!   Samples closer than [`CombineCheck::skip_distance`] to any input surface are
 //!   skipped (the result's surface lies on the inputs' surfaces, and a tessellation
 //!   only classifies points farther than its chord reliably). A sample the inputs
-//!   classify but the result does not (winding neither 0 nor 1) is a mismatch;
+//!   classify but the result does not (winding neither 0 nor 1) is a mismatch.
+//!   The same comparison runs on a grid over each tool's own bounds and on
+//!   both sides of every input face (its three largest triangles), so tools
+//!   and existing features smaller than the grid spacing are still probed;
 //! * volume: the result's measured volume must agree with the grid estimate of the
 //!   expected region within the grid's stated resolution
 //!   ([`CombineCheck::volume_tolerance`]).
@@ -370,6 +373,20 @@ fn area(m: &TriMesh) -> f64 {
         .sum()
 }
 
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
 fn check_combine(
     target: &Body,
     tools: &[Body],
@@ -433,6 +450,40 @@ fn check_combine(
                 tb.min[1] + (j as f64 + 0.5) * ts[1],
                 tb.min[2] + (l as f64 + 0.5) * ts[2],
             ]);
+        }
+    }
+    // Both sides of every input face (its three largest triangles, 2 x skip
+    // off the surface): a feature of the inputs smaller than the grid
+    // spacing (a small hole refilled by the boolean, far from any tool)
+    // leaves no grid point inside it, but its faces are always probed.
+    for m in std::iter::once(&mt).chain(&mtools) {
+        let faces = m
+            .tri_face
+            .iter()
+            .copied()
+            .max()
+            .map_or(0, |f| f as usize + 1);
+        let mut by_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); faces];
+        for (ti, t) in m.triangles.iter().enumerate() {
+            let [a, b, c] = t.map(|i| m.positions[i as usize]);
+            let n = cross3(sub3(b, a), sub3(c, a));
+            let area2 = dot3(n, n).sqrt();
+            if area2 > 0.0
+                && let Some(f) = m.tri_face.get(ti)
+            {
+                by_face[*f as usize].push((area2, ti));
+            }
+        }
+        for tris in &mut by_face {
+            tris.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)));
+            for &(area2, ti) in tris.iter().take(3) {
+                let [a, b, c] = m.triangles[ti].map(|i| m.positions[i as usize]);
+                let n = cross3(sub3(b, a), sub3(c, a)).map(|x| x / area2);
+                let g = [0, 1, 2].map(|k| (a[k] + b[k] + c[k]) / 3.0);
+                for s in [-2.0 * skip, 2.0 * skip] {
+                    pts.push([0, 1, 2].map(|k| g[k] + s * n[k]));
+                }
+            }
         }
     }
     // (expected, result) per sample; None = skipped.
@@ -570,5 +621,74 @@ mod tests {
         };
         let rep = verify_boolean_by_membership(&a, &b, &bad, BoolOp::Join, 12).unwrap();
         assert!(rep.mismatches > 0 && !rep.passed(), "{rep:?}");
+    }
+
+    /// A 0.5 mm pin (1/200 of the block) cut from a 100 mm block: a result
+    /// that ignores the pin (the block unchanged), or that removes a pin of
+    /// the wrong size, is refused; the right result passes.
+    #[test]
+    fn small_pin_cut_from_a_large_block_is_checked() {
+        let block = crate::extrude(
+            &crate::Profile::Polygon(vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]]),
+            &crate::Frame::XY,
+            100.0,
+        )
+        .unwrap();
+        let pin = |r: f64| {
+            crate::extrude(
+                &crate::Profile::Circle {
+                    center: [50.0, 50.0],
+                    radius: r,
+                },
+                &crate::Frame::XY.offset(-1.0),
+                102.0,
+            )
+            .unwrap()
+        };
+        let right = boolean(&block, &pin(0.25), BoolOp::Cut).unwrap();
+        let ok = verify_boolean_by_membership(&block, &pin(0.25), &right, BoolOp::Cut, CHECK_GRID)
+            .unwrap();
+        assert!(ok.passed(), "{ok:?}");
+        let rep = verify_boolean_by_membership(&block, &pin(0.25), &block, BoolOp::Cut, CHECK_GRID)
+            .unwrap();
+        assert!(!rep.passed(), "unchanged block accepted: {rep:?}");
+        let wide = boolean(&block, &pin(0.4), BoolOp::Cut).unwrap();
+        let rep = verify_boolean_by_membership(&block, &pin(0.25), &wide, BoolOp::Cut, CHECK_GRID)
+            .unwrap();
+        assert!(
+            !rep.passed(),
+            "0.8 mm hole for a 0.5 mm pin accepted: {rep:?}"
+        );
+    }
+
+    /// A result that refills a small existing hole of the target far from the
+    /// tool (the known Truck failure of refilled voids) is refused: the hole
+    /// falls between the grid points, but its faces are probed on both sides.
+    #[test]
+    fn refilled_small_hole_away_from_the_tool_is_detected() {
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            crate::Profile::Polygon(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+        };
+        let block =
+            crate::extrude(&rect(0.0, 0.0, 100.0, 100.0), &crate::Frame::XY, 100.0).unwrap();
+        let hole = crate::Profile::Circle {
+            center: [50.0, 50.0],
+            radius: 0.5,
+        };
+        let holed = crate::cut_prism(&block, &hole, &crate::Frame::XY.offset(-1.0), 102.0).unwrap();
+        let tool = crate::extrude(
+            &rect(10.0, 10.0, 20.0, 20.0),
+            &crate::Frame::XY.offset(90.0),
+            20.0,
+        )
+        .unwrap();
+        let right = boolean(&holed, &tool, BoolOp::Cut).unwrap();
+        let ok =
+            verify_boolean_by_membership(&holed, &tool, &right, BoolOp::Cut, CHECK_GRID).unwrap();
+        assert!(ok.passed(), "{ok:?}");
+        let refilled = boolean(&block, &tool, BoolOp::Cut).unwrap();
+        let rep = verify_boolean_by_membership(&holed, &tool, &refilled, BoolOp::Cut, CHECK_GRID)
+            .unwrap();
+        assert!(!rep.passed(), "refilled hole accepted: {rep:?}");
     }
 }

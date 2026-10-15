@@ -876,7 +876,8 @@ fn finish(
         .map_err(|e| KernelError::InvalidResult(format!("stitched faces: {e}")))?;
     if !shell.is_connected() {
         // Still several pieces at this tolerance: an open multi-shell body.
-        let parts = shell.connected_components();
+        // Components in face order (Truck's own order follows face addresses).
+        let parts = truck_shapeops::connected_components(&shell);
         let pieces = parts.len();
         // Separate closed pieces would make an unoriented
         // multi-solid "body"; refuse instead (one solid per body).

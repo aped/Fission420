@@ -218,6 +218,20 @@ struct PrismTest {
     taper: f64,
     /// Tapered sections: the exact base shape.
     base: Section,
+    /// Some loop of the region has a circular or cubic segment: its side is a
+    /// curved wall whose tessellation is only chord-accurate.
+    curved: bool,
+}
+
+/// The profile has a circular or cubic segment (a curved prism wall).
+fn profile_is_curved(p: &Profile) -> bool {
+    match p {
+        Profile::Polygon(_) => false,
+        Profile::Circle { .. } => true,
+        Profile::Loop(segs) => segs
+            .iter()
+            .any(|s| !matches!(s, crate::LoopSegment::Line { .. })),
+    }
 }
 
 /// Base shape of a tapered section.
@@ -242,6 +256,9 @@ impl PrismTest {
                 Profile::Circle { center, radius } => Section::Circle(*center, *radius),
                 Profile::Loop(_) => Section::Other,
             },
+            curved: std::iter::once(p.profile)
+                .chain(p.holes.iter())
+                .any(profile_is_curved),
         }
     }
     /// Section polygon at height `w` (tapered polygons; None when the offset
@@ -371,6 +388,11 @@ impl PrismTest {
         out
     }
     fn classify(&self, x: [f64; 3], eps: f64) -> Option<bool> {
+        self.classify_sides(x, eps, eps)
+    }
+    /// [`Self::classify`] with a separate margin for the side wall
+    /// (`eps_side`) and for the end caps and their rims (`eps`).
+    fn classify_sides(&self, x: [f64; 3], eps: f64, eps_side: f64) -> Option<bool> {
         let [u, v, w] = local(&self.start, x);
         let d_cap = w.abs().min((w - self.length).abs());
         let (inside, d_side) = self.at([u, v], w.clamp(0.0, self.length));
@@ -379,7 +401,7 @@ impl PrismTest {
         if d_cap < eps && (inside || d_side < eps) {
             return None;
         }
-        if d_side < eps && w > -eps && w < self.length + eps {
+        if d_side < eps_side && w > -eps && w < self.length + eps {
             return None;
         }
         Some(w > 0.0 && w < self.length && inside)
@@ -794,10 +816,13 @@ fn check_faces(
     };
     // Union of the tools: inside any → inside; ambiguous near one and not
     // inside another → unclassified.
-    let in_tools_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
+    // `curved_side`: the side margin of tools with a curved wall (used by the
+    // target probes below); planar sides and every cap keep `eps`.
+    let in_tools_eps = |p: [f64; 3], eps: f64, curved_side: f64| -> Option<bool> {
         let mut unknown = false;
         for t in &tests {
-            match t.classify(p, eps) {
+            let side = if t.curved { eps.max(curved_side) } else { eps };
+            match t.classify_sides(p, eps, side) {
                 Some(true) => return Some(true),
                 Some(false) => {}
                 None => unknown = true,
@@ -805,15 +830,15 @@ fn check_faces(
         }
         (!unknown).then_some(false)
     };
-    let expected_eps = |p: [f64; 3], eps: f64| -> Option<bool> {
-        let in_tool = in_tools_eps(p, eps)?;
+    let expected_eps = |p: [f64; 3], eps: f64, curved_side: f64| -> Option<bool> {
+        let in_tool = in_tools_eps(p, eps, curved_side)?;
         match (op, in_tool) {
             (PrismOp::Join, true) => Some(true),
             (PrismOp::Cut, true) => Some(false),
             _ => wind.classify(p),
         }
     };
-    let expected = |p: [f64; 3]| expected_eps(p, eps_tool);
+    let expected = |p: [f64; 3]| expected_eps(p, eps_tool, eps_tool);
     // Per face: the triangles (largest first) to probe.
     let nfaces = planar.len();
     let mut by_face: Vec<Vec<(f64, usize)>> = vec![Vec::new(); nfaces];
@@ -934,40 +959,51 @@ fn check_faces(
             }
             let n = cross(sub(b, a), sub(c, a));
             let n = [n[0] / area2, n[1] / area2, n[2] / area2];
-            let centroid = [
-                (a[0] + b[0] + c[0]) / 3.0,
-                (a[1] + b[1] + c[1]) / 3.0,
-                (a[2] + b[2] + c[2]) / 3.0,
-            ];
-            let mut both = true;
-            for sgn in [-1.0, 1.0] {
-                let p = [
-                    centroid[0] + sgn * h * n[0],
-                    centroid[1] + sgn * h * n[1],
-                    centroid[2] + sgn * h * n[2],
-                ];
-                // A target face may cross the tool's wall: probes within the
-                // tessellation's chord error of a curved tool wall (h_curved)
-                // are not classified, as the result's mesh of that wall is
-                // only that accurate.
-                match (expected_eps(p, eps_tool.max(h_curved)), rwind.classify(p)) {
-                    (Some(e), Some(r)) if e != r => {
-                        return Err(KernelError::InvalidResult(format!(
-                            "result check: beside a face of the target near {} the result has {} \
-                             where the expected solid has {} (existing geometry away from the \
-                             tool was changed); the kernel returned a wrong {} result",
-                            fmt_pt(centroid),
-                            if r { "material" } else { "no material" },
-                            if e { "material" } else { "none" },
-                            match op {
-                                PrismOp::Join => "join",
-                                PrismOp::Cut => "cut",
-                            }
-                        )));
+            // The centroid and a point toward each corner, all checked: a long
+            // strip of a curved wall can have its centroid exactly on a tool
+            // cap (unclassifiable) and only one end beside the tool.
+            let at =
+                |wa: f64, wb: f64, wc: f64| [0, 1, 2].map(|k| wa * a[k] + wb * b[k] + wc * c[k]);
+            let third = 1.0 / 3.0;
+            let mut both = false;
+            for centroid in [
+                at(third, third, third),
+                at(0.5, 0.25, 0.25),
+                at(0.25, 0.5, 0.25),
+                at(0.25, 0.25, 0.5),
+            ] {
+                let mut decisive = true;
+                for sgn in [-1.0, 1.0] {
+                    let p = [
+                        centroid[0] + sgn * h * n[0],
+                        centroid[1] + sgn * h * n[1],
+                        centroid[2] + sgn * h * n[2],
+                    ];
+                    // A target face may cross the tool's wall: probes within the
+                    // tessellation's chord error of a curved tool wall (h_curved)
+                    // are not classified, as the result's mesh of that wall is
+                    // only that accurate. Planar tool walls and every cap are
+                    // exact, so their margin stays at float noise.
+                    match (expected_eps(p, eps_tool, h_curved), rwind.classify(p)) {
+                        (Some(e), Some(r)) if e != r => {
+                            return Err(KernelError::InvalidResult(format!(
+                                "result check: beside a face of the target near {} the result \
+                                 has {} where the expected solid has {} (existing geometry away \
+                                 from the tool was changed); the kernel returned a wrong {} result",
+                                fmt_pt(centroid),
+                                if r { "material" } else { "no material" },
+                                if e { "material" } else { "none" },
+                                match op {
+                                    PrismOp::Join => "join",
+                                    PrismOp::Cut => "cut",
+                                }
+                            )));
+                        }
+                        (Some(_), Some(_)) => {}
+                        _ => decisive = false,
                     }
-                    (Some(_), Some(_)) => {}
-                    _ => both = false,
                 }
+                both |= decisive;
             }
             stats.probes += 1;
             if both {
