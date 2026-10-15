@@ -3,6 +3,7 @@
 //! `cargo test -p rcad-document --test it <module>::`.
 
 mod assembly_bodies;
+mod atomic_save;
 mod document;
 mod format_name;
 mod format_v9;

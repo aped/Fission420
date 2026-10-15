@@ -3,6 +3,28 @@
 Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock` is committed.
 Versions in the tables are the ones resolved in `Cargo.lock`.
 
+`cargo deny check` (configuration `deny.toml`, run by the CI lint job) enforces this policy on the
+whole dependency graph for Linux, Windows and macOS, refuses crates with RustSec vulnerability or
+unsoundness advisories, yanked versions, and any source other than crates.io and the workspace's
+path dependencies, and reports duplicate versions as warnings. Its allowlist is MIT, Apache-2.0
+(also with the LLVM exception), BSD-2-Clause, BSD-3-Clause, 0BSD, ISC and Zlib.
+
+### Approved license exceptions
+
+Each is limited to the named crate in `deny.toml`.
+
+| crate | license | why it is accepted |
+|---|---|---|
+| epaint_default_fonts | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 | egui's bundled UI fonts. Font licences that allow embedding and redistribution with their notices, which `THIRD_PARTY_LICENSES.txt` carries. |
+| unicode-ident | (MIT OR Apache-2.0) AND Unicode-3.0 | Unicode character tables; the Unicode License v3 is permissive with a notice. |
+| clipboard-win, error-code | BSL-1.0 | Windows clipboard (egui-winit → arboard), Windows builds only. The Boost Software License is permissive; its notice is only required in source distributions. |
+
+### Advisories accepted for now
+
+| advisory | crate | why it is accepted |
+|---|---|---|
+| RUSTSEC-2026-0192 (unmaintained) | ttf-parser 0.25.1 | No vulnerability; the author no longer maintains it. `rcad-sketch` reads installed fonts' glyph outlines with it. Replacing it with `skrifa` is a planned change. |
+
 | crate | version | license | source | used by |
 |---|---|---|---|---|
 | truck-modeling | 0.6.0 | Apache-2.0 | https://github.com/ricosjp/truck | rcad-kernel |
@@ -43,11 +65,11 @@ committed or shipped. The resolved glyph outlines are stored in the user's docum
 External tools used only for validation (not linked, not shipped): FreeCAD 1.1.4 flatpak (LGPL-2.1).
 Full transitive license audit: see `artifacts/licenses.txt` (generated) / section below.
 
-### Transitive C code (audited 2026-10-10)
-- `lzma-sys` 0.1.20 (liblzma, 0BSD/public-domain sources via `cc`) ← `xz2` ← `vtkio` ← `truck-meshalgo`
-  default feature `vtk`, re-enabled by `truck-shapeops` 0.4 which depends on meshalgo with default
-  features. It is compression for VTK file I/O, not geometry; the kernel stays pure Rust. Removing it
-  needs a Truck patch (`[patch]`) — deferred.
+### Transitive C code (audited 2026-10-15)
+- None. `lzma-sys` (liblzma via `cc`), with `xz2`, `vtkio`, quick-xml 0.22 and lz4_flex 0.7, came
+  from truck-meshalgo's default `vtk` feature (VTK file I/O, unused), which the vendored
+  `truck-shapeops` fork enabled; the fork now depends on truck-meshalgo without it
+  (`third_party/truck-shapeops/R-CAD-CHANGES.md`).
 - `wayland-sys`, `renderdoc-sys`: OS/graphics integration (dlopen bindings), allowed by policy.
 - Fonts in `epaint_default_fonts`: OFL-1.1 / Ubuntu Font Licence (font licences, permissive for embedding).
 - `self_cell` (Apache-2.0 OR GPL-2.0-only) and `r-efi` (MIT OR Apache-2.0 OR LGPL) are used under their permissive option.

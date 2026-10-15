@@ -10,8 +10,11 @@
 //! the offer says the copy is older and offers the saved document instead.
 //! Opening a copy never writes to the saved document.
 //!
-//! Directory: `RCAD_RECOVERY_DIR`, else `$XDG_STATE_HOME/r-cad/recovery`,
-//! else `~/.local/state/r-cad/recovery`. Interval: `RCAD_AUTOSAVE_SECS`
+//! Directory: `RCAD_RECOVERY_DIR`, else the platform's per-user state folder
+//! ([`recovery_dir_on`]): `$XDG_STATE_HOME/r-cad/recovery` or
+//! `~/.local/state/r-cad/recovery` on Linux and other Unix systems,
+//! `~/Library/Application Support/R-CAD/recovery` on macOS and
+//! `%LOCALAPPDATA%\R-CAD\recovery` on Windows. Interval: `RCAD_AUTOSAVE_SECS`
 //! (default 60; `0` = after every committed change, for tests).
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
@@ -22,16 +25,61 @@ use std::time::{Duration, Instant};
 
 const SUFFIX: &str = ".autosave.rcad.json";
 
-/// Recovery directory from an environment lookup: `RCAD_RECOVERY_DIR`, else
-/// `$XDG_STATE_HOME/r-cad/recovery`, else `$HOME/.local/state/r-cad/recovery`.
+/// Platform conventions for the per-user recovery folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// Linux and other Unix systems: the XDG state directory.
+    Unix,
+    /// `~/Library/Application Support`.
+    MacOs,
+    /// `%LOCALAPPDATA%`.
+    Windows,
+}
+
+impl Platform {
+    /// The platform this build runs on.
+    pub const CURRENT: Platform = if cfg!(windows) {
+        Platform::Windows
+    } else if cfg!(target_os = "macos") {
+        Platform::MacOs
+    } else {
+        Platform::Unix
+    };
+}
+
+/// Recovery directory for this platform from an environment lookup; see
+/// [`recovery_dir_on`].
 pub fn recovery_dir(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    recovery_dir_on(Platform::CURRENT, var)
+}
+
+/// Recovery directory from an environment lookup: `RCAD_RECOVERY_DIR` when set,
+/// else the platform's per-user folder:
+/// - Unix: `$XDG_STATE_HOME/r-cad/recovery`, else `$HOME/.local/state/r-cad/recovery`;
+/// - macOS: `$HOME/Library/Application Support/R-CAD/recovery`;
+/// - Windows: `%LOCALAPPDATA%\R-CAD\recovery`.
+///
+/// Empty values count as unset. `None` (autosave off) when nothing applies.
+pub fn recovery_dir_on(
+    platform: Platform,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let var = |k: &str| var(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     if let Some(d) = var("RCAD_RECOVERY_DIR") {
-        return Some(PathBuf::from(d));
+        return Some(d);
     }
-    var("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-        .map(|b| b.join("r-cad/recovery"))
+    match platform {
+        Platform::Unix => var("XDG_STATE_HOME")
+            .or_else(|| var("HOME").map(|h| h.join(".local").join("state")))
+            .map(|b| b.join("r-cad").join("recovery")),
+        Platform::MacOs => var("HOME").map(|h| {
+            h.join("Library")
+                .join("Application Support")
+                .join("R-CAD")
+                .join("recovery")
+        }),
+        Platform::Windows => var("LOCALAPPDATA").map(|l| l.join("R-CAD").join("recovery")),
+    }
 }
 
 /// Autosave interval: `RCAD_AUTOSAVE_SECS`, else 60 s.
