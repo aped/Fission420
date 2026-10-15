@@ -483,6 +483,7 @@ impl RcadApp {
             self.sketch_input(ui, &resp);
             self.paint_sketch_session(&painter, rect);
             self.sketch_dim_input(ui);
+            self.sketch_hud(ui);
             self.sketch_offset_input(ui);
             self.sketch_fillet_input(ui);
             if let Some(s) = self.sketch.as_mut() {

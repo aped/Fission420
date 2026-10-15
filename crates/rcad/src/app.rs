@@ -2408,6 +2408,8 @@ impl RcadApp {
             ed.set_tool(T::Offset);
         } else if sc(Modifiers::NONE, Key::P) {
             ed.set_tool(T::Project);
+        } else if sc(Modifiers::NONE, Key::Tab) {
+            ed.hud_tab();
         } else if sc(Modifiers::NONE, Key::S) {
             ed.set_tool(T::Select);
         } else if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {

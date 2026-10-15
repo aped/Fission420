@@ -205,3 +205,109 @@ fn unit_suffixes_convert_and_invalid_input_keeps_the_field_open() {
         "numbers bind nothing"
     );
 }
+
+fn editor<'a>(h: &'a Harness<'_, RcadApp>) -> &'a rcad::sketch_edit::SketchEditor {
+    &h.state().sketch_session().expect("sketch session").editor
+}
+
+/// Type `text` into the heads-up field `label`.
+fn hud_type(h: &mut Harness<'_, RcadApp>, label: &str, text: &str) {
+    assert!(
+        h.query_by_label(label).is_some(),
+        "no heads-up field {label}: {:?}",
+        editor(h).hud
+    );
+    h.get_by_label(label).type_text(text);
+    let _ = h.try_run();
+}
+
+#[test]
+fn heads_up_typed_values_place_points_and_dimension_them() {
+    let mut h = harness();
+    click(&mut h, "New");
+    click(&mut h, "Create Sketch");
+    // Line: start at (10, 5), Tab, length 50, Tab, angle 30, Enter.
+    click(&mut h, "Line");
+    sk_click(&mut h, [10.0, 5.0]);
+    h.key_press(Key::Tab);
+    settle(&mut h);
+    hud_type(&mut h, "Length (mm)", "50");
+    h.key_press(Key::Tab);
+    let _ = h.try_run();
+    assert_eq!(
+        editor(&h).hud.as_ref().map(|x| x.focus),
+        Some(1),
+        "Tab cycles"
+    );
+    hud_type(&mut h, "Angle (deg)", "30");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    let sk = editor(&h).sketch.clone();
+    let end = sk
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            rcad_sketch::Entity::Line { b, .. } => sk.point_xy(*b),
+            _ => None,
+        })
+        .expect("line drawn");
+    let want = [
+        10.0 + 50.0 * 30f64.to_radians().cos(),
+        5.0 + 50.0 * 30f64.to_radians().sin(),
+    ];
+    assert!(
+        (end[0] - want[0]).abs() < 1e-9 && (end[1] - want[1]).abs() < 1e-9,
+        "{end:?} vs {want:?}: {}",
+        feedback(&h)
+    );
+    assert!(
+        sk.dimensions().iter().any(|(_, v)| (v - 50.0).abs() < 1e-9),
+        "typed length dimensioned: {:?}",
+        sk.dimensions()
+    );
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    // Centre rectangle 40 x 20 about (0, -40).
+    click(&mut h, "Center Rect");
+    sk_click(&mut h, [0.0, -40.0]);
+    sk_click_move(&mut h, [15.0, -30.0]);
+    h.key_press(Key::Tab);
+    settle(&mut h);
+    hud_type(&mut h, "Width (mm)", "40");
+    h.key_press(Key::Tab);
+    let _ = h.try_run();
+    hud_type(&mut h, "Height (mm)", "20");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    let d = editor(&h).sketch.dimensions();
+    assert!(
+        d.iter()
+            .any(|(n, v)| n.starts_with("width") && (v - 40.0).abs() < 1e-9)
+            && d.iter()
+                .any(|(n, v)| n.starts_with("height") && (v - 20.0).abs() < 1e-9),
+        "{d:?}: {}",
+        feedback(&h)
+    );
+    // Invalid typed input keeps the fields open and changes nothing.
+    click(&mut h, "Circle");
+    sk_click(&mut h, [60.0, 0.0]);
+    let before = editor(&h).sketch.clone();
+    h.key_press(Key::Tab);
+    settle(&mut h);
+    hud_type(&mut h, "Diameter (mm)", "abc");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    assert!(editor(&h).hud.is_some(), "fields stay open");
+    assert!(
+        editor(&h).feedback.as_ref().is_some_and(|f| f.error),
+        "{}",
+        feedback(&h)
+    );
+    assert_eq!(editor(&h).sketch, before);
+}
+
+fn sk_click_move(h: &mut Harness<'_, RcadApp>, p: [f64; 2]) {
+    let s = h.state().sketch_to_screen(p).expect("visible");
+    h.event(egui::Event::PointerMoved(s));
+    let _ = h.try_run();
+}

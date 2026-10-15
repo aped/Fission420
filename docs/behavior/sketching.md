@@ -54,6 +54,18 @@ an arc sharing an endpoint, `T`). **Construction** (X) toggles selected curves t
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
 Del (refused, with the dependents named, while anything uses them; one undo step).
 
+## Typed input while drawing (Tab)
+
+While a Line, rectangle or Circle gesture is in progress (after its first click), **Tab** opens
+heads-up fields next to the cursor: Line → Length (mm) and Angle (deg, counter-clockwise from +x);
+Center / 2-Point Rect → Width and Height; Circle → Diameter. Tab cycles the fields; **Enter**
+places the next point from the typed values (an empty field keeps the cursor's value; a rectangle
+keeps the cursor's quadrant) and adds a dimension for each typed length (length, width, height,
+diameter: the Dimension tool's names); a typed angle places the point only. Values accept units and
+parameter expressions as in the dimension field (the dimension takes the value; bind it afterwards by
+typing the expression into the dimension). **Escape** closes the fields. Invalid input keeps them
+open with the reason and adds nothing.
+
 ## Snapping (deterministic priority)
 
 All tolerances are **screen-space** (egui points) and converted to sketch millimetres with the

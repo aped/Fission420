@@ -467,6 +467,21 @@ pub struct SketchEditor {
     /// Dimensions bound to an expression in the document when the session
     /// (or the last projection commit) started, with their expressions.
     pub bound: std::collections::BTreeMap<String, String>,
+    /// Heads-up typed fields while drawing (Tab opens, Tab cycles).
+    pub hud: Option<Hud>,
+    /// The last pointer event's view (scale), for typed input.
+    last_view: Option<View>,
+}
+
+/// Heads-up typed input for the gesture in progress: one text per field of
+/// [`SketchEditor::hud_fields`]; an empty field takes the cursor's value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Hud {
+    pub values: Vec<String>,
+    /// Field that has (or gets) keyboard focus.
+    pub focus: usize,
+    /// Focus must be (re)given to `focus` on the next frame.
+    pub refocus: bool,
 }
 
 /// What the inline dimension editor accepted.
@@ -619,7 +634,165 @@ impl SketchEditor {
             bindings: Default::default(),
             new_params: vec![],
             bound: Default::default(),
+            hud: None,
+            last_view: None,
         }
+    }
+
+    /// Fields of the heads-up input for the current tool and gesture (None:
+    /// nothing to type yet): Line → length, angle; rectangles → width,
+    /// height; Circle → diameter.
+    pub fn hud_fields(&self) -> Option<&'static [&'static str]> {
+        self.rubber_band_from()?;
+        match (&self.tool, &self.gesture) {
+            (SketchTool::Line, Gesture::Line { .. }) => Some(&["Length (mm)", "Angle (deg)"]),
+            (SketchTool::CenterRectangle | SketchTool::CornerRectangle, Gesture::FirstClick(_)) => {
+                Some(&["Width (mm)", "Height (mm)"])
+            }
+            (SketchTool::Circle, Gesture::FirstClick(_)) => Some(&["Diameter (mm)"]),
+            _ => None,
+        }
+    }
+
+    /// Tab: open the heads-up fields (focus on the first) or move to the next.
+    pub fn hud_tab(&mut self) -> bool {
+        let Some(fields) = self.hud_fields() else {
+            return false;
+        };
+        match &mut self.hud {
+            Some(h) => {
+                h.focus = (h.focus + 1) % fields.len();
+                h.refocus = true;
+            }
+            None => {
+                self.hud = Some(Hud {
+                    values: vec![String::new(); fields.len()],
+                    focus: 0,
+                    refocus: true,
+                })
+            }
+        }
+        true
+    }
+
+    /// Enter in the heads-up fields: place the gesture's next point from the
+    /// typed values (empty fields keep the cursor's value) and dimension
+    /// what was typed. Invalid input keeps the fields open with the reason.
+    pub fn apply_hud(&mut self) -> bool {
+        let (Some(h), Some(fields), Some(from)) =
+            (self.hud.clone(), self.hud_fields(), self.rubber_band_from())
+        else {
+            self.hud = None;
+            return false;
+        };
+        let cursor = self.cursor.as_ref().map_or(from, |c| c.pos);
+        let mut typed: Vec<Option<f64>> = Vec::new();
+        for (i, f) in fields.iter().enumerate() {
+            let text = h.values.get(i).map_or("", |v| v.trim());
+            if text.is_empty() {
+                typed.push(None);
+                continue;
+            }
+            let angle = f.starts_with("Angle");
+            let v = if angle {
+                rcad_document::params::evaluate_for_slot(
+                    text.trim_end_matches('°').trim_end_matches("deg").trim(),
+                    &self.param_env,
+                    rcad_document::params::SlotKind::Angle,
+                )
+                .map_err(|e| format!("'{text}': {e}"))
+            } else {
+                match parse_dim_input(text, false, &self.param_env) {
+                    Ok(DimInput::Value(v) | DimInput::Bound { value: v, .. }) => Ok(v),
+                    Ok(DimInput::NewParameter { .. }) => Err(format!(
+                        "'{text}': name = value is for dimensions; type a value"
+                    )),
+                    Err(e) => Err(e),
+                }
+            };
+            match v {
+                Ok(v) if v.is_finite() => typed.push(Some(v)),
+                Ok(_) => typed.push(None),
+                Err(e) => {
+                    self.fail(format!("{f}: {e}"));
+                    return false;
+                }
+            }
+        }
+        let d = [cursor[0] - from[0], cursor[1] - from[1]];
+        let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
+        let target = match self.tool {
+            SketchTool::Line => {
+                let len = typed[0].unwrap_or(d[0].hypot(d[1]));
+                let ang = typed[1].map_or(d[1].atan2(d[0]), f64::to_radians);
+                [from[0] + len * ang.cos(), from[1] + len * ang.sin()]
+            }
+            SketchTool::CornerRectangle => {
+                let w = typed[0].map_or(d[0], |w| w * sign(d[0]));
+                let hh = typed[1].map_or(d[1], |v| v * sign(d[1]));
+                [from[0] + w, from[1] + hh]
+            }
+            SketchTool::CenterRectangle => {
+                let w = typed[0].map_or(d[0], |w| 0.5 * w * sign(d[0]));
+                let hh = typed[1].map_or(d[1], |v| 0.5 * v * sign(d[1]));
+                [from[0] + w, from[1] + hh]
+            }
+            SketchTool::Circle => {
+                let r = typed[0].map_or(d[0].hypot(d[1]), |v| 0.5 * v);
+                [from[0] + r, from[1]]
+            }
+            _ => return false,
+        };
+        let view = View {
+            snapping: false,
+            grid: None,
+            ..self.last_view.unwrap_or(View {
+                px_per_mm: 4.0,
+                grid: None,
+                snapping: false,
+            })
+        };
+        let n_entities = self.sketch.entities.len();
+        let tool = self.tool;
+        self.hud = None;
+        self.pointer_move(target, None, &view);
+        self.click(target, None, &view, false);
+        if self.sketch.entities.len() == n_entities {
+            return false; // refused: the click's feedback says why
+        }
+        let new: Vec<EntityId> = self.sketch.entities[n_entities..]
+            .iter()
+            .map(Entity::id)
+            .collect();
+        // Dimension the typed values (named like the Dimension tool's).
+        let mut dims: Vec<EntityId> = vec![];
+        match tool {
+            SketchTool::Line if typed[0].is_some() => dims.extend(new.last()),
+            SketchTool::Circle if typed[0].is_some() => dims.extend(new.first()),
+            SketchTool::CenterRectangle | SketchTool::CornerRectangle => {
+                let horizontal = |sk: &Sketch, e: &EntityId| match sk.entity(*e) {
+                    Some(Entity::Line { a, b, .. }) => {
+                        let (p, q) = (sk.point_xy(*a), sk.point_xy(*b));
+                        p.zip(q)
+                            .is_some_and(|(p, q)| (p[1] - q[1]).abs() < (p[0] - q[0]).abs())
+                    }
+                    _ => false,
+                };
+                if typed[0].is_some() {
+                    dims.extend(new.iter().find(|e| horizontal(&self.sketch, e)));
+                }
+                if typed[1].is_some() {
+                    dims.extend(new.iter().find(|e| !horizontal(&self.sketch, e)));
+                }
+            }
+            _ => {}
+        }
+        for e in dims {
+            self.dimension_entity(e);
+            // Created at the typed (= measured) value; close its field.
+            self.dim_edit = None;
+        }
+        true
     }
 
     /// True when Finish must also commit typed expressions or parameters.
@@ -1148,6 +1321,7 @@ impl SketchEditor {
     /// Abort the current gesture. A drag in progress restores its start state;
     /// a line chain without segments drops the point it created.
     pub fn cancel_gesture(&mut self) {
+        self.hud = None;
         if !matches!(self.gesture, Gesture::Idle) {
             self.epoch += 1;
         }
@@ -1185,6 +1359,7 @@ impl SketchEditor {
     }
 
     pub fn pointer_move(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        self.last_view = Some(*view);
         if let Gesture::Drag { item, moved, .. } = &mut self.gesture {
             let item = item.clone();
             *moved = true;
