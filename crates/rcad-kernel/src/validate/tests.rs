@@ -447,8 +447,12 @@ fn ring_and_thin_slot_tools_are_sampled() {
         let e = verify_prism_boolean(&block, &block, PrismOp::Cut, &prism, (0.0, 4.0))
             .unwrap_err()
             .to_string();
+        // Any of the three probe families may see it first: the tool's
+        // interior, a result face, or a target face beside the tool.
         assert!(
-            e.contains("was not applied") || e.contains("does not bound"),
+            e.contains("was not applied")
+                || e.contains("does not bound")
+                || e.contains("beside a face of the target"),
             "{e}"
         );
     }
@@ -540,4 +544,43 @@ fn ray_crossing_winding_matches_the_exact_sum() {
     }
     // Rays through vertices/edges are detected and use the exact sum.
     assert!(fell_back > 0, "no grazing ray detected ({agreed} agreed)");
+}
+
+/// A planar tool wall is exact, so target faces beside it are probed at float
+/// noise, not at the curved-wall chord margin: a result that refills a 0.02 mm
+/// slot 0.005 mm from a planar cut wall (a void the tool never touches) is
+/// refused, while the correct result still passes.
+#[test]
+fn refilled_slot_beside_a_planar_tool_wall_is_refused() {
+    let p = plate();
+    let slot = rect(40.005, 10.0, 40.025, 40.0);
+    let slotted = cut_prism(&p, &slot, &Frame::XY.offset(5.0), 6.0).unwrap();
+    let tool = rect(10.0, 5.0, 40.0, 45.0);
+    let start = Frame::XY.offset(-1.0);
+    let nominal = Prism {
+        profile: &tool,
+        holes: &[],
+        start: &start,
+        length: 12.0,
+    };
+    // The slot lies within the chord margin of the check (3 x chord here).
+    let chord = check_chord(diag_of(
+        &crate::measure::raw_bounds(&slotted.solid).unwrap(),
+    ));
+    assert!(0.025 < 3.0 * chord, "chord {chord}");
+    let right = cut_prism(&slotted, &tool, &start, 12.0).unwrap();
+    let want = 80.0 * 50.0 * 10.0 - 0.02 * 30.0 * 5.0 - 30.0 * 40.0 * 10.0;
+    assert!(
+        (volume(&right) - want).abs() < 1e-6 * want,
+        "{}",
+        volume(&right)
+    );
+    verify_prism_boolean(&slotted, &right, PrismOp::Cut, &nominal, (0.0, 12.0)).unwrap();
+    // Wrong: the same cut with the slot filled again.
+    let wrong = cut_prism(&p, &tool, &start, 12.0).unwrap();
+    let e = verify_prism_boolean(&slotted, &wrong, PrismOp::Cut, &nominal, (0.0, 12.0));
+    assert!(
+        matches!(&e, Err(KernelError::InvalidResult(m)) if m.contains("beside a face of the target")),
+        "{e:?}"
+    );
 }
