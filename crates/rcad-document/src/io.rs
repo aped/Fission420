@@ -353,6 +353,9 @@ pub fn v9_feature(doc: &Document) -> Option<&'static str> {
     if doc.features.iter().any(|f| !f.piece_seeds.is_empty()) {
         return Some("piece identity of cuts and splits that separate a body");
     }
+    if !doc.units.is_default() {
+        return Some("document display units");
+    }
     if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
         return Some("prints of referenced imported faces");
     }
