@@ -310,6 +310,8 @@ pub struct SketchSession {
     pub(crate) press_dragging: bool,
     /// Last click (position, time, egui pass) for double-click detection.
     pub(crate) last_click: Option<(egui::Pos2, f64, u64)>,
+    /// Project / Intersect inside the editor (`crate::sketch_project`).
+    pub(crate) project: crate::sketch_project::ProjectState,
 }
 
 /// Actions that discard the open document and therefore need confirmation
@@ -510,6 +512,9 @@ pub struct RcadApp {
     /// (a newly opened editor selects its text so typing replaces it).
     pub(crate) sketch_dim_opened: Option<usize>,
     pub(crate) show_help: bool,
+    /// Preference: a new sketch on a planar face starts with the face's
+    /// edges projected as construction (Fusion's default; on).
+    pub(crate) auto_project_faces: bool,
     /// Summary of the last successful import (window until closed).
     pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
     /// Open "Re-attach sketch" window.
@@ -618,6 +623,7 @@ impl RcadApp {
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
             show_help: false,
+            auto_project_faces: true,
             import_summary: None,
             reattach: None,
             params: Default::default(),
@@ -1283,7 +1289,12 @@ impl RcadApp {
                     ..
                 }
         );
-        if commit_reply && self.sketch.as_ref().is_some_and(|s| s.committing) {
+        if commit_reply
+            && self
+                .sketch
+                .as_ref()
+                .is_some_and(|s| s.committing && !s.project.busy())
+        {
             if response.ok {
                 self.end_sketch_session();
                 if let Some(f) = response.feature {
@@ -1314,6 +1325,7 @@ impl RcadApp {
             self.selected_face = None;
             self.selected_body = None;
         }
+        self.sketch_project_reply(&command, &response);
         // Continue a guarded action once its pre-save succeeded.
         if matches!(command, Command::Save { .. })
             && let Some(g) = self.after_save.take()
@@ -1892,8 +1904,10 @@ impl RcadApp {
             press_epoch: 0,
             press_dragging: false,
             last_click: None,
+            project: Default::default(),
         });
         self.orient_to_sketch();
+        self.sketch_session_started();
     }
 
     /// Point the camera along the sketch normal and frame the sketch.
@@ -1922,6 +1936,11 @@ impl RcadApp {
                 error: true,
                 text: format!("Cannot finish: {why}. Fix or delete the conflicting constraint."),
             });
+            return;
+        }
+        if s.editor.has_bindings() {
+            // Typed expressions / new parameters: committed with the sketch.
+            self.finish_with_bindings();
             return;
         }
         let sketch = s.editor.sketch.clone();
@@ -1955,10 +1974,11 @@ impl RcadApp {
         if self.sketch.as_ref().is_some_and(|s| s.committing) {
             return;
         }
+        self.undo_session_commits();
         self.end_sketch_session();
     }
 
-    fn end_sketch_session(&mut self) {
+    pub(crate) fn end_sketch_session(&mut self) {
         if let Some(s) = self.sketch.take()
             && let Some(cam) = s.saved_camera
         {
@@ -2416,6 +2436,9 @@ impl RcadApp {
                 ed.escape();
             }
             SketchKey::LookAt => self.orient_to_sketch(),
+            SketchKey::HudTab => {
+                ed.hud_tab();
+            }
         }
     }
 

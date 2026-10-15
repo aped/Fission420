@@ -1586,6 +1586,10 @@ pub struct FeatureSummary {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projections: Vec<rcad_document::ProjectSource>,
+    /// Sketches: the entities each projection link drives (same order as
+    /// `projections`); read-only in the sketch editor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projection_entities: Vec<Vec<rcad_sketch::EntityId>>,
     /// Health after the last regeneration (Healthy/Warning/Error/...).
     #[serde(default)]
     pub health: rcad_document::FeatureHealth,
@@ -4327,10 +4331,7 @@ impl Session {
                 let m = self.model_mut()?;
                 let out = sketch_ops::apply(m, *feature, op)?;
                 r.feature = Some(*feature);
-                r.message = Some(format!(
-                    "sketch op: created {:?}, removed {:?}",
-                    out.created, out.removed
-                ));
+                r.message = Some(out.summary());
             }
             Command::Open { path, safe_mode } => {
                 let nf = load_file(path)?;
@@ -4693,6 +4694,13 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 health: res.map(|r| r.health.clone()).unwrap_or_default(),
                 projections: match &f.kind {
                     FeatureKind::Sketch { links, .. } => links.iter().map(|l| l.source).collect(),
+                    _ => vec![],
+                },
+                projection_entities: match &f.kind {
+                    FeatureKind::Sketch { links, .. } => links
+                        .iter()
+                        .map(|l| l.loops.iter().flatten().map(|c| c.entity).collect())
+                        .collect(),
                     _ => vec![],
                 },
                 sheet_relief: match &f.kind {
@@ -5097,7 +5105,7 @@ impl Session {
     }
 }
 
-fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
+pub(crate) fn keep_entity_ids(old: &Sketch, mut new: Sketch) -> Result<Sketch, DocError> {
     use rcad_sketch::Entity;
     // An entity keeps its identity when its endpoints change (the editor can
     // reconnect a line), but not when its kind changes, with one exception: a

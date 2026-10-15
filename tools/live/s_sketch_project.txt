@@ -1,0 +1,69 @@
+# Project inside the sketch: a hole dimensioned to projected cap edges follows the base width
+clickw New Sketch on XY
+wait_idle
+key r
+sclick 0.4 0.3
+smove 40 20
+sclick 40 20
+key d
+sclick 0 -20
+type 80
+key Return
+sclick 40 5
+type 40
+key Return
+expect editing.status FullyConstrained
+clickw Finish Sketch
+wait_idle
+clickw Extrude…
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 32000 0.01
+wclick 15 8 10
+clickw Create Sketch
+wait_idle
+# The cap's edges are auto-projected (construction, read-only).
+expect editing.projected 4
+expect editing.entities 0
+# P: project the right and the bottom cap edges.
+key p
+wclick 39 5 10
+wait_idle
+wclick 5 -19 10
+wait_idle
+expect editing.projected 6
+shot
+# A circle dimensioned to the projected corner (right and bottom edges).
+key c
+sclick 28 -12
+sclick 31 -12
+key d
+sclick 40 -20
+sclick 28 -12
+type 12
+key Return
+sclick 40 -20
+sclick 28 -12
+type 8
+key Return
+sclick 31 -12
+type 6
+key Return
+expect editing.status FullyConstrained
+shot
+clickw Finish Sketch
+wait_idle
+clickw Cut through all…
+key Return
+wait_idle
+expect volume 31717.2567 0.01
+# Base width 80 -> 60: the right edge moves to x = 30 and the hole follows
+# (12 mm from it); a hole left behind at x = 28 would break the wall.
+clickw Sketch1
+clickdim width
+type 60
+key Return
+wait_idle
+expect volume 23717.2567 0.01
+shot

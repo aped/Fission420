@@ -50,6 +50,14 @@ pub enum SketchTool {
     Trim,
     /// Extend a line's free end to the nearest curve along its direction.
     Extend,
+    /// Break a curve at the crossings either side of the click (nothing is
+    /// removed; the clicked span becomes its own curve).
+    Break,
+    /// Project a model edge into the sketch: click a face next to the edge
+    /// (the app resolves the face; see `ProjectPick`).
+    Project,
+    /// Intersect: the section of the clicked body by the sketch plane.
+    Intersect,
     /// Offset a closed loop by an editable distance (docs/behavior/sketching.md).
     Offset,
     /// SKETCH corner fillet: round the corner where two lines (or a line and an
@@ -70,6 +78,33 @@ pub enum SketchTool {
 }
 
 impl SketchTool {
+    /// The sketch toolbar's tools, in order (the toolbar iterates this).
+    pub const TOOLBAR: [SketchTool; 16] = [
+        SketchTool::Select,
+        SketchTool::Line,
+        SketchTool::CenterRectangle,
+        SketchTool::CornerRectangle,
+        SketchTool::Circle,
+        SketchTool::Arc,
+        SketchTool::Ellipse,
+        SketchTool::Spline,
+        SketchTool::Dimension,
+        SketchTool::Trim,
+        SketchTool::Extend,
+        SketchTool::Offset,
+        SketchTool::Fillet,
+        SketchTool::Slot,
+        SketchTool::Polygon,
+        SketchTool::Text,
+    ];
+
+    /// Tools on the sketch bar's second row (the first row is full at 1280 px).
+    pub const SECOND_ROW: [SketchTool; 3] = [
+        SketchTool::Break,
+        SketchTool::Project,
+        SketchTool::Intersect,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             SketchTool::Select => "Select",
@@ -81,6 +116,9 @@ impl SketchTool {
             SketchTool::Dimension => "Dimension",
             SketchTool::Trim => "Trim",
             SketchTool::Extend => "Extend",
+            SketchTool::Break => "Break",
+            SketchTool::Project => "Project",
+            SketchTool::Intersect => "Intersect",
             SketchTool::Offset => "Offset",
             SketchTool::Fillet => "Fillet",
             SketchTool::Text => "Text",
@@ -102,6 +140,9 @@ impl SketchTool {
             SketchTool::Dimension => "D",
             SketchTool::Trim => "T",
             SketchTool::Extend => "E",
+            SketchTool::Break => "toolbar",
+            SketchTool::Project => "P",
+            SketchTool::Intersect => "toolbar",
             SketchTool::Offset => "O",
             SketchTool::Fillet => "toolbar",
             SketchTool::Text => "toolbar",
@@ -134,8 +175,21 @@ impl SketchTool {
                 "Click a line (length), circle (diameter), arc (radius), or two points (horizontal/vertical distance; the same two points again: the other axis)"
             }
             SketchTool::Trim => {
-                "Click the part of a line to remove: it is cut at the nearest intersections with other \
-                 curves (a line with none is deleted) · lines only"
+                "Click the part of a line, arc or circle to remove: it is cut at the nearest \
+                 intersections with other curves (a curve with none is deleted)"
+            }
+            SketchTool::Project => {
+                "Click a model face next to the edge to project: the face edge nearest the click \
+                 is projected into the sketch (purple, read-only, follows the model while linked) · \
+                 Projection Link off: the curves are copied unlinked"
+            }
+            SketchTool::Intersect => {
+                "Click a body: its section by the sketch plane is added (purple, read-only, follows \
+                 the model while linked)"
+            }
+            SketchTool::Break => {
+                "Click the span of a line, arc or circle to break off: it is split at the nearest \
+                 intersections with other curves, nothing is removed (a circle needs two)"
             }
             SketchTool::Extend => {
                 "Click a line near its free end: the end moves along the line to the nearest curve it would cross · lines only"
@@ -346,6 +400,17 @@ pub struct Feedback {
     pub text: String,
 }
 
+/// A Project / Intersect click for the app to resolve against the model (the
+/// editor has no 3D geometry): the face (edge) or body under `at`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectPick {
+    pub at: egui::Pos2,
+    /// Intersect (body section) instead of an edge projection.
+    pub section: bool,
+    /// Keep the projection link (false: copy the curves unlinked).
+    pub linked: bool,
+}
+
 /// Overall constraint state shown to the user (text + symbol, not only colour).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StateKind {
@@ -386,206 +451,136 @@ pub struct SketchEditor {
     /// Bumped whenever a gesture is cancelled or the tool/history changes, so
     /// the view can drop a pointer press that started before (see `epoch`).
     epoch: u64,
+    /// Projected (linked) entities and their link index: read-only.
+    pub projected: std::collections::BTreeMap<EntityId, usize>,
+    /// A Project / Intersect click waiting for the app.
+    pub project_pick: Option<ProjectPick>,
+    /// Project tool option: keep the projection link (Fusion's Projection Link).
+    pub project_linked: bool,
+    /// Evaluated user parameters (name -> value), for dimension expressions.
+    pub param_env: std::collections::HashMap<String, rcad_document::params::Quantity>,
+    /// Dimension expressions typed in this session (name -> expression; an
+    /// empty expression unbinds), committed with the sketch at Finish.
+    pub bindings: std::collections::BTreeMap<String, String>,
+    /// User parameters created by `name = expr` in this session.
+    pub new_params: Vec<rcad_commands::sketch_ops::NewParameter>,
+    /// Dimensions bound to an expression in the document when the session
+    /// (or the last projection commit) started, with their expressions.
+    pub bound: std::collections::BTreeMap<String, String>,
+    /// Heads-up typed fields while drawing (Tab opens, Tab cycles).
+    pub hud: Option<Hud>,
+    /// The last pointer event's view (scale), for typed input.
+    last_view: Option<View>,
+}
+
+/// Heads-up typed input for the gesture in progress: one text per field of
+/// [`SketchEditor::hud_fields`]; an empty field takes the cursor's value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Hud {
+    pub values: Vec<String>,
+    /// Field that has (or gets) keyboard focus.
+    pub focus: usize,
+    /// Focus must be (re)given to `focus` on the next frame.
+    pub refocus: bool,
+}
+
+/// What the inline dimension editor accepted.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DimInput {
+    /// A number (with an optional unit suffix): no binding.
+    Value(f64),
+    /// An expression using parameters: its value now, bound to `expr`.
+    Bound { value: f64, expr: String },
+    /// `name = expr`: a new user parameter; the dimension is bound to it.
+    NewParameter {
+        value: f64,
+        name: String,
+        expr: String,
+    },
+}
+
+/// Parse inline dimension input (docs/behavior/sketching.md "Dimension
+/// entry"): a number with an optional unit (mm, cm, m, in; deg or rad for
+/// angles), an expression over user parameters (`w/2`, `w + 2 mm`), or
+/// `name = expr` (a new user parameter). The result must be finite and > 0.
+pub fn parse_dim_input(
+    buf: &str,
+    angle: bool,
+    env: &std::collections::HashMap<String, rcad_document::params::Quantity>,
+) -> Result<DimInput, String> {
+    use rcad_document::params;
+    let text = buf.trim();
+    if text.is_empty() {
+        return Err("enter a value, a parameter or an expression".into());
+    }
+    let (name, src) = match text.split_once('=') {
+        Some((n, e)) => {
+            let n = n.trim();
+            params::valid_name(n).map_err(|e| format!("'{n}': {e}"))?;
+            if env.contains_key(n) {
+                return Err(format!(
+                    "parameter '{n}' already exists: type '{n}' to use it, or change it in \
+                     Parameters"
+                ));
+            }
+            (Some(n.to_string()), e.trim())
+        }
+        None => (None, text),
+    };
+    // Angle unit suffixes (the expression grammar's angles are degrees).
+    let (src, to_deg) = if angle {
+        if let Some(x) = src.strip_suffix("rad") {
+            (x.trim(), 180.0 / std::f64::consts::PI)
+        } else {
+            (
+                src.trim_end_matches('°').trim_end_matches("deg").trim(),
+                1.0,
+            )
+        }
+    } else {
+        (src, 1.0)
+    };
+    if src.is_empty() {
+        return Err("the expression is empty".into());
+    }
+    let kind = if angle {
+        params::SlotKind::Angle
+    } else {
+        params::SlotKind::Length
+    };
+    let value =
+        params::evaluate_for_slot(src, env, kind).map_err(|e| format!("'{src}': {e}"))? * to_deg;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!(
+            "'{text}' gives {}: a dimension must be > 0",
+            rcad_sketch::fmt_mm(value)
+        ));
+    }
+    let bound_src = if to_deg == 1.0 {
+        src.to_string()
+    } else {
+        format!("({src}) * 180 / {}", std::f64::consts::PI)
+    };
+    Ok(match name {
+        Some(name) => DimInput::NewParameter {
+            value,
+            name,
+            expr: bound_src,
+        },
+        None if params::references(src).is_empty() => DimInput::Value(value),
+        None => DimInput::Bound {
+            value,
+            expr: bound_src,
+        },
+    })
 }
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
     (a[0] - b[0]).hypot(a[1] - b[1])
 }
 
-/// Distance from `p` to segment `a`-`b`.
-pub fn seg_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
-    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    let l2 = dx * dx + dy * dy;
-    if l2 <= 0.0 {
-        return dist(p, a);
-    }
-    let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
-    dist(p, [a[0] + t * dx, a[1] + t * dy])
-}
-
-/// Does constraint `c` reference point `p` directly?
-pub(crate) fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
-    match c {
-        Constraint::FixedPoint { p: q, .. } => *q == p,
-        Constraint::HorizontalDistance { a, b, .. }
-        | Constraint::VerticalDistance { a, b, .. }
-        | Constraint::Distance { a, b, .. }
-        | Constraint::Coincident { a, b } => *a == p || *b == p,
-        Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
-        Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
-            *point == p
-        }
-        _ => false,
-    }
-}
-
-/// How a trim/extend end was joined to the curve it was cut at.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum CutEnd {
-    /// An existing point already lies there: its id is shared, so profiles close.
-    Shared,
-    /// New point held on the cutting curve(s): `PointOnLine` for a line,
-    /// `PointOnCircle` for a circle or arc (both at a line/circle crossing).
-    Held,
-    /// New point on no other curve (nothing to hold it on).
-    Free,
-}
-
-/// End point for a trim/extend cut at `x`. Reuses an existing point there (other
-/// than `own`, the edited curve's points), else adds one and keeps it on the
-/// cutting curves (not in `skip`) through `x`: a line whose segment holds `x`
-/// (`PointOnLine`) and/or a circle or arc through `x` (`PointOnCircle`). When
-/// the cutting curve is later trimmed at the same place, the shared point makes
-/// the profile close (see `cut_point`'s reuse rule).
-pub(crate) fn cut_point(
-    sk: &mut Sketch,
-    x: [f64; 2],
-    own: &[PointId],
-    skip: &[EntityId],
-) -> (PointId, CutEnd) {
-    let tol = rcad_sketch::solve_tolerance(sk.scale());
-    let used = |sk: &Sketch, p: PointId| {
-        sk.origin == Some(p)
-            || sk
-                .entities
-                .iter()
-                .any(|e| !skip.contains(&e.id()) && e.points().contains(&p))
-    };
-    if let Some(p) = sk
-        .points
-        .iter()
-        .filter(|q| !own.contains(&q.id) && dist([q.x, q.y], x) <= tol)
-        .map(|q| q.id)
-        .find(|&q| used(sk, q))
-    {
-        return (p, CutEnd::Shared);
-    }
-    let line = sk.entities.iter().find_map(|e| match e {
-        Entity::Line { id, a, b } if !skip.contains(id) => {
-            let (pa, pb) = (sk.point_xy(*a)?, sk.point_xy(*b)?);
-            (seg_dist(x, pa, pb) <= tol && dist(x, pa) > tol && dist(x, pb) > tol).then_some(*id)
-        }
-        _ => None,
-    });
-    let round = sk.entities.iter().find_map(|e| match e {
-        Entity::Circle { id, center, radius } if !skip.contains(id) => {
-            let c = sk.point_xy(*center)?;
-            ((dist(x, c) - radius).abs() <= tol).then_some(*id)
-        }
-        Entity::Arc { id, .. } if !skip.contains(id) => {
-            let g = sk.arc_geometry(*id)?;
-            ((dist(x, g.center) - g.radius).abs() <= tol && arc_distance(&g, x) <= tol)
-                .then_some(*id)
-        }
-        _ => None,
-    });
-    let n = sk.add_point(x[0], x[1]);
-    if let Some(line) = line {
-        sk.constraints
-            .push(Constraint::PointOnLine { point: n, line });
-    }
-    if let Some(circle) = round {
-        sk.constraints
-            .push(Constraint::PointOnCircle { point: n, circle });
-    }
-    if line.is_some() || round.is_some() {
-        (n, CutEnd::Held)
-    } else {
-        (n, CutEnd::Free)
-    }
-}
-
-/// Drop `PointOnLine` / `PointOnCircle` constraints whose point has become an
-/// end (or the centre) of that curve: implied, and refused by validation.
-fn drop_implied_on_line(sk: &mut Sketch) {
-    let ends = |sk: &Sketch, l: EntityId| sk.entity(l).map(|x| x.points()).unwrap_or_default();
-    let keep: Vec<bool> = sk
-        .constraints
-        .iter()
-        .map(|c| match c {
-            Constraint::PointOnLine { point, line } => !ends(sk, *line).contains(point),
-            Constraint::PointOnCircle { point, circle } => !ends(sk, *circle).contains(point),
-            _ => true,
-        })
-        .collect();
-    let mut it = keep.into_iter();
-    sk.constraints.retain(|_| it.next().unwrap_or(true));
-}
-
-/// After `e` was shortened/split into `e` + `piece`: a Tangent naming `e` stays
-/// with whichever piece still ends at the tangent point, else it is dropped.
-/// Returns the number dropped.
-fn retarget_tangents(sk: &mut Sketch, e: EntityId, piece: Option<EntityId>) -> usize {
-    // Endpoints only (an arc's centre is not where tangency holds).
-    let ends = |sk: &Sketch, id: EntityId| match sk.entity(id) {
-        Some(Entity::Line { a, b, .. }) => vec![*a, *b],
-        Some(Entity::Arc { start, end, .. }) => vec![*start, *end],
-        _ => vec![],
-    };
-    let shares = |sk: &Sketch, u: EntityId, v: EntityId| {
-        let pv = ends(sk, v);
-        ends(sk, u).iter().any(|p| pv.contains(p))
-    };
-    let before = sk.constraints.len();
-    let old = std::mem::take(&mut sk.constraints);
-    let mut keep = Vec::with_capacity(old.len());
-    for c in old {
-        // (first, second, rebuild with one of them replaced) for both
-        // line–arc and arc–arc tangency.
-        let (x, y) = match c {
-            Constraint::Tangent { line, arc } => (line, arc),
-            Constraint::TangentArcs { a, b } => (a, b),
-            _ => {
-                keep.push(c);
-                continue;
-            }
-        };
-        if x != e && y != e {
-            keep.push(c);
-            continue;
-        }
-        let other = if x == e { y } else { x };
-        let swap = |id: EntityId| {
-            let (nx, ny) = if x == e { (id, y) } else { (x, id) };
-            match c {
-                Constraint::Tangent { .. } => Constraint::Tangent { line: nx, arc: ny },
-                _ => Constraint::TangentArcs { a: nx, b: ny },
-            }
-        };
-        if shares(sk, e, other) {
-            keep.push(c);
-        } else if let Some(pc) = piece.filter(|pc| shares(sk, *pc, other)) {
-            keep.push(swap(pc));
-        }
-    }
-    sk.constraints = keep;
-    before - sk.constraints.len()
-}
-
-/// Status line suffix for ends that could not be attached.
-fn free_note(free: usize) -> String {
-    if free == 0 {
-        String::new()
-    } else {
-        format!(" {free} new end(s) lie on no other curve and are not held.")
-    }
-}
-
-/// Distance from `p` to an arc (to the nearest end outside its angular span).
-pub fn arc_distance(g: &rcad_sketch::ArcGeometry, p: [f64; 2]) -> f64 {
-    let ang = (p[1] - g.center[1]).atan2(p[0] - g.center[0]);
-    let rel = (ang - g.start_angle).rem_euclid(std::f64::consts::TAU);
-    if rel <= g.sweep {
-        return (dist(p, g.center) - g.radius).abs();
-    }
-    let at = |a: f64| {
-        [
-            g.center[0] + g.radius * a.cos(),
-            g.center[1] + g.radius * a.sin(),
-        ]
-    };
-    dist(p, at(g.start_angle)).min(dist(p, at(g.start_angle + g.sweep)))
-}
+use rcad_sketch::constraint_mentions;
+pub use rcad_sketch::{arc_distance, seg_dist};
 
 /// Exact area of a closed loop (lines, arcs and ellipse / spline spans):
 /// see [`rcad_sketch::loop_area`].
@@ -632,7 +627,221 @@ impl SketchEditor {
             screen_targets: vec![],
             original,
             epoch: 0,
+            projected: Default::default(),
+            project_pick: None,
+            project_linked: true,
+            param_env: Default::default(),
+            bindings: Default::default(),
+            new_params: vec![],
+            bound: Default::default(),
+            hud: None,
+            last_view: None,
         }
+    }
+
+    /// Fields of the heads-up input for the current tool and gesture (None:
+    /// nothing to type yet): Line → length, angle; rectangles → width,
+    /// height; Circle → diameter.
+    pub fn hud_fields(&self) -> Option<&'static [&'static str]> {
+        self.rubber_band_from()?;
+        match (&self.tool, &self.gesture) {
+            (SketchTool::Line, Gesture::Line { .. }) => Some(&["Length (mm)", "Angle (deg)"]),
+            (SketchTool::CenterRectangle | SketchTool::CornerRectangle, Gesture::FirstClick(_)) => {
+                Some(&["Width (mm)", "Height (mm)"])
+            }
+            (SketchTool::Circle, Gesture::FirstClick(_)) => Some(&["Diameter (mm)"]),
+            _ => None,
+        }
+    }
+
+    /// Tab: open the heads-up fields (focus on the first) or move to the next.
+    pub fn hud_tab(&mut self) -> bool {
+        let Some(fields) = self.hud_fields() else {
+            return false;
+        };
+        match &mut self.hud {
+            Some(h) => {
+                h.focus = (h.focus + 1) % fields.len();
+                h.refocus = true;
+            }
+            None => {
+                self.hud = Some(Hud {
+                    values: vec![String::new(); fields.len()],
+                    focus: 0,
+                    refocus: true,
+                })
+            }
+        }
+        true
+    }
+
+    /// Enter in the heads-up fields: place the gesture's next point from the
+    /// typed values (empty fields keep the cursor's value) and dimension
+    /// what was typed. Invalid input keeps the fields open with the reason.
+    pub fn apply_hud(&mut self) -> bool {
+        let (Some(h), Some(fields), Some(from)) =
+            (self.hud.clone(), self.hud_fields(), self.rubber_band_from())
+        else {
+            self.hud = None;
+            return false;
+        };
+        let cursor = self.cursor.as_ref().map_or(from, |c| c.pos);
+        let mut typed: Vec<Option<f64>> = Vec::new();
+        for (i, f) in fields.iter().enumerate() {
+            let text = h.values.get(i).map_or("", |v| v.trim());
+            if text.is_empty() {
+                typed.push(None);
+                continue;
+            }
+            let angle = f.starts_with("Angle");
+            let v = if angle {
+                rcad_document::params::evaluate_for_slot(
+                    text.trim_end_matches('°').trim_end_matches("deg").trim(),
+                    &self.param_env,
+                    rcad_document::params::SlotKind::Angle,
+                )
+                .map_err(|e| format!("'{text}': {e}"))
+            } else {
+                match parse_dim_input(text, false, &self.param_env) {
+                    Ok(DimInput::Value(v) | DimInput::Bound { value: v, .. }) => Ok(v),
+                    Ok(DimInput::NewParameter { .. }) => Err(format!(
+                        "'{text}': name = value is for dimensions; type a value"
+                    )),
+                    Err(e) => Err(e),
+                }
+            };
+            match v {
+                Ok(v) if v.is_finite() => typed.push(Some(v)),
+                Ok(_) => typed.push(None),
+                Err(e) => {
+                    self.fail(format!("{f}: {e}"));
+                    return false;
+                }
+            }
+        }
+        let d = [cursor[0] - from[0], cursor[1] - from[1]];
+        let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
+        let target = match self.tool {
+            SketchTool::Line => {
+                let len = typed[0].unwrap_or(d[0].hypot(d[1]));
+                let ang = typed[1].map_or(d[1].atan2(d[0]), f64::to_radians);
+                [from[0] + len * ang.cos(), from[1] + len * ang.sin()]
+            }
+            SketchTool::CornerRectangle => {
+                let w = typed[0].map_or(d[0], |w| w * sign(d[0]));
+                let hh = typed[1].map_or(d[1], |v| v * sign(d[1]));
+                [from[0] + w, from[1] + hh]
+            }
+            SketchTool::CenterRectangle => {
+                let w = typed[0].map_or(d[0], |w| 0.5 * w * sign(d[0]));
+                let hh = typed[1].map_or(d[1], |v| 0.5 * v * sign(d[1]));
+                [from[0] + w, from[1] + hh]
+            }
+            SketchTool::Circle => {
+                let r = typed[0].map_or(d[0].hypot(d[1]), |v| 0.5 * v);
+                [from[0] + r, from[1]]
+            }
+            _ => return false,
+        };
+        let view = View {
+            snapping: false,
+            grid: None,
+            ..self.last_view.unwrap_or(View {
+                px_per_mm: 4.0,
+                grid: None,
+                snapping: false,
+            })
+        };
+        let n_entities = self.sketch.entities.len();
+        let tool = self.tool;
+        self.hud = None;
+        self.pointer_move(target, None, &view);
+        self.click(target, None, &view, false);
+        if self.sketch.entities.len() == n_entities {
+            return false; // refused: the click's feedback says why
+        }
+        let new: Vec<EntityId> = self.sketch.entities[n_entities..]
+            .iter()
+            .map(Entity::id)
+            .collect();
+        // Dimension the typed values (named like the Dimension tool's).
+        let mut dims: Vec<EntityId> = vec![];
+        match tool {
+            SketchTool::Line if typed[0].is_some() => dims.extend(new.last()),
+            SketchTool::Circle if typed[0].is_some() => dims.extend(new.first()),
+            SketchTool::CenterRectangle | SketchTool::CornerRectangle => {
+                let horizontal = |sk: &Sketch, e: &EntityId| match sk.entity(*e) {
+                    Some(Entity::Line { a, b, .. }) => {
+                        let (p, q) = (sk.point_xy(*a), sk.point_xy(*b));
+                        p.zip(q)
+                            .is_some_and(|(p, q)| (p[1] - q[1]).abs() < (p[0] - q[0]).abs())
+                    }
+                    _ => false,
+                };
+                if typed[0].is_some() {
+                    dims.extend(new.iter().find(|e| horizontal(&self.sketch, e)));
+                }
+                if typed[1].is_some() {
+                    dims.extend(new.iter().find(|e| !horizontal(&self.sketch, e)));
+                }
+            }
+            _ => {}
+        }
+        for e in dims {
+            self.dimension_entity(e);
+            // Created at the typed (= measured) value; close its field.
+            self.dim_edit = None;
+        }
+        true
+    }
+
+    /// True when Finish must also commit typed expressions or parameters.
+    pub fn has_bindings(&self) -> bool {
+        !self.bindings.is_empty() || !self.new_params.is_empty()
+    }
+
+    /// The typed bindings that still name a dimension of the sketch.
+    pub fn live_bindings(&self) -> std::collections::BTreeMap<String, String> {
+        let dims = self.sketch.dimensions();
+        self.bindings
+            .iter()
+            .filter(|(n, _)| dims.iter().any(|(m, _)| m == *n))
+            .map(|(n, e)| (n.clone(), e.clone()))
+            .collect()
+    }
+
+    /// Mark the curves of each projection link (in link order) read-only.
+    pub fn set_projected(&mut self, links: &[Vec<EntityId>]) {
+        self.projected = links
+            .iter()
+            .enumerate()
+            .flat_map(|(i, l)| l.iter().map(move |e| (*e, i)))
+            .collect();
+    }
+
+    /// Continue on `sketch` as committed to the document (after Project
+    /// committed the work so far): local undo restarts here, because the
+    /// document's undo now holds the earlier steps.
+    pub fn rebase(&mut self, sketch: Sketch, links: &[Vec<EntityId>]) {
+        self.cancel_gesture();
+        self.epoch += 1;
+        self.sketch = sketch.clone();
+        self.original = sketch;
+        self.undo.clear();
+        self.redo.clear();
+        self.selection.clear();
+        self.dim_edit = None;
+        self.set_projected(links);
+        self.resolve();
+    }
+
+    /// Entities drawn by the user (not projected).
+    pub fn drawn_entity_count(&self) -> usize {
+        self.sketch
+            .entities
+            .iter()
+            .filter(|e| !self.projected.contains_key(&e.id()))
+            .count()
     }
 
     pub fn modified(&self) -> bool {
@@ -848,8 +1057,31 @@ impl SketchEditor {
                 };
                 (d <= tol).then_some((e.id(), d))
             })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .min_by(|a, b| {
+                // Coincident curves (a projected edge under a drawn or a
+                // re-projected one): the same distance picks the drawn
+                // curve first, construction projections last.
+                let eq = rcad_sketch::solve_tolerance(self.sketch.scale());
+                if (a.1 - b.1).abs() <= eq {
+                    self.pick_rank(a.0).cmp(&self.pick_rank(b.0))
+                } else {
+                    a.1.total_cmp(&b.1)
+                }
+            })
             .map(|(id, _)| Item::Entity(id))
+    }
+
+    /// Pick priority among coincident curves (lower first).
+    fn pick_rank(&self, e: EntityId) -> u8 {
+        match (
+            self.projected.contains_key(&e),
+            self.sketch.is_construction(e),
+        ) {
+            (false, false) => 0,
+            (false, true) => 1,
+            (true, false) => 2,
+            (true, true) => 3,
+        }
     }
 
     /// Snap a raw plane position. `anchor` enables H/V alignment; `exclude`
@@ -971,6 +1203,10 @@ impl SketchEditor {
             self.fail(e);
             return false;
         }
+        if let Some(why) = self.projected_change(&cand) {
+            self.fail(why);
+            return false;
+        }
         let original = cand.clone();
         let mut solved = cand;
         let rep = solved.solve();
@@ -990,6 +1226,22 @@ impl SketchEditor {
                  Delete or change one of these constraints first.",
                 rep.status,
                 labels(&rep.conflicting)
+            ));
+            return false;
+        }
+        let collapsed: Vec<EntityId> = solved
+            .collapsed_curves()
+            .into_iter()
+            .filter(|e| !before.collapsed_curves().contains(e))
+            .collect();
+        if !collapsed.is_empty() {
+            self.fail(format!(
+                "Rejected: this would collapse {} to zero size.",
+                collapsed
+                    .iter()
+                    .map(|e| format!("entity {}", e.0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
             return false;
         }
@@ -1092,6 +1344,7 @@ impl SketchEditor {
     /// Abort the current gesture. A drag in progress restores its start state;
     /// a line chain without segments drops the point it created.
     pub fn cancel_gesture(&mut self) {
+        self.hud = None;
         if !matches!(self.gesture, Gesture::Idle) {
             self.epoch += 1;
         }
@@ -1129,6 +1382,7 @@ impl SketchEditor {
     }
 
     pub fn pointer_move(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        self.last_view = Some(*view);
         if let Gesture::Drag { item, moved, .. } = &mut self.gesture {
             let item = item.clone();
             *moved = true;
@@ -1151,6 +1405,7 @@ impl SketchEditor {
                 | SketchTool::Dimension
                 | SketchTool::Trim
                 | SketchTool::Extend
+                | SketchTool::Break
                 | SketchTool::Offset
                 | SketchTool::Fillet
         ) {
@@ -1214,7 +1469,22 @@ impl SketchEditor {
         if self.tool != SketchTool::Select || self.dim_edit.is_some() {
             return;
         }
-        let item = match self.pick(pos, screen, view) {
+        let hit = self.pick(pos, screen, view);
+        let locked = match hit {
+            Some(Item::Entity(e)) => self.locked_reason(e),
+            Some(Item::Point(p)) => self
+                .sketch
+                .entities
+                .iter()
+                .filter(|x| x.points().contains(&p))
+                .find_map(|x| self.locked_reason(x.id())),
+            _ => None,
+        };
+        if let Some(why) = locked {
+            self.fail(why);
+            return;
+        }
+        let item = match hit {
             Some(Item::Point(p)) => DragItem::Point(p),
             Some(Item::Entity(e)) => match self.sketch.entity(e) {
                 Some(Entity::Circle { .. } | Entity::Ellipse { .. }) => DragItem::Radius(e),
@@ -1292,6 +1562,17 @@ impl SketchEditor {
             SketchTool::Dimension => self.dimension_click(pos, screen, view),
             SketchTool::Trim => self.trim_click(pos, screen, view),
             SketchTool::Extend => self.extend_click(pos, screen, view),
+            SketchTool::Break => self.break_click(pos, screen, view),
+            SketchTool::Project | SketchTool::Intersect => match screen {
+                Some(at) => {
+                    self.project_pick = Some(ProjectPick {
+                        at,
+                        section: self.tool == SketchTool::Intersect,
+                        linked: self.project_linked,
+                    });
+                }
+                None => self.fail("Project: click a model face in the view.".into()),
+            },
             SketchTool::Offset => self.offset_click(pos, screen, view),
             SketchTool::Fillet => self.fillet_click(pos, screen, view),
             SketchTool::Text => self.text_click(pos, view),
@@ -1734,114 +2015,31 @@ impl SketchEditor {
         }
     }
 
-    // ----- trim -----
+    // ----- trim / extend / break (geometry in `rcad_sketch::trim`) -----
 
-    /// Trim and Extend compute intersections with lines, arcs and circles
-    /// only: in a sketch with an ellipse or spline they refuse rather than
-    /// ignore those curves.
-    fn free_form_refusal(&self, tool: &str) -> Option<String> {
-        self.sketch
-            .entities
-            .iter()
-            .any(|e| matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. }))
-            .then(|| {
-                format!(
-                    "{tool} does not support sketches with ellipses or splines (intersections \
-                     with them are not computed); delete and redraw the lines instead."
-                )
-            })
-    }
-
-    /// Parameters t in (0, 1) along line `p -> q` where other curves cross it.
-    fn line_cuts(&self, line: EntityId, p: [f64; 2], q: [f64; 2]) -> Vec<f64> {
-        self.line_hits(line, p, q, false)
-    }
-
-    /// Parameters t along the line through `p -> q` (t = 0 at p, 1 at q) where
-    /// other curves cross it: inside the segment, or (`beyond`) outside it.
-    fn line_hits(&self, line: EntityId, p: [f64; 2], q: [f64; 2], beyond: bool) -> Vec<f64> {
-        let d = [q[0] - p[0], q[1] - p[1]];
-        let len2 = d[0] * d[0] + d[1] * d[1];
-        let tol = rcad_sketch::solve_tolerance(self.sketch.scale());
-        let eps = tol / len2.sqrt().max(1e-12);
-        let inside = |t: f64| {
-            if beyond {
-                t < -eps || t > 1.0 + eps
-            } else {
-                t > eps && t < 1.0 - eps
-            }
-        };
-        let mut ts = Vec::new();
-        let circle_hits = |c: [f64; 2], r: f64| -> Vec<f64> {
-            // |p + t d - c|^2 = r^2
-            let f = [p[0] - c[0], p[1] - c[1]];
-            let (a, b, cc) = (
-                len2,
-                2.0 * (f[0] * d[0] + f[1] * d[1]),
-                f[0] * f[0] + f[1] * f[1] - r * r,
-            );
-            let disc = b * b - 4.0 * a * cc;
-            if disc < 0.0 {
-                return vec![];
-            }
-            let s = disc.sqrt();
-            vec![(-b - s) / (2.0 * a), (-b + s) / (2.0 * a)]
-        };
-        for e in &self.sketch.entities {
-            if e.id() == line {
-                continue;
-            }
-            match e {
-                Entity::Line { a, b, .. } => {
-                    let (Some(c), Some(g)) = (self.sketch.point_xy(*a), self.sketch.point_xy(*b))
-                    else {
-                        continue;
-                    };
-                    let k = [g[0] - c[0], g[1] - c[1]];
-                    let den = d[0] * k[1] - d[1] * k[0];
-                    if den.abs() < 1e-12 * len2.sqrt() * k[0].hypot(k[1]) {
-                        continue; // parallel
-                    }
-                    let w = [c[0] - p[0], c[1] - p[1]];
-                    let t = (w[0] * k[1] - w[1] * k[0]) / den;
-                    let u = (w[0] * d[1] - w[1] * d[0]) / den;
-                    if inside(t) && (-1e-9..=1.0 + 1e-9).contains(&u) {
-                        ts.push(t);
-                    }
-                }
-                // Refused up front (see `free_form_refusal`).
-                Entity::Ellipse { .. } | Entity::Spline { .. } => {}
-                Entity::Circle { center, radius, .. } => {
-                    if let Some(c) = self.sketch.point_xy(*center) {
-                        ts.extend(circle_hits(c, *radius).into_iter().filter(|t| inside(*t)));
-                    }
-                }
-                Entity::Arc { id, .. } => {
-                    let Some(g) = self.sketch.arc_geometry(*id) else {
-                        continue;
-                    };
-                    for t in circle_hits(g.center, g.radius) {
-                        let x = [p[0] + t * d[0], p[1] + t * d[1]];
-                        let ang = (x[1] - g.center[1]).atan2(x[0] - g.center[0]);
-                        let rel = (ang - g.start_angle).rem_euclid(std::f64::consts::TAU);
-                        // Tolerant at both ends (rel just below 0 wraps to ~2π).
-                        let ae = tol / g.radius;
-                        if inside(t) && (rel <= g.sweep + ae || rel >= std::f64::consts::TAU - ae) {
-                            ts.push(t);
-                        }
-                    }
-                }
-            }
+    /// Apply a curve edit (`Sketch::{trim, extend, break_at}`) as one
+    /// solved transaction; the status line reports what it did.
+    fn curve_edit(
+        &mut self,
+        verb: &str,
+        edit: impl FnOnce(&mut Sketch) -> Result<rcad_sketch::CurveEdit, rcad_sketch::SketchError>,
+    ) {
+        let mut out = None;
+        let ok = self.try_change(false, |sk| {
+            out = Some(edit(sk).map_err(|e| e.to_string())?);
+            Ok(())
+        });
+        if ok && let Some(out) = out {
+            self.selection.clear();
+            self.info(out.message(verb));
         }
-        ts.sort_by(f64::total_cmp);
-        ts
     }
 
     /// Extend the line end nearest to the click along the line to the nearest
     /// curve it would cross. The end must be free (used by no other curve).
     fn extend_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
-        if let Some(why) = self.free_form_refusal("Extend") {
-            self.fail(why);
+        if let Err(why) = self.sketch.free_form_refusal("Extend") {
+            self.fail(why.to_string());
             return;
         }
         // A line, or the end point of exactly one line.
@@ -1871,485 +2069,95 @@ impl SketchEditor {
                 return;
             }
         };
-        let Some(Entity::Line { a, b, .. }) = self.sketch.entity(e).cloned() else {
-            self.fail("Extend works on lines only.".into());
-            return;
-        };
-        let (Some(p), Some(q)) = (self.sketch.point_xy(a), self.sketch.point_xy(b)) else {
-            return;
-        };
-        let d = [q[0] - p[0], q[1] - p[1]];
-        let len2 = d[0] * d[0] + d[1] * d[1];
-        let tc = ((pos[0] - p[0]) * d[0] + (pos[1] - p[1]) * d[1]) / len2;
-        let at_b = picked_end.map_or(tc >= 0.5, |pt| pt == b);
-        let end = if at_b { b } else { a };
-        let shared = self
-            .sketch
-            .entities
-            .iter()
-            .any(|x| x.id() != e && x.points().contains(&end));
-        if shared {
-            self.fail(
-                "That end is connected to another curve; only a free end can be extended.".into(),
-            );
+        if let Some(why) = self.locked_reason(e) {
+            self.fail(why);
             return;
         }
-        let hits = self.line_hits(e, p, q, true);
-        let t = if at_b {
-            hits.iter()
-                .copied()
-                .filter(|t| *t > 1.0)
-                .fold(f64::INFINITY, f64::min)
-        } else {
-            hits.iter()
-                .copied()
-                .filter(|t| *t < 0.0)
-                .fold(f64::NEG_INFINITY, f64::max)
-        };
-        if !t.is_finite() {
-            self.fail("Nothing to extend to: no curve crosses the line's extension.".into());
-            return;
-        }
-        let x = [p[0] + t * d[0], p[1] + t * d[1]];
-        let origin = self.sketch.origin;
-        let mut dropped = 0usize;
-        let mut free = 0usize;
-        let ok = self.try_change(false, |sk| {
-            let before = sk.constraints.len();
-            sk.constraints.retain(|c| {
-                !matches!(c, Constraint::EqualLength { a: u, b: v } if *u == e || *v == e)
-                    && !(Some(end) != origin && constraint_mentions(c, end))
-            });
-            dropped += before - sk.constraints.len();
-            let (n, how) = cut_point(sk, x, &[a, b], &[e]);
-            free += usize::from(how == CutEnd::Free);
-            if let Some(Entity::Line { a, b, .. }) = sk.entities.iter_mut().find(|x| x.id() == e) {
-                if at_b {
-                    *b = n;
-                } else {
-                    *a = n;
-                }
-            }
-            if Some(end) != origin {
-                sk.points.retain(|x| x.id != end);
-            }
-            drop_implied_on_line(sk);
-            Ok(())
-        });
-        if ok {
-            self.selection.clear();
-            let base = if dropped > 0 {
-                format!("Extended; {dropped} constraint(s) on the old end were removed.")
-            } else {
-                "Extended.".into()
-            };
-            self.info(format!("{base}{}", free_note(free)));
-        }
-    }
-
-    /// Polar angles (about `c`) where other curves cross the circle (c, r).
-    fn circle_cuts(&self, round: EntityId, c: [f64; 2], r: f64) -> Vec<f64> {
-        let tol = rcad_sketch::solve_tolerance(self.sketch.scale());
-        let ang = |x: [f64; 2]| (x[1] - c[1]).atan2(x[0] - c[0]);
-        let mut out = Vec::new();
-        let on_arc = |g: &rcad_sketch::ArcGeometry, x: [f64; 2]| {
-            let rel = ((x[1] - g.center[1]).atan2(x[0] - g.center[0]) - g.start_angle)
-                .rem_euclid(std::f64::consts::TAU);
-            let ae = tol / g.radius;
-            rel <= g.sweep + ae || rel >= std::f64::consts::TAU - ae
-        };
-        let circle_circle = |c2: [f64; 2], r2: f64| -> Vec<[f64; 2]> {
-            let dx = [c2[0] - c[0], c2[1] - c[1]];
-            let dd = dx[0].hypot(dx[1]);
-            if dd <= tol || dd > r + r2 + tol || dd < (r - r2).abs() - tol {
-                return vec![];
-            }
-            let u = [dx[0] / dd, dx[1] / dd];
-            let a = (r * r - r2 * r2 + dd * dd) / (2.0 * dd);
-            let h = (r * r - a * a).max(0.0).sqrt();
-            let m = [c[0] + a * u[0], c[1] + a * u[1]];
-            vec![
-                [m[0] - h * u[1], m[1] + h * u[0]],
-                [m[0] + h * u[1], m[1] - h * u[0]],
-            ]
-        };
-        for e in &self.sketch.entities {
-            if e.id() == round {
-                continue;
-            }
-            match e {
-                Entity::Line { a, b, .. } => {
-                    let (Some(p), Some(q)) = (self.sketch.point_xy(*a), self.sketch.point_xy(*b))
-                    else {
-                        continue;
-                    };
-                    let d = [q[0] - p[0], q[1] - p[1]];
-                    let f = [p[0] - c[0], p[1] - c[1]];
-                    let (aa, bb, cc) = (
-                        d[0] * d[0] + d[1] * d[1],
-                        2.0 * (f[0] * d[0] + f[1] * d[1]),
-                        f[0] * f[0] + f[1] * f[1] - r * r,
-                    );
-                    let disc = bb * bb - 4.0 * aa * cc;
-                    if disc < 0.0 || aa == 0.0 {
-                        continue;
-                    }
-                    for t in [
-                        (-bb - disc.sqrt()) / (2.0 * aa),
-                        (-bb + disc.sqrt()) / (2.0 * aa),
-                    ] {
-                        if (-1e-9..=1.0 + 1e-9).contains(&t) {
-                            out.push(ang([p[0] + t * d[0], p[1] + t * d[1]]));
-                        }
-                    }
-                }
-                // Refused up front (see `free_form_refusal`).
-                Entity::Ellipse { .. } | Entity::Spline { .. } => {}
-                Entity::Circle { center, radius, .. } => {
-                    if let Some(c2) = self.sketch.point_xy(*center) {
-                        out.extend(circle_circle(c2, *radius).into_iter().map(ang));
-                    }
-                }
-                Entity::Arc { id, .. } => {
-                    if let Some(g) = self.sketch.arc_geometry(*id) {
-                        out.extend(
-                            circle_circle(g.center, g.radius)
-                                .into_iter()
-                                .filter(|x| on_arc(&g, *x))
-                                .map(ang),
-                        );
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    /// Trim a circle (to an arc) or an arc at the nearest crossings around the click.
-    fn trim_round(&mut self, e: EntityId, pos: [f64; 2]) {
-        use std::f64::consts::TAU;
-        let ent = self.sketch.entity(e).cloned();
-        let (c, r, start, sweep, center_pt) = match &ent {
-            Some(Entity::Circle { center, radius, .. }) => {
-                let Some(c) = self.sketch.point_xy(*center) else {
-                    return;
-                };
-                (c, *radius, 0.0, TAU, *center)
-            }
-            Some(Entity::Arc { id, center, .. }) => {
-                let Some(g) = self.sketch.arc_geometry(*id) else {
-                    return;
-                };
-                (g.center, g.radius, g.start_angle, g.sweep, *center)
-            }
-            _ => return,
-        };
-        let is_circle = matches!(ent, Some(Entity::Circle { .. }));
-        let rel = |a: f64| (a - start).rem_euclid(TAU);
-        let eps = rcad_sketch::solve_tolerance(self.sketch.scale()) / r;
-        let mut cuts: Vec<f64> = self
-            .circle_cuts(e, c, r)
-            .into_iter()
-            .map(rel)
-            .filter(|t| {
-                if is_circle {
-                    true
-                } else {
-                    *t > eps && *t < sweep - eps
-                }
-            })
-            .collect();
-        cuts.sort_by(f64::total_cmp);
-        cuts.dedup_by(|x, y| (*x - *y).abs() <= eps);
-        let tc = rel((pos[1] - c[1]).atan2(pos[0] - c[0]));
-        let on = |t: f64| [c[0] + r * (start + t).cos(), c[1] + r * (start + t).sin()];
-        let origin = self.sketch.origin;
-        let mut dropped = 0usize;
-        let mut free = 0usize;
-        let ok = if is_circle {
-            if cuts.len() < 2 {
-                if cuts.is_empty() {
-                    self.try_change(false, |sk| {
-                        sk.remove_entity(e);
-                        Ok(())
-                    })
-                } else {
-                    self.fail("A circle needs two crossings to trim.".into());
-                    return;
-                }
-            } else {
-                // Removed interval (lo, hi) around the click, cyclically.
-                let hi = cuts
-                    .iter()
-                    .copied()
-                    .find(|t| *t > tc)
-                    .unwrap_or(cuts[0] + TAU);
-                let lo = cuts
-                    .iter()
-                    .copied()
-                    .rev()
-                    .find(|t| *t < tc)
-                    .unwrap_or(cuts[cuts.len() - 1] - TAU);
-                self.try_change(false, |sk| {
-                    // Keep the arc CCW from hi to lo (+ 2π).
-                    let (ps, pe) = (on(hi), on(lo));
-                    let (s_id, h0) = cut_point(sk, ps, &[], &[e]);
-                    let (e_id, h1) = cut_point(sk, pe, &[], &[e]);
-                    free += usize::from(h0 == CutEnd::Free) + usize::from(h1 == CutEnd::Free);
-                    // The arc keeps the circle's entity id (the
-                    // id names generated faces; same centre point, so the
-                    // command layer accepts Circle -> Arc for it) and its
-                    // construction flag, in place.
-                    if let Some(slot) = sk.entities.iter_mut().find(|x| x.id() == e) {
-                        *slot = Entity::Arc {
-                            id: e,
-                            center: center_pt,
-                            start: s_id,
-                            end: e_id,
-                        };
-                    }
-                    let before = sk.constraints.len();
-                    let mut keep = Vec::new();
-                    for k in std::mem::take(&mut sk.constraints) {
-                        match k {
-                            Constraint::Diameter { circle, mut dim } if circle == e => {
-                                dim.value /= 2.0;
-                                keep.push(Constraint::Radius { entity: e, dim });
-                            }
-                            // Valid for an arc with the same id as they were for the circle.
-                            k @ (Constraint::Radius { .. }
-                            | Constraint::EqualRadius { .. }
-                            | Constraint::PointOnCircle { .. }) => keep.push(k),
-                            k if k.entities().contains(&e) => {}
-                            k => keep.push(k),
-                        }
-                    }
-                    sk.constraints = keep;
-                    dropped += before.saturating_sub(sk.constraints.len());
-                    drop_implied_on_line(sk);
-                    Ok(())
-                })
-            }
-        } else {
-            let lo = cuts.iter().copied().filter(|t| *t < tc).fold(0.0, f64::max);
-            let hi = cuts
-                .iter()
-                .copied()
-                .filter(|t| *t > tc)
-                .fold(sweep, f64::min);
-            let Some(Entity::Arc {
-                start: sp, end: ep, ..
-            }) = ent
-            else {
-                return;
-            };
-            self.try_change(false, |sk| {
-                if lo <= 0.0 && hi >= sweep {
-                    sk.remove_entity(e);
-                    return Ok(());
-                }
-                let mut piece = None;
-                let set = |sk: &mut Sketch, s: PointId, t: PointId| {
-                    if let Some(Entity::Arc { start, end, .. }) =
-                        sk.entities.iter_mut().find(|x| x.id() == e)
-                    {
-                        (*start, *end) = (s, t);
-                    }
-                };
-                let mut freed = Vec::new();
-                let own = [sp, ep];
-                let mut point = |sk: &mut Sketch, t: f64| {
-                    let (n, how) = cut_point(sk, on(t), &own, &[e]);
-                    free += usize::from(how == CutEnd::Free);
-                    n
-                };
-                if lo <= 0.0 {
-                    let n = point(sk, hi);
-                    set(sk, n, ep);
-                    freed.push(sp);
-                } else if hi >= sweep {
-                    let n = point(sk, lo);
-                    set(sk, sp, n);
-                    freed.push(ep);
-                } else {
-                    let n0 = point(sk, lo);
-                    let n1 = point(sk, hi);
-                    set(sk, sp, n0);
-                    let id = sk.next_entity_id();
-                    sk.entities.push(Entity::Arc {
-                        id,
-                        center: center_pt,
-                        start: n1,
-                        end: ep,
-                    });
-                    if sk.is_construction(e) {
-                        sk.construction.insert(id);
-                    }
-                    sk.constraints.push(Constraint::EqualRadius { a: e, b: id });
-                    piece = Some(id);
-                }
-                dropped += retarget_tangents(sk, e, piece);
-                drop_implied_on_line(sk);
-                for pt in freed {
-                    if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
-                        let before = sk.constraints.len();
-                        sk.constraints.retain(|k| !constraint_mentions(k, pt));
-                        dropped += before - sk.constraints.len();
-                        sk.points.retain(|x| x.id != pt);
-                    }
-                }
-                Ok(())
-            })
-        };
-        if ok {
-            self.selection.clear();
-            self.trimmed_info(dropped, free);
-        }
-    }
-
-    fn trimmed_info(&mut self, dropped: usize, free: usize) {
-        self.trimmed_info_dims(dropped, free, &[]);
-    }
-
-    /// Status line after a trim; `split_dims` names length dimensions removed
-    /// because the line they measured was split.
-    fn trimmed_info_dims(&mut self, dropped: usize, free: usize, split_dims: &[String]) {
-        let base = if dropped > 0 {
-            format!("Trimmed; {dropped} constraint(s) that no longer applied were removed.")
-        } else {
-            "Trimmed.".into()
-        };
-        let dims = if split_dims.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " The split line's length dimension {} was removed (it spanned both pieces).",
-                split_dims
-                    .iter()
-                    .map(|n| format!("'{n}'"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        self.info(format!("{base}{dims}{}", free_note(free)));
+        self.curve_edit("Extended", |sk| sk.extend(e, pos, picked_end));
     }
 
     fn trim_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
-        if let Some(why) = self.free_form_refusal("Trim") {
-            self.fail(why);
+        if let Err(why) = self.sketch.free_form_refusal("Trim") {
+            self.fail(why.to_string());
             return;
         }
         let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
             self.fail("Click the part of a line to remove (away from its endpoints).".into());
             return;
         };
-        let Some(Entity::Line { a, b, .. }) = self.sketch.entity(e).cloned() else {
-            self.trim_round(e, pos);
+        if let Some(why) = self.locked_reason(e) {
+            self.fail(why);
             return;
-        };
-        let (Some(p), Some(q)) = (self.sketch.point_xy(a), self.sketch.point_xy(b)) else {
-            return;
-        };
-        let d = [q[0] - p[0], q[1] - p[1]];
-        let len2 = d[0] * d[0] + d[1] * d[1];
-        let tc = (((pos[0] - p[0]) * d[0] + (pos[1] - p[1]) * d[1]) / len2).clamp(0.0, 1.0);
-        let cuts = self.line_cuts(e, p, q);
-        let lo = cuts.iter().copied().filter(|t| *t < tc).fold(0.0, f64::max);
-        let hi = cuts.iter().copied().filter(|t| *t > tc).fold(1.0, f64::min);
-        let at = |t: f64| [p[0] + t * d[0], p[1] + t * d[1]];
-        let mut dropped = 0usize;
-        let mut free = 0usize;
-        let mut split_dims: Vec<String> = Vec::new();
-        let origin = self.sketch.origin;
-        let ok = self.try_change(false, |sk| {
-            if lo <= 0.0 && hi >= 1.0 {
-                sk.remove_entity(e);
-                return Ok(());
-            }
-            // Constraints whose meaning depends on this line's extent.
-            let before = sk.constraints.len();
-            sk.constraints.retain(
-                |c| !matches!(c, Constraint::EqualLength { a: x, b: y } if *x == e || *y == e),
-            );
-            dropped += before - sk.constraints.len();
-            let mut piece = None;
-            let mut point = |sk: &mut Sketch, t: f64| {
-                let (n, how) = cut_point(sk, at(t), &[a, b], &[e]);
-                free += usize::from(how == CutEnd::Free);
-                n
-            };
-            let set_ends = |sk: &mut Sketch, na: PointId, nb: PointId| {
-                if let Some(Entity::Line { a, b, .. }) =
-                    sk.entities.iter_mut().find(|x| x.id() == e)
-                {
-                    (*a, *b) = (na, nb);
-                }
-            };
-            let mut freed = Vec::new();
-            if lo <= 0.0 {
-                let n = point(sk, hi);
-                set_ends(sk, n, b);
-                freed.push(a);
-            } else if hi >= 1.0 {
-                let n = point(sk, lo);
-                set_ends(sk, a, n);
-                freed.push(b);
-            } else {
-                let n0 = point(sk, lo);
-                let n1 = point(sk, hi);
-                set_ends(sk, a, n0);
-                // A dimension between the original ends now
-                // spans two separate lines and no longer measures a length; no
-                // piece keeps both measured points, so it is removed (named in
-                // the status line).
-                sk.constraints.retain(|c| match c {
-                    Constraint::Distance { a: x, b: y, dim }
-                    | Constraint::HorizontalDistance { a: x, b: y, dim }
-                    | Constraint::VerticalDistance { a: x, b: y, dim }
-                        if (*x == a && *y == b) || (*x == b && *y == a) =>
-                    {
-                        split_dims.push(dim.name.clone());
-                        false
-                    }
-                    _ => true,
-                });
-                let l2 = sk.add_line(n1, b);
-                if sk.is_construction(e) {
-                    sk.construction.insert(l2);
-                }
-                piece = Some(l2);
-                let hv: Vec<Constraint> = sk
-                    .constraints
-                    .iter()
-                    .filter_map(|c| match c {
-                        Constraint::Horizontal { line } if *line == e => {
-                            Some(Constraint::Horizontal { line: l2 })
-                        }
-                        Constraint::Vertical { line } if *line == e => {
-                            Some(Constraint::Vertical { line: l2 })
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                sk.constraints.extend(hv);
-            }
-            dropped += retarget_tangents(sk, e, piece);
-            drop_implied_on_line(sk);
-            // A detached endpoint used by nothing else goes, with its constraints.
-            for pt in freed {
-                if Some(pt) != origin && !sk.entities.iter().any(|x| x.points().contains(&pt)) {
-                    let before = sk.constraints.len();
-                    sk.constraints.retain(|c| !constraint_mentions(c, pt));
-                    dropped += before - sk.constraints.len();
-                    sk.points.retain(|x| x.id != pt);
-                }
-            }
-            Ok(())
-        });
-        if ok {
-            self.selection.clear();
-            self.trimmed_info_dims(dropped, free, &split_dims);
         }
+        self.curve_edit("Trimmed", |sk| sk.trim(e, pos));
+    }
+
+    /// Why entity `e` may not be edited (projected geometry is read-only).
+    pub fn locked_reason(&self, e: EntityId) -> Option<String> {
+        self.projected.get(&e).map(|l| {
+            format!(
+                "Entity {} is projected geometry (link {}) and is read-only: select it and use \
+                 Unlink projection first.",
+                e.0,
+                l + 1
+            )
+        })
+    }
+
+    /// Why `before` -> `after` is refused: it removes or reshapes projected
+    /// geometry, or drops a pin of a projected point.
+    fn projected_change(&self, after: &Sketch) -> Option<String> {
+        for (e, l) in &self.projected {
+            let (Some(old), new) = (self.sketch.entity(*e), after.entity(*e)) else {
+                continue;
+            };
+            if new != Some(old) {
+                return Some(format!(
+                    "Rejected: entity {} is projected geometry (link {}) and is read-only; \
+                     unlink the projection first.",
+                    e.0,
+                    l + 1
+                ));
+            }
+            for p in old.points() {
+                let pins = |sk: &Sketch| {
+                    sk.constraints
+                        .iter()
+                        .filter(|c| match c {
+                            Constraint::FixedPoint { p: q, .. }
+                            | Constraint::FixedX { p: q, .. }
+                            | Constraint::FixedY { p: q, .. } => *q == p,
+                            _ => false,
+                        })
+                        .count()
+                };
+                if pins(after) < pins(&self.sketch) {
+                    return Some(format!(
+                        "Rejected: that constraint holds projected entity {} (link {}); unlink \
+                         the projection first.",
+                        e.0,
+                        l + 1
+                    ));
+                }
+            }
+        }
+        None
+    }
+
+    fn break_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
+        if let Err(why) = self.sketch.free_form_refusal("Break") {
+            self.fail(why.to_string());
+            return;
+        }
+        let Some(Item::Entity(e)) = self.pick(pos, screen, view) else {
+            self.fail("Click the span of a curve to break off at its crossings.".into());
+            return;
+        };
+        if let Some(why) = self.locked_reason(e) {
+            self.fail(why);
+            return;
+        }
+        self.curve_edit("Broken", |sk| sk.break_at(e, pos));
     }
 
     // ----- dimensions -----
@@ -2547,6 +2355,35 @@ impl SketchEditor {
             return;
         }
         let idx = self.sketch.constraints.len();
+        if self.sketch.dimension_is_redundant(&c) {
+            // Redundant: added as a driven (measuring) dimension, Fusion's
+            // behaviour, instead of being refused.
+            let mut c = c;
+            let name = match c.dimension_mut() {
+                Some(d) => {
+                    d.driven = true;
+                    d.name.clone()
+                }
+                None => return,
+            };
+            if self.try_change(false, |sk| {
+                sk.constraints.push(c);
+                Ok(())
+            }) {
+                let v = self
+                    .sketch
+                    .constraints
+                    .get(idx)
+                    .and_then(|c| c.dimension())
+                    .map_or(0.0, |d| d.value);
+                self.info(format!(
+                    "{name} = ({}) added as a driven dimension: the sketch already fixes it, so it \
+                     measures instead of driving.",
+                    rcad_sketch::fmt_mm(v.abs())
+                ));
+            }
+            return;
+        }
         if self.try_change(true, |sk| {
             sk.constraints.push(c);
             Ok(())
@@ -2555,7 +2392,52 @@ impl SketchEditor {
         }
     }
 
+    /// Toggle the selected dimension between driving and driven. Driving is
+    /// refused while it is redundant (the reason names the constraints).
+    pub fn toggle_driven(&mut self) {
+        let Some(&Item::Constraint(i)) = self.selection.first() else {
+            self.fail("Select a dimension first.".into());
+            return;
+        };
+        let Some(d) = self.sketch.constraints.get(i).and_then(|c| c.dimension()) else {
+            self.fail("Select a dimension first.".into());
+            return;
+        };
+        let (name, driven) = (d.name.clone(), d.driven);
+        let ok = self.try_change(true, |sk| {
+            let c = sk.constraints.get_mut(i).ok_or("no such dimension")?;
+            let d = c.dimension_mut().ok_or("not a dimension")?;
+            d.driven = !driven;
+            if driven && !(d.value.is_finite() && d.value > 0.0) {
+                // A signed measurement turns into its driving magnitude.
+                d.value = d.value.abs();
+            }
+            Ok(())
+        });
+        if ok {
+            self.info(if driven {
+                format!("{name} is now driving.")
+            } else {
+                format!("{name} is now driven (it measures).")
+            });
+        }
+    }
+
     pub fn begin_dim_edit(&mut self, constraint: usize, fresh: bool) {
+        if let Some(d) = self
+            .sketch
+            .constraints
+            .get(constraint)
+            .and_then(|c| c.dimension())
+            .filter(|d| d.driven)
+        {
+            self.fail(format!(
+                "{} is a driven dimension: it measures the sketch and cannot be edited (make it \
+                 driving first).",
+                d.name
+            ));
+            return;
+        }
         let value = self
             .sketch
             .constraints
@@ -2584,25 +2466,6 @@ impl SketchEditor {
         let Some(ed) = self.dim_edit.clone() else {
             return false;
         };
-        let value = match ed
-            .buffer
-            .trim()
-            .trim_end_matches("mm")
-            .trim_end_matches('°')
-            .trim_end_matches("deg")
-            .trim()
-            .parse::<f64>()
-        {
-            Ok(v) if v.is_finite() && v > 0.0 => v,
-            _ => {
-                self.fail(format!(
-                    "'{}' is not a valid dimension: enter a positive number (millimetres; \
-                     degrees for angles).",
-                    ed.buffer.trim()
-                ));
-                return false;
-            }
-        };
         let Some(name) = self
             .sketch
             .constraints
@@ -2613,19 +2476,73 @@ impl SketchEditor {
             self.dim_edit = None;
             return false;
         };
+        let angle = matches!(
+            self.sketch.constraints.get(ed.constraint),
+            Some(Constraint::Angle { .. } | Constraint::PatternRotate { .. })
+        );
+        let input = match parse_dim_input(&ed.buffer, angle, &self.param_env) {
+            Ok(i) => i,
+            Err(why) => {
+                self.fail(format!(
+                    "'{}' is not a valid dimension: {why}. Enter a positive number (mm, cm, in; \
+                     deg or rad for angles), a parameter expression, or name = value.",
+                    ed.buffer.trim()
+                ));
+                return false;
+            }
+        };
+        let value = match &input {
+            DimInput::Value(v) | DimInput::Bound { value: v, .. } => *v,
+            DimInput::NewParameter { value, .. } => *value,
+        };
+        // Solved with the branch-flip guard (rcad_sketch::guard): an edit that
+        // would flip an arc or reverse a line is refused by name.
         let ok = self.try_change(false, |sk| {
-            sk.set_dimension(&name, value).map_err(|e| e.to_string())
+            sk.set_dimension_solved(&name, value)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         });
         if ok {
             self.dim_edit = None;
-            let angle = matches!(
-                self.sketch.constraints.get(ed.constraint),
-                Some(Constraint::Angle { .. })
-            );
+            let unit = if angle { "°" } else { " mm" };
+            let shown = match input {
+                DimInput::Value(_) => {
+                    // A typed number replaces an expression binding.
+                    if self.bound.contains_key(&name) || self.bindings.contains_key(&name) {
+                        self.bindings.insert(name.clone(), String::new());
+                    }
+                    String::new()
+                }
+                DimInput::Bound { expr, .. } => {
+                    let shown = format!(" (= {expr})");
+                    self.bindings.insert(name.clone(), expr);
+                    shown
+                }
+                DimInput::NewParameter {
+                    value,
+                    name: p,
+                    expr,
+                } => {
+                    self.param_env.insert(
+                        p.clone(),
+                        rcad_document::params::Quantity {
+                            value,
+                            dim: Some(if angle { 0 } else { 1 }),
+                        },
+                    );
+                    self.new_params
+                        .push(rcad_commands::sketch_ops::NewParameter {
+                            name: p.clone(),
+                            expression: expr.clone(),
+                            unit: angle.then_some(rcad_document::ParamUnit::Deg),
+                        });
+                    self.bindings.insert(name.clone(), p.clone());
+                    format!(" (= {p}, new parameter {p} = {expr})")
+                }
+            };
             self.info(format!(
-                "{name} = {}{}",
-                rcad_sketch::fmt_mm(value),
-                if angle { "°" } else { " mm" }
+                "{name} = {}{unit}{shown}",
+                rcad_sketch::fmt_mm(value)
             ));
         }
         ok
@@ -2705,6 +2622,133 @@ impl SketchEditor {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Points of the selection: selected points plus every point of selected
+    /// curves (not the origin).
+    fn selected_curve_points(&self) -> Vec<PointId> {
+        let mut pts = self.selected_points();
+        for e in self.selected_entities() {
+            if let Some(x) = self.sketch.entity(e) {
+                pts.extend(x.points());
+            }
+        }
+        pts.sort();
+        pts.dedup();
+        pts.retain(|p| Some(*p) != self.sketch.origin);
+        pts
+    }
+
+    pub fn fix_disabled_reason(&self) -> Option<&'static str> {
+        if self.selected_curve_points().is_empty() {
+            return Some("Select points or curves to fix (or unfix)");
+        }
+        if self
+            .selected_entities()
+            .iter()
+            .any(|e| self.projected.contains_key(e))
+        {
+            return Some("Projected geometry is already held by its projection link");
+        }
+        None
+    }
+
+    /// Fix the selected points/curves where they are; when all of them are
+    /// already fixed, unfix them instead (Fix/UnFix toggle).
+    pub fn toggle_fix(&mut self) {
+        self.end_lone_chain();
+        if let Some(why) = self.fix_disabled_reason() {
+            self.fail(why.into());
+            return;
+        }
+        let pts = self.selected_curve_points();
+        let all_fixed = pts.iter().all(|p| {
+            self.sketch
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::FixedPoint { p: q, .. } if q == p))
+        });
+        let ok = self.try_change(!all_fixed, |sk| {
+            if all_fixed {
+                sk.unfix_points(&pts);
+            } else {
+                sk.fix_points(&pts);
+            }
+            Ok(())
+        });
+        if ok {
+            self.info(if all_fixed {
+                format!("Unfixed {} point(s).", pts.len())
+            } else {
+                format!("Fixed {} point(s) where they are.", pts.len())
+            });
+        }
+    }
+
+    fn two_rounds(&self) -> Option<(EntityId, EntityId)> {
+        let es = self.selected_entities();
+        let round = |e: &EntityId| {
+            matches!(
+                self.sketch.entity(*e),
+                Some(Entity::Circle { .. } | Entity::Arc { .. })
+            )
+        };
+        (self.selection.len() == 2 && es.len() == 2 && es.iter().all(round)).then(|| (es[0], es[1]))
+    }
+
+    pub fn concentric_disabled_reason(&self) -> Option<&'static str> {
+        self.two_rounds()
+            .is_none()
+            .then_some("Select two circles or arcs")
+    }
+
+    /// Concentric: the two selected circles/arcs share their centre.
+    pub fn constrain_concentric(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b)) = self.two_rounds() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Concentric { a, b });
+            sk.validate().map_err(|e| e.to_string())
+        });
+    }
+
+    /// Collinear: the second selected line lies on the first one's line.
+    pub fn constrain_collinear(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b)) = self.two_lines() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Collinear { a, b });
+            sk.validate().map_err(|e| e.to_string())
+        });
+    }
+
+    /// Two points and a line, if that is the selection.
+    fn symmetry_pick(&self) -> Option<(PointId, PointId, EntityId)> {
+        let (p, l) = (self.selected_points(), self.selected_lines());
+        (self.selection.len() == 3 && p.len() == 2 && l.len() == 1).then(|| (p[0], p[1], l[0]))
+    }
+
+    pub fn symmetry_disabled_reason(&self) -> Option<&'static str> {
+        self.symmetry_pick()
+            .is_none()
+            .then_some("Select two points and the line to mirror about")
+    }
+
+    /// Symmetry: the two selected points mirror each other about the
+    /// selected line.
+    pub fn constrain_symmetric(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b, line)) = self.symmetry_pick() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Symmetric { a, b, line });
+            sk.validate().map_err(|e| e.to_string())
+        });
     }
 
     /// A (line, arc) pair sharing an endpoint, if that is the selection.
@@ -3636,52 +3680,6 @@ mod tests {
         assert!(!ed.can_redo());
     }
 
-    /// A trim that replaces one of two tangent arcs by a piece
-    /// moves the arc–arc tangency to the piece that keeps the shared point
-    /// (it used to be left behind, then refused or silently dropped).
-    #[test]
-    fn trim_retargets_arc_arc_tangency() {
-        let mut sk = Sketch::default();
-        let (c1, c2, c3) = (
-            sk.add_point(0.0, 0.0),
-            sk.add_point(20.0, 0.0),
-            sk.add_point(0.0, 0.1),
-        );
-        let p = sk.add_point(10.0, 0.0);
-        let (s1, e2, s3) = (
-            sk.add_point(-10.0, 0.0),
-            sk.add_point(30.0, 0.0),
-            sk.add_point(0.0, 10.1),
-        );
-        let arc = |sk: &mut Sketch, center, start, end| {
-            let id = sk.next_entity_id();
-            sk.entities.push(Entity::Arc {
-                id,
-                center,
-                start,
-                end,
-            });
-            id
-        };
-        let a = arc(&mut sk, c1, s1, p);
-        let b = arc(&mut sk, c2, p, e2);
-        sk.constraints.push(Constraint::TangentArcs { a, b });
-        // The trim moved `a` off P and a new piece (c3) now ends at P.
-        let piece = arc(&mut sk, c3, s3, p);
-        for e in &mut sk.entities {
-            if let Entity::Arc { id, end, .. } = e
-                && *id == a
-            {
-                *end = s3;
-            }
-        }
-        assert_eq!(retarget_tangents(&mut sk, a, Some(piece)), 0);
-        assert!(
-            sk.constraints
-                .contains(&Constraint::TangentArcs { a: piece, b })
-        );
-    }
-
     #[test]
     fn same_two_points_dimensioned_twice_give_both_axes() {
         // Corner at (2, 2): |dx| = |dy|, so one point-to-point dimension cannot
@@ -3717,19 +3715,26 @@ mod tests {
             "{:?}",
             ed.status()
         );
-        // A third dimension of the pair is redundant (refused, sketch kept).
+        // A third dimension of the pair is redundant: added driven, the
+        // geometry and DOF are unchanged.
         let before = ed.sketch.clone();
         click(&mut ed, [0.0, 0.0]);
         click(&mut ed, [3.0, 3.0]);
-        if let Some(e) = ed.dim_edit.as_mut() {
-            e.buffer = "3".into();
-            ed.apply_dim_edit();
-        }
-        assert_eq!(ed.sketch.constraints.len(), before.constraints.len());
+        assert!(ed.dim_edit.is_none());
+        assert_eq!(ed.sketch.constraints.len(), before.constraints.len() + 1);
+        assert!(
+            ed.sketch
+                .constraints
+                .last()
+                .and_then(|c| c.dimension())
+                .is_some_and(|d| d.driven)
+        );
+        assert_eq!(ed.sketch.points, before.points);
+        assert_eq!(ed.report.status, SolveStatus::FullyConstrained);
     }
 
     #[test]
-    fn redundant_dimension_is_rejected_and_sketch_kept() {
+    fn redundant_dimension_becomes_driven() {
         let mut ed = SketchEditor::new(Sketch::default());
         ed.set_tool(SketchTool::CenterRectangle);
         click(&mut ed, [0.0, 0.0]);
@@ -3737,15 +3742,49 @@ mod tests {
         ed.set_tool(SketchTool::Dimension);
         click(&mut ed, [0.0, -20.0]); // width (bottom)
         ed.apply_dim_edit();
-        let before = ed.sketch.clone();
+        let dof = ed.report.dof;
         click(&mut ed, [0.0, 20.0]); // top line: also horizontal → redundant width
-        assert_eq!(ed.sketch, before);
-        assert!(ed.dim_edit.is_none());
+        assert!(ed.dim_edit.is_none(), "a driven dimension is not edited");
         let fb = ed.feedback.clone().expect("feedback");
+        assert!(!fb.error && fb.text.contains("driven"), "{}", fb.text);
+        let d = ed
+            .sketch
+            .constraints
+            .last()
+            .and_then(|c| c.dimension())
+            .cloned()
+            .unwrap();
+        assert!(d.driven && (d.value.abs() - 60.0).abs() < 1e-9, "{d:?}");
+        assert_eq!(ed.report.dof, dof, "no equation added");
+        // Editing the width moves the driven one.
+        let w = ed
+            .sketch
+            .constraints
+            .iter()
+            .position(|c| c.dimension().is_some_and(|d| d.name == "width"))
+            .unwrap();
+        ed.begin_dim_edit(w, false);
+        ed.dim_edit.as_mut().unwrap().buffer = "70".into();
+        assert!(ed.apply_dim_edit());
+        let d = ed
+            .sketch
+            .constraints
+            .last()
+            .and_then(|c| c.dimension())
+            .unwrap();
+        assert!((d.value.abs() - 70.0).abs() < 1e-9, "{d:?}");
+        // It cannot be edited, and making it driving is refused as redundant.
+        let i = ed.sketch.constraints.len() - 1;
+        ed.begin_dim_edit(i, false);
+        assert!(ed.dim_edit.is_none());
+        ed.selection = vec![Item::Constraint(i)];
+        let before = ed.sketch.clone();
+        ed.toggle_driven();
+        assert_eq!(ed.sketch, before);
         assert!(
-            fb.error && fb.text.contains("over-constrain"),
-            "{}",
-            fb.text
+            ed.feedback
+                .as_ref()
+                .is_some_and(|f| f.error && f.text.contains("over-constrain"))
         );
     }
 
@@ -4480,7 +4519,7 @@ mod tests {
             let b = sk.add_point(at(th, 15.0)[0], at(th, 15.0)[1]);
             let l = sk.add_line(a, b);
             let ed = SketchEditor::new(sk);
-            let hits = ed.line_cuts(l, at(th, 5.0), at(th, 15.0));
+            let hits = ed.sketch.line_hits(l, at(th, 5.0), at(th, 15.0), false);
             assert!(
                 hits.iter().any(|t| (t - 0.5).abs() < 1e-9),
                 "{k} deg: {hits:?}"
@@ -4780,5 +4819,100 @@ mod tests {
         // Escape closes an open entry.
         click(&mut ed, [20.0, 0.0]);
         assert!(ed.escape() && ed.offset_edit.is_none());
+    }
+
+    #[test]
+    fn dimension_input_units_expressions_and_new_parameters() {
+        use rcad_document::params::Quantity;
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "w".to_string(),
+            Quantity {
+                value: 40.0,
+                dim: Some(1),
+            },
+        );
+        env.insert(
+            "a".to_string(),
+            Quantity {
+                value: 30.0,
+                dim: Some(0),
+            },
+        );
+        let p = |s: &str, angle: bool| parse_dim_input(s, angle, &env);
+        assert_eq!(p("12.5", false), Ok(DimInput::Value(12.5)));
+        assert_eq!(p("12.5 mm", false), Ok(DimInput::Value(12.5)));
+        assert_eq!(p("1 in", false), Ok(DimInput::Value(25.4)));
+        assert_eq!(p("2cm", false), Ok(DimInput::Value(20.0)));
+        assert_eq!(
+            p("w/2", false),
+            Ok(DimInput::Bound {
+                value: 20.0,
+                expr: "w/2".into()
+            })
+        );
+        assert_eq!(
+            p("d = w + 5 mm", false),
+            Ok(DimInput::NewParameter {
+                value: 45.0,
+                name: "d".into(),
+                expr: "w + 5 mm".into()
+            })
+        );
+        assert_eq!(p("30deg", true), Ok(DimInput::Value(30.0)));
+        assert_eq!(p("45°", true), Ok(DimInput::Value(45.0)));
+        match p("0.5 rad", true) {
+            Ok(DimInput::Value(v)) => {
+                assert!((v - 0.5 * 180.0 / std::f64::consts::PI).abs() < 1e-12)
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(p("a * 2", true), Ok(DimInput::Bound { value, .. }) if value == 60.0));
+        for (bad, angle) in [
+            ("", false),
+            ("q/2", false),
+            ("10 - 30", false),
+            ("w = 3", false),
+            ("2w = 3", false),
+            ("30 mm", true),
+            ("x = ", false),
+        ] {
+            assert!(p(bad, angle).is_err(), "{bad} accepted");
+        }
+    }
+
+    #[test]
+    fn a_dimension_edit_that_would_flip_a_fillet_is_refused() {
+        // 2-point rectangle 0..20 x 0..10, filleted at two corners.
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [20.0, 10.0]);
+        let corner = |ed: &SketchEditor, x: f64, y: f64| {
+            ed.sketch
+                .points
+                .iter()
+                .find(|p| (p.x - x).abs() < 1e-9 && (p.y - y).abs() < 1e-9)
+                .unwrap()
+                .id
+        };
+        let (a, b) = (corner(&ed, 20.0, 0.0), corner(&ed, 20.0, 10.0));
+        ed.sketch.fillet_corner(a, 2.0, Some("ra")).unwrap();
+        ed.sketch.fillet_corner(b, 2.0, Some("rb")).unwrap();
+        assert!(ed.sketch.solve().is_success());
+        let i = ed
+            .sketch
+            .constraints
+            .iter()
+            .position(|c| c.dimension().is_some_and(|d| d.name == "ra"))
+            .unwrap();
+        let before = ed.sketch.clone();
+        ed.begin_dim_edit(i, false);
+        ed.dim_edit.as_mut().unwrap().buffer = "9".into();
+        assert!(!ed.apply_dim_edit());
+        assert_eq!(ed.sketch, before);
+        let fb = ed.feedback.clone().unwrap();
+        assert!(fb.error && fb.text.contains("would flip"), "{}", fb.text);
+        assert!(ed.dim_edit.is_some(), "the field stays open");
     }
 }

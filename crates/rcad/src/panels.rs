@@ -208,29 +208,13 @@ impl RcadApp {
         let committing = s.committing;
         let mut finish = false;
         let mut cancel = false;
+        let mut unlink = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Sketch");
             ui.separator();
             ui.add_enabled_ui(!committing, |ui| {
                 let ed = &mut s.editor;
-                for t in [
-                    SketchTool::Select,
-                    SketchTool::Line,
-                    SketchTool::CenterRectangle,
-                    SketchTool::CornerRectangle,
-                    SketchTool::Circle,
-                    SketchTool::Arc,
-                    SketchTool::Ellipse,
-                    SketchTool::Spline,
-                    SketchTool::Dimension,
-                    SketchTool::Trim,
-                    SketchTool::Extend,
-                    SketchTool::Offset,
-                    SketchTool::Fillet,
-                    SketchTool::Slot,
-                    SketchTool::Polygon,
-                    SketchTool::Text,
-                ] {
+                for t in SketchTool::TOOLBAR {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
                         .probe(t.label())
@@ -325,11 +309,33 @@ impl RcadApp {
             {
                 s.editor.redo();
             }
+            // Second-row sketch tools (Break, Project, Intersect) and the
+            // Project options.
+            ui.separator();
+            ui.add_enabled_ui(!committing, |ui| {
+                let ed = &mut s.editor;
+                for t in SketchTool::SECOND_ROW {
+                    if ui
+                        .add(egui::Button::new(t.label()).selected(ed.tool == t))
+                        .probe(t.label())
+                        .on_hover_text(format!("{} ({})", t.hint(), t.shortcut()))
+                        .clicked()
+                    {
+                        ed.set_tool(t);
+                    }
+                }
+                if crate::sketch_project::options_ui(ui, ed, &mut self.auto_project_faces) {
+                    unlink = true;
+                }
+            });
             if committing {
                 ui.spinner();
                 ui.label("Committing…");
             }
         });
+        if unlink {
+            self.unlink_selected_projection();
+        }
         if finish {
             self.finish_sketch();
         } else if cancel {
@@ -1413,6 +1419,36 @@ impl RcadApp {
                     }
                     if action(ui, "Tangent", ed.tangent_disabled_reason()) {
                         ed.constrain_tangent();
+                    }
+                    ui.end_row();
+                    if action(ui, "Fix / Unfix", ed.fix_disabled_reason()) {
+                        ed.toggle_fix();
+                    }
+                    if action(ui, "Concentric", ed.concentric_disabled_reason()) {
+                        ed.constrain_concentric();
+                    }
+                    if action(ui, "Collinear", ed.two_lines_disabled_reason()) {
+                        ed.constrain_collinear();
+                    }
+                    ui.end_row();
+                    if action(ui, "Symmetric", ed.symmetry_disabled_reason()) {
+                        ed.constrain_symmetric();
+                    }
+                    let driven = ed
+                        .selection
+                        .first()
+                        .and_then(|i| match i {
+                            Item::Constraint(c) => ed.sketch.constraints.get(*c),
+                            _ => None,
+                        })
+                        .and_then(|c| c.dimension())
+                        .is_some();
+                    if action(
+                        ui,
+                        "Driven / Driving",
+                        (!driven).then_some("Select a dimension"),
+                    ) {
+                        ed.toggle_driven();
                     }
                     ui.end_row();
                 });

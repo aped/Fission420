@@ -35,16 +35,44 @@ compete. Opening another document while a sketch is open discards the session wi
 | 3-Point Arc (A) | start point, end point, then a point the arc passes through (counter-clockwise storage; orientation follows the third point). Collinear points are refused |
 | Ellipse (toolbar) | centre, then the end of one axis, then a point whose distance from that axis is the other radius. See [Ellipses and splines](#ellipses-and-splines) |
 | Spline (toolbar) | click control points; Enter or right-click finishes an open spline (≥ 4 points), clicking the first point again closes it (≥ 3). Nothing is added before it is finished |
+| Trim (T) | click the span of a line, arc or circle to remove: it is cut at the nearest crossings with other curves either side of the click (a curve with no crossing is deleted). A line cut in the middle splits in two (the new piece gets a fresh id and the first one's Horizontal/Vertical); a circle becomes an arc with the same id and centre (its diameter dimension becomes a radius); an arc cut in the middle splits into two arcs with an equal-radius constraint. Cut ends reuse an existing point at the crossing, else are held on the cutting curve (`PointOnLine` / `PointOnCircle`). Constraints that no longer apply are removed and counted in the status line (equal length, a length dimension spanning a split line, a tangency no piece still touches) |
+| Extend (E) | click a line near its free end: the end moves along the line to the nearest curve its extension crosses; a connected end, an arc, or an extension that meets nothing is refused |
+| Break (toolbar) | click the span of a line, arc or circle: it is split at the nearest crossings either side of the click and nothing is removed. Line pieces stay collinear (the far end of each new piece is held on the first piece's line, so the DOF count is unchanged); arc pieces share the centre and get an equal-radius constraint; a circle needs two crossings and becomes two arcs (the clicked span is the new one). Refused when the span has no crossing |
 | Dimension (D) | click a line (horizontal line → `width`, vertical → `height`, other → aligned `length`), a circle (`diameter`), an arc (`radius`), an ellipse (first `major_radius`, then `minor_radius`), or two points (horizontal or vertical distance, whichever is larger). The inline editor opens immediately |
+
+Trim, Extend and Break are `rcad_sketch::Sketch::{trim, extend, break_at}`; the editor and the
+headless `sketch_op` command (docs/COMMANDS.md) run the same code, then solve; a change that does
+not solve, or that collapses a curve to zero size (e.g. Horizontal plus Vertical on one line), is
+refused and the sketch is unchanged.
 
 Constraint buttons act on the selection and are disabled with the reason as hover text:
 Horizontal / Vertical (lines, glyph `H`/`V`), Parallel / Perpendicular (two lines, `//` / `90`),
 Equal (two lines → equal length, two arcs/circles → equal radius, `=`), Coincident (two points,
 `C`), Midpoint (a line and a point: the point stays at the line's midpoint, `Mid`), On line (a
 line and a point: the point stays on the line's infinite extension, `On`), Tangent (a line and
-an arc sharing an endpoint, `T`). **Construction** (X) toggles selected curves to reference
+an arc sharing an endpoint, `T`), **Fix / Unfix** (selected points and the points of selected
+curves are pinned where they are with `FixedPoint`; when all are already pinned they are
+unpinned; never the origin, not projected geometry; glyph `Fix`), **Concentric** (two
+circles/arcs with different centre points: centres coincide, 2 equations, `Con`), **Collinear**
+(two lines that share no end point: the second's ends lie on the first's line, 2 equations;
+lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a line: the points
+mirror each other about the line's infinite extension, 2 equations, `Sym`; two points that are
+close to each other and near the line can solve onto the line itself, which the zero-size guard
+refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
 Del (refused, with the dependents named, while anything uses them; one undo step).
+
+## Typed input while drawing (Tab)
+
+While a Line, rectangle or Circle gesture is in progress (after its first click), **Tab** opens
+heads-up fields next to the cursor: Line → Length (mm) and Angle (deg, counter-clockwise from +x);
+Center / 2-Point Rect → Width and Height; Circle → Diameter. Tab cycles the fields; **Enter**
+places the next point from the typed values (an empty field keeps the cursor's value; a rectangle
+keeps the cursor's quadrant) and adds a dimension for each typed length (length, width, height,
+diameter: the Dimension tool's names); a typed angle places the point only. Values accept units and
+parameter expressions as in the dimension field (the dimension takes the value; bind it afterwards by
+typing the expression into the dimension). **Escape** closes the fields. Invalid input keeps them
+open with the reason and adds nothing.
 
 ## Snapping (deterministic priority)
 
@@ -67,13 +95,37 @@ rubber band shows the live length / size / radius.
 ## Dimensions and constraints
 
 * New constraints and dimensions are applied to a copy and solved first. If the copy does not
-  solve, or the new item is redundant (over-constrains), it is **rejected** and the message
+  solve, or a new constraint is redundant (over-constrains), it is **rejected** and the message
   names the conflicting constraints, e.g. "Rejected: this would over-constrain the sketch
   (redundant with: width = 80 mm (horizontal P1 to P2); …)". The sketch is unchanged.
+* **Driven dimensions**: a new *dimension* that is redundant (the sketch already fixes that
+  distance, diameter, radius or angle) is added **driven** instead of being refused: it adds no
+  equation, shows its measured value in parentheses, follows the geometry after every solve
+  (horizontal/vertical distances are signed), and cannot be edited or set as a parameter
+  (refused by name). A dimension whose value conflicts (inconsistent) is still refused.
+  `toggle_driven` (editor) turns a driven dimension driving only when it is no longer redundant.
+  Stored as `"driven": true` on the dimension (absent = driving, so older files load unchanged).
+* **Branch-flip guard**: a typed dimension value is solved directly; if an arc's sweep jumps by
+  more than 90° (its centre crossed the chord: a different shape) or a line reverses direction,
+  the edit is re-solved by continuation in 16 steps; if a step still jumps, the edit is refused
+  ("would flip arc N"), the field stays open and the sketch is unchanged (`rcad_sketch::guard`).
 * The inline editor opens with the value selected, so typing replaces it. **Enter** applies,
   **Escape** cancels (a freshly created dimension keeps its measured value). Invalid input
   ("abc", ≤ 0) or a value the solver cannot satisfy keeps the editor open with the error; the
   sketch keeps its last valid state.
+* **Dimension entry** (the inline field) accepts:
+  * a number with an optional unit: `25`, `25 mm`, `2.5 cm`, `1 in` (lengths, stored in mm);
+    `30`, `30deg`, `30°`, `0.5 rad` (angles, stored in degrees);
+  * an expression over user parameters (`w/2`, `w + 2 mm`, `max(w, 30)`; docs/PARAMETERS.md):
+    the dimension takes its value now and is **bound** to the expression;
+  * `name = expr`: creates the user parameter `name` (refused if it exists: type its name to
+    use it) and binds the dimension to it.
+
+  A typed number on a bound dimension unbinds it. The parameters and bindings are committed with
+  the sketch at Finish in the same undo step (`sketch_op` `replace`; a new sketch is created
+  first, so it takes two steps); later parameter edits drive the dimension. Invalid input (an
+  unknown name, a unit that does not fit, a result ≤ 0, an existing parameter name) keeps the
+  field open with the reason and leaves the sketch unchanged.
 * Dimension names are unique per sketch (`width`, `width2`, …) and become document parameters
   editable in the inspector and through the annotations in the 3D view.
 * Keyboard shortcuts never fire while a text field has focus.
@@ -329,6 +381,29 @@ of the arc, or the refusal reason), Enter. One undo step.
   oblique corner t·r − (π − θ)r²/2; full constraint kept; width and radius edits; refusals),
   `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
+
+## Project inside the sketch (P, Intersect)
+
+* **Project (P)**, second row of the sketch bar: click a model face next to the edge to project;
+  the face edge nearest the click is projected into the open sketch (the same associative
+  projection as the inspector's Project edge below). **Intersect**: click a body; its section by
+  the sketch plane is added. A projected edge comes in as construction (an open curve would make
+  the profile fail: profiles need closed loops); a section's closed loops are profile geometry.
+  Projected curves are drawn purple, are read-only (Delete, Trim,
+  Extend, Break, drags and deleting their pins are refused with the reason) and can be
+  dimensioned and constrained to at once. **Projection Link** (shown with the tools, on by
+  default) off copies the curves unlinked.
+* **Auto-project face edges** (Fusion's default, on): a new sketch on a planar face starts with
+  that face's edges projected, as construction so they stay out of profiles. The checkbox (shown
+  with the Project tool) turns it off for later sketches.
+* **Unlink projection** (shown when a projected curve is selected) breaks its link: the curves
+  stay as plain fixed geometry.
+* Projection reads the model, so it is a document step: the sketch so far is committed first
+  (`create_sketch` or `edit_sketch`), then `project` (and `unlink_projection`). The editor's local
+  undo restarts after it (the document's Undo holds those steps). **Cancel Sketch undoes every
+  document step the session made**, so cancelling still leaves the document as it was.
+* Live probe: `editing.entities` counts drawn (non-projected) curves, `editing.projected` the
+  projected ones.
 
 ## Projected edges and sections (Project edge / Intersect)
 
