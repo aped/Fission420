@@ -105,7 +105,8 @@ rubber band shows the live length / size / radius.
   (refused by name). A dimension whose value conflicts (inconsistent) is still refused.
   `toggle_driven` (editor) turns a driven dimension driving only when it is no longer redundant.
   Stored as `"driven": true` on the dimension (absent = driving, so older files load unchanged).
-* **Branch-flip guard**: a typed dimension value is solved directly; if an arc's sweep jumps by
+* **Branch-flip guard**: a typed dimension value (and a parameter edit of a sketch dimension:
+  `set_parameter`, or a bound expression whose value changes) is solved directly; if an arc's sweep jumps by
   more than 90° (its centre crossed the chord: a different shape) or a line reverses direction,
   the edit is re-solved by continuation in 16 steps; if a step still jumps, the edit is refused
   ("would flip arc N"), the field stays open and the sketch is unchanged (`rcad_sketch::guard`).

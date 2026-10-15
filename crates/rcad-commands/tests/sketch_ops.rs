@@ -397,3 +397,76 @@ fn fix_and_driven_dimensions_through_ops() {
     );
     let _ = id;
 }
+
+/// A parameter edit of a sketch dimension goes through the branch-flip
+/// guard: a radius that would push one fillet past the next is refused with
+/// the document unchanged; a tenfold width edit keeps every fillet a quarter
+/// arc (closed-form area w·h − (4 − π)·r²).
+#[test]
+fn parameter_edits_are_guarded_against_branch_flips() {
+    let mut sk = Sketch::default();
+    let p: Vec<PointId> = [[0.0, 0.0], [20.0, 0.0], [20.0, 10.0], [0.0, 10.0]]
+        .iter()
+        .map(|q| sk.add_point(q[0], q[1]))
+        .collect();
+    sk.origin = Some(p[0]);
+    let l: Vec<EntityId> = (0..4).map(|i| sk.add_line(p[i], p[(i + 1) % 4])).collect();
+    sk.constraints.extend([
+        Constraint::FixedPoint {
+            p: p[0],
+            x: 0.0,
+            y: 0.0,
+        },
+        Constraint::Horizontal { line: l[0] },
+        Constraint::Horizontal { line: l[2] },
+        Constraint::Vertical { line: l[1] },
+        Constraint::Vertical { line: l[3] },
+        Constraint::HorizontalDistance {
+            a: p[0],
+            b: p[1],
+            dim: Dimension::new("w", 20.0),
+        },
+        Constraint::VerticalDistance {
+            a: p[1],
+            b: p[2],
+            dim: Dimension::new("h", 10.0),
+        },
+    ]);
+    assert!(sk.solve().is_success());
+    for (i, c) in p.iter().enumerate() {
+        sk.fillet_corner(*c, 2.0, Some(if i == 0 { "r" } else { "rr" }))
+            .unwrap();
+    }
+    let mut s = Session::new();
+    assert!(s.execute(&Command::NewDocument).ok);
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::Custom { sketch: sk },
+    });
+    assert!(r.ok, "{r:?}");
+    let f = r.feature.unwrap();
+    let rev = revision(&s);
+    let r = s.execute(&Command::SetParameter {
+        feature: f,
+        name: "r".into(),
+        value: 9.0,
+    });
+    assert!(!r.ok, "{r:?}");
+    assert!(
+        r.error.unwrap().to_string().contains("would flip"),
+        "refused by name"
+    );
+    assert_eq!(revision(&s), rev);
+    let r = s.execute(&Command::SetParameter {
+        feature: f,
+        name: "w".into(),
+        value: 200.0,
+    });
+    assert!(r.ok, "{r:?}");
+    let mut sk = stored(&s, f);
+    assert!(sk.solve().is_success());
+    let area = sk.regions().unwrap()[0].area;
+    let want = 200.0 * 10.0 - (4.0 - std::f64::consts::PI) * 4.0;
+    assert!((area - want).abs() < 1e-6, "{area} vs {want}");
+}

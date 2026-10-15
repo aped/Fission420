@@ -1615,20 +1615,23 @@ impl Feature {
                 Ok(())
             }
             FeatureKind::Sketch { sketch, .. } => {
-                sketch.set_dimension(name, value).map_err(|e| match e {
-                    rcad_sketch::SketchError::UnknownDimension(_) => DocError::UnknownParameter {
-                        feature: id,
-                        name: name.into(),
-                    },
-                    other => DocError::Validation(format!("{id}.{name}: {other}")),
-                })?;
-                // Store the solved geometry so the definition stays a solved state
-                // (freeform vertices are solver unknowns seeded from storage). A
-                // failed solve leaves the seed; regeneration then reports it.
-                let mut solved = sketch.clone();
-                if solved.solve().is_success() {
-                    *sketch = solved;
-                }
+                // Set and solve with the branch-flip guard (rcad_sketch::guard):
+                // the solved geometry is stored so the definition stays a
+                // solved state (freeform vertices are solver unknowns seeded
+                // from storage); a failed solve leaves the seed and
+                // regeneration reports it; an edit that would flip an arc or
+                // reverse a line is refused by name.
+                sketch
+                    .set_dimension_solved(name, value)
+                    .map_err(|e| match e {
+                        rcad_sketch::SketchError::UnknownDimension(_) => {
+                            DocError::UnknownParameter {
+                                feature: id,
+                                name: name.into(),
+                            }
+                        }
+                        other => DocError::Validation(format!("{id}.{name}: {other}")),
+                    })?;
                 Ok(())
             }
             FeatureKind::Revolve { angle, .. } if name == "angle_deg" => {
