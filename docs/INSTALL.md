@@ -1,10 +1,11 @@
 # Installing and running R-CAD (Linux x86_64)
 
-R-CAD is built from source with a stable Rust toolchain (edition 2024; developed with rustc
-1.99; CI installs the current stable). Primary target: Linux x86_64 on Wayland or X11 with a
-Vulkan/GL driver (wgpu). Other platforms build in CI but are not tested as a GUI release.
+Prebuilt archives for Linux x86_64, Windows x64 and macOS ARM64 are attached to each tagged
+GitHub release (`v1.0.0` and later), with SHA-256 checksums. To build from source you need a
+stable Rust toolchain, 1.95 or newer (edition 2024; CI pins 1.99.0). Primary target: Linux
+x86_64 on Wayland or X11 with a Vulkan/GL driver (wgpu).
 
-## From a release candidate archive
+## From a locally built archive
 
 ```bash
 tar xzf r-cad-<version>-<rev>-linux-x86_64.tar.gz
@@ -19,9 +20,9 @@ The archive contains `bin/rcad` (GUI), `bin/rcad-cli` (headless scripts and the 
 suite), the user documentation in `docs/`, the native example documents and their replayable
 workflows in `examples/`, `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD_PARTY_LICENSES.txt`.
 Runtime libraries are loaded from the system (Wayland/X11, xkbcommon, Vulkan or GL); no
-other native library is linked. Release candidates are not signed or published.
+other native library is linked. Archives are not code-signed.
 
-## Building a release candidate
+## Building a release archive locally
 
 ```bash
 tools/release.sh artifacts/release            # refuses a dirty tree; --allow-dirty for tests
