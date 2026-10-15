@@ -112,7 +112,55 @@ fn curve_range(c: &Curve) -> (f64, f64) {
 /// Exact when extrema lie on vertices or straight edges; for explicit curved edges
 /// (NURBS arcs) exact to the search precision (unimodal near the extremum, true for
 /// circular arcs); boolean intersection curves keep the sampling error.
+///
+/// Memoised: bounds are asked for the same body many times per regeneration
+/// (tool margins, extents, the result check, tessellation, measurement), and
+/// each call samples every curved edge. A cached value is returned only for the
+/// very same shape (`same_solid`: identical Truck handles in order and
+/// orientation; the cache holds a clone, so the handles stay alive and cannot
+/// be reused by another shape) with bit-identical vertex points, i.e. exactly
+/// what recomputing would return.
 pub(crate) fn raw_bounds(solid: &Solid) -> Result<Bounds> {
+    let points: Vec<[u64; 3]> = solid
+        .vertex_iter()
+        .map(|v| {
+            let p = v.point();
+            [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]
+        })
+        .collect();
+    if let Ok(memo) = BOUNDS_MEMO.lock()
+        && let Some(e) = memo
+            .iter()
+            .find(|e| e.points == points && crate::same_solid(&e.solid, solid))
+    {
+        return Ok(e.bounds);
+    }
+    let bounds = raw_bounds_uncached(solid)?;
+    if let Ok(mut memo) = BOUNDS_MEMO.lock() {
+        if memo.len() >= BOUNDS_MEMO_LEN {
+            memo.remove(0);
+        }
+        memo.push(BoundsMemo {
+            solid: solid.clone(),
+            points,
+            bounds,
+        });
+    }
+    Ok(bounds)
+}
+
+/// Shapes whose bounds are remembered (most recent last).
+const BOUNDS_MEMO_LEN: usize = 32;
+
+struct BoundsMemo {
+    solid: Solid,
+    points: Vec<[u64; 3]>,
+    bounds: Bounds,
+}
+
+static BOUNDS_MEMO: std::sync::Mutex<Vec<BoundsMemo>> = std::sync::Mutex::new(Vec::new());
+
+fn raw_bounds_uncached(solid: &Solid) -> Result<Bounds> {
     let mut b = Bounds {
         min: [f64::INFINITY; 3],
         max: [f64::NEG_INFINITY; 3],
