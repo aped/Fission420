@@ -9,6 +9,7 @@
 //! button, a menu or a key.
 
 pub mod actions;
+pub mod browser;
 pub mod icons;
 pub mod keymap;
 pub mod prefs;

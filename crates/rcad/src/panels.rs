@@ -351,12 +351,14 @@ impl RcadApp {
             ui.weak("No document open. Use New or Open….");
             return;
         }
+        self.browser_top_nodes(ui);
         self.parameters_panel(ui);
         self.configurations_panel(ui);
         self.configuration_table(ui);
         self.drawings_panel(ui);
         ui.separator();
         self.bodies_browser(ui);
+        self.browser_sketch_nodes(ui);
         ui.add_space(4.0);
         ui.separator();
         ui.label(RichText::new("History").strong());
