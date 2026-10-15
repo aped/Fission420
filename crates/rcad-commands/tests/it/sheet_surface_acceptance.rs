@@ -23,7 +23,11 @@ fn replay(name: &str) -> Session {
     let fixtures = root().join("crates/rcad-kernel/tests/fixtures/step");
     let text = std::fs::read_to_string(root().join("examples").join(name))
         .unwrap()
-        .replace("${STEP_FIXTURES}", &fixtures.display().to_string());
+        // Forward slashes: a Windows path's backslashes would be JSON escapes.
+        .replace(
+            "${STEP_FIXTURES}",
+            &fixtures.display().to_string().replace('\\', "/"),
+        );
     let steps: Vec<Value> = serde_json::from_str(&text).unwrap();
     let mut s = Session::new();
     for v in steps {
