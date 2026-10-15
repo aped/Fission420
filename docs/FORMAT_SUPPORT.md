@@ -49,7 +49,7 @@ interchange does not carry another application's feature history.
 | STL | export | triangles (B-rep tessellated at chord / facet angle, both shown in the dialog) | mm | none (one shell per body, or one file per body) | no / no (file names per body with `separate_files`) | tessellation (stated chord) | exactness, units, names |
 | 3MF | import | core meshes, components (flattened with transforms), one body per build item | declared unit (mm, cm, inch, … tested; unknown unit refused) | flattened | object names; colours no (the reader parses object-level `displaycolor`, but bodies have no colour, so it is dropped) | mesh as stored | all colours (object colours dropped, per-triangle ones reported), textures; required extensions other than materials (production, beam lattice) **refused**; singular transforms refused |
 | 3MF | export | one object per body, body selection | selectable (default mm) | none; with `item_transforms` the export placement is kept per object as its build item `transform` (objects as modeled) | names; colours no (the writer supports object colours, the export commands pass none) | tessellation | exactness, colours; no printer/process settings (geometry only) |
-| DXF | import | LINE, ARC, CIRCLE, LWPOLYLINE/POLYLINE subset → unconstrained sketch; splines refused by name | `$INSUNITS`, else choice | none | no | exact lines/arcs | splines, text, blocks beyond the subset |
+| DXF | import | LINE, ARC, CIRCLE, LWPOLYLINE/POLYLINE subset, full ELLIPSE, clamped uniform cubic SPLINE → unconstrained sketch; other splines and elliptical arcs refused by name | `$INSUNITS`, else choice | none | no | exact lines/arcs/ellipses/splines | other splines, elliptical arcs, text, blocks beyond the subset |
 | DXF | export (sketch / flat pattern / drawing) | R12 LINE/ARC/CIRCLE(+TEXT, SOLID for drawings) | mm, `$INSUNITS` 4 | layers only | layer names | exact lines/arcs | splines (none produced) |
 | SVG | import | lines, rects, circles, circular arcs, `M L H V Z A` paths; Béziers/elliptical arcs/text reported | physical size + viewBox, else choice; y flipped | none | no | exact | Béziers, text, transforms beyond affine |
 | SVG / PDF | export (sketch, drawings) | lines/arcs/circles; SVG sketch export also ellipses (elliptical `A` arcs) and splines (exact cubic Bézier `C` spans); PDF: arcs as Béziers ≤ 2.8e-4·r | mm (viewBox / MediaBox) | groups per view | no | as stated | none known within scope |
@@ -267,6 +267,30 @@ sketch → 5 mm solid, own SVG export re-imported, STEP export); `tools/check_sc
 stroke only), design intent (constraints); sketch placement on export.
 
 ## Native format
+
+**Versions.** This build reads every native version from v1 to v9 (`io::MIN_FORMAT_VERSION`,
+`io::FORMAT_VERSION`) and refuses newer ones. A save writes the lowest version that holds the
+document (`io::required_version`), so a document that uses nothing newer stays readable by older
+builds; v9 is the newest. Each version's additions are listed by `io::v5_feature` …
+`io::v9_feature`, and a file whose label is older than a feature it contains is refused. v7 to v9
+in brief (the paragraphs after this list give the details of v3 to v6):
+
+- **v7**: nested assemblies, components without bodies, independent and external components,
+  hidden occurrences, an active component, exploded-view offsets, cylindrical / pin-slot / planar / ball joints;
+  mesh repair; sheet-metal base faces, flanges and flat patterns; surface bodies, stitching,
+  fills, patches, extruded and thickened surfaces (`io::v7_feature`).
+- **v8**: sketch ellipses and splines, projected edges and body sections in sketches, bodies
+  split off by cuts, rectangular patterns with a second direction, fillets and chamfers of a face's
+  whole edge loop, mesh edits (transform, plane cut, decimation) (`io::v8_feature`).
+- **v9**: piece identity seeds of cuts and splits that separate a body (ADR 0003), document
+  display units, projected edges bound to the feature that made them, regions of crossing
+  sketch curves, prints of referenced imported faces, expressions on sheet-metal rules and
+  flanges, driven sketch dimensions, concentric / collinear / symmetric sketch constraints
+  (`io::v9_feature`).
+
+Frozen documents of every version from v2 to v8 are in
+`crates/rcad-commands/tests/fixtures/native_v*/`; `native_formats.rs` opens each, checks its
+analytic volume and re-saves it at its own version.
 
 **v5** = v4 plus feature suppression (`"suppressed": true`), face references to
 pattern/mirror occurrences and chamfer faces (`FaceRole::Copy`, `FaceRole::Chamfer`), the

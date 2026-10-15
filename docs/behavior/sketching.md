@@ -382,7 +382,7 @@ Enter. One undo step.
 ## Sketch corner fillet (Fillet tool)
 
 A **sketch** corner fillet: it rounds a 2D corner of a sketch. It is not a solid-edge fillet
-(Truck 0.6 has no fillet operation; solid fillets remain unavailable). Fillet tool (toolbar),
+(solid fillets are separate features: docs/FILLETS.md). Fillet tool (toolbar),
 click the corner point where two lines meet, type the radius in the inline entry (dashed preview
 of the arc, or the refusal reason), Enter. One undo step.
 

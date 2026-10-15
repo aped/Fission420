@@ -82,10 +82,13 @@ More in [`docs/screenshots/`](docs/screenshots).
 
 ### Prebuilt binaries
 
-CI publishes unsigned builds for **Linux x86_64**, **Windows x64** and **macOS ARM64** from
-`main` and from manual runs (Actions → CI → a run → *Artifacts*; kept 7 days). Tagged
-versions (`v*`) produce a draft release with the same archives. Each archive holds `rcad`, `rcad-cli`, the example
-documents and a `BUILD_INFO.txt` that says whether that platform's tests passed.
+Each tagged version (`v*`) gets a GitHub release with unsigned archives for **Linux x86_64**,
+**Windows x64** and **macOS ARM64**, built with the whole-program-optimised `dist` profile,
+with a `.sha256` per archive and a `SHA256SUMS` for all of them. CI also publishes the same
+archives (release profile) from `main`, pull requests into `main` and manual runs (Actions →
+CI → a run → *Artifacts*; kept 7 days). Each archive holds `rcad`, `rcad-cli`, the README,
+changelog and licences, the example documents and a `BUILD_INFO.txt` (version, commit,
+toolchain, CI run). See [`docs/INSTALL.md`](docs/INSTALL.md).
 
 > Linux, Windows and macOS builds are all test-gated: an archive is published only after
 > that platform's full test suite and example replays passed; see [`docs/CI.md`](docs/CI.md).
@@ -164,10 +167,10 @@ in [`docs/adr/`](docs/adr); every tolerance and its rationale is in
 ## Testing
 
 ```bash
-cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptance, example replays
+cargo xtask check     # layout, public text, fmt, clippy -D warnings, release and doc tests, acceptance, example replays
 ```
 
-- **About 1,300 tests.** They use analytic expected values (volumes, bounds, Pappus,
+- **More than 1,300 tests.** They use analytic expected values (volumes, bounds, Pappus,
   divergence-theorem checks), not snapshots of the program's own output.
 - **Malformed input.** Truncation and byte-mutation sweeps over every importer and the
   native format must return errors, never panics.
@@ -208,7 +211,9 @@ The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | [`docs/PRINT_EXPORT.md`](docs/PRINT_EXPORT.md) | STL/3MF print export, placement, validation, slicing |
 | [`docs/behavior/sketching.md`](docs/behavior/sketching.md) | sketch editor behaviour |
 | [`docs/TOLERANCES.md`](docs/TOLERANCES.md) | every tolerance and why |
-| [`docs/CI.md`](docs/CI.md) | CI matrix, toolchain pin, platform refactor plan |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | release archives, building from source |
+| [`docs/UI.md`](docs/UI.md) | desktop app layout, menus and dialogs |
+| [`docs/CI.md`](docs/CI.md) | CI pipeline, gating, toolchain pin, release archives |
 | [`docs/ASSEMBLIES.md`](docs/ASSEMBLIES.md), [`docs/DRAWINGS.md`](docs/DRAWINGS.md), [`docs/SHEET_METAL.md`](docs/SHEET_METAL.md), [`docs/MATERIALS.md`](docs/MATERIALS.md) | assemblies, drawings, sheet metal, materials (supported subsets) |
 | [`docs/adr/`](docs/adr) | architecture decisions |
 | [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) | dependency licences |

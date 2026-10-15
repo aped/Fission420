@@ -1,16 +1,18 @@
 # Dependencies
 
 Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock` is committed.
+Versions in the tables are the ones resolved in `Cargo.lock`.
 
 | crate | version | license | source | used by |
 |---|---|---|---|---|
 | truck-modeling | 0.6.0 | Apache-2.0 | https://github.com/ricosjp/truck | rcad-kernel |
 | truck-shapeops | 0.4.0, R-CAD fork | Apache-2.0 | vendored in `third_party/truck-shapeops` from ricosjp/truck c23d2c25 via `[patch.crates-io]`; changes listed in its `R-CAD-CHANGES.md` | rcad-kernel |
 | truck-meshalgo | 0.4.0 | Apache-2.0 | same | rcad-kernel |
-| serde | 1.x | MIT OR Apache-2.0 | crates.io | all |
-| thiserror | 2.x | MIT OR Apache-2.0 | crates.io | all |
+| truck-topology | 0.6.0 | Apache-2.0 | same | rcad-kernel |
+| serde | 1.0.229 | MIT OR Apache-2.0 | crates.io | all |
+| thiserror | 2.0.21 | MIT OR Apache-2.0 | crates.io | all |
 | rfd | 0.17.2 (features `xdg-portal`, `wayland`; no GTK) | MIT | https://github.com/PolyMeilex/rfd | rcad (Browse… file dialogs; on Linux through the XDG desktop portal over D-Bus, pure Rust) |
-| pollster | 0.4.0 | Apache-2.0 OR MIT | crates.io (via rfd) | rcad |
+| pollster | 0.4.0 (transitive) | Apache-2.0 OR MIT | crates.io (via rfd) | rcad |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash (already in the tree via truck-shapeops) | rcad-kernel (Fx hashing of the tessellation's vertex-weld and edge maps) |
 
 (Updated as crates are added; see section below for the GUI stack.)
@@ -21,11 +23,13 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 |---|---|---|---|
 | nalgebra | 0.35.0 (default-features off, `std`) | Apache-2.0 | rcad-sketch (SVD rank) |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | document, commands, cli |
-| tempfile | 3.27 (dev) | MIT OR Apache-2.0 | tests |
-| eframe / egui / egui-wgpu | 0.36.2 (`default_fonts`, `wayland`, `x11`, `wgpu`) | MIT OR Apache-2.0 | rcad-viewport, rcad |
-| wgpu | 30.0.1 | MIT OR Apache-2.0 | rcad-viewport |
-| bytemuck | 1.25 | Zlib OR Apache-2.0 OR MIT | rcad-viewport |
+| tempfile | 3.27.0 (dev) | MIT OR Apache-2.0 | tests |
+| eframe (egui, egui-wgpu through it) | 0.36.2 (`default_fonts`, `wayland`, `x11`, `wgpu`) | MIT OR Apache-2.0 | rcad-viewport, rcad |
+| wgpu | 30.0.1 (transitive, through eframe) | MIT OR Apache-2.0 | rcad-viewport |
+| bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | rcad-viewport |
 | image | 0.25.10 (`png`) | MIT OR Apache-2.0 | rcad (screenshots) |
+| egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | rcad UI interaction tests |
+| kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | rcad UI interaction tests |
 
 ## Sketch text
 
@@ -51,8 +55,6 @@ No package lacks a permissive option (`artifacts/licenses.txt`).
 Binary distributions (CI artifacts) carry `THIRD_PARTY_LICENSES.txt`, generated per target by
 `tools/ci/third_party_licenses.py` (crate list, shipped licence and font texts, canonical texts
 for crates without licence files); see docs/CI.md.
-| egui_kittest | 0.36.2 (dev) | MIT OR Apache-2.0 | rcad UI interaction tests |
-| kittest | 0.4.0 (dev, transitive) | MIT OR Apache-2.0 | rcad UI interaction tests |
 
 ## rcad-exchange (STL/DXF adapters)
 

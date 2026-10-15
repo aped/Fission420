@@ -1,9 +1,27 @@
-# Installing and running R-CAD (Linux x86_64)
+# Installing and running R-CAD
 
 Prebuilt archives for Linux x86_64, Windows x64 and macOS ARM64 are attached to each tagged
-GitHub release (`v1.0.0` and later), with SHA-256 checksums. To build from source you need a
+GitHub release (`v1.0.0` and later), with SHA-256 checksums. They are built with the `dist`
+profile (fat LTO, one codegen unit) after that platform's tests and example replays passed. To build from source you need a
 stable Rust toolchain, 1.95 or newer (edition 2024; CI pins 1.99.0). Primary target: Linux
 x86_64 on Wayland or X11 with a Vulkan/GL driver (wgpu).
+
+## From a GitHub release
+
+```bash
+sha256sum -c r-cad-<version>-linux-x86_64.tar.gz.sha256    # or: sha256sum -c SHA256SUMS
+tar xzf r-cad-<version>-linux-x86_64.tar.gz
+cd r-cad-<version>-linux-x86_64
+./rcad --version
+./rcad                           # GUI
+./rcad-cli run examples/plate_workflow.json     # writes into artifacts/
+```
+
+A release archive (`.zip` on Windows) holds `rcad` and `rcad-cli`, `README.md`,
+`CHANGELOG.md`, the licences and `THIRD_PARTY_LICENSES.txt`, the example documents and
+workflows in `examples/`, an empty `artifacts/` for the workflows' exports, and
+`BUILD_INFO.txt` (version, commit, platform, toolchain, the CI run). The same archives, built
+with the ordinary release profile, are also kept for 7 days as artifacts of CI runs on `main`.
 
 ## From a locally built archive
 
@@ -36,7 +54,7 @@ drawing-set example) and writes `SHA256SUMS` plus `<name>.tar.gz.sha256`.
 
 ```bash
 cargo build --release -p rcad -p rcad-cli
-cargo xtask check          # fmt, clippy -D warnings, tests, acceptance, example replays
+cargo xtask check          # layout, public text, fmt, clippy, tests, acceptance, example replays
 target/release/rcad
 ```
 

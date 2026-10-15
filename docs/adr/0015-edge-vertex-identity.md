@@ -147,6 +147,8 @@ above:
   area of every referenced planar face, taken when the face is first referenced; a mismatch
   makes references to that face broken.
 * Stale picks: `Command::AtRevision`.
-* Picking: edge polylines, vertex points and the BVH in `rcad-viewport/src/pick.rs`, not yet
-  used by the application's selection; no `EdgeRef`/`VertexRef` is stored yet (stage 4).
+* Picking: edge polylines, vertex points and the BVH in `rcad-viewport/src/pick.rs`. The
+  application's face picks (selection clicks, Project edge, sketch on a face) go through the BVH
+  (`PickScene::pick_face_section`); edge and vertex picks are not used by the selection yet, and
+  no `EdgeRef`/`VertexRef` is stored yet (stage 4).
 * Health (stage 2): `docs/behavior/health.md`.
