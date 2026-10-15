@@ -182,6 +182,9 @@ impl Model {
             })
             .collect();
         m.dirty = !cleaned.is_empty() || rolled_back_to.is_some();
+        // Seeds only record the identity this evaluation already gave the
+        // pieces; adopting them is not an unsaved change.
+        adopt_piece_seeds(&mut doc, &m.eval);
         m.doc = doc;
         Ok((
             m,
@@ -330,13 +333,13 @@ impl Model {
         ))
     }
 
-    /// (hits, misses) of the regeneration cache, for diagnostics.
     /// Drop the regeneration memo (after a caught panic may have left a
     /// half-built entry); the next regeneration rebuilds it.
     pub fn discard_cache(&mut self) {
         self.cache = RegenCache::default();
     }
 
+    /// (hits, misses) of the regeneration cache, for diagnostics.
     pub fn cache_stats(&self) -> (u64, u64) {
         (self.cache.hits, self.cache.misses)
     }
@@ -390,6 +393,7 @@ impl Model {
         {
             return Err(new_failure(&eval, r));
         }
+        adopt_piece_seeds(&mut candidate, &eval);
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
         self.undo.push((label.to_string(), old));
@@ -529,5 +533,62 @@ fn new_failure(eval: &Evaluation, r: &crate::FeatureResult) -> DocError {
 impl Default for Model {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Store the piece seeds of every feature `eval` evaluated (ADR 0003, piece
+/// identity): a cut or split that separates a body records where each of its
+/// pieces is, so the next regeneration recognises them after an upstream
+/// edit. Features that failed or were not evaluated keep their seeds.
+fn adopt_piece_seeds(doc: &mut Document, eval: &Evaluation) {
+    for r in &eval.features {
+        if r.health.state != crate::HealthState::Healthy {
+            continue;
+        }
+        if let Ok(f) = doc.feature_mut(r.id)
+            && f.piece_seeds != r.piece_seeds
+        {
+            f.piece_seeds = r.piece_seeds.clone();
+        }
+    }
+    adopt_face_prints(doc, eval);
+}
+
+/// Keep [`crate::Feature::face_prints`] of every STEP import equal to the
+/// faces the document references: a stored print stays as it was (it is
+/// what the reference meant, even if the face no longer matches), a newly
+/// referenced planar face gets the print of the face as imported now, and
+/// prints of faces nothing references any more are dropped.
+fn adopt_face_prints(doc: &mut Document, eval: &Evaluation) {
+    let imports: Vec<FeatureId> = doc
+        .features
+        .iter()
+        .filter(|f| matches!(f.kind, crate::FeatureKind::ImportStep { .. }))
+        .map(|f| f.id)
+        .collect();
+    for id in imports {
+        let refs = crate::regen::imported_face_refs(doc, id);
+        let Ok(f) = doc.feature(id) else { continue };
+        let prints: Vec<crate::ImportFacePrint> = refs
+            .iter()
+            .filter_map(|&(body, face)| {
+                f.face_prints
+                    .iter()
+                    .find(|p| p.body == body && p.face == face)
+                    .cloned()
+                    .or_else(|| {
+                        eval.import_planes
+                            .get(&(id, body))?
+                            .iter()
+                            .find(|p| p.index == face)
+                            .map(|p| crate::ImportFacePrint::of(body, p))
+                    })
+            })
+            .collect();
+        if f.face_prints != prints
+            && let Ok(f) = doc.feature_mut(id)
+        {
+            f.face_prints = prints;
+        }
     }
 }

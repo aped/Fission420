@@ -263,10 +263,11 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
     let volume = app.volume().map_or("null".to_string(), |v| v.to_string());
     let editing = app.sketch_session().map_or("null".to_string(), |ss| {
         format!(
-            "{{\"status\":\"{:?}\",\"dof\":{},\"entities\":{},\"dims\":{}}}",
+            "{{\"status\":\"{:?}\",\"dof\":{},\"entities\":{},\"projected\":{},\"dims\":{}}}",
             ss.editor.report.status,
             ss.editor.report.dof,
-            ss.editor.sketch.entities.len(),
+            ss.editor.drawn_entity_count(),
+            ss.editor.projected.len(),
             ss.editor.sketch.dimensions().len()
         )
     });

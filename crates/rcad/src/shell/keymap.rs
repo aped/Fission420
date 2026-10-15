@@ -111,6 +111,8 @@ pub enum SketchKey {
     FinishChain,
     Escape,
     LookAt,
+    /// Typed heads-up fields for the shape being drawn.
+    HudTab,
 }
 
 /// Sketch-mode bindings of `layer`, most specific first.
@@ -143,6 +145,8 @@ pub fn sketch_bindings(layer: KeymapLayer) -> Vec<(Chord, SketchKey)> {
         (k(Key::D), S::Tool(T::Dimension)),
         (k(Key::T), S::Tool(T::Trim)),
         (k(Key::O), S::Tool(T::Offset)),
+        (k(Key::P), S::Tool(T::Project)),
+        (k(Key::Tab), S::HudTab),
         (k(Key::Delete), S::Delete),
         (k(Key::Backspace), S::Delete),
         (k(Key::Enter), S::FinishChain),
@@ -173,6 +177,7 @@ pub fn sketch_help(layer: KeymapLayer) -> String {
             SketchKey::FinishChain => "end line chain".into(),
             SketchKey::Escape => "cancel gesture, then tool".into(),
             SketchKey::LookAt => "look at the sketch".into(),
+            SketchKey::HudTab => "type length/angle while drawing".into(),
         };
         if c.key == Key::Backspace {
             continue;

@@ -39,7 +39,10 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// surfaces, ...). Written only when used (otherwise v6 or older as before).
 /// v8: the additions listed in [`v8_feature`] (sketch ellipses and splines, extra bodies of cuts that
 /// split a body, ...). Written only when used (otherwise v7 or older as before).
-pub const FORMAT_VERSION: u32 = 8;
+/// v9: the additions listed in [`v9_feature`] (piece identity seeds of cuts
+/// and splits that separate a body, contour flanges ordered by geometry).
+/// Written only when used.
+pub const FORMAT_VERSION: u32 = 9;
 /// Oldest version this build reads.
 pub const MIN_FORMAT_VERSION: u32 = 1;
 /// Refuse to parse native files larger than this (v3 embeds imported source files).
@@ -342,6 +345,28 @@ fn part_v7_feature(doc: &Document) -> Option<&'static str> {
 /// What in `doc` needs format v8, if anything (see [`FORMAT_VERSION`]).
 /// Every v8 addition that an older build would ignore or misread must be
 /// listed here. Each area keeps its checks in its own helper below.
+/// What in `doc` needs format v9, if anything (see [`FORMAT_VERSION`]).
+pub fn v9_feature(doc: &Document) -> Option<&'static str> {
+    if doc.features.iter().any(|f| !f.piece_seeds.is_empty()) {
+        return Some("piece identity of cuts and splits that separate a body");
+    }
+    if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
+        return Some("prints of referenced imported faces");
+    }
+    doc.features
+        .iter()
+        .any(|f| {
+            matches!(
+                f.kind,
+                crate::FeatureKind::SheetMetal {
+                    geometric_order: true,
+                    ..
+                }
+            )
+        })
+        .then_some("contour flanges ordered by geometry")
+}
+
 pub fn v8_feature(doc: &Document) -> Option<&'static str> {
     part_v8_feature(doc)
         .or_else(|| finish_v8_feature(doc))
@@ -447,7 +472,9 @@ pub fn sketch_v6_feature(doc: &Document) -> Option<&'static str> {
 /// The oldest format version that can hold `doc`: 8 / 7 / 6 / 5 when it uses a
 /// v8 / v7 / v6 / v5 feature, else 4.
 pub fn required_version(doc: &Document) -> u32 {
-    if v8_feature(doc).is_some() {
+    if v9_feature(doc).is_some() {
+        9
+    } else if v8_feature(doc).is_some() {
         8
     } else if v7_feature(doc).is_some() {
         7

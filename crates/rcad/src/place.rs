@@ -463,6 +463,7 @@ mod tests {
             rolled_back: false,
             health: Default::default(),
             projections: vec![],
+            projection_entities: vec![],
             sheet_relief: None,
             definition: None,
         };

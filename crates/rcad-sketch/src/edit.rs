@@ -224,6 +224,35 @@ impl Sketch {
         true
     }
 
+    /// Fix (pin) each point at its current position with a `FixedPoint`
+    /// (points already pinned that way are skipped). Returns how many were
+    /// added. Does not solve.
+    pub fn fix_points(&mut self, points: &[PointId]) -> usize {
+        let mut n = 0;
+        for &p in points {
+            let pinned = self
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::FixedPoint { p: q, .. } if *q == p));
+            if let (false, Some([x, y])) = (pinned, self.point_xy(p)) {
+                self.constraints.push(Constraint::FixedPoint { p, x, y });
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Remove the `FixedPoint` pins of `points` (never the origin's).
+    /// Returns how many were removed. Does not solve.
+    pub fn unfix_points(&mut self, points: &[PointId]) -> usize {
+        let origin = self.origin;
+        let before = self.constraints.len();
+        self.constraints.retain(|c| {
+            !matches!(c, Constraint::FixedPoint { p, .. } if points.contains(p) && Some(*p) != origin)
+        });
+        before - self.constraints.len()
+    }
+
     pub fn remove_constraint(&mut self, index: usize) -> Option<Constraint> {
         (index < self.constraints.len()).then(|| self.constraints.remove(index))
     }
@@ -328,6 +357,11 @@ impl Sketch {
                 )
             }
             Constraint::PointOnLine { point, line } => format!("{} on L{}", p(point), line.0),
+            Constraint::Concentric { a, b } => format!("Concentric #{} and #{}", a.0, b.0),
+            Constraint::Collinear { a, b } => format!("Collinear L{} and L{}", a.0, b.0),
+            Constraint::Symmetric { a, b, line } => {
+                format!("{} and {} symmetric about L{}", p(a), p(b), line.0)
+            }
             Constraint::Offset { pairs, dim } => format!(
                 "{} = {} (offset of {} curve{})",
                 dim.name,
@@ -506,6 +540,7 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => vec![*a, *b],
         Constraint::SymmetricAboutPoint { a, b, center } => vec![*a, *b, *center],
+        Constraint::Symmetric { a, b, .. } => vec![*a, *b],
         Constraint::PatternStep { from, to, a, b, .. } => vec![*from, *to, *a, *b],
         Constraint::PatternRotate {
             from, to, center, ..
@@ -525,6 +560,8 @@ pub(crate) fn constraint_points(c: &Constraint) -> Vec<PointId> {
         | Constraint::Perpendicular { .. }
         | Constraint::EqualLength { .. }
         | Constraint::Angle { .. }
+        | Constraint::Concentric { .. }
+        | Constraint::Collinear { .. }
         | Constraint::Offset { .. } => vec![],
     }
 }
@@ -543,7 +580,8 @@ pub(crate) fn constraint_entities(c: &Constraint) -> Vec<EntityId> {
         | Constraint::Perpendicular { a, b }
         | Constraint::EqualLength { a, b }
         | Constraint::Angle { a, b, .. } => vec![*a, *b],
-        Constraint::PointOnLine { line, .. } => vec![*line],
+        Constraint::PointOnLine { line, .. } | Constraint::Symmetric { line, .. } => vec![*line],
+        Constraint::Concentric { a, b } | Constraint::Collinear { a, b } => vec![*a, *b],
         Constraint::PointOnCircle { circle, .. } => vec![*circle],
         Constraint::Offset { pairs, .. } => pairs.iter().flat_map(|p| [p.source, p.copy]).collect(),
         _ => vec![],

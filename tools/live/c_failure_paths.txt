@@ -32,16 +32,16 @@ key d
 sclick 0 -25
 type 80
 key Return
-# a second width on the top edge is redundant: rejected, nothing added
+# a second width on the top edge is redundant: added driven (measuring)
 sclick 0 25
-expect editing.dims 1
+expect editing.dims 2
 shot
 key Escape
 clickdim width
 clickdim width
 type abc
 key Return
-expect editing.dims 1
+expect editing.dims 2
 shot
 key Escape
 clickw Finish Sketch

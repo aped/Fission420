@@ -117,6 +117,17 @@ All edits work on the body's compressed topology (`Solid::compress` → edit →
   reversed; anchoring the generatrix elsewhere made it worse. Repro: export the
   `edits_compose_and_export` body, import it with that branch, `check_mesh(tessellate(..,
   0.01))`. Left unsupported rather than import a body that meshes wrong.
+
+  Update: the importer now reads `SURFACE_OF_REVOLUTION` (LINE or B-spline swept curve,
+  `AXIS1_PLACEMENT`; `surface_of_revolution` in `crates/rcad-kernel/src/step_in/geom.rs`).
+  Because the normal convention of R-CAD-written solids varies, `build_checked` in
+  `step_in/mod.rs` tries both normals per solid and keeps the one that tessellates watertight
+  and consistently oriented; with neither the solid is refused (observed: a face reaching the
+  seam angle, R-CAD-written spheres with poles). Tests: `surfaces_of_revolution_written_by_r_cad_read_back`
+  (`crates/rcad-kernel/tests/step_export_assembly.rs`: re-exported imported cylinder and torus,
+  same volume) and `revolve_washer_roundtrip` (`step_curved_roundtrip.rs`). No test
+  re-imports a direct-edited export (`edits_compose_and_export` checks only that it is written),
+  so re-import of edited bodies is not claimed beyond those limits (docs/formats/step.md).
 * Direct edits must come before modeled features on an imported body.
 
 ## Addendum: countersink (task 2, same machinery)

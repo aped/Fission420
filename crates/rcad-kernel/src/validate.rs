@@ -62,7 +62,7 @@ impl Prism<'_> {
 }
 
 /// Chord used for the validation tessellations, relative to the part size.
-fn check_chord(diag: f64) -> f64 {
+pub(crate) fn check_chord(diag: f64) -> f64 {
     (diag * 1.0e-4).clamp(1.0e-3, 0.02)
 }
 

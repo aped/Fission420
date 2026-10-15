@@ -74,6 +74,22 @@ enum Eq {
     /// `u × (p - a)` with `u` the unit direction `a -> b`: signed distance (mm)
     /// of point `p` from the infinite line through `a`, `b`.
     PointLine { p: usize, a: usize, b: usize },
+    /// `u × ((p + q)/2 − a)`: signed distance (mm) of the midpoint of `p`, `q`
+    /// from the infinite line through `a`, `b` (symmetry).
+    MidLine {
+        p: usize,
+        q: usize,
+        a: usize,
+        b: usize,
+    },
+    /// `u · (q − p)` with `u` the unit direction `a -> b` (mm): zero when
+    /// `p -> q` is perpendicular to the line (symmetry).
+    PerpLine {
+        p: usize,
+        q: usize,
+        a: usize,
+        b: usize,
+    },
     /// `PointLine − v` (offset copy vertex on the offset of a source line).
     PointLineOff {
         p: usize,
@@ -199,6 +215,15 @@ impl Eq {
             Eq::PointLine { p, a, b } => {
                 let (ux, uy, _) = unit(x, a, b);
                 ux * (x[p + 1] - x[a + 1]) - uy * (x[p] - x[a])
+            }
+            Eq::MidLine { p, q, a, b } => {
+                let (ux, uy, _) = unit(x, a, b);
+                let (mx, my) = (0.5 * (x[p] + x[q]), 0.5 * (x[p + 1] + x[q + 1]));
+                ux * (my - x[a + 1]) - uy * (mx - x[a])
+            }
+            Eq::PerpLine { p, q, a, b } => {
+                let (ux, uy, _) = unit(x, a, b);
+                ux * (x[q] - x[p]) + uy * (x[q + 1] - x[p + 1])
             }
             Eq::PointLineOff { p, a, b, v } => Eq::PointLine { p, a, b }.eval(x) - v,
             Eq::SameDistOff { c, a, d, b, v } => Eq::SameDist { c, a, d, b }.eval(x) - v,
@@ -371,6 +396,32 @@ impl Eq {
                 j[(row, a + 1)] -= ux;
                 add_unit_grad(x, j, row, a, b, (vy, -vx));
             }
+            Eq::MidLine { p, q, a, b } => {
+                // f = u × v with v = m − a, m = (p + q)/2: df/dm = (−uy, ux)
+                // (half to each of p, q), df/da = (uy, −ux), df/du = (vy, −vx).
+                let (ux, uy, _) = unit(x, a, b);
+                let (vx, vy) = (
+                    0.5 * (x[p] + x[q]) - x[a],
+                    0.5 * (x[p + 1] + x[q + 1]) - x[a + 1],
+                );
+                for c in [p, q] {
+                    j[(row, c)] -= 0.5 * uy;
+                    j[(row, c + 1)] += 0.5 * ux;
+                }
+                j[(row, a)] += uy;
+                j[(row, a + 1)] -= ux;
+                add_unit_grad(x, j, row, a, b, (vy, -vx));
+            }
+            Eq::PerpLine { p, q, a, b } => {
+                // f = u · w with w = q − p: df/dq = u, df/dp = −u, df/du = w.
+                let (ux, uy, _) = unit(x, a, b);
+                j[(row, q)] += ux;
+                j[(row, q + 1)] += uy;
+                j[(row, p)] -= ux;
+                j[(row, p + 1)] -= uy;
+                let w = (x[q] - x[p], x[q + 1] - x[p + 1]);
+                add_unit_grad(x, j, row, a, b, w);
+            }
             Eq::PointLineOff { p, a, b, .. } => Eq::PointLine { p, a, b }.jac(x, j, row),
             Eq::SameDistOff { c, a, d, b, .. } => Eq::SameDist { c, a, d, b }.jac(x, j, row),
             Eq::VertLine { p, q, a, b, v, k } => {
@@ -498,6 +549,10 @@ impl System {
         let mut eqs = Vec::new();
         let mut owner = Vec::new();
         for (ci, c) in s.constraints.iter().enumerate() {
+            // A driven dimension measures; it adds no equation.
+            if c.dimension().is_some_and(|d| d.driven) {
+                continue;
+            }
             let mut push = |e: Eq| {
                 eqs.push(e);
                 owner.push(ci);
@@ -717,6 +772,48 @@ impl System {
                             d: b0,
                             b: b1,
                         });
+                    }
+                }
+                Constraint::Concentric { a, b } => {
+                    let centre = |id: &crate::EntityId| match entity(id) {
+                        Some(Entity::Circle { center, .. } | Entity::Arc { center, .. }) => {
+                            point_col.get(center).copied()
+                        }
+                        _ => None,
+                    };
+                    if let (Some(ca), Some(cb)) = (centre(a), centre(b)) {
+                        push(Eq::Diff {
+                            a: ca,
+                            b: cb,
+                            v: 0.0,
+                        });
+                        push(Eq::Diff {
+                            a: ca + 1,
+                            b: cb + 1,
+                            v: 0.0,
+                        });
+                    }
+                }
+                Constraint::Collinear { a, b } => {
+                    if let (Some(&(a0, a1)), Some(&(b0, b1))) = (lines.get(a), lines.get(b)) {
+                        push(Eq::PointLine {
+                            p: b0,
+                            a: a0,
+                            b: a1,
+                        });
+                        push(Eq::PointLine {
+                            p: b1,
+                            a: a0,
+                            b: a1,
+                        });
+                    }
+                }
+                Constraint::Symmetric { a, b, line } => {
+                    if let (Some(&p), Some(&q), Some(&(l0, l1))) =
+                        (point_col.get(a), point_col.get(b), lines.get(line))
+                    {
+                        push(Eq::MidLine { p, q, a: l0, b: l1 });
+                        push(Eq::PerpLine { p, q, a: l0, b: l1 });
                     }
                 }
                 Constraint::PointOnLine { point, line } => {
@@ -1374,6 +1471,62 @@ mod tests {
             }
         }
         max_err
+    }
+
+    /// Concentric, Collinear and Symmetric rows against central finite
+    /// differences at a generic configuration, and their residuals against
+    /// hand values.
+    #[test]
+    fn concentric_collinear_symmetric_rows_match_finite_differences() {
+        let mut s = Sketch::default();
+        let pts = [
+            (0.4, -0.3), // 0 line a start
+            (9.1, 1.2),  // 1 line a end
+            (-1.5, 8.7), // 2 line b start
+            (3.0, 13.0), // 3 line b end
+            (2.0, 3.0),  // 4 circle 1 centre
+            (2.5, 2.2),  // 5 circle 2 centre
+            (7.0, 5.0),  // 6 symmetric p
+            (1.0, -4.0), // 7 symmetric q
+        ];
+        for (x, y) in pts {
+            s.add_point(x, y);
+        }
+        let la = s.add_line(PointId(0), PointId(1));
+        let lb = s.add_line(PointId(2), PointId(3));
+        let c1 = s.add_circle(PointId(4), 3.0);
+        let c2 = s.add_circle(PointId(5), 5.0);
+        s.constraints = vec![
+            Constraint::Concentric { a: c1, b: c2 },
+            Constraint::Collinear { a: la, b: lb },
+            Constraint::Symmetric {
+                a: PointId(6),
+                b: PointId(7),
+                line: la,
+            },
+        ];
+        s.validate().unwrap();
+        let sys = System::build(&s);
+        assert_eq!(sys.eqs.len(), 6);
+        let x0 = sys.initial.clone();
+        let err = fd_error(&sys, &x0, 1e-6);
+        assert!(err < 1e-7, "Jacobian vs finite differences: {err:e}");
+        // Hand values. u = (8.7, 1.5)/|.|; midpoint of P6, P7 = (4, 0.5).
+        let (dx, dy) = (8.7f64, 1.5f64);
+        let n = dx.hypot(dy);
+        let side = |px: f64, py: f64| (dx * (py + 0.3) - dy * (px - 0.4)) / n;
+        let want = [
+            2.5 - 2.0,
+            2.2 - 3.0,
+            side(-1.5, 8.7),
+            side(3.0, 13.0),
+            side(4.0, 0.5),
+            (dx * (1.0 - 7.0) + dy * (-4.0 - 5.0)) / n,
+        ];
+        for (i, w) in want.iter().enumerate() {
+            let got = sys.eqs[i].eval(&x0);
+            assert!((got - w).abs() < 1e-12, "row {i}: {got} vs {w}");
+        }
     }
 
     /// Two lines L1 = P0->P1, L2 = P2->P3, point P4; every line relation.

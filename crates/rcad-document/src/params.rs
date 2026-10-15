@@ -728,6 +728,8 @@ fn kind_has(kind: &FeatureKind, name: &str) -> bool {
         notes: vec![],
         expressions: Default::default(),
         suppressed: false,
+        piece_seeds: Default::default(),
+        face_prints: Vec::new(),
     }
     .parameters()
     .iter()

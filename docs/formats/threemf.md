@@ -2,9 +2,8 @@
 
 Wired into commands (`import_3mf`, `export_3mf`; document base feature
 `Import3mf`, mesh bodies); desktop UI: Import… and Export 3MF…
-(`crates/rcad/src/exchange.rs`, test `exchange_ui.rs::threemf_import_export_and_svg_sketch`). The section "Command
-integration" below records the original proposal, implemented as written (no colours: the
-document has no body colour yet).
+(`crates/rcad/src/exchange.rs`, test `exchange_ui.rs::threemf_import_export_and_svg_sketch`). The commands
+are listed under "Command integration" below (no colours: the document has no body colour yet).
 
 Clean-room implementation from the public 3MF Core Specification 1.3 (3MF Consortium) and
 ECMA-376 Part 2 (Open Packaging Conventions). Container: `crates/rcad-exchange/src/zip.rs`
@@ -81,19 +80,21 @@ exact B-rep geometry is tessellated by the caller (3MF is a mesh format).
 * Writer validated independently: `tools/fixtures/threemf/validate_writer.sh` (Python stdlib
   reader + FreeCAD 1.1.4): PASS.
 
-## Command integration (not done; proposed API)
-```rust
-/// Import every build item of a 3MF package as a mesh body (one ImportMesh-like base
-/// feature per file, source embedded as a blob, name from the object name). Units come
-/// from the file (always declared, default millimeter).
-Command::Import3mf { path: PathBuf }
-/// Write `bodies` (default: all visible) as one 3MF object each: B-rep bodies
-/// tessellated at `chord` (watertightness checked as for STL), mesh bodies as imported;
-/// `unit` (default millimeter); optional per-body colour when the document has one.
-Command::Export3mf { path: PathBuf, #[serde(default)] chord: Option<f64>,
-                     #[serde(default)] bodies: Option<Vec<BodyId>>,
-                     #[serde(default)] unit: Option<ThreeMfUnit> }
-```
-Needed in `rcad-document`: a `FeatureKind::ImportMesh` variant (or a format tag on the
-existing one) that regenerates N mesh bodies from a 3MF blob via `threemf::read`, keeping
-per-body colour if the body model gains one.
+## Command integration
+
+Commands in `crates/rcad-commands/src/lib.rs` (`Command` enum):
+
+* `import_3mf {path}`: every build item of the package as a mesh body (display/export only, like
+  STL), units from the file, source embedded as a blob behind one base feature
+  `FeatureKind::Import3mf {blob, bodies}` (`crates/rcad-document/src/model.rs`), which regenerates
+  the bodies through `rcad_document::import::threemf`. Body names come from the object names.
+  Object colours read by `threemf::read` are dropped (`ThreeMfObject` has no colour).
+* `export_3mf {path, chord?, bodies?, unit?, ...print options}`: `bodies` (default: all
+  visible) as one object each, B-rep bodies tessellated at `chord` and solid-checked, mesh
+  bodies as imported (solid-checked unless `allow_open_meshes`); `unit` default millimetre;
+  print options (`item_transforms`, placement, ...) in docs/PRINT_EXPORT.md. Written by
+  `crates/rcad-commands/src/print.rs` with `color: None`.
+* `export_assembly {path, format: "3mf"}`: one object per placed body, named per occurrence,
+  millimetres, default chord, solid-checked (`crates/rcad-commands/src/assembly.rs`, also
+  `color: None`). No components or build-item hierarchy are written.
+* `export_configurations {..., "3mf": true}`: `export_3mf` per configuration.

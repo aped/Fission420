@@ -30,6 +30,8 @@ pub struct Palette {
     pub conflict: Color32,
     pub preview: Color32,
     pub plane: Color32,
+    /// Projected (linked, read-only) geometry.
+    pub projected: Color32,
 }
 
 pub const PALETTE: Palette = Palette {
@@ -42,6 +44,7 @@ pub const PALETTE: Palette = Palette {
     conflict: Color32::from_rgb(255, 90, 90),
     preview: Color32::from_rgb(255, 205, 60),
     plane: Color32::from_rgba_premultiplied(8, 16, 30, 30),
+    projected: Color32::from_rgb(190, 120, 255),
 };
 
 /// Projection of sketch-plane points to absolute screen positions.
@@ -94,6 +97,8 @@ pub struct SketchStyle<'a> {
     pub glyphs: bool,
     /// Multiplier for all colours' alpha (dimmed read-only previews).
     pub alpha: f32,
+    /// Projected (linked) entities, drawn in the projected colour.
+    pub projected: &'a [EntityId],
 }
 
 fn fade(c: Color32, a: f32) -> Color32 {
@@ -245,7 +250,15 @@ pub fn paint_sketch(
     for e in &s.entities {
         let item = Item::Entity(e.id());
         let construction = s.is_construction(e.id());
-        let c = if construction {
+        let c = if st.projected.contains(&e.id())
+            && !st.selection.contains(&item)
+            && st.hover != Some(item)
+        {
+            fade(
+                PALETTE.projected,
+                st.alpha * if construction { 0.75 } else { 1.0 },
+            )
+        } else if construction {
             fade(color_of(item), 0.6)
         } else {
             color_of(item)
@@ -500,6 +513,34 @@ pub fn paint_sketch(
                     targets.push((item, glyph("On", sp + egui::vec2(14.0, -12.0))));
                 }
             }
+            Constraint::Concentric { a, .. } => {
+                let centre = match s.entity(*a) {
+                    Some(Entity::Circle { center, .. } | Entity::Arc { center, .. }) => {
+                        s.point_xy(*center)
+                    }
+                    _ => None,
+                };
+                if let Some(sp) = centre.and_then(|p| pr.screen(p)) {
+                    targets.push((item, glyph("Con", sp + egui::vec2(12.0, 12.0))));
+                }
+            }
+            Constraint::Collinear { a, b } => {
+                for l in [a, b] {
+                    if let Some(Entity::Line { a: p, b: q, .. }) = s.entity(*l)
+                        && let (Some(pp), Some(pq)) = (s.point_xy(*p), s.point_xy(*q))
+                        && let Some(sm) = pr.screen([0.5 * (pp[0] + pq[0]), 0.5 * (pp[1] + pq[1])])
+                    {
+                        targets.push((item, glyph("Col", sm + egui::vec2(0.0, 12.0))));
+                    }
+                }
+            }
+            Constraint::Symmetric { a, b, .. } => {
+                for p in [a, b] {
+                    if let Some(sp) = s.point_xy(*p).and_then(|q| pr.screen(q)) {
+                        targets.push((item, glyph("Sym", sp + egui::vec2(14.0, 12.0))));
+                    }
+                }
+            }
             Constraint::Coincident { a, .. } => {
                 if let Some(sp) = s.point_xy(*a).and_then(|p| pr.screen(p)) {
                     targets.push((item, glyph("C", sp + egui::vec2(11.0, -11.0))));
@@ -515,7 +556,15 @@ pub fn paint_sketch(
                     targets.push((item, glyph(t, sp + egui::vec2(22.0, 16.0))));
                 }
             }
-            Constraint::FixedPoint { p, .. } if s.origin != Some(*p) => {
+            // Pins of projected curves follow their link: no glyph (the
+            // curve's colour says it is projected).
+            Constraint::FixedPoint { p, .. }
+                if s.origin != Some(*p)
+                    && !st
+                        .projected
+                        .iter()
+                        .any(|e| s.entity(*e).is_some_and(|x| x.points().contains(p))) =>
+            {
                 if let Some(sp) = s.point_xy(*p).and_then(|q| pr.screen(q)) {
                     targets.push((item, glyph("Fix", sp + egui::vec2(-16.0, 12.0))));
                 }
@@ -536,12 +585,15 @@ fn paint_dimension(
     editing: bool,
 ) -> Option<egui::Rect> {
     let d = c.dimension()?;
+    let v = if d.driven { d.value.abs() } else { d.value };
     let text = match c {
-        Constraint::Diameter { .. } => format!("Ø{} mm", rcad_sketch::fmt_mm(d.value)),
-        Constraint::Radius { .. } => format!("R{} mm", rcad_sketch::fmt_mm(d.value)),
-        Constraint::Angle { .. } => format!("{}°", rcad_sketch::fmt_mm(d.value)),
-        _ => format!("{} mm", rcad_sketch::fmt_mm(d.value)),
+        Constraint::Diameter { .. } => format!("Ø{} mm", rcad_sketch::fmt_mm(v)),
+        Constraint::Radius { .. } => format!("R{} mm", rcad_sketch::fmt_mm(v)),
+        Constraint::Angle { .. } => format!("{}°", rcad_sketch::fmt_mm(v)),
+        _ => format!("{} mm", rcad_sketch::fmt_mm(v)),
     };
+    // Driven (measuring) dimensions are shown in parentheses.
+    let text = if d.driven { format!("({text})") } else { text };
     let stroke = Stroke::new(1.2, col);
     match c {
         Constraint::HorizontalDistance { a, b, .. }
@@ -903,6 +955,9 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
             SketchTool::Select
             | SketchTool::Trim
             | SketchTool::Extend
+            | SketchTool::Break
+            | SketchTool::Project
+            | SketchTool::Intersect
             | SketchTool::Offset
             | SketchTool::Fillet
             | SketchTool::Text => {}

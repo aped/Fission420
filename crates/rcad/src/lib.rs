@@ -33,6 +33,8 @@ pub mod section;
 pub mod sheet_ui;
 pub mod shell;
 pub mod sketch_edit;
+pub mod sketch_hud;
+pub mod sketch_project;
 pub mod sketch_view;
 pub mod text_ui;
 pub mod view3d;
