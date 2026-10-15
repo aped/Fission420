@@ -1,8 +1,10 @@
 //! Browser tree nodes in Fusion's order: Document Settings (units), Named
 //! Views, Origin (the world planes), then the document's sections, Bodies
-//! (with Components), Sketches and Construction. The first three are one row
-//! of node menus so the tree stays short in a 800 px window; Sketches and
-//! Construction are collapsible nodes. Accessible names: "Document Settings",
+//! (with Components), Sketches and Construction. The first three are node
+//! menus on the Browser heading's row (shown as Settings / Views / Origin) so
+//! the column stays short in a 800 px window; Sketches and Construction are
+//! collapsible nodes, drawn after the History list so its rows keep their
+//! place. Accessible names: "Document Settings",
 //! "Named Views", "Origin", "Sketches (N)", "Construction (N)", and
 //! "Browser <sketch>" for sketch rows (History keeps the bare names).
 
@@ -15,8 +17,8 @@ use crate::probe::Probe as _;
 impl RcadApp {
     /// Document Settings ▸ Units, Named Views, Origin.
     pub(crate) fn browser_top_nodes(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.menu_button("⚙ Document Settings", |ui| {
+        {
+            ui.menu_button("⚙ Settings", |ui| {
                 ui.label(RichText::new("Units").strong());
                 ui.label("Length: millimetre (mm)").on_hover_text(
                     "Model units are millimetres and degrees; parameters may use mm, cm, m or in",
@@ -25,7 +27,7 @@ impl RcadApp {
             })
             .response
             .named("Document Settings");
-            ui.menu_button("Named Views", |ui| {
+            ui.menu_button("Views", |ui| {
                 use crate::shell::{CmdId as C, registry};
                 for id in [
                     C::ViewTop,
@@ -68,10 +70,10 @@ impl RcadApp {
             })
             .response
             .named("Origin");
-        });
+        }
     }
 
-    /// Sketches and Construction nodes (after Bodies).
+    /// Sketches and Construction nodes (after Bodies; drawn below History).
     pub(crate) fn browser_sketch_nodes(&mut self, ui: &mut egui::Ui) {
         let sketches: Vec<_> = self
             .summary

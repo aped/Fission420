@@ -346,19 +346,23 @@ impl RcadApp {
     // ----- browser -----
 
     pub(crate) fn history(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Browser");
+        // The Browser heading shares its row with the first tree nodes.
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Browser");
+            if self.summary.open {
+                self.browser_top_nodes(ui);
+            }
+        });
         if !self.summary.open {
             ui.weak("No document open. Use New or Open….");
             return;
         }
-        self.browser_top_nodes(ui);
         self.parameters_panel(ui);
         self.configurations_panel(ui);
         self.configuration_table(ui);
         self.drawings_panel(ui);
         ui.separator();
         self.bodies_browser(ui);
-        self.browser_sketch_nodes(ui);
         ui.add_space(4.0);
         ui.separator();
         ui.label(RichText::new("History").strong());
@@ -656,7 +660,7 @@ impl RcadApp {
     // ----- inspector -----
 
     pub(crate) fn inspector_ui(&mut self, ui: &mut egui::Ui, _busy: bool) {
-        ui.heading("Inspector");
+        // The "Inspector" heading is the right column's tab (shell::properties).
         if let Some(info) = self.selected_face().cloned() {
             ui.label(RichText::new("Selected face").strong());
             ui.label(&info.description);
@@ -1714,6 +1718,11 @@ impl RcadApp {
         let opened = self.last_dialog != Some(dlg.title());
         self.last_dialog = Some(dlg.title());
         AUTOFOCUS.with(|a| a.set(opened));
+        if opened {
+            // The docked window lays itself out over two frames (sizing pass,
+            // then shown); ask for both even without further input.
+            ctx.request_repaint();
+        }
         // Enter confirms and Escape cancels (also while a field has focus).
         let (enter, esc) = ctx.input(|i| {
             (

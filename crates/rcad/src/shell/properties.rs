@@ -25,7 +25,7 @@ impl RcadApp {
         ui.horizontal(|ui| {
             for (props, l) in [(true, "Properties"), (false, "Inspector")] {
                 if ui
-                    .selectable_label(self.shell.properties == props, RichText::new(l).strong())
+                    .selectable_label(self.shell.properties == props, RichText::new(l).heading())
                     .named(&format!("{l} tab"))
                     .clicked()
                 {
@@ -33,7 +33,6 @@ impl RcadApp {
                 }
             }
         });
-        ui.separator();
     }
 
     pub(crate) fn properties_ui(&mut self, ui: &mut egui::Ui) {

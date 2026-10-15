@@ -2304,6 +2304,11 @@ impl RcadApp {
                     .id_salt("browser_scroll")
                     .show(ui, |ui| {
                         self.history(ui);
+                        if self.summary.open {
+                            // After History so the long-standing rows keep
+                            // their place in the column.
+                            self.browser_sketch_nodes(ui);
+                        }
                         ui.add_space(8.0);
                         ui.separator();
                         self.diagnostics_ui(ui);
