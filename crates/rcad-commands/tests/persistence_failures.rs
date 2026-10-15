@@ -7,9 +7,11 @@
 //! exports into an unwritable directory write nothing.
 //!
 //! Permission cases need a non-root user (root ignores directory permissions);
-//! they are skipped with a message when the probe write succeeds anyway.
+//! they are skipped with a message when the probe write succeeds anyway. They use
+//! Unix mode bits, so they run on Unix only (Windows has no read-only directories).
 use rcad_commands::{Command, Response, Session, SketchTemplate};
 use rcad_document::SketchPlane;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -48,6 +50,7 @@ fn entries(d: &Path) -> Vec<String> {
 }
 
 /// Whether directory permissions are enforced for this user.
+#[cfg(unix)]
 fn perms_enforced(d: &Path) -> bool {
     let probe = d.join("probe");
     let w = std::fs::write(&probe, b"x").is_err();
@@ -55,6 +58,7 @@ fn perms_enforced(d: &Path) -> bool {
     w
 }
 
+#[cfg(unix)]
 #[test]
 fn failed_save_keeps_the_previous_file_and_the_document() {
     let dir = tempfile::tempdir().unwrap();
@@ -230,6 +234,7 @@ fn stale_temporary_files_do_not_matter() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn export_into_an_unwritable_directory_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
