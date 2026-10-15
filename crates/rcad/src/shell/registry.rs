@@ -406,7 +406,7 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [], classic: [],
         places: [Place::FileExport, ribbon(Tab::Utilities, Group::Make, true)], mm: None,
         enabled: open, run: |a| a.open_print_export_dialog(true)),
-    def!(ExportStep, "Export STEP…", Export, "STEP AP242 of the selected or visible bodies",
+    def!(ExportStep, "Export STEP…", Export, "STEP (AP214) of the selected or visible bodies",
         fusion: [], classic: [],
         places: [Place::FileExport], mm: None,
         enabled: open, run: |a| a.export_step_dialog()),
