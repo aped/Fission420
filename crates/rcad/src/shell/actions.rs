@@ -653,6 +653,11 @@ impl RcadApp {
         }
     }
 
+    /// Feature the open command dialog edits (Edit Feature).
+    pub fn editing_feature(&self) -> Option<rcad_document::FeatureId> {
+        self.shell.editing.filter(|_| self.dialog.is_some())
+    }
+
     /// Active key layer.
     pub fn keymap(&self) -> super::KeymapLayer {
         self.shell.prefs.keymap

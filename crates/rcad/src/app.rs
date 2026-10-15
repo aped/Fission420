@@ -2302,10 +2302,11 @@ impl RcadApp {
                         }
                     });
             });
+        self.dialog_ui(ui, busy);
         egui::CentralPanel::no_frame().show(ui, |ui| self.view_ui(ui));
-        self.dialog_ui(&ctx, busy);
         if self.dialog.is_none() {
             self.last_dialog = None;
+            self.shell.editing = None;
         }
         if !matches!(
             self.dialog,
@@ -2450,10 +2451,13 @@ impl RcadApp {
     }
 }
 
+/// A dialog number: a plain number, or an expression with units and
+/// parameter names (see [`crate::dialogs::check_value`]).
 pub(crate) fn parse_num(label: &str, s: &str) -> Result<f64, String> {
-    s.trim()
-        .parse::<f64>()
-        .map_err(|_| format!("{label}: '{s}' is not a number"))
+    if let Ok(v) = s.trim().parse::<f64>() {
+        return Ok(v);
+    }
+    crate::dialogs::check_value(label, s).map_err(|e| format!("{label}: '{s}' {e}"))
 }
 
 pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {

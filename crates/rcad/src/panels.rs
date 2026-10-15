@@ -346,6 +346,7 @@ impl RcadApp {
         });
         let mut clicked = None;
         let mut edit = None;
+        let mut edit_feature = None;
         let mut rename = None;
         let mut delete = None;
         let feats = self.summary.features.clone();
@@ -408,13 +409,26 @@ impl RcadApp {
                 if r.clicked() {
                     clicked = Some(f.id);
                 }
-                if r.double_clicked() && f.kind == "sketch" {
-                    edit = Some(f.id);
+                if r.double_clicked() {
+                    if f.kind == "sketch" {
+                        edit = Some(f.id);
+                    } else {
+                        edit_feature = Some(f.id);
+                    }
                 }
                 r.context_menu(|ui| {
                     if f.kind == "sketch" && ui.button("Edit Sketch").probe("Edit Sketch").clicked()
                     {
                         edit = Some(f.id);
+                        ui.close();
+                    }
+                    if f.kind != "sketch"
+                        && ui
+                            .button("Edit Feature")
+                            .named(&format!("Edit Feature {}", f.name))
+                            .clicked()
+                    {
+                        edit_feature = Some(f.id);
                         ui.close();
                     }
                     if ui.button("Rename…").probe("Rename…").clicked() {
@@ -463,6 +477,9 @@ impl RcadApp {
             if let Some(id) = edit {
                 self.select(Some(id));
                 self.begin_sketch(SketchTarget::Existing(id));
+            }
+            if let Some(id) = edit_feature {
+                self.edit_feature(id);
             }
             if let Some(id) = rename {
                 self.rename = Some((id, self.feature_name(id)));
@@ -1481,10 +1498,17 @@ impl RcadApp {
 
     // ----- windows -----
 
-    pub(crate) fn dialog_ui(&mut self, ctx: &egui::Context, busy: bool) {
+    /// The docked command dialog: one panel at the right of the canvas
+    /// (its width is remembered in the preferences). Number fields take
+    /// expressions with units and parameter names (red with the reason when
+    /// invalid; OK is then disabled). Enter = OK, Esc = Cancel.
+    pub(crate) fn dialog_ui(&mut self, outer: &mut egui::Ui, busy: bool) {
+        let ctx = outer.ctx().clone();
+        let _ = outer;
         let Some(mut dlg) = self.dialog.take() else {
             return;
         };
+        crate::dialogs::set_expression_env(&self.summary.parameters);
         let features = self.summary.features.clone();
         let sketches: Vec<&FeatureSummary> =
             features.iter().filter(|f| f.kind == "sketch").collect();
@@ -1504,23 +1528,33 @@ impl RcadApp {
                 i.key_pressed(egui::Key::Escape),
             )
         });
-        egui::Window::new(dlg.title())
+        let width = self.shell.prefs.dialog_width.unwrap_or(360.0);
+        let title = match self.shell.editing {
+            Some(f) => format!("Edit {}", self.feature_name(f)),
+            None => dlg.title().to_string(),
+        };
+        // Docked at the right edge of the canvas, under the ribbon (Fusion's
+        // command-dialog position); one dialog at a time.
+        let screen = ctx.content_rect();
+        let view = self.view_rect.unwrap_or(screen);
+        let max_h = (view.height() - 90.0).max(120.0);
+        let dock = egui::Window::new(&title)
+            .id(egui::Id::new("rcad_command_dialog"))
             .collapsible(false)
-            .resizable(false)
+            .resizable([true, false])
+            .default_width(width)
+            .min_width(260.0)
             .anchor(
-                if matches!(dlg, Dialog::Extrude(_)) {
-                    // Beside the browser, clear of the model and its preview.
-                    egui::Align2::LEFT_TOP
-                } else {
-                    egui::Align2::CENTER_TOP
-                },
-                if matches!(dlg, Dialog::Extrude(_)) {
-                    [self.view_rect.map_or(270.0, |r| r.min.x + 8.0), 40.0]
-                } else {
-                    [0.0, 60.0]
-                },
+                egui::Align2::RIGHT_TOP,
+                [view.max.x - screen.max.x - 8.0, view.min.y - screen.min.y + 8.0],
             )
-            .show(ctx, |ui| {
+            .show(&ctx, |ui| {
+                crate::dialogs::begin_fields();
+                // Fields scroll; OK / Cancel stay at the bottom in view.
+                egui::ScrollArea::vertical()
+                    .id_salt("dialog_scroll")
+                    .max_height(max_h)
+                    .show(ui, |ui| {
                 match &mut dlg {
                     Dialog::Rectangle {
                         width,
@@ -1999,14 +2033,31 @@ impl RcadApp {
                         }
                     }
                 }
+                    });
+                let invalid = crate::dialogs::invalid_fields();
+                if let Some(why) = &invalid {
+                    ui.colored_label(BAD_COLOR, why);
+                }
+                ok_allowed &= invalid.is_none();
+                ui.separator();
                 ui.horizontal(|ui| {
                     ok = ui
-                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK")).probe("OK")
+                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK"))
+                        .probe("OK")
                         .clicked();
                     cancel = ui.button("Cancel").probe("Cancel").clicked();
                 });
                 ui.weak("Enter = OK · Esc = Cancel");
             });
+        // Remember a width the user dragged (not every layout jitter).
+        let w = dock.map_or(width, |d| d.response.rect.width());
+        if (w - width).abs() > 4.0 && w <= 640.0 && !ctx.input(|i| i.pointer.any_down()) {
+            self.shell.prefs.dialog_width = Some(w.round());
+            self.save_prefs();
+        }
+        for e in crate::dialogs::take_left_invalid() {
+            self.diag(true, "Input", e);
+        }
         AUTOFOCUS.with(|a| a.set(false));
         ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
@@ -2082,7 +2133,10 @@ impl RcadApp {
             }
         } else if ok {
             self.last_dialog = None;
-            match build_command(&dlg) {
+            let built = self
+                .redefine_command(&dlg)
+                .unwrap_or_else(|| build_command(&dlg));
+            match built {
                 Ok(Command::Open { path, safe_mode }) => {
                     self.guarded(if safe_mode {
                         Guarded::OpenSafe(path)
@@ -2307,20 +2361,38 @@ thread_local! {
 }
 
 fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32) {
+    field_checked(ui, label, buf, width, false);
+}
+
+/// A labelled text field; `numeric`: a value input (expression with units,
+/// checked against the document's parameters, red with the reason when it
+/// does not evaluate).
+fn field_checked(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32, numeric: bool) {
+    // Empty is left to the command (optional fields such as the facet angle).
+    let err = if numeric && !buf.trim().is_empty() {
+        crate::dialogs::check_value(label, buf).err()
+    } else {
+        None
+    };
     ui.horizontal(|ui| {
         let l = ui.label(label);
-        let r = ui
-            .add(egui::TextEdit::singleline(buf).desired_width(width))
-            .labelled_by(l.id)
-            .probe(label);
+        let mut edit = egui::TextEdit::singleline(buf).desired_width(width);
+        if err.is_some() {
+            edit = edit.text_color(BAD_COLOR);
+        }
+        let r = ui.add(edit).labelled_by(l.id).probe(label);
         if AUTOFOCUS.with(|a| a.replace(false)) {
             r.request_focus();
+        }
+        if let Some(e) = &err {
+            crate::dialogs::note_invalid(label, e, r.lost_focus());
+            r.on_hover_text(e.as_str());
         }
     });
 }
 
 pub(crate) fn num_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {
-    field(ui, label, buf, 90.0);
+    field_checked(ui, label, buf, 90.0, true);
 }
 
 pub(crate) fn text_field(ui: &mut egui::Ui, label: &str, buf: &mut String) {

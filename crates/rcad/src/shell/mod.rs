@@ -51,6 +51,8 @@ pub struct ShellState {
     /// Active ribbon tab.
     pub tab: registry::Tab,
     pub show_prefs: bool,
+    /// Feature the open dialog edits (Edit Feature), if any.
+    pub editing: Option<rcad_document::FeatureId>,
     /// Theme applied to the context (re-applied when it changes).
     pub applied_theme: Option<prefs::Theme>,
 }
@@ -76,6 +78,7 @@ impl Default for ShellState {
             focus: None,
             tab: registry::Tab::Solid,
             show_prefs: false,
+            editing: None,
             applied_theme: None,
         }
     }
