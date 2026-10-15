@@ -100,6 +100,10 @@ T-junctions; every edge must be used twice in opposite directions; one connected
 * Determinism: the construction itself is deterministic (no hash-order dependence in its
   output). Truck's boolean, tried first, is not: the same seeded corpus gave different
   Truck outcomes in different processes (156 vs 161 accepted of ~190 on one stream).
+  *Amended:* the cause was the order of `Shell::connected_components` (face addresses);
+  the fork now uses an order-stable version (third_party/truck-shapeops/R-CAD-CHANGES.md),
+  and `crates/rcad-commands/tests/cross_process_determinism.rs` requires identical outcomes,
+  volume bits, refusal texts and STEP text for the whole corpus in five processes.
 
 ## Addendum to ADR 0005: target faces are probed too
 

@@ -39,7 +39,7 @@ impl<P, C, S> FacesClassification<P, C, S> {
         let [and, or, unknown] = self.and_or_unknown();
         let and_boundary = and.extract_boundaries();
         let or_boundary = or.extract_boundaries();
-        let components = unknown.connected_components();
+        let components = super::stable::connected_components(&unknown);
         for comp in components {
             let boundary = comp.extract_boundaries();
             if and_boundary

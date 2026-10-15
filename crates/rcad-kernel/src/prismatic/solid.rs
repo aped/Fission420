@@ -588,11 +588,12 @@ pub(super) fn build(
         if pieces && !void {
             type Box3 = ([f64; 3], [f64; 3]);
             let mut comps: Vec<(usize, Box3)> = boxes.iter().map(|(r, b)| (*r, *b)).collect();
+            // Ties (equal minimum corners) by first face, never by hash order.
             comps.sort_by(|a, b| {
                 (0..3)
                     .map(|i| a.1.0[i].total_cmp(&b.1.0[i]))
                     .find(|o| o.is_ne())
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .unwrap_or(a.0.cmp(&b.0))
             });
             let mut shells: Vec<Vec<Face>> = vec![Vec::new(); comps.len()];
             for (fi, face) in tfaces.into_iter().enumerate() {
