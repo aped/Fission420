@@ -555,6 +555,19 @@ pub fn line_chain(s: &rcad_sketch::Sketch) -> std::result::Result<Vec<[f64; 2]>,
     Ok(out)
 }
 
+/// The chain a contour flange walks: [`surface_chain`] (geometric start) or,
+/// for flanges made before that rule, [`line_chain`] (entity order).
+pub fn flange_chain(
+    s: &rcad_sketch::Sketch,
+    geometric: bool,
+) -> std::result::Result<Vec<[f64; 2]>, String> {
+    if geometric {
+        surface_chain(s)
+    } else {
+        line_chain(s)
+    }
+}
+
 /// The open line chain of `s` (as [`line_chain`]) in a geometric order that
 /// does not depend on entity ids or line directions: it
 /// starts at the chain end with the smaller sketch x, or, when the two ends'

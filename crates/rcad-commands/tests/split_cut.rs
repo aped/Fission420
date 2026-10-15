@@ -2,7 +2,7 @@
 //! the first piece (lowest bounding-box corner) stays the target, the others
 //! become new bodies assigned in the same transaction, including when an
 //! upstream edit makes an existing cut split the body. Closed-form volumes,
-//! undo/redo, a downstream Join on a new piece, save/reopen (format v8), a
+//! undo/redo, a downstream Join on a new piece, save/reopen (format v9), a
 //! three-piece cut, and an enclosed void still refused unchanged.
 mod support;
 use rcad_commands::Session;
@@ -110,7 +110,7 @@ fn a_cut_across_the_whole_part_makes_one_body_per_piece() {
     let path = dir.path().join("split.rcad.json");
     tray::ok(&mut s, &json!({"cmd": "save", "path": path}));
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(v["version"], json!(8));
+    assert_eq!(v["version"], json!(9), "piece identity seeds (v9)");
     let mut t = Session::new();
     tray::ok(&mut t, &json!({"cmd": "open", "path": path}));
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());

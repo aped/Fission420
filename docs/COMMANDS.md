@@ -121,9 +121,11 @@ variable the same test fails when the committed JSON is stale, and it replays th
 | `export_svg` | `path`, `sketch` | the solved sketch's lines/arcs/circles, local 2D coordinates in mm with y negated |
 | `export_dxf` | `path`, `sketch` | the solved sketch's lines/arcs/circles in its local 2D coordinates, mm, R12 ASCII |
 | `delete_feature` | `feature` | removes a feature nothing depends on, explicitly or as a join/cut target of a body it creates (one undo step); refused naming the dependents otherwise; bodies and embedded files no longer created/used are dropped |
-| `undo` / `redo` | | document-level snapshots |
+| `undo` / `redo` | | document-level snapshots; always succeed, whatever the restored history's health |
 | `save` | `path` | atomic (temp file + fsync + rename); always writes the current format version |
-| `open` | `path` | validates format/version/references, regenerates, compares with saved cache |
+| `open` | `path`, `safe_mode?` | validates format/version/references, regenerates, compares with saved cache; opens even when features fail (flagged, exports refused); `safe_mode` rolls back to before the first failure (docs/behavior/health.md) |
+| `at_revision` | `revision`, `command` | runs `command` only if the document is still at `revision`; otherwise refused as a stale pick |
+| `redefine_feature` | `feature`, `kind`, `name?`, `expressions?` | Edit Feature: replaces a feature's definition in one undo step; refused if the feature itself fails, dependents that break are flagged |
 | `close` | | |
 | `export_stl` | `path`, `chord?` (mm, default 0.01), `bodies?`, print fields (below) | binary STL in mm (STL has no unit field; the slicer must read mm) of `bodies` (default: all visible bodies; hidden ones only when listed, named in the message), B-rep tessellations and mesh bodies checked as for 3MF; bodies are separate shells in one file (or one file each with `separate_files`), never fused; message names the committed revision; report in `response.export` |
 | `export_step` | `path`, `bodies?` | AP214 via truck-stepio with exact NURBS edge rebuild, one solid per body, or one `SHELL_BASED_SURFACE_MODEL` per open surface body (not mixed with solids in one file) (default: all visible bodies); mesh bodies refused; refused when an edge can't be written exactly |

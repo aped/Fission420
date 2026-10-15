@@ -126,12 +126,18 @@ makes one body per piece, as Autodesk Fusion does, instead of being refused:
   existing cut split the body, is one undo step. Ids left unused when an edit rejoins the pieces
   produce no body; a later feature that targets such a body fails with an explicit error and the
   edit is refused.
-* Piece identity is positional (the bounding-box order above). When an upstream edit changes
-  how many pieces a cut makes, or their order, the extra ids follow the new positions; a
-  feature downstream that targets a piece body may then act on another piece (it is still
-  checked like any edit). Faces that a cut divides between pieces are reported ambiguous
-  (`BrokenReference`), never silently bound to one fragment. Matching pieces to ids by overlap
-  with the previous evaluation is future work.
+* Piece identity follows seed points, not positions (format v9). After each commit the model
+  stores, for every body id of a cut or split that separates a body, two points inside its
+  piece (`Feature::piece_seeds`): the deepest point, and a point just under the surface as far
+  as possible from the other pieces (away from the cut, so moving the cut does not move it into
+  a neighbour). Regeneration matches ids to pieces by how many of an id's points each piece
+  contains, taking at each step the pair whose count is the unique maximum for both the id and
+  the piece. The bounding-box order above is used only for ids without seeds (new ids, and
+  documents written before v9, which receive seeds when opened). When the seeds of the target
+  (or of a split's new body) single out no piece, the feature fails with `BrokenReference`
+  instead of guessing; an extra piece id in that situation makes no body, so a downstream
+  feature that targets it fails explicitly. Faces that a cut divides between pieces are
+  reported ambiguous (`BrokenReference`), never silently bound to one fragment.
 * Faces of the extra pieces made by earlier features are not referencable by role (they resolve
   only on the target body), like a copied body's faces; references that now land on another
   piece report `BrokenReference`.

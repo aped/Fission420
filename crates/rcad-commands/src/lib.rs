@@ -1060,6 +1060,15 @@ pub enum Command {
     },
     Undo,
     Redo,
+    /// Run `command` only if the open document is still at `revision` (the
+    /// model revision the client showed when the user picked what the
+    /// command refers to). A command built from a pick made before an edit
+    /// that has since been applied is refused ("stale pick") instead of
+    /// acting on whatever now has the picked index.
+    AtRevision {
+        revision: u64,
+        command: Box<Command>,
+    },
     Save {
         path: PathBuf,
     },
@@ -1407,6 +1416,7 @@ impl Command {
             Command::Redo => "redo",
             Command::Save { .. } => "save",
             Command::Open { .. } => "open",
+            Command::AtRevision { command, .. } => command.name(),
             Command::RedefineFeature { .. } => "redefine_feature",
             Command::SketchOp { .. } => "sketch_op",
             Command::Close => "close",
@@ -1939,6 +1949,18 @@ impl Session {
             return Ok(());
         }
         match cmd {
+            Command::AtRevision { revision, command } => {
+                let now = self.model.as_ref().map(|m| m.revision);
+                if now != Some(*revision) {
+                    return Err(DocError::Validation(format!(
+                        "stale pick: '{}' was built at revision {revision}, the document is \
+                         now at {}; pick again",
+                        command.name(),
+                        now.map_or("no document".into(), |n| n.to_string())
+                    )));
+                }
+                return self.run(command, r);
+            }
             Command::NewDocument => {
                 self.model = Some(Model::new());
                 self.path = None;
@@ -2592,7 +2614,8 @@ impl Session {
                     },
                     other => other,
                 };
-                self.model_mut()?
+                let configured = self
+                    .model_mut()?
                     .transact(&label, |d| {
                         match d.parameters.iter_mut().find(|p| p.name == name) {
                             Some(p) => {
@@ -2611,7 +2634,7 @@ impl Session {
                                 comment: comment.unwrap_or_default(),
                             }),
                         }
-                        Ok(())
+                        Ok(d.write_back_configuration(&name, &expression))
                     })
                     .map_err(cause)?;
                 let v = self
@@ -2619,9 +2642,12 @@ impl Session {
                     .as_ref()
                     .and_then(|m| params::evaluate_parameters(m.document()).ok())
                     .and_then(|e| e.get(&name).map(|q| q.value));
+                let written = configured
+                    .map(|c| format!(" (stored in the active configuration '{c}')"))
+                    .unwrap_or_default();
                 r.message = Some(match v {
-                    Some(v) => format!("{name} = {expression} = {v}"),
-                    None => format!("{name} = {expression}"),
+                    Some(v) => format!("{name} = {expression} = {v}{written}"),
+                    None => format!("{name} = {expression}{written}"),
                 });
             }
             Command::SetUserParameters { parameters } => {
@@ -2648,10 +2674,12 @@ impl Session {
                         .join(", ")
                 );
                 let label: String = label.chars().take(200).collect();
-                self.model_mut()?.transact(&label, |d| {
+                let configured = self.model_mut()?.transact(&label, |d| {
+                    let mut configured = std::collections::BTreeSet::new();
                     for p in &defs {
                         let name = p.name.trim().to_string();
                         let expression = p.expression.trim().to_string();
+                        configured.extend(d.write_back_configuration(&name, &expression));
                         match d.parameters.iter_mut().find(|x| x.name == name) {
                             Some(x) => {
                                 x.expression = expression;
@@ -2670,9 +2698,16 @@ impl Session {
                             }),
                         }
                     }
-                    Ok(())
+                    Ok(configured)
                 })?;
-                r.message = Some(format!("set {} parameter(s) in one step", defs.len()));
+                r.message = Some(format!(
+                    "set {} parameter(s) in one step{}",
+                    defs.len(),
+                    match configured.first() {
+                        Some(c) => format!(" (stored in the active configuration '{c}')"),
+                        None => String::new(),
+                    }
+                ));
             }
             Command::RenameUserParameter { name, new_name } => {
                 use rcad_document::params;
@@ -3631,6 +3666,7 @@ impl Session {
                             width,
                             flip,
                             body,
+                            geometric_order: true,
                         },
                     ))
                 })?;
@@ -3665,6 +3701,7 @@ impl Session {
                     k_factor,
                     width,
                     flip,
+                    geometric_order,
                     ..
                 } = m.document().feature(feature)?.kind.clone()
                 else {
@@ -3681,7 +3718,7 @@ impl Session {
                     .ok_or_else(|| {
                         DocError::Validation(format!("{sketch} is not an evaluated sketch"))
                     })?;
-                let chain = rcad_document::sheet::line_chain(&solved)
+                let chain = rcad_document::sheet::flange_chain(&solved, geometric_order)
                     .map_err(|e| DocError::Validation(format!("{feature}: {e}")))?;
                 let part = rcad_document::sheet::contour_flange(
                     feature, &chain, thickness, radius, k_factor, flip,

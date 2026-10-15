@@ -597,6 +597,14 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
         body: BodyId,
+        /// Walk the line chain from its geometric start
+        /// (`sheet::surface_chain`: the end with the smaller sketch x, then
+        /// y), so redrawing or renumbering a line never flips the flange.
+        /// False only for flanges made before this rule (they keep the
+        /// entity-order start they were made with; Edit Feature upgrades
+        /// them). Format v9.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        geometric_order: bool,
     },
     /// Direct edit (ADR 0010) of an imported STEP body: `face` is an
     /// imported face (`FaceRole::Imported`, by stable import index) and `op`
@@ -961,6 +969,14 @@ pub struct Feature {
     /// the change is refused, never silently rebound. Serde-additive.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub suppressed: bool,
+    /// Piece identity of a cut or split that separates a body (format v9):
+    /// for each body id the feature leaves or creates, points inside the
+    /// piece it named at the last commit (`rcad_kernel::piece_seeds`).
+    /// Regeneration gives each id the piece that holds its points, never a
+    /// piece chosen by position (ADR 0003). Maintained by the model after
+    /// every commit; rounded to 1e-6 mm.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub piece_seeds: std::collections::BTreeMap<BodyId, Vec<[f64; 3]>>,
 }
 
 impl Feature {
@@ -2214,6 +2230,21 @@ impl Document {
         self.check_suppression()
     }
 
+    /// After a user parameter's expression changed to `expression`: when
+    /// the active configuration sets that parameter, store the new
+    /// expression in its row too, so switching configurations does not
+    /// silently revert the edit (as Fusion edits the active configuration).
+    /// Returns the configuration written to.
+    pub fn write_back_configuration(&mut self, name: &str, expression: &str) -> Option<String> {
+        let active = self.active_configuration.clone()?;
+        let c = self.configurations.iter_mut().find(|c| c.name == active)?;
+        let v = c.values.get_mut(name)?;
+        if v != expression {
+            *v = expression.to_string();
+        }
+        Some(active)
+    }
+
     /// Drop configuration values for parameters that do
     /// not exist (left by a parameter rename or delete before configurations
     /// followed them); such a configuration could not be activated. One line
@@ -2872,6 +2903,7 @@ impl Document {
             notes: vec![],
             expressions: Default::default(),
             suppressed: false,
+            piece_seeds: Default::default(),
         };
         // With the timeline rolled back, insert at the marker and move it.
         match self

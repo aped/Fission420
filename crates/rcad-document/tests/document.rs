@@ -185,6 +185,7 @@ fn broken_and_cyclic_references_are_reported() {
         notes: vec![],
         expressions: Default::default(),
         suppressed: false,
+        piece_seeds: Default::default(),
     });
     d.features.push(Feature {
         id: FeatureId(2),
@@ -193,6 +194,7 @@ fn broken_and_cyclic_references_are_reported() {
         notes: vec![],
         expressions: Default::default(),
         suppressed: false,
+        piece_seeds: Default::default(),
     });
     match regenerate(&d) {
         Err(DocError::Cycle(ids)) => assert_eq!(ids, vec![FeatureId(1), FeatureId(2)]),
