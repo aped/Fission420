@@ -64,3 +64,11 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   samples intersection curves through `fast_curve::search_triple` as well. Test:
   `fast_curve::tests::matches_truck_bit_for_bit` (triples, `subs`, `der` and divisions compared bit
   for bit with truck-geometry on plane–cylinder and cylinder–cylinder curves).
+- `src/transversal/intersection_curve`, `loops_store`, `integrate`: performance only, results
+  bit-identical. `IntersectionCurveWithParameters::try_new` projected every point of each new
+  intersection polyline with unhinted `double_projection`, i.e. a fresh presearch grid per surface
+  per point; it now passes `fast_curve::nearest_hint`, the same presearch answer from the cached
+  grid (`None` for other surface types, where Truck searches as before). `'static` added to
+  `ShapeOpsSurface` and the functions that reach `try_new` (for the downcast). Test: the hinted
+  projection is compared bit for bit with the unhinted one in
+  `fast_curve::tests::matches_truck_bit_for_bit`.

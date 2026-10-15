@@ -451,7 +451,7 @@ where
         + SearchParameter<D1, Point = Point3>
         + Cut<Point = Point3, Vector = Vector3>
         + From<IntersectionCurve<PolylineCurve, S>>,
-    S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>,
+    S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3> + 'static,
 {
     let mut geom_loops_store0: LoopsStore<_, _> = geom_shell0.face_iter().collect();
     let mut poly_loops_store0: LoopsStore<_, _> = poly_shell0.face_iter().collect();

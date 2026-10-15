@@ -182,6 +182,15 @@ impl ParametricCurve for FastIntersection<'_> {
     }
 }
 
+/// The hint that makes `surface.search_nearest_parameter(point, hint, n)` equal to the unhinted
+/// search bit for bit: the cached presearch result for a truck-modeling B-spline/NURBS
+/// [`Surface`], `None` for any other surface (Truck then searches as before).
+pub fn nearest_hint<S: 'static>(surface: &S, point: Point3) -> Option<(f64, f64)> {
+    let any: &dyn std::any::Any = surface;
+    any.downcast_ref::<Surface>()
+        .and_then(|s| presearch_hint(s, point))
+}
+
 /// `curve.parameter_division(range, tol)`, bit for bit; a truck-modeling intersection curve is
 /// divided through [`FastIntersection`].
 pub fn parameter_division<C>(curve: &C, range: (f64, f64), tol: f64) -> (Vec<f64>, Vec<Point3>)
@@ -247,6 +256,25 @@ mod tests {
                     assert_eq!(bits(fast.subs(t)), bits(slow.subs(t)));
                     let d = |v: Vector3| [v.x, v.y, v.z].map(f64::to_bits);
                     assert_eq!(d(fast.der(t)), d(slow.der(t)));
+                    // The hinted projection `IntersectionCurveWithParameters::try_new` uses.
+                    let (s0, s1) = (ic.surface0(), ic.surface1());
+                    let (p, n) = (
+                        ic.leader().subs(t) + Vector3::new(1e-3, -2e-3, 1e-3),
+                        Vector3::unit_z(),
+                    );
+                    let hinted = double_projection(
+                        s0,
+                        nearest_hint(s0, p),
+                        s1,
+                        nearest_hint(s1, p),
+                        p,
+                        n,
+                        100,
+                    );
+                    assert_eq!(
+                        tri(hinted),
+                        tri(double_projection(s0, None, s1, None, p, n, 100))
+                    );
                     compared += 1;
                 }
                 let (pa, qa) = parameter_division(&curve, (t0, t1), 0.01);

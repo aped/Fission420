@@ -17,7 +17,7 @@ impl<S> From<IntersectionCurveWithParameters<S>> for IntersectionCurve<PolylineC
 }
 
 impl<S> IntersectionCurveWithParameters<S>
-where S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>
+where S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3> + 'static
 {
     pub fn try_new(
         surface0: S,
@@ -28,9 +28,12 @@ where S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>
         let mut polyline = PolylineCurve(Vec::new());
         let mut params0 = PolylineCurve(Vec::new());
         let mut params1 = PolylineCurve(Vec::new());
+        // R-CAD fork: the unhinted searches, without per-point presearch grids (`fast_curve`).
+        let hint = |s: &S, p: Point3| crate::fast_curve::nearest_hint(s, p);
         for p in poly.windows(2) {
             let n = (p[1] - p[0]).normalize();
-            let (q, p0, p1) = double_projection(&surface0, None, &surface1, None, p[0], n, 100)?;
+            let (h0, h1) = (hint(&surface0, p[0]), hint(&surface1, p[0]));
+            let (q, p0, p1) = double_projection(&surface0, h0, &surface1, h1, p[0], n, 100)?;
             polyline.push(q);
             params0.push(p0);
             params1.push(p1);
@@ -39,12 +42,13 @@ where S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>
             (polyline[0], params0[0], params1[0])
         } else {
             let n = (poly[poly.len() - 1] - poly[poly.len() - 2]).normalize();
+            let last = poly[poly.len() - 1];
             double_projection(
                 &surface0,
-                None,
+                hint(&surface0, last),
                 &surface1,
-                None,
-                poly[poly.len() - 1],
+                hint(&surface1, last),
+                last,
                 n,
                 100,
             )?
@@ -152,7 +156,7 @@ pub fn intersection_curves<S>(
     Option<IntersectionCurveWithParameters<S>>,
 )>
 where
-    S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>,
+    S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3> + 'static,
 {
     let interferences = polygon0.extract_interference(polygon1);
     let polylines = super::polyline_construction::construct_polylines(&interferences);

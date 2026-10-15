@@ -11,7 +11,8 @@ pub trait ShapeOpsSurface:
     + SearchNearestParameter<D2, Point = Point3>
     + Invertible
     + Send
-    + Sync {
+    + Sync
+    + 'static {
 }
 impl<S> ShapeOpsSurface for S where S: ParametricSurface3D
         + ParameterDivision2D
@@ -20,6 +21,7 @@ impl<S> ShapeOpsSurface for S where S: ParametricSurface3D
         + Invertible
         + Send
         + Sync
+        + 'static
 {
 }
 
