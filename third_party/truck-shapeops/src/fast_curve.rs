@@ -204,6 +204,59 @@ where
     curve.parameter_division(range, tol)
 }
 
+/// A truck-modeling [`Curve`] whose evaluation and division go through [`FastIntersection`] for
+/// intersection curves: the same values bit for bit, so a shape mapped to it tessellates exactly
+/// like the original (truck-meshalgo divides every edge with `parameter_division`).
+#[derive(Clone, Debug)]
+pub struct FastCurve(pub Curve);
+
+impl ParametricCurve for FastCurve {
+    type Point = Point3;
+    type Vector = Vector3;
+    fn subs(&self, t: f64) -> Point3 {
+        match &self.0 {
+            Curve::IntersectionCurve(ic) => FastIntersection(ic).subs(t),
+            c => c.subs(t),
+        }
+    }
+    fn der(&self, t: f64) -> Vector3 {
+        match &self.0 {
+            Curve::IntersectionCurve(ic) => FastIntersection(ic).der(t),
+            c => c.der(t),
+        }
+    }
+    fn der2(&self, t: f64) -> Vector3 {
+        self.0.der2(t)
+    }
+    fn parameter_range(&self) -> ParameterRange {
+        self.0.parameter_range()
+    }
+    fn period(&self) -> Option<f64> {
+        self.0.period()
+    }
+}
+
+impl BoundedCurve for FastCurve {}
+
+impl ParameterDivision1D for FastCurve {
+    type Point = Point3;
+    fn parameter_division(&self, range: (f64, f64), tol: f64) -> (Vec<f64>, Vec<Point3>) {
+        parameter_division(&self.0, range, tol)
+    }
+}
+
+/// `shell` with its curves wrapped in [`FastCurve`] (same topology, order and geometry), for
+/// tessellating it.
+pub fn fast_shell(shell: &Shell) -> truck_topology::Shell<Point3, FastCurve, Surface> {
+    shell.mapped(Point3::clone, |c| FastCurve(c.clone()), Surface::clone)
+}
+
+/// `solid` with its curves wrapped in [`FastCurve`] (same topology, order and geometry), for
+/// tessellating it.
+pub fn fast_solid(solid: &Solid) -> truck_topology::Solid<Point3, FastCurve, Surface> {
+    solid.mapped(Point3::clone, |c| FastCurve(c.clone()), Surface::clone)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +346,29 @@ mod tests {
             compared > 0 && both_nurbs > 0,
             "{compared} points, {both_nurbs} NURBS-NURBS curves"
         );
+    }
+
+    #[test]
+    fn fast_curves_tessellate_identically() {
+        use truck_meshalgo::tessellation::MeshableShape;
+        let bits =
+            |s: &truck_topology::Solid<Point3, _, Option<truck_meshalgo::prelude::PolygonMesh>>| {
+                s.face_iter()
+                    .map(|f| {
+                        let m = f.surface().expect("face tessellated");
+                        let p: Vec<[u64; 3]> = m
+                            .positions()
+                            .iter()
+                            .map(|p| [p.x, p.y, p.z].map(f64::to_bits))
+                            .collect();
+                        (p, format!("{:?}", m.faces()))
+                    })
+                    .collect::<Vec<_>>()
+            };
+        for solid in raw_booleans() {
+            let a = solid.triangulation(0.01);
+            let b = fast_solid(&solid).triangulation(0.01);
+            assert_eq!(bits(&a), bits(&b));
+        }
     }
 }

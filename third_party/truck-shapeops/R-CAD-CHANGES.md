@@ -72,3 +72,12 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   `ShapeOpsSurface` and the functions that reach `try_new` (for the downcast). Test: the hinted
   projection is compared bit for bit with the unhinted one in
   `fast_curve::tests::matches_truck_bit_for_bit`.
+- `src/fast_curve.rs` (`FastCurve`, `fast_shell`, `fast_solid`), `integrate`: performance only,
+  meshes bit-identical. truck-meshalgo divides every edge with `parameter_division`, which for an
+  intersection curve again rebuilt the presearch grids per point. `FastCurve` wraps a
+  truck-modeling `Curve` and divides through `fast_curve::parameter_division`; `fast_shell` /
+  `fast_solid` map a shape's curves to it (same topology and order). `process_one_pair_of_shells`
+  tessellates its operands through `fast_shell` when they are truck-modeling shells (downcast),
+  and R-CAD's kernel tessellates bodies the same way. Test:
+  `fast_curve::tests::fast_curves_tessellate_identically` (positions and triangles compared bit for
+  bit with the plain tessellation).

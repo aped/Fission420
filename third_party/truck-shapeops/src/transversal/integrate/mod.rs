@@ -117,14 +117,28 @@ fn signed_volume(poly: &PolygonMesh) -> f64 {
 }
 
 
+/// R-CAD fork: `shell.triangulation(tol)`; a truck-modeling shell is tessellated through
+/// `fast_curve::fast_shell`, which gives the same mesh bit for bit without a presearch grid per
+/// intersection-curve point.
+fn triangulate<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
+    shell: &Shell<Point3, C, S>,
+    tol: f64,
+) -> Shell<Point3, PolylineCurve<Point3>, Option<PolygonMesh>> {
+    let any: &dyn std::any::Any = shell;
+    match any.downcast_ref::<truck_modeling::Shell>() {
+        Some(shell) => crate::fast_curve::fast_shell(shell).triangulation(tol),
+        None => shell.triangulation(tol),
+    }
+}
+
 fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     shell0: &Shell<Point3, C, S>,
     shell1: &Shell<Point3, C, S>,
     tol: f64,
 ) -> Option<[Shell<Point3, C, S>; 2]> {
     nonpositive_tolerance!(tol);
-    let poly_shell0 = shell0.triangulation(tol);
-    let poly_shell1 = shell1.triangulation(tol);
+    let poly_shell0 = triangulate(shell0, tol);
+    let poly_shell1 = triangulate(shell1, tol);
     let loops_store::LoopsStoreQuadruple {
         geom_loops_store0: loops_store0,
         geom_loops_store1: loops_store1,

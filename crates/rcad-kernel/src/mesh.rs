@@ -53,17 +53,20 @@ fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<T
         // An open surface body cannot go through `Solid` triangulation
         // (Truck rebuilds a closed solid and panics); mesh its shells instead.
         // Face order is the same (the solid's faces are its shells' in order).
+        // Curves wrapped in `FastCurve`: the same edge divisions bit for bit,
+        // without a presearch grid per intersection-curve point.
         let open = body.is_open_shell();
         let shells: Vec<_> = if open {
             solid
                 .boundaries()
                 .iter()
-                .map(|sh| sh.triangulation(chord))
+                .map(|sh| truck_shapeops::fast_curve::fast_shell(sh).triangulation(chord))
                 .collect()
         } else {
             Vec::new()
         };
-        let meshed_solid = (!open).then(|| solid.triangulation(chord));
+        let meshed_solid =
+            (!open).then(|| truck_shapeops::fast_curve::fast_solid(solid).triangulation(chord));
         let mut out = TriMesh {
             chord_tolerance: chord,
             ..Default::default()
