@@ -1308,9 +1308,13 @@ impl RcadApp {
         {
             self.notice = None;
         }
-        let Some((text, _)) = self.notice.clone() else {
+        let Some((text, since)) = self.notice.clone() else {
             return;
         };
+        // One repaint when it is due to go (an idle UI otherwise sleeps).
+        ui.ctx().request_repaint_after(
+            std::time::Duration::from_secs(crate::app::NOTICE_SECS).saturating_sub(since.elapsed()),
+        );
         let painter = ui.painter_at(rect);
         let color = Color32::from_rgb(255, 210, 120);
         // Wrapped to the view (room for ×); the bottom edge stays above the
