@@ -2,7 +2,7 @@
 //! keeps the piece that contains its stored seed point across upstream
 //! edits, including an edit that reorders the pieces' bounding boxes (the
 //! old positional rule would have swapped the ids). Seeds persist (format
-//! v9); a seed no piece contains is a broken reference, never a guess.
+//! v9); seeds no piece contains are a broken reference, never a guess.
 mod support;
 use rcad_commands::Session;
 use rcad_document::{BodyId, FeatureId, HealthState, Model};
@@ -141,7 +141,10 @@ fn seeds_persist_and_a_seed_in_no_piece_is_a_broken_reference() {
         .iter_mut()
         .find(|f| f.id == FeatureId(6))
         .unwrap();
+    // (Both seeds: with one left over, the pairing would be forced.)
     f.piece_seeds.insert(BodyId(1), vec![[500.0, 500.0, 500.0]]);
+    f.piece_seeds
+        .insert(BodyId(2), vec![[-500.0, 500.0, 500.0]]);
     let (m, report) = Model::open_document(nf.document, false).unwrap();
     let r = &m
         .evaluation()

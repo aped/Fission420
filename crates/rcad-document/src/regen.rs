@@ -1057,17 +1057,19 @@ type Pieces<'a> = (
 /// are the feature's extra piece ids.
 ///
 /// Ids with seeds are matched first: repeatedly, the (id, piece) pair with
-/// the most of the id's seed points inside the piece is taken, provided
+/// the most of the id's seed points inside the piece (the deep point counts
+/// twice) is taken, provided
 /// that count is the unique maximum for the id (over free pieces) and the
 /// maximum for the piece (over unmatched ids; when pieces rejoined, the
-/// earliest id, the target first, keeps the piece). Ids without seeds (new ids,
+/// earliest id, the target first, keeps the piece). When one seeded id and
+/// one piece are left over, they are paired (the only possibility). Ids without seeds (new ids,
 /// documents written before seeds) then take the remaining pieces in
 /// positional order. A required id left unmatched by its seeds is a broken
 /// reference (the piece is never guessed); a spare one makes no body (a
 /// later feature that targets it fails explicitly). More unclaimed pieces
 /// than free ids is [`DocError::NeedsPieces`]. On success `seeds_out`
 /// receives fresh seeds for every id that got a piece (when the result has
-/// several pieces).
+/// several pieces) and keeps the old seeds of the others.
 fn assign_pieces(
     id: FeatureId,
     parts: Vec<Body>,
@@ -1105,14 +1107,15 @@ fn assign_pieces(
             .map(|p| k::point_membership(p, &points))
             .collect::<std::result::Result<_, _>>()
             .map_err(kernel(id))?;
-        // count[k][j]: seeds of id k inside piece j.
+        // count[k][j]: weight of id k's seeds inside piece j; the deep
+        // point (first) weighs 2, the point away from the cut 1.
         let mut count = vec![vec![0usize; parts.len()]; with_seed.len()];
         let mut at = 0;
         for (k, (_, v)) in with_seed.iter().enumerate() {
-            for _ in 0..v.len() {
+            for n in 0..v.len() {
                 for (j, row) in inside.iter().enumerate() {
                     if row[at] == Some(true) {
-                        count[k][j] += 1;
+                        count[k][j] += if n == 0 { 2 } else { 1 };
                     }
                 }
                 at += 1;
@@ -1156,6 +1159,17 @@ fn assign_pieces(
             let Some((_, k, j)) = best else { break };
             matched[k] = true;
             owner[j] = Some(with_seed[k].0);
+        }
+        // One seeded id and one piece left over (its seeds now lie in
+        // pieces others claimed more strongly): the pairing is forced.
+        let left: Vec<usize> = (0..with_seed.len()).filter(|&k| !matched[k]).collect();
+        let free: Vec<usize> = (0..parts.len()).filter(|&j| owner[j].is_none()).collect();
+        let unseeded_free = ids.iter().any(|b| !with_seed.iter().any(|(x, _)| x == b));
+        if let ([k], [j]) = (&left[..], &free[..])
+            && !unseeded_free
+        {
+            matched[*k] = true;
+            owner[*j] = Some(with_seed[*k].0);
         }
         for (k, (b, _)) in with_seed.iter().enumerate() {
             seeded.insert(*b);
@@ -1201,6 +1215,21 @@ fn assign_pieces(
     let mut out: Vec<(BodyId, Body)> = owner.into_iter().flatten().zip(parts).collect();
     // Required ids first, then the others in the feature's order.
     out.sort_by_key(|(b, _)| ids.iter().position(|x| x == b));
+    // Ids without a piece now (rejoined, or the cut no longer separates the
+    // body) keep their seeds, so they find their pieces again when the cut
+    // separates the body again.
+    for b in &ids {
+        if !out.iter().any(|(o, _)| o == b)
+            && let Some(v) = seeds.get(b)
+        {
+            seeds_out.insert(*b, v.clone());
+        }
+    }
+    if out.len() == 1
+        && let Some(v) = seeds.get(&out[0].0)
+    {
+        seeds_out.insert(out[0].0, v.clone());
+    }
     if out.len() > 1 {
         for (i, (b, piece)) in out.iter().enumerate() {
             let others: Vec<&Body> = out

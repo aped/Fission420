@@ -136,8 +136,10 @@ makes one body per piece, as Autodesk Fusion does, instead of being refused:
   piece (`Feature::piece_seeds`): the deepest point, and a point just under the surface as far
   as possible from the other pieces (away from the cut, so moving the cut does not move it into
   a neighbour). Regeneration matches ids to pieces by how many of an id's points each piece
-  contains, taking at each step the pair whose count is the unique maximum for both the id and
-  the piece. The bounding-box order above is used only for ids without seeds (new ids, and
+  contains (the deep point counts twice), taking at each step the pair whose count is the
+  unique maximum for the id and the maximum for the piece (when pieces rejoined, the earliest
+  id keeps the piece); one id and one piece left over are paired. Seeds of an id without a
+  piece (the cut no longer separates the body) are kept, so the ids find their pieces again. The bounding-box order above is used only for ids without seeds (new ids, and
   documents written before v9, which receive seeds when opened). When the seeds of the target
   (or of a split's new body) single out no piece, the feature fails with `BrokenReference`
   instead of guessing; an extra piece id in that situation makes no body, so a downstream
