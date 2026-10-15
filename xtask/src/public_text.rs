@@ -2,6 +2,9 @@
 //! numbers ("run 7", `run6_parts`), session-spec citations or paths into the
 //! local, git-ignored working-notes directory. Checks every tracked path and
 //! the text of every tracked UTF-8 file.
+//!
+//! The same pass refuses the project's former name (see [`find_old_name`]): the
+//! rename to R-CAD kept no compatibility code, so any mention is a leftover.
 use std::path::Path;
 use std::process::Command;
 
@@ -18,6 +21,42 @@ const MARKERS: &[&str] = &["morning_report", "goal.md", ".meta/", "claude.local.
 
 /// Prefixes that are process vocabulary when a digit follows (`SESSION_5`).
 const NUMBERED: &[&str] = &["session_", "night_"];
+
+/// The project's former name, in both spellings: the product name and the
+/// four-character crate, file-extension and environment-variable prefix. Built
+/// from parts so this file does not trip a plain-text search for it.
+const OLD_PRODUCT: &str = concat!("fiss", "ion", "420");
+const OLD_PREFIX: &str = concat!("f", "420");
+
+const OLD_NAME_HINT: &str = "former project name; the project is R-CAD";
+
+/// The first mention of the former project name in `text`, if any
+/// (case-insensitive). The product name matches anywhere. The short prefix
+/// matches only where it starts a word (`_`, `.` and `-` also start one, as in
+/// an extension or `X_` variable) and does not begin a longer hexadecimal run,
+/// so checksums and hex constants (`…d7f42…`, `0xf42…`) pass.
+pub fn find_old_name(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let b = lower.as_bytes();
+    if let Some(i) = lower.find(OLD_PRODUCT) {
+        return Some(snippet(text, i, OLD_PRODUCT.len()));
+    }
+    for (i, _) in lower.match_indices(OLD_PREFIX) {
+        if i > 0 && b[i - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        let rest = &b[i + OLD_PREFIX.len()..];
+        let word = rest
+            .iter()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .count();
+        if word > 0 && rest[..word].iter().all(u8::is_ascii_hexdigit) {
+            continue;
+        }
+        return Some(snippet(text, i, OLD_PREFIX.len()));
+    }
+    None
+}
 
 /// The first process marker in `text`, if any. "run" followed by an optional
 /// `-`, `_` or space and a digit counts when "run" starts a word (an
@@ -81,10 +120,14 @@ pub fn offenders(root: &Path) -> Result<Vec<String>, String> {
     let mut found = Vec::new();
     for path in out.stdout.split(|&c| c == 0).filter(|p| !p.is_empty()) {
         let path = String::from_utf8_lossy(path).into_owned();
-        if EXEMPT.contains(&path.as_str()) {
+        if path == "xtask/src/public_text.rs" {
             continue;
         }
-        if let Some(m) = find_marker(&path) {
+        let markers = !EXEMPT.contains(&path.as_str());
+        if let Some(m) = find_old_name(&path) {
+            found.push(format!("{path}: name contains \"{m}\" ({OLD_NAME_HINT})"));
+        }
+        if let Some(m) = find_marker(&path).filter(|_| markers) {
             found.push(format!("{path}: name contains \"{m}\""));
         }
         // Deleted-but-unstaged files and binaries are skipped.
@@ -92,7 +135,10 @@ pub fn offenders(root: &Path) -> Result<Vec<String>, String> {
             continue;
         };
         for (n, line) in text.lines().enumerate() {
-            if let Some(m) = find_marker(line) {
+            if let Some(m) = find_old_name(line) {
+                found.push(format!("{path}:{}: \"{m}\" ({OLD_NAME_HINT})", n + 1));
+            }
+            if let Some(m) = find_marker(line).filter(|_| markers) {
                 found.push(format!("{path}:{}: \"{m}\"", n + 1));
             }
         }
@@ -102,7 +148,50 @@ pub fn offenders(root: &Path) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_marker;
+    use super::{find_marker, find_old_name};
+
+    #[test]
+    fn former_project_name_is_found() {
+        // `{P}`, `{q}`, `{R}`, `{p}` stand for the spellings, substituted at run
+        // time so the literal names never appear in the tree.
+        let (big, small) = (concat!("Fiss", "ion", "420"), concat!("f", "420"));
+        for s in [
+            "Until 2026 the project was called {P}.",
+            r#"  "format": "{q}","#,
+            "{P}",
+            "crates/{p}-commands/tests",
+            "use {p}_document::Model;",
+            "saved as `*.{p}.json`",
+            "{R}_RECOVERY_DIR=/x",
+            "struct {R}App;",
+            "{p}",
+            "tools/rename_{p}.py",
+        ] {
+            let s = s
+                .replace("{P}", big)
+                .replace("{q}", &big.to_ascii_lowercase())
+                .replace("{R}", &small.to_ascii_uppercase())
+                .replace("{p}", small);
+            assert!(find_old_name(&s).is_some(), "{s}");
+        }
+    }
+
+    #[test]
+    fn hex_and_other_words_pass() {
+        for s in [
+            concat!(
+                "checksum = \"67ec1fc3ad980a24e4761b763bf5bfbf58c1d88be1bffb14654d369d7f",
+                "420258\""
+            ),
+            concat!("const SEED: u64 = 0xf", "420a;"),
+            concat!("commit f", "420abc1"),
+            concat!("fis", "sion products"),
+            "R-CAD",
+            "rcad_document",
+        ] {
+            assert!(find_old_name(s).is_none(), "{s}");
+        }
+    }
 
     #[test]
     fn process_vocabulary_is_found() {

@@ -1,7 +1,7 @@
 # STEP fixtures
 
 Independent STEP AP214 (`AUTOMOTIVE_DESIGN`) files for import tests. These
-were made outside Fission420, so they check the importer against another
+were made outside R-CAD, so they check the importer against another
 kernel's output rather than against our own writer.
 
 ## Provenance
@@ -11,16 +11,16 @@ kernel's output rather than against our own writer.
   OpenCascade 7.8.1 (`Part.OCC_VERSION`). The header says
   `Open CASCADE STEP processor 7.8`.
 - Regenerate with `tools/fixtures/step/generate.sh`. It runs:
-  1. `tools/fixtures/step/generate.py` in FreeCADCmd (`F420_MODE=generate`)
+  1. `tools/fixtures/step/generate.py` in FreeCADCmd (`RCAD_MODE=generate`)
      to build the shapes from `Part` primitives and export them;
   2. `tools/fixtures/step/make_units.py` (python3) to write the inch and
      metre box conversions;
   3. `tools/fixtures/step/make_derived.py` (python3) to write the malformed
      files;
-  4. `generate.py` again (`F420_MODE=verify`) to re-import every file and
+  4. `generate.py` again (`RCAD_MODE=verify`) to re-import every file and
      write `verification.json`.
 - The FreeCAD invocation, with no lasting change to flatpak permissions:
-  `flatpak run --filesystem=<repo> --env=F420_OUT=<out dir> --env=F420_MODE=generate|verify|all [--env=F420_RESULTS=<json>] --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/step/generate.py`
+  `flatpak run --filesystem=<repo> --env=RCAD_OUT=<out dir> --env=RCAD_MODE=generate|verify|all [--env=RCAD_RESULTS=<json>] --command=FreeCADCmd org.freecad.FreeCAD tools/fixtures/step/generate.py`
 - Headers are sanitized. `FILE_NAME` has no host paths. Its timestamp
   changes on every run, so regenerating does not reproduce the files byte
   for byte. The DATA sections are deterministic.

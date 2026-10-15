@@ -313,12 +313,9 @@ block fields, views referencing bodies by id and hole callouts referencing featu
 docs/DRAWINGS.md). Written only when a document has a drawing (`io::v6_feature`,
 "drawings"). No geometry is stored: drawings are rendered from the regenerated model at export.
 
-**Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. Files written before
-the rename to R-CAD (2026-10-13) say `"format": "fission420"` and are usually named
-`*.f420.json`. They load unchanged; no version changed with the name, and the extension is
-never checked. Evidence: `crates/rcad-document/tests/legacy_name.rs`, plus every frozen
-fixture under `crates/rcad-commands/tests/fixtures/native_v*/`, whose contents predate the
-rename. See docs/RENAME.md.
+**Name.** Files say `"format": "r-cad"` and are named `*.rcad.json`. A file with any other
+format name is refused with an error naming the format found; the extension is never
+checked. Evidence: `crates/rcad-document/tests/format_name.rs`.
 
 **v4** = v3 plus named user parameters and feature expression bindings
 (docs/PARAMETERS.md); v3 files load unchanged (frozen v3 documents in

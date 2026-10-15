@@ -13,11 +13,6 @@
 //! Directory: `RCAD_RECOVERY_DIR`, else `$XDG_STATE_HOME/r-cad/recovery`,
 //! else `~/.local/state/r-cad/recovery`. Interval: `RCAD_AUTOSAVE_SECS`
 //! (default 60; `0` = after every committed change, for tests).
-//!
-//! Before the rename to R-CAD (2026-10-13) these were `F420_RECOVERY_DIR`,
-//! `F420_AUTOSAVE_SECS` and `.../fission420/recovery`, with copies named
-//! `*.autosave.f420.json`. The old variables are still read when the new ones are
-//! unset, and copies left in the old directory are still offered at start-up.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
 use eframe::egui::{self, RichText};
@@ -26,34 +21,22 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const SUFFIX: &str = ".autosave.rcad.json";
-/// Recovery copies written before the rename.
-const LEGACY_SUFFIX: &str = ".autosave.f420.json";
 
-/// `(recovery dir, pre-rename recovery dir to also search)` from an environment lookup.
-/// The legacy dir is only derived from XDG/HOME; an explicit directory variable wins
-/// outright.
-pub fn recovery_dirs(
-    var: impl Fn(&str) -> Option<std::ffi::OsString>,
-) -> (Option<PathBuf>, Option<PathBuf>) {
-    if let Some(d) = var("RCAD_RECOVERY_DIR").or_else(|| var("F420_RECOVERY_DIR")) {
-        return (Some(PathBuf::from(d)), None);
+/// Recovery directory from an environment lookup: `RCAD_RECOVERY_DIR`, else
+/// `$XDG_STATE_HOME/r-cad/recovery`, else `$HOME/.local/state/r-cad/recovery`.
+pub fn recovery_dir(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    if let Some(d) = var("RCAD_RECOVERY_DIR") {
+        return Some(PathBuf::from(d));
     }
-    let base = var("XDG_STATE_HOME")
+    var("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")));
-    match base {
-        Some(b) => (
-            Some(b.join("r-cad/recovery")),
-            Some(b.join("fission420/recovery")),
-        ),
-        None => (None, None),
-    }
+        .or_else(|| var("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+        .map(|b| b.join("r-cad/recovery"))
 }
 
-/// Autosave interval: `RCAD_AUTOSAVE_SECS`, else `F420_AUTOSAVE_SECS`, else 60 s.
+/// Autosave interval: `RCAD_AUTOSAVE_SECS`, else 60 s.
 pub fn autosave_interval(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Duration {
     var("RCAD_AUTOSAVE_SECS")
-        .or_else(|| var("F420_AUTOSAVE_SECS"))
         .and_then(|v| v.to_str()?.parse::<u64>().ok())
         .map_or(Duration::from_secs(60), Duration::from_secs)
 }
@@ -64,8 +47,6 @@ pub struct Autosave {
     /// and scripted scenes never write recovery files.
     pub enabled: bool,
     pub dir: Option<PathBuf>,
-    /// Pre-rename recovery directory, searched (never written) at start-up.
-    pub legacy_dir: Option<PathBuf>,
     pub interval: Duration,
     /// (doc id, revision) last written, and where.
     last: Option<(u64, u64, PathBuf)>,
@@ -85,12 +66,11 @@ pub struct Autosave {
 
 impl Default for Autosave {
     fn default() -> Self {
-        let (dir, legacy_dir) = recovery_dirs(|k| std::env::var_os(k));
+        let dir = recovery_dir(|k| std::env::var_os(k));
         let interval = autosave_interval(|k| std::env::var_os(k));
         Self {
             enabled: false,
             dir,
-            legacy_dir,
             interval,
             last: None,
             last_time: None,
@@ -112,7 +92,7 @@ pub fn find_copies(dir: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             let s = p.to_string_lossy();
-            s.ends_with(SUFFIX) || s.ends_with(LEGACY_SUFFIX)
+            s.ends_with(SUFFIX)
         })
         .map(|p| {
             let t = std::fs::metadata(&p)
@@ -173,12 +153,12 @@ impl RcadApp {
     /// copies left by an earlier session.
     pub fn enable_autosave(&mut self) {
         self.autosave.enabled = true;
-        let a = &self.autosave;
-        self.autosave.offered = [a.dir.as_deref(), a.legacy_dir.as_deref()]
-            .into_iter()
-            .flatten()
-            .flat_map(find_copies)
-            .collect();
+        self.autosave.offered = self
+            .autosave
+            .dir
+            .as_deref()
+            .map(find_copies)
+            .unwrap_or_default();
     }
 
     /// Where the open document's recovery copy goes: the file stem plus a
