@@ -80,20 +80,22 @@ pub enum SlotKind {
     Angle,
     /// Integer count.
     Count,
+    /// Dimensionless ratio (K-factor, scale factor).
+    Ratio,
 }
 
 impl SlotKind {
     fn dim(self) -> i32 {
         match self {
             SlotKind::Length => 1,
-            SlotKind::Angle | SlotKind::Count => 0,
+            SlotKind::Angle | SlotKind::Count | SlotKind::Ratio => 0,
         }
     }
     pub fn unit(self) -> &'static str {
         match self {
             SlotKind::Length => "mm",
             SlotKind::Angle => "deg",
-            SlotKind::Count => "",
+            SlotKind::Count | SlotKind::Ratio => "",
         }
     }
 }
@@ -694,11 +696,16 @@ pub fn slot_kind(kind: &FeatureKind, name: &str) -> Option<SlotKind> {
             Some(SlotKind::Length)
         }
         FeatureKind::MoveBody { .. } if name == "angle_deg" => Some(SlotKind::Angle),
-        FeatureKind::ScaleBody { .. } if name == "factor" => Some(SlotKind::Angle),
+        FeatureKind::ScaleBody { .. } if name == "factor" => Some(SlotKind::Ratio),
         FeatureKind::AlignBody { .. } if name == "offset" => Some(SlotKind::Length),
-        // The K-factor is a ratio: dimensionless like an angle.
-        FeatureKind::SheetMetal { .. } if name == "k_factor" => Some(SlotKind::Angle),
-        FeatureKind::SheetMetal { .. } => kind_has(kind, name).then_some(SlotKind::Length),
+        FeatureKind::SheetMetal { .. } | FeatureKind::SheetBase { .. } if name == "k_factor" => {
+            kind_has(kind, name).then_some(SlotKind::Ratio)
+        }
+        FeatureKind::SheetMetal { .. } | FeatureKind::SheetBase { .. } => {
+            kind_has(kind, name).then_some(SlotKind::Length)
+        }
+        FeatureKind::SheetFlange { .. } if name == "angle_deg" => Some(SlotKind::Angle),
+        FeatureKind::SheetFlange { .. } => kind_has(kind, name).then_some(SlotKind::Length),
         FeatureKind::SplitBody { .. } if name == "plane_angle_deg" => {
             kind_has(kind, name).then_some(SlotKind::Angle)
         }

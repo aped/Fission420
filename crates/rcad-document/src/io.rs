@@ -42,7 +42,8 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v9: the additions listed in [`v9_feature`] (piece identity seeds of cuts
 /// and splits that separate a body, prints of referenced imported faces,
 /// contour flanges ordered by geometry, driven sketch dimensions,
-/// concentric/collinear/symmetric sketch constraints).
+/// concentric/collinear/symmetric sketch constraints, expressions on
+/// sheet-metal rules and flanges).
 /// Written only when used.
 pub const FORMAT_VERSION: u32 = 9;
 /// Oldest version this build reads.
@@ -352,8 +353,20 @@ pub fn v9_feature(doc: &Document) -> Option<&'static str> {
     if doc.features.iter().any(|f| !f.piece_seeds.is_empty()) {
         return Some("piece identity of cuts and splits that separate a body");
     }
+    if !doc.units.is_default() {
+        return Some("document display units");
+    }
     if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
         return Some("prints of referenced imported faces");
+    }
+    if doc.features.iter().any(|f| {
+        !f.expressions.is_empty()
+            && matches!(
+                f.kind,
+                crate::FeatureKind::SheetBase { .. } | crate::FeatureKind::SheetFlange { .. }
+            )
+    }) {
+        return Some("expressions on sheet-metal rules and flanges");
     }
     // A v8 reader would take a driven (measuring) dimension as driving, and
     // cannot parse the newer constraint kinds.

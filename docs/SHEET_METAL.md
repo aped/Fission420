@@ -31,12 +31,12 @@ later cut, fillet, ... is fine; a flange after it is refused with the reason).
 | `relief` | `rectangular` or `obround` |
 | `relief_width`, `relief_depth` | relief size (default t × t); obround needs depth ≥ width/2 |
 
-Edit it with `edit_sheet_rule` (atomic, any subset of fields) or as numeric feature parameters of
-the base with `set_parameter` (`thickness`, `radius`, `k_factor`, `relief_width`, `relief_depth`).
-These and the flange parameters (`angle_deg`, `length`, `start_offset`, `end_offset`) cannot be
-bound to expressions: `set_expression` refuses them as unknown parameters (`params::slot_kind`
-has no sheet base or edge flange slot). Only the contour flange's `thickness`, `radius`,
-`k_factor` and `width` take expressions. Every flange and the flat pattern regenerate from the rule.
+Edit it with `edit_sheet_rule` (atomic, any subset of fields) or as feature parameters of the
+base (`thickness`, `radius`, `k_factor`, `relief_width`, `relief_depth`) with `set_parameter`,
+or bind them to expressions with `set_expression`; flanges likewise (`angle_deg`, `length`,
+`start_offset`, `end_offset`). Lengths take length expressions, `angle_deg` angles, and the
+K-factor a plain ratio (format v9 when used). Every flange and the flat pattern regenerate from
+the rule (`sheet_flanges.rs::sheet_rule_and_flange_lengths_take_expressions`).
 
 ### Edge flange conventions (stated)
 

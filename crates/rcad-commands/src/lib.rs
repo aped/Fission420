@@ -1069,6 +1069,11 @@ pub enum Command {
         revision: u64,
         command: Box<Command>,
     },
+    /// Set the document's display length unit (`mm`, `cm`, `m`, `in`,
+    /// `ft`). Geometry and stored values stay in millimetres. One undo step.
+    SetDocumentUnits {
+        units: rcad_document::DocumentUnits,
+    },
     Save {
         path: PathBuf,
     },
@@ -1417,6 +1422,7 @@ impl Command {
             Command::Save { .. } => "save",
             Command::Open { .. } => "open",
             Command::AtRevision { command, .. } => command.name(),
+            Command::SetDocumentUnits { .. } => "set_document_units",
             Command::RedefineFeature { .. } => "redefine_feature",
             Command::SketchOp { .. } => "sketch_op",
             Command::Close => "close",
@@ -1958,6 +1964,15 @@ impl Session {
             return Ok(());
         }
         match cmd {
+            Command::SetDocumentUnits { units } => {
+                let units = *units;
+                self.model_mut()?
+                    .transact(&format!("Units {}", units.symbol()), |d| {
+                        d.units = units;
+                        Ok(())
+                    })?;
+                r.message = Some(format!("document units: {}", units.symbol()));
+            }
             Command::AtRevision { revision, command } => {
                 let now = self.model.as_ref().map(|m| m.revision);
                 if now != Some(*revision) {

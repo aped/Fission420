@@ -217,3 +217,38 @@ fn moving_the_cut_far_keeps_each_id_on_its_side() {
         assert!((vol(&s, 1) - (left.1 - left.0) * 300.0).abs() < 1e-6);
     }
 }
+
+#[test]
+fn a_join_on_piece_two_stays_on_its_physical_piece() {
+    // A Ø4 x 5 boss joined to Body2 (the bottom piece) from World XY, which
+    // holds that piece's bottom face, so it grows downward (ADR 0003). The
+    // tab then moves below the slot, flipping the bounding-box order: the
+    // boss stays on the bottom piece. (Under the positional rule Body2 would
+    // become the top piece and the boss would join it far from its body.)
+    let mut s = Session::new();
+    tabbed_plate(&mut s, 25.0);
+    for v in [
+        json!({"cmd": "create_sketch", "plane": "WorldXY", "template": "centered_circle",
+               "diameter": 4.0, "center": [20.0, 5.0]}),
+        json!({"cmd": "extrude", "sketch": 7, "distance": 5.0, "op": "join", "target": 2}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let boss = std::f64::consts::PI * 4.0 * 5.0;
+    assert!((vol(&s, 2) - (PLAIN + boss)).abs() < 1e-6, "{}", vol(&s, 2));
+    tray::ok(
+        &mut s,
+        &json!({"cmd": "set_parameter", "feature": 3, "name": "center_y", "value": 5.0}),
+    );
+    let (lo2, hi2) = bounds(&s, 2);
+    assert!(
+        lo2[1].abs() < 1e-9 && (hi2[1] - 14.0).abs() < 1e-9,
+        "{lo2:?} {hi2:?}"
+    );
+    assert!(
+        (vol(&s, 2) - (TABBED + boss)).abs() < 1e-6,
+        "{}",
+        vol(&s, 2)
+    );
+    assert!((vol(&s, 1) - PLAIN).abs() < 1e-6, "{}", vol(&s, 1));
+}

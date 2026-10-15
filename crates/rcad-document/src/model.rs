@@ -2191,6 +2191,48 @@ pub struct Document {
     /// bodies by id; geometry is computed at export from the evaluation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<crate::drawing::Drawing>,
+    /// Display length unit of the document (format v9). Geometry and
+    /// parameters stay in millimetres; this only chooses how lengths are
+    /// shown and how bare numbers typed by the user are read.
+    #[serde(default, skip_serializing_if = "DocumentUnits::is_default")]
+    pub units: DocumentUnits,
+}
+
+/// Display length unit of a document ([`Document::units`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentUnits {
+    #[default]
+    Mm,
+    Cm,
+    M,
+    In,
+    Ft,
+}
+
+impl DocumentUnits {
+    pub fn is_default(&self) -> bool {
+        *self == Self::Mm
+    }
+    /// Millimetres per unit (exact by definition of the inch).
+    pub fn mm_per_unit(self) -> f64 {
+        match self {
+            Self::Mm => 1.0,
+            Self::Cm => 10.0,
+            Self::M => 1000.0,
+            Self::In => 25.4,
+            Self::Ft => 304.8,
+        }
+    }
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::Cm => "cm",
+            Self::M => "m",
+            Self::In => "in",
+            Self::Ft => "ft",
+        }
+    }
 }
 
 /// A named variant of a document (see [`Document::configurations`]).
@@ -2231,6 +2273,7 @@ impl Document {
             active_configuration: None,
             assembly: Default::default(),
             drawings: Vec::new(),
+            units: DocumentUnits::Mm,
         }
     }
 
