@@ -1,6 +1,6 @@
 {
   "format": "r-cad",
-  "version": 4,
+  "version": 9,
   "document": {
     "features": [
       {
@@ -13,7 +13,20 @@
           "bodies": [
             1
           ]
-        }
+        },
+        "face_prints": [
+          {
+            "body": 1,
+            "face": 5,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "offset": 10.0,
+            "area": 1200.0
+          }
+        ]
       },
       {
         "id": 2,
