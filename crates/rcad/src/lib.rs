@@ -8,6 +8,7 @@ pub mod app;
 pub mod assembly_ui;
 pub mod bodies;
 pub mod config_ui;
+pub mod dialogs;
 pub mod direct_edit_ui;
 #[cfg(test)]
 mod display_fault_tests;
@@ -30,6 +31,7 @@ pub mod recovery;
 pub mod scenes;
 pub mod section;
 pub mod sheet_ui;
+pub mod shell;
 pub mod sketch_edit;
 pub mod sketch_view;
 pub mod text_ui;

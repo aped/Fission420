@@ -1593,6 +1593,11 @@ pub struct FeatureSummary {
     /// rule values are in `parameters`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet_relief: Option<rcad_document::sheet::ReliefShape>,
+    /// The stored definition of features Edit Feature can reopen (extrude,
+    /// revolve, hole, shell, thread, patterns, mirror, edge finishes, loft,
+    /// sweep); None for other kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<FeatureKind>,
 }
 
 /// A named user parameter with its evaluated value and relationships.
@@ -4694,6 +4699,25 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                     FeatureKind::SheetBase { rule, .. } => Some(rule.relief),
                     _ => None,
                 },
+                definition: matches!(
+                    f.kind,
+                    FeatureKind::Extrude { .. }
+                        | FeatureKind::Revolve { .. }
+                        | FeatureKind::Hole { .. }
+                        | FeatureKind::Shell { .. }
+                        | FeatureKind::ShellFace { .. }
+                        | FeatureKind::Thread { .. }
+                        | FeatureKind::LinearPattern { .. }
+                        | FeatureKind::CircularPattern { .. }
+                        | FeatureKind::Mirror { .. }
+                        | FeatureKind::Chamfer { .. }
+                        | FeatureKind::Fillet { .. }
+                        | FeatureKind::FilletLoop { .. }
+                        | FeatureKind::ChamferLoop { .. }
+                        | FeatureKind::Loft { .. }
+                        | FeatureKind::Sweep { .. }
+                )
+                .then(|| f.kind.clone()),
             }
         })
         .collect()

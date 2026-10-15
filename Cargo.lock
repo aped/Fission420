@@ -2487,6 +2487,8 @@ dependencies = [
  "rcad-sketch",
  "rcad-viewport",
  "rfd",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

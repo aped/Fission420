@@ -112,6 +112,7 @@ impl RcadApp {
         egui::CollapsingHeader::new(RichText::new(format!("Parameters ({n})")).strong())
             .id_salt("params_panel")
             .default_open(true)
+            .open(self.shell.take_focus(crate::shell::Focus::Parameters))
             .show(ui, |ui| self.parameters_body(ui))
             .header_response
             .probe("Parameters header");

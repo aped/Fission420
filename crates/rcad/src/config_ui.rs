@@ -103,6 +103,7 @@ impl RcadApp {
         let mut send: Vec<Command> = Vec::new();
         let header = egui::CollapsingHeader::new("Configuration table")
             .id_salt("configuration_table")
+            .open(self.shell.take_focus(crate::shell::Focus::ConfigTable))
             .show(ui, |ui| {
                 let st = &mut self.config_table;
                 let Some((_, _, table)) = st.draft.as_mut() else {

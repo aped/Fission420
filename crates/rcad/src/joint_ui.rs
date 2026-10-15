@@ -357,11 +357,15 @@ pub(crate) fn joint_dialog(
         ui.horizontal(|ui| {
             match &cmd {
                 Ok(c) => {
-                    if ui
+                    let r = ui
                         .add_enabled(!d.pending, egui::Button::new("Create joint"))
-                        .probe("Create joint")
-                        .clicked()
-                    {
+                        .probe("Create joint");
+                    // Keep the open form's commit button in view in the
+                    // browser column (the column is shorter under the ribbon).
+                    if !ui.clip_rect().contains_rect(r.rect) {
+                        r.scroll_to_me(Some(egui::Align::Max));
+                    }
+                    if r.clicked() {
                         send.push(c.clone());
                         d.pending = true;
                     }
