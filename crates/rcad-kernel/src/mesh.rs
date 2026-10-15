@@ -30,7 +30,22 @@ pub fn tessellate_display(body: &Body, chord: f64) -> Result<TriMesh> {
     tessellate_impl(body, chord, false)
 }
 
+/// Tessellations of the 16 most recent (shape, chord, weld mode) triples (see
+/// `crate::memo`): a regeneration tessellates the same body for several checks,
+/// and the viewport re-tessellates every visible body after each command,
+/// including the bodies the command did not change.
+static TESSELLATIONS: crate::memo::ShapeMemo<(u64, bool), std::sync::Arc<TriMesh>> =
+    crate::memo::ShapeMemo::new(16);
+
 fn tessellate_impl(body: &Body, chord: f64, weld_across_faces: bool) -> Result<TriMesh> {
+    TESSELLATIONS
+        .get_or_try(&body.solid, (chord.to_bits(), weld_across_faces), || {
+            tessellate_uncached(body, chord, weld_across_faces).map(std::sync::Arc::new)
+        })
+        .map(|m| (*m).clone())
+}
+
+fn tessellate_uncached(body: &Body, chord: f64, weld_across_faces: bool) -> Result<TriMesh> {
     // Bound the chord from below relative to the part size: tiny chords make Truck
     // allocate unboundedly (observed: 1e-6 mm aborts on a ~1 GB allocation).
     let b = crate::measure::raw_bounds(&body.solid)?;

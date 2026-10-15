@@ -112,7 +112,18 @@ fn curve_range(c: &Curve) -> (f64, f64) {
 /// Exact when extrema lie on vertices or straight edges; for explicit curved edges
 /// (NURBS arcs) exact to the search precision (unimodal near the extremum, true for
 /// circular arcs); boolean intersection curves keep the sampling error.
+///
+/// Memoised (`crate::memo`): bounds are asked for the same body many times per
+/// regeneration (tool margins, extents, the result check, tessellation,
+/// measurement), and each call samples every curved edge.
 pub(crate) fn raw_bounds(solid: &Solid) -> Result<Bounds> {
+    BOUNDS_MEMO.get_or_try(solid, (), || raw_bounds_uncached(solid))
+}
+
+/// Bounds of the 32 most recent shapes (see `crate::memo`).
+static BOUNDS_MEMO: crate::memo::ShapeMemo<(), Bounds> = crate::memo::ShapeMemo::new(32);
+
+fn raw_bounds_uncached(solid: &Solid) -> Result<Bounds> {
     let mut b = Bounds {
         min: [f64::INFINITY; 3],
         max: [f64::NEG_INFINITY; 3],

@@ -270,27 +270,40 @@ impl PolyIndex {
     }
     /// [`dist_to_polygon`] of `poly` (the polygon this index was built for).
     pub(crate) fn dist(&self, p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
+        self.dist_within(p, poly, f64::INFINITY)
+    }
+    /// [`dist_to_polygon`] where it is below `limit`; otherwise some value
+    /// `>= limit` (blocks whose box is farther than `limit` are not visited).
+    /// For callers that only compare the distance with thresholds below `limit`.
+    pub(crate) fn dist_within(&self, p: [f64; 2], poly: &[[f64; 2]], limit: f64) -> f64 {
         let n = poly.len();
         let margin = self.margin(p);
-        let mut order: Vec<(f64, usize)> = self
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(k, &(_, _, lo, hi))| {
-                let dx = (lo[0] - p[0]).max(p[0] - hi[0]).max(0.0);
-                let dy = (lo[1] - p[1]).max(p[1] - hi[1]).max(0.0);
-                (dx.hypot(dy), k)
-            })
-            .collect();
-        order.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-        let mut best = f64::INFINITY;
-        for (lb, k) in order {
-            if lb > best + margin {
-                break;
-            }
+        // Squared distance from `p` to a block's box (a lower bound of its edges').
+        let lb2 = |&(_, _, lo, hi): &(usize, usize, [f64; 2], [f64; 2])| {
+            let dx = (lo[0] - p[0]).max(p[0] - hi[0]).max(0.0);
+            let dy = (lo[1] - p[1]).max(p[1] - hi[1]).max(0.0);
+            dx * dx + dy * dy
+        };
+        let scan = |k: usize, best: f64| {
             let (s, e, _, _) = self.blocks[k];
-            for i in s..e {
-                best = best.min(seg_dist(p, poly[i], poly[(i + 1) % n]));
+            (s..e).fold(best, |b, i| b.min(seg_dist(p, poly[i], poly[(i + 1) % n])))
+        };
+        // The nearest box first (a small bound), then every block whose box
+        // is not farther than that bound plus the margin.
+        let Some(first) = (0..self.blocks.len())
+            .min_by(|&a, &b| lb2(&self.blocks[a]).total_cmp(&lb2(&self.blocks[b])))
+        else {
+            return f64::INFINITY;
+        };
+        let cap = limit + margin;
+        if lb2(&self.blocks[first]) > cap * cap {
+            return f64::INFINITY;
+        }
+        let mut best = scan(first, f64::INFINITY);
+        for k in 0..self.blocks.len() {
+            let reach = best.min(limit) + margin;
+            if k != first && lb2(&self.blocks[k]) <= reach * reach {
+                best = scan(k, best);
             }
         }
         best
@@ -388,7 +401,8 @@ impl PrismTest {
         }
     }
     /// (inside, distance to the boundary) of `q` in the section at `w`.
-    fn at(&self, q: [f64; 2], w: f64) -> (bool, f64) {
+    /// Distances of `limit` or more are reported as some value `>= limit`.
+    fn at(&self, q: [f64; 2], w: f64, limit: f64) -> (bool, f64) {
         if self.taper != 0.0
             && let Section::Circle(c, r) = &self.base
         {
@@ -398,14 +412,14 @@ impl PrismTest {
         }
         match self.section_poly(w) {
             // The profile's own polygon (untapered): the indexed queries.
-            Some(std::borrow::Cow::Borrowed(_)) => (self.inside(q), self.boundary_dist(q)),
+            Some(std::borrow::Cow::Borrowed(_)) => (self.inside(q), self.boundary_dist(q, limit)),
             Some(poly) => {
                 let inside = point_in_polygon(q, &poly) && !self.in_hole(q);
                 let d = self
                     .holes
                     .iter()
                     .zip(&self.holes_ix)
-                    .map(|(h, ix)| ix.dist(q, h))
+                    .map(|(h, ix)| ix.dist_within(q, h, limit))
                     .fold(dist_to_polygon(q, &poly), f64::min);
                 (inside, d)
             }
@@ -422,13 +436,14 @@ impl PrismTest {
             .zip(&self.holes_ix)
             .any(|(h, ix)| ix.contains(q, h))
     }
-    /// Distance to the region's boundary (outer loop and holes).
-    fn boundary_dist(&self, q: [f64; 2]) -> f64 {
+    /// Distance to the region's boundary (outer loop and holes); distances of
+    /// `limit` or more are reported as some value `>= limit`.
+    fn boundary_dist(&self, q: [f64; 2], limit: f64) -> f64 {
         self.holes
             .iter()
             .zip(&self.holes_ix)
-            .map(|(h, ix)| ix.dist(q, h))
-            .fold(self.poly_ix.dist(q, &self.poly), f64::min)
+            .map(|(h, ix)| ix.dist_within(q, h, limit))
+            .fold(self.poly_ix.dist_within(q, &self.poly, limit), f64::min)
     }
     /// In-plane sample points of the actual tool region (outer loop minus
     /// holes): a 7 x 7 grid of its bounding box (points inside the region, 1 %
@@ -453,7 +468,7 @@ impl PrismTest {
                     lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / 7.0,
                     lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / 7.0,
                 ];
-                if self.inside(q) && self.boundary_dist(q) > 0.01 * size {
+                if self.inside(q) && self.boundary_dist(q, f64::INFINITY) > 0.01 * size {
                     out.push(q);
                 }
             }
@@ -508,9 +523,13 @@ impl PrismTest {
     fn classify_sides(&self, x: [f64; 3], eps: f64, eps_side: f64) -> Option<bool> {
         let [u, v, w] = local(&self.start, x);
         let d_cap = w.abs().min((w - self.length).abs());
-        let (inside, d_side) = self.at([u, v], w.clamp(0.0, self.length));
         // A drafted side is inclined: its distance is at most the in-plane one.
-        let d_side = d_side * (1.0 + self.taper * self.taper).sqrt().recip();
+        let incline = (1.0 + self.taper * self.taper).sqrt().recip();
+        // Only `d_side < eps` and `d_side < eps_side` matter below: in-plane
+        // distances beyond twice the larger threshold need not be exact.
+        let limit = 2.0 * eps.max(eps_side) / incline;
+        let (inside, d_side) = self.at([u, v], w.clamp(0.0, self.length), limit);
+        let d_side = d_side * incline;
         if d_cap < eps && (inside || d_side < eps) {
             return None;
         }
@@ -1288,7 +1307,9 @@ fn invasion_depth(
 ) -> Option<f64> {
     let mut best: Option<f64> = None;
     let mut take = |w: f64| best = Some(best.map_or(w, |b: f64| b.min(w)));
-    let strictly_inside = |q: [f64; 2]| poly_ix.contains(q, poly) && poly_ix.dist(q, poly) > slack;
+    let strictly_inside = |q: [f64; 2]| {
+        poly_ix.contains(q, poly) && poly_ix.dist_within(q, poly, 2.0 * slack) > slack
+    };
     // (a) polygon vertices inside the footprint.
     for v in p {
         if strictly_inside([v[0], v[1]]) {

@@ -17,6 +17,7 @@ mod fillet;
 mod icurve;
 mod loft;
 mod measure;
+mod memo;
 mod mesh;
 mod ops;
 mod pieces;
@@ -426,7 +427,12 @@ pub struct Body {
 /// while both are alive. Used to keep derived data (a check tessellation)
 /// only for the very body it was computed from.
 pub fn same_shape(a: &Body, b: &Body) -> bool {
-    let (sa, sb) = (a.solid.boundaries(), b.solid.boundaries());
+    same_solid(&a.solid, &b.solid)
+}
+
+/// [`same_shape`] of two solids.
+pub(crate) fn same_solid(a: &Solid, b: &Solid) -> bool {
+    let (sa, sb) = (a.boundaries(), b.boundaries());
     sa.len() == sb.len()
         && sa.iter().zip(sb).all(|(x, y)| {
             x.len() == y.len()

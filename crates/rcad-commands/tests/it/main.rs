@@ -61,6 +61,7 @@ mod open_with_errors;
 mod organizer_tray;
 mod panic_boundary;
 mod pattern_grid;
+mod perf_bench;
 mod persistence_failures;
 mod piece_identity;
 mod piece_retarget_fuzz;
