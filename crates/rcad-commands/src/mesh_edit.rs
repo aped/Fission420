@@ -10,7 +10,7 @@ use rcad_document::{BodyId, DocError, FeatureKind};
 use rcad_exchange::mesh::{
     MeshDiagnostics, SelfIntersectionLimits, SelfIntersectionReport, self_intersections,
 };
-use rcad_exchange::mesh_edit::{CutKeep, MeshEditOp, edit};
+use rcad_exchange::mesh_edit::{CutKeep, MeshEditOp};
 use serde::{Deserialize, Serialize};
 
 /// Arguments of `edit_mesh`.
@@ -87,8 +87,16 @@ impl Session {
                 let a = a.clone();
                 a.op.validate().map_err(DocError::Validation)?;
                 let mesh = self.source_mesh(a.body, "mesh editing")?;
-                let (_, report) = edit(&mesh.mesh.positions, &mesh.mesh.triangles, &a.op)
-                    .map_err(|e| DocError::Validation(format!("mesh {}: {e}", a.op.name())))?;
+                // Cached: the regeneration of the new feature reuses this
+                // result instead of editing (e.g. decimating) again.
+                let report = rcad_document::mesh_edit::edit_cached(
+                    &mesh.mesh.positions,
+                    &mesh.mesh.triangles,
+                    &a.op,
+                )
+                .map_err(|e| DocError::Validation(format!("mesh {}: {e}", a.op.name())))?
+                .1
+                .clone();
                 let text = rcad_document::mesh_edit::summary(&report);
                 if a.preview {
                     r.message = Some(format!("preview: {text}"));
