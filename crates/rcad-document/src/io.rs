@@ -356,6 +356,14 @@ pub fn v9_feature(doc: &Document) -> Option<&'static str> {
     if !doc.units.is_default() {
         return Some("document display units");
     }
+    // A v8 reader would ignore the tool identity and bind such an edge by
+    // nearness, possibly to another edge.
+    if doc.features.iter().any(|f| {
+        matches!(&f.kind, crate::FeatureKind::Sketch { links, .. }
+            if links.iter().flat_map(|l| l.loops.iter().flatten()).any(|c| c.from_tool.is_some()))
+    }) {
+        return Some("projected edges bound to the tool feature that made them");
+    }
     if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
         return Some("prints of referenced imported faces");
     }
