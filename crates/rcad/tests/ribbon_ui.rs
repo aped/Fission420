@@ -314,9 +314,29 @@ fn enter_commits_the_docked_dialog_without_focusing_a_field() {
         },
     });
     settle(&mut h);
-    // Click and Enter in the same frame.
-    h.get_by_label("Extrude…").click();
-    h.key_press(eframe::egui::Key::Enter);
+    // Click and Enter in the same frame (a loaded machine delivers them
+    // together): one step processes press, release and Enter.
+    let at = h.get_by_label("Extrude…").rect().center();
+    h.event(eframe::egui::Event::PointerMoved(at));
+    h.step();
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::PointerButton {
+            pos: at,
+            button: eframe::egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+    }
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::Key {
+            key: eframe::egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        });
+    }
+    h.step();
     settle(&mut h);
     assert!(
         (h.state().volume().unwrap_or(0.0) - 12000.0).abs() < 1e-6,

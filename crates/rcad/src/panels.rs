@@ -2264,7 +2264,10 @@ impl RcadApp {
             self.diag(true, "Input", e);
         }
         AUTOFOCUS.with(|a| a.set(false));
-        ok |= enter && !opened && ok_allowed && !busy_blocks(&dlg, busy);
+        // Enter counts on the frame the dialog opens too: under load the click
+        // that opened it and the Enter arrive in the same frame (no command
+        // opens a dialog from an Enter key, so it cannot confirm itself).
+        ok |= enter && ok_allowed && !busy_blocks(&dlg, busy);
         cancel |= esc;
         if cancel {
             // A pending import is cancelled too (stopped while it reads, or
