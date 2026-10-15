@@ -120,19 +120,7 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
         smax - smin + 2.0 * m,
         "chamfer",
     )
-    .map_err(|e| match e {
-        // Typically the edge ends at another chamfer or fillet: the tool then
-        // cuts across that blend's face and the boolean fails.
-        KernelError::BooleanFailed(_) | KernelError::Internal(_) => {
-            KernelError::InvalidInput(String::from(
-                "chamfer: this edge cannot be chamfered on its own here; where it meets \
-                 another chamfered or filleted edge at a corner the blend needs a mitered \
-                 corner, which single-edge chamfers do not build. To chamfer every edge of \
-                 a face's outer boundary use the chamfer_loop command (Chamfer edge loop…)",
-            ))
-        }
-        other => other,
-    })?;
+    .map_err(|err| boolean_failure(err, oblique_end(end0.1, e) || oblique_end(end1.1, e)))?;
     check_single_closed(&out, "chamfer")?;
     // The tool must have removed exactly the edge wedge: triangle (edge, A, B)
     // swept between the end planes, area(T) times the axial length at T's
@@ -141,15 +129,12 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
     let centroid = (t1 + t2) * (d / 3.0);
     let wedge =
         0.5 * t1.cross(t2).magnitude() * d * d * (s_at(end1, centroid) - s_at(end0, centroid));
-    let vol = |b: &Body| match crate::measure(b)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => Ok((volume, error_estimate)),
-        crate::VolumeResult::Unavailable { reason } => Err(KernelError::InvalidInput(format!(
-            "chamfer: cannot verify the removed volume ({reason})"
-        ))),
+    let vol = |b: &Body| {
+        crate::measure::verified_volume(b).map_err(|reason| {
+            KernelError::InvalidInput(format!(
+                "chamfer: cannot verify the removed volume ({reason})"
+            ))
+        })
     };
     let ((v0, e0), (v1, e1)) = (vol(body)?, vol(&out)?);
     let removed = v0 - v1;
@@ -162,6 +147,36 @@ pub fn chamfer_edge(body: &Body, f1: &Frame, f2: &Frame, d: f64) -> Result<Body>
         )));
     }
     Ok(out)
+}
+
+/// An end face (outward unit normal `n`) that is not perpendicular to the edge
+/// direction `e`: what an earlier chamfer or fillet at that corner leaves.
+fn oblique_end(n: Vector3, e: Vector3) -> bool {
+    n.dot(e).abs() < 1.0 - 1.0e-9
+}
+
+/// The error for a failed chamfer boolean. The corner hint is given only when
+/// the edge actually ends at an oblique face (`corner`, typically another
+/// blend); otherwise the kernel's own reason is passed on.
+fn boolean_failure(err: KernelError, corner: bool) -> KernelError {
+    match err {
+        KernelError::BooleanFailed(why) | KernelError::Internal(why) if corner => {
+            KernelError::InvalidInput(format!(
+                "chamfer: this edge cannot be chamfered on its own here: it ends at a face \
+                 oblique to it (typically another chamfered or filleted edge), and that corner \
+                 needs a mitered blend, which single-edge chamfers do not build. To chamfer \
+                 every edge of a face's outer boundary use the chamfer_loop command (Chamfer \
+                 edge loop…). Kernel detail: {why}"
+            ))
+        }
+        KernelError::BooleanFailed(why) | KernelError::Internal(why) => {
+            KernelError::InvalidInput(format!(
+                "chamfer: the geometry kernel's boolean failed on this edge; nothing was \
+                 changed. Kernel detail: {why}"
+            ))
+        }
+        other => other,
+    }
 }
 
 /// The planar END face of the edge at its endpoint `q`: the one face through

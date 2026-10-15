@@ -1197,7 +1197,8 @@ pub fn chamfer_cap_loop(body: &Body, cap: &Frame, d: f64) -> Result<Body> {
 }
 
 /// Volume and error of a body: the exact parametric integral when it
-/// applies, else the general measurement.
+/// applies, else another exact boundary integral; refused when only the
+/// tessellation estimate exists.
 fn volume_of(body: &Body) -> Result<(f64, f64)> {
     if let Ok(Ok(v)) = guarded("edge loop volume", || {
         crate::measure::parametric_volume(&body.solid, VOLUME_PANELS)
@@ -1205,16 +1206,11 @@ fn volume_of(body: &Body) -> Result<(f64, f64)> {
     {
         return Ok(v);
     }
-    match crate::measure(body)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => Ok((volume, error_estimate)),
-        crate::VolumeResult::Unavailable { reason } => Err(KernelError::InvalidResult(format!(
-            "{PREFIX}cannot verify the result volume ({reason})"
-        ))),
-    }
+    // Any other exact boundary integral; never the tessellation estimate,
+    // which is not a bound.
+    crate::measure::verified_volume(body).map_err(|reason| {
+        KernelError::InvalidResult(format!("{PREFIX}cannot verify the volume ({reason})"))
+    })
 }
 
 /// The blend region of a general body: the cap face, one wall face per

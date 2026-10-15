@@ -508,24 +508,16 @@ fn circle_loft(
 
 /// The body's volume must equal the analytic one (a construction check).
 fn check_volume(body: &Body, want: f64, what: &str) -> Result<()> {
-    match measure(body)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => {
-            let tol = (1e-9 * want.abs()).max(1e-6) + 3.0 * error_estimate;
-            if (volume - want).abs() > tol {
-                return Err(KernelError::InvalidResult(format!(
-                    "loft: volume {volume:.6} mm^3 differs from the {what} formula {want:.6}"
-                )));
-            }
-            Ok(())
-        }
-        crate::VolumeResult::Unavailable { reason } => Err(KernelError::InvalidResult(format!(
-            "loft: cannot verify the volume ({reason})"
-        ))),
+    let (volume, error_estimate) = crate::measure::verified_volume(body).map_err(|reason| {
+        KernelError::InvalidResult(format!("loft: cannot verify the volume ({reason})"))
+    })?;
+    let tol = (1e-9 * want.abs()).max(1e-6) + 3.0 * error_estimate;
+    if (volume - want).abs() > tol {
+        return Err(KernelError::InvalidResult(format!(
+            "loft: volume {volume:.6} mm^3 differs from the {what} formula {want:.6}"
+        )));
     }
+    Ok(())
 }
 
 #[cfg(test)]

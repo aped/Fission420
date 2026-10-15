@@ -231,3 +231,24 @@ fn chamfer_refusals_at_the_ends() {
         Err(e) => assert!(e.to_string().contains("instead of the edge wedge"), "{e}"),
     }
 }
+
+/// A failed chamfer boolean names a corner blend only when the edge really ends
+/// at a face oblique to it; otherwise the kernel's own reason is passed on, not
+/// a guess about neighbouring chamfers.
+#[test]
+fn chamfer_boolean_failure_names_the_real_cause() {
+    let e = Vector3::new(1.0, 0.0, 0.0);
+    // Square end faces: no corner blend.
+    assert!(!oblique_end(Vector3::new(-1.0, 0.0, 0.0), e));
+    assert!(oblique_end(Vector3::new(-0.8, 0.6, 0.0), e));
+    let plain =
+        boolean_failure(KernelError::BooleanFailed("coplanar contact".into()), false).to_string();
+    assert!(plain.contains("coplanar contact"), "{plain}");
+    assert!(!plain.contains("chamfered or filleted"), "{plain}");
+    let corner = boolean_failure(KernelError::Internal("panic caught".into()), true).to_string();
+    assert!(corner.contains("chamfered or filleted"), "{corner}");
+    assert!(corner.contains("panic caught"), "{corner}");
+    // Other errors pass through unchanged.
+    let other = boolean_failure(KernelError::InvalidInput("x".into()), true);
+    assert!(matches!(other, KernelError::InvalidInput(m) if m == "x"));
+}

@@ -18,7 +18,7 @@
 //! coming back within the profile's reach (self-intersection).
 use crate::build::{check_single_closed, region_face};
 use crate::{
-    Body, Frame, KernelError, LoopSegment, Profile, Result, arc_signed_sweep, guarded, measure, tol,
+    Body, Frame, KernelError, LoopSegment, Profile, Result, arc_signed_sweep, guarded, tol,
 };
 use serde::{Deserialize, Serialize};
 use truck_modeling::*;
@@ -260,24 +260,14 @@ pub fn sweep(profile: &Profile, frame: &Frame, path: &[PathSegment]) -> Result<B
             } => area * angle * (radius + centroid[0] * out2[0] + centroid[1] * out2[1]),
         })
         .sum();
-    match measure(&body)?.volume {
-        crate::VolumeResult::Value {
-            volume,
-            error_estimate,
-            ..
-        } => {
-            let tolerance = (1e-9 * want).max(1e-6) + 3.0 * error_estimate;
-            if (volume - want).abs() > tolerance {
-                return Err(KernelError::InvalidResult(format!(
-                    "sweep: volume {volume:.6} mm^3 differs from Pappus {want:.6} mm^3"
-                )));
-            }
-        }
-        crate::VolumeResult::Unavailable { reason } => {
-            return Err(KernelError::InvalidResult(format!(
-                "sweep: cannot verify the volume ({reason})"
-            )));
-        }
+    let (volume, error_estimate) = crate::measure::verified_volume(&body).map_err(|reason| {
+        KernelError::InvalidResult(format!("sweep: cannot verify the volume ({reason})"))
+    })?;
+    let tolerance = (1e-9 * want).max(1e-6) + 3.0 * error_estimate;
+    if (volume - want).abs() > tolerance {
+        return Err(KernelError::InvalidResult(format!(
+            "sweep: volume {volume:.6} mm^3 differs from Pappus {want:.6} mm^3"
+        )));
     }
     Ok(body)
 }
