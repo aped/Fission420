@@ -3,7 +3,7 @@
 //! workspace tabs explain themselves.
 use std::time::{Duration, Instant};
 
-use eframe::egui::Key;
+use eframe::egui::{Key, Modifiers};
 use egui_kittest::{Harness, kittest::Queryable as _};
 use rcad::{ExecMode, RcadApp};
 use rcad_commands::{Command, SketchTemplate};
@@ -135,4 +135,27 @@ fn workspace_tabs_have_tooltips() {
         h.query_by_label_contains("repair and edit").is_some(),
         "no MESH tab tooltip"
     );
+}
+
+/// File ▸ Quit (Ctrl+Q) asks first when there is unsaved work and quits
+/// straight away otherwise.
+#[test]
+fn quit_asks_about_unsaved_changes() {
+    let mut h = harness();
+    plate(&mut h);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Q);
+    settle(&mut h);
+    h.get_by_label("Discard changes");
+    click(&mut h, "Keep editing");
+    assert!(!h.state().exit_confirmed());
+    click(&mut h, "File menu");
+    click(&mut h, "Quit");
+    click(&mut h, "Discard changes");
+    assert!(h.state().exit_confirmed());
+    // A document without changes quits without asking.
+    let mut h = harness();
+    click(&mut h, "New");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Q);
+    settle(&mut h);
+    assert!(h.state().exit_confirmed());
 }
