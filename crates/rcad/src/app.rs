@@ -2818,6 +2818,7 @@ pub fn error_kind(e: &DocError) -> &'static str {
         DocError::NeedsPieces { .. } => "NeedsPieces",
         DocError::Cancelled(_) => "Cancelled",
         DocError::ImportCancelled(_) => "Cancelled",
+        DocError::Internal { .. } => "Internal",
     }
 }
 

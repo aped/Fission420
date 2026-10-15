@@ -374,3 +374,38 @@ fn v7_documents() {
         assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     }
 }
+
+/// Frozen version-8 documents (split pieces, edge-loop fillets, two-direction
+/// patterns) must open, regenerate healthy, and re-save equal to the original
+/// definition.
+#[test]
+fn v8_documents() {
+    let d = repo().join("crates/rcad-commands/tests/fixtures/native_v8");
+    for name in ["everyday_enclosure", "everyday_tray", "split_bar"] {
+        let path = d.join(format!("{name}.rcad.json"));
+        assert_eq!(version(&path), 8, "{name}");
+        let mut s = Session::new();
+        let r = s.execute(&Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        });
+        assert!(r.ok, "{name}: {:?}", r.error);
+        assert!(
+            s.model().unwrap().evaluation().is_healthy(),
+            "{name}: {:?}",
+            r.message
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("resaved.rcad.json");
+        assert!(s.execute(&Command::Save { path: out.clone() }).ok);
+        let mut t = Session::new();
+        assert!(
+            t.execute(&Command::Open {
+                path: out,
+                safe_mode: false
+            })
+            .ok
+        );
+        assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
+    }
+}

@@ -172,6 +172,22 @@ pub struct Evaluation {
 }
 
 impl Evaluation {
+    /// Features that did not evaluate (failed themselves or depend on a
+    /// failure), in evaluation order.
+    pub fn failures(&self) -> impl Iterator<Item = &FeatureResult> {
+        self.features.iter().filter(|r| r.health.is_error())
+    }
+
+    /// Whether every feature evaluated.
+    pub fn is_healthy(&self) -> bool {
+        self.failures().next().is_none()
+    }
+
+    /// The structured error of the first feature that failed itself.
+    pub fn first_error(&self) -> Option<&DocError> {
+        self.features.iter().find_map(|r| r.health.error.as_ref())
+    }
+
     pub fn body_by_id(&self, id: BodyId) -> Option<&EvalBody> {
         self.bodies.iter().find(|b| b.id == id)
     }
@@ -396,6 +412,14 @@ struct Snapshot {
     moves: Vec<(BodyId, usize, k::Rigid)>,
     /// Sheet-metal bodies (definition state for flanges / flat pattern).
     sheets: BTreeMap<BodyId, crate::sheet::SheetModel>,
+    /// Partial regeneration: features not evaluated because they failed or
+    /// depend on a failure, each with the failed feature at the root.
+    failed: BTreeMap<FeatureId, FeatureId>,
+    /// Bodies a failed feature should have made or changed (with that
+    /// feature): later features reading them are not evaluated.
+    tainted: BTreeMap<BodyId, FeatureId>,
+    /// First error of a partial regeneration of this prefix.
+    first_error: Option<DocError>,
 }
 
 impl Snapshot {
@@ -433,6 +457,33 @@ impl Snapshot {
             index: HashMap::new(),
             moves: Vec::new(),
             sheets: BTreeMap::new(),
+            failed: BTreeMap::new(),
+            tainted: BTreeMap::new(),
+            first_error: None,
+        }
+    }
+
+    /// The failed feature `f` depends on (explicitly, or through a body it
+    /// reads or changes that a failed feature should have made or changed).
+    fn failed_upstream(&self, doc: &Document, f: &crate::Feature) -> Option<FeatureId> {
+        if self.failed.is_empty() {
+            return None;
+        }
+        let deps = doc.dependencies_of(f);
+        if let Some(root) = deps.iter().find_map(|d| self.failed.get(d)) {
+            return Some(*root);
+        }
+        doc.read_bodies(f)
+            .iter()
+            .find_map(|b| self.tainted.get(b))
+            .copied()
+    }
+
+    /// Record that `f` was not evaluated because of failed feature `root`.
+    fn mark_failed(&mut self, doc: &Document, f: &crate::Feature, root: FeatureId) {
+        self.failed.insert(f.id, root);
+        for b in f.created_bodies().into_iter().chain(doc.read_bodies(f)) {
+            self.tainted.entry(b).or_insert(root);
         }
     }
 }
@@ -630,11 +681,49 @@ pub fn regenerate_cached_opts(
     cache: Option<&mut RegenCache>,
     measure_body: bool,
 ) -> Result<Evaluation> {
-    match regen_impl(doc, cache, measure_body, None)? {
+    match regen_impl(doc, cache, measure_body, None, false)? {
         Regen::Done(e) => Ok(*e),
         Regen::Stopped(_) => Err(DocError::Validation(
             "internal: regeneration stopped early".into(),
         )),
+    }
+}
+
+/// Regenerate as far as possible: a feature that fails is recorded in its
+/// [`FeatureResult::health`] (with the state just before it kept), its
+/// dependents are flagged as failed upstream and not evaluated, and every
+/// independent feature is still evaluated. Fails only for structural
+/// problems (dependency cycles, inconsistent body tables, cancellation,
+/// unassigned split pieces). Deterministic, like [`regenerate`].
+pub fn regenerate_partial(
+    doc: &Document,
+    cache: Option<&mut RegenCache>,
+    measure_body: bool,
+) -> Result<Evaluation> {
+    match regen_impl(doc, cache, measure_body, None, true)? {
+        Regen::Done(e) => Ok(*e),
+        Regen::Stopped(_) => Err(DocError::Validation(
+            "internal: regeneration stopped early".into(),
+        )),
+    }
+}
+
+/// How to repair feature `id` that failed with `e`, when there is a
+/// generic answer.
+fn repair_hint(doc: &Document, id: FeatureId, e: &DocError) -> Option<String> {
+    let name = doc.feature(id).map(|f| f.name.as_str()).unwrap_or("");
+    match e {
+        DocError::BrokenReference { .. } => Some(format!(
+            "edit {id} {name} and select its references again, or delete it"
+        )),
+        DocError::SketchSolve { .. } => Some(format!(
+            "edit sketch {id} {name}: remove or change the conflicting constraints"
+        )),
+        DocError::Kernel { .. } | DocError::ProductLimit(_) => Some(format!(
+            "edit {id} {name} (change its size or operation), roll the marker back before \
+             it, or suppress it"
+        )),
+        _ => None,
     }
 }
 
@@ -649,10 +738,24 @@ fn regen_impl(
     mut cache: Option<&mut RegenCache>,
     measure_body: bool,
     stop: Option<FeatureId>,
+    partial: bool,
 ) -> Result<Regen> {
     let order = doc.evaluation_order()?;
-    doc.validate_bodies()?;
-    doc.check_suppression()?;
+    doc.validate_body_tables()?;
+    // Strict: a dependency on a suppressed/rolled-back feature fails the
+    // whole regeneration. Partial: that feature (and its dependents) is
+    // flagged and the rest evaluates.
+    let mut bad_refs: HashMap<FeatureId, DocError> = HashMap::new();
+    for (id, e) in doc
+        .missing_body_refs()
+        .into_iter()
+        .chain(doc.suppression_violations()?)
+    {
+        if !partial {
+            return Err(e);
+        }
+        bad_refs.entry(id).or_insert(e);
+    }
     let keys = prefix_keys(doc, &order)?;
     let mut st = Snapshot::new();
     let mut start = 0;
@@ -667,6 +770,11 @@ fn regen_impl(
         } else {
             c.misses += 1;
         }
+    }
+    // A cached prefix that holds a failure (stored by a partial
+    // regeneration) fails a strict one, as evaluating it would.
+    if !partial && let Some(e) = &st.first_error {
+        return Err(e.clone());
     }
 
     for (i, id) in order.iter().copied().enumerate().skip(start) {
@@ -697,1062 +805,87 @@ fn regen_impl(
             } else {
                 "rolled back: after the timeline marker, not evaluated".into()
             });
+            r.health = crate::FeatureHealth {
+                state: if f.suppressed {
+                    crate::HealthState::Suppressed
+                } else {
+                    crate::HealthState::RolledBack
+                },
+                ..Default::default()
+            };
             st.results.push(r);
             if let Some(c) = cache.as_deref_mut() {
                 c.insert(keys[i].clone(), st.clone());
             }
             continue;
         }
-        match &f.kind {
-            FeatureKind::Sketch {
-                plane,
-                sketch,
-                links,
-            } => {
-                let (frame, resolved) = plane_frame(id, plane, &st)?;
-                let mut s = sketch.clone();
-                for (li, link) in links.iter().enumerate() {
-                    let curves = link_curves(id, &frame, &link.source, &st)?;
-                    bind_link(id, li, link, &curves, &mut s)?;
-                }
-                let report = s.solve();
-                if !report.is_success() {
-                    let culprits: Vec<String> = report
-                        .conflicting
-                        .iter()
-                        .map(|&i| sketch.constraint_label(i))
-                        .collect();
-                    return Err(DocError::SketchSolve {
+        // Partial regeneration: a feature that reads a failed feature, or
+        // a body a failed feature should have made or changed, is not
+        // evaluated (never built on a state the history does not describe).
+        let upstream = if partial {
+            st.failed_upstream(doc, f)
+        } else {
+            None
+        };
+        let outcome = match (bad_refs.remove(&id), upstream) {
+            (Some(e), _) => Err(e),
+            (None, Some(up)) => {
+                r.health = crate::FeatureHealth::upstream(up);
+                st.mark_failed(doc, f, up);
+                Ok(false)
+            }
+            (None, None) => Ok(true),
+        };
+        // Partial regeneration restores this state when the feature fails.
+        let pre = partial.then(|| st.clone());
+        let evaluated = match outcome {
+            Ok(true) => {
+                // A panic inside one feature's evaluation (a kernel defect)
+                // fails that feature like any other error; the state it was
+                // building is discarded (restored from `pre`, or dropped with
+                // the strict regeneration's error).
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    eval_feature(doc, id, i, f, &mut st, &mut r)
+                }))
+                .unwrap_or_else(|p| {
+                    Err(DocError::Kernel {
                         feature: id,
                         detail: format!(
-                            "{:?}, residual {:.3e} mm, conflicting constraints: {}",
-                            report.status,
-                            report.residual,
-                            if culprits.is_empty() {
-                                "not identified".to_string()
-                            } else {
-                                culprits.join("; ")
-                            }
+                            "internal error while evaluating this feature ({}); nothing was \
+                             changed",
+                            panic_text(&p)
                         ),
-                    });
-                }
-                let profile = s.profile_region().map_err(|e| e.to_string());
-                r.profile_error = profile.as_ref().err().cloned();
-                r.solve = Some(report);
-                r.frame = Some(frame);
-                r.resolved_face = resolved;
-                let solved = Arc::new(s.clone());
-                r.solved_sketch = Some(s);
-                st.sketches.insert(
-                    id,
-                    SketchOut {
-                        frame,
-                        profile,
-                        solved,
-                    },
-                );
-            }
-            FeatureKind::Revolve {
-                sketch,
-                angle,
-                body,
-                axis,
-                reverse,
-                merge,
-            } => {
-                let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let profile = s.single_loop(id, *sketch, "Revolve")?.clone();
-                // Runs 1-5: about the sketch Y axis with the profile on +X,
-                // straight to the kernel (unchanged results); otherwise (other
-                // axes, the profile on −X, reverse) through `revolve_about`.
-                let legacy = (axis.is_default() && !*reverse)
-                    .then(|| k::revolve(&to_kernel(&profile), &s.frame, *angle));
-                let b = match legacy {
-                    Some(Ok(b)) => b,
-                    Some(Err(e)) => {
-                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)
-                            .map_err(|_| DocError::Validation(format!("{id}: {e}")))?
-                    }
-                    None => {
-                        revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)?
-                    }
-                };
-                match merge {
-                    None | Some(Operation::NewBody { .. }) => {
-                        create_body(
-                            &mut st,
-                            id,
-                            *body,
-                            BodyGeometry::Brep(b),
-                            BodySource::Modeled,
-                        )?;
-                        r.body = Some(*body);
-                    }
-                    Some(Operation::Join { target } | Operation::Cut { target })
-                    | Some(Operation::Intersect { target }) => {
-                        let op = match merge {
-                            Some(Operation::Join { .. }) => k::CombineOp::Join,
-                            Some(Operation::Cut { .. }) => k::CombineOp::Cut,
-                            _ => k::CombineOp::Intersect,
-                        };
-                        let t = brep_target(&st, id, *target)?;
-                        // A full turn is the same solid whatever its seam:
-                        // Truck often fails when the tool's seam lies on the
-                        // target's (coaxial revolutions), so retry with the
-                        // seam turned about the axis.
-                        let (ao, ad) = revolve_axis_world(id, &s.frame, &s.solved, *axis)?;
-                        let full = *angle >= 2.0 * std::f64::consts::PI - 1e-12;
-                        let turns: &[f64] = if full {
-                            &[0.0, 0.37, 1.13, 2.71]
-                        } else {
-                            &[0.0]
-                        };
-                        let mut last = None;
-                        let mut done = None;
-                        for &a in turns {
-                            let tool = if a == 0.0 {
-                                b.clone()
-                            } else {
-                                let rot = k::Rigid::new([0.0; 3], ao, ad, a).map_err(kernel(id))?;
-                                k::transform_body(&b, &rot).map_err(kernel(id))?
-                            };
-                            match k::combine(&t, std::slice::from_ref(&tool), op) {
-                                Ok(x) => {
-                                    done = Some(x);
-                                    break;
-                                }
-                                Err(e) => last = Some(e),
-                            }
-                        }
-                        let (out, rep) = done.ok_or_else(|| DocError::Kernel {
-                            feature: id,
-                            detail: format!(
-                                "revolve {op:?}: {}",
-                                last.map(|e| e.to_string()).unwrap_or_default()
-                            ),
-                        })?;
-                        if !rep.passed() {
-                            return Err(DocError::GeometryCheck {
-                                feature: id,
-                                detail: format!(
-                                    "revolve {op:?}: {}; refused (the model is unchanged)",
-                                    rep.failure().unwrap_or_default()
-                                ),
-                            });
-                        }
-                        replace_body(&mut st, id, *target, out);
-                        r.body = Some(*target);
-                    }
-                }
-            }
-            FeatureKind::Sweep {
-                profile,
-                path,
-                body,
-            } => {
-                let sp = st.sketches.get(profile).ok_or(not_a_sketch(id, *profile))?;
-                let pp = st.sketches.get(path).ok_or(not_a_sketch(id, *path))?;
-                let prof = to_kernel(sp.single_loop(id, *profile, "Sweep")?);
-                let segs = path_segments(&pp.solved, &pp.frame, sp.frame.origin)
-                    .map_err(|m| DocError::ProductLimit(format!("{id}: sweep path: {m}")))?;
-                let solid = k::sweep(&prof, &sp.frame, &segs).map_err(|e| match e {
-                    k::KernelError::InvalidInput(m) => {
-                        // The kernel message already starts with "sweep: ".
-                        DocError::ProductLimit(format!("{id}: {m}"))
-                    }
-                    other => DocError::Kernel {
-                        feature: id,
-                        detail: other.to_string(),
-                    },
-                })?;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(solid),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::Loft { a, b, body, via } => {
-                let mut sections = Vec::new();
-                for f in std::iter::once(a).chain(via.iter()).chain([b]) {
-                    let so = st.sketches.get(f).ok_or(not_a_sketch(id, *f))?;
-                    sections.push((to_kernel(so.single_loop(id, *f, "Loft")?), so.frame));
-                }
-                let solid = k::loft_sections(&sections).map_err(|e| match e {
-                    k::KernelError::InvalidInput(m) => {
-                        DocError::ProductLimit(format!("{id}: loft: {m}"))
-                    }
-                    other => DocError::Kernel {
-                        feature: id,
-                        detail: other.to_string(),
-                    },
-                })?;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(solid),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::Extrude {
-                sketch,
-                distance,
-                operation,
-                extent,
-                reverse,
-                region,
-                options,
-                pieces,
-            } => {
-                let out = extrude_feature(
-                    &mut st,
-                    id,
-                    *sketch,
-                    *distance,
-                    *operation,
-                    *extent,
-                    *reverse,
-                    region.as_ref(),
-                    options,
-                    pieces,
-                )?;
-                r.body = Some(out.body);
-                st.extrudes.insert(id, out);
-            }
-            FeatureKind::Cut { sketch, target, .. } => {
-                legacy_cut(doc, &mut st, id, *sketch, *target, None)?;
-                r.body = Some(*target);
-            }
-            FeatureKind::Pocket {
-                sketch,
-                depth,
-                target,
-            } => {
-                legacy_cut(doc, &mut st, id, *sketch, *target, Some(*depth))?;
-                r.body = Some(*target);
-            }
-            FeatureKind::ImportStep {
-                blob,
-                unit_override_to_mm,
-                bodies,
-            } => {
-                let b = doc.blob(*blob)?;
-                let bytes = b.bytes()?;
-                let imp = import::step(&bytes, *unit_override_to_mm).map_err(|e| match e {
-                    DocError::Validation(m) => DocError::Validation(format!("{id}: {m}")),
-                    other => other,
-                })?;
-                if imp.solids.len() != bodies.len() {
-                    return Err(DocError::Validation(format!(
-                        "{id}: {} contains {} solids but the feature records {} bodies",
-                        b.file_name,
-                        imp.solids.len(),
-                        bodies.len()
-                    )));
-                }
-                r.notes = imp.notes.clone();
-                for (solid, body) in imp.solids.into_iter().zip(bodies) {
-                    st.imported_faces
-                        .insert((id, *body), Arc::new(solid.planar_faces));
-                    st.face_ids.insert(
-                        *body,
-                        crate::direct::ImportedFaceIds::at_import(id, k::face_count(&solid.body)),
-                    );
-                    create_body(
-                        &mut st,
-                        id,
-                        *body,
-                        BodyGeometry::Brep(solid.body),
-                        BodySource::ImportedStep {
-                            file_name: b.file_name.clone(),
-                            solid_name: solid.name,
-                        },
-                    )?;
-                }
-                r.body = bodies.last().copied();
-            }
-            FeatureKind::LinearPattern {
-                seed,
-                count,
-                spacing,
-                direction,
-                second,
-            } => {
-                r.body = Some(linear_pattern(
-                    &mut st, id, *seed, *count, *spacing, *direction, *second,
-                )?);
-            }
-            FeatureKind::CircularPattern {
-                seed,
-                count,
-                angle,
-                center,
-            } => {
-                r.body = Some(circular_pattern(
-                    &mut st, id, *seed, *count, *angle, *center,
-                )?);
-            }
-            FeatureKind::Mirror { seed, plane } => {
-                let frame = plane_frame(id, plane, &st)?.0;
-                r.frame = Some(frame);
-                r.body = Some(mirror_feature(&mut st, id, *seed, &frame)?);
-            }
-            FeatureKind::Chamfer { a, b, distance } => {
-                let (fa, fb) = (resolve_face(id, a, &st)?, resolve_face(id, b, &st)?);
-                if fa.body != fb.body {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the two faces belong to different bodies ({} and {})",
-                        fa.body, fb.body
-                    )));
-                }
-                // The kernel finds the edge along the whole line where the two
-                // planes meet; with other faces in either plane (pattern
-                // occurrences, split faces) that line spans several edges.
-                if fa.sample.is_some() || fb.sample.is_some() {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: this chamfer edge lies on a plane that other faces of the body \
-                         share (pattern copies, split faces), so the edge between the two picked \
-                         faces is not unique (product limit). For patterned pockets, round the \
-                         seed sketch's corners (sketch fillet) so every copy is rounded"
-                    )));
-                }
-                let body = brep_target(&st, id, fa.body)?;
-                let out =
-                    k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
-                replace_body(&mut st, id, fa.body, out);
-                if let Some(frame) = chamfer_face_frame(&fa.frame, &fb.frame, *distance) {
-                    st.chamfers.insert(id, (frame, fa.body));
-                }
-                r.body = Some(fa.body);
-            }
-            FeatureKind::Fillet { a, b, radius } => {
-                let (fa, fb) = (resolve_face(id, a, &st)?, resolve_face(id, b, &st)?);
-                if fa.body != fb.body {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the two faces belong to different bodies ({} and {})",
-                        fa.body, fb.body
-                    )));
-                }
-                if fa.sample.is_some() || fb.sample.is_some() {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: this fillet edge lies on a plane that other faces of the body \
-                         share (pattern copies, split faces), so the edge between the two picked \
-                         faces is not unique (product limit). For patterned pockets, round the \
-                         seed sketch's corners (sketch fillet) so every copy is rounded"
-                    )));
-                }
-                let body = brep_target(&st, id, fa.body)?;
-                let out =
-                    k::fillet_edge(&body, &fa.frame, &fb.frame, *radius).map_err(kernel(id))?;
-                replace_body(&mut st, id, fa.body, out);
-                r.body = Some(fa.body);
-            }
-            FeatureKind::FilletLoop {
-                face,
-                radius,
-                holes,
-            } => {
-                let fa = resolve_face(id, face, &st)?;
-                let body = brep_target(&st, id, fa.body)?;
-                let out = if *holes {
-                    k::fillet_cap_face_edges(&body, &fa.frame, *radius)
-                } else {
-                    k::fillet_cap_loop(&body, &fa.frame, *radius)
-                }
-                .map_err(kernel(id))?;
-                replace_body(&mut st, id, fa.body, out);
-                r.body = Some(fa.body);
-            }
-            FeatureKind::ChamferLoop {
-                face,
-                distance,
-                holes,
-            } => {
-                let fa = resolve_face(id, face, &st)?;
-                let body = brep_target(&st, id, fa.body)?;
-                let out = if *holes {
-                    k::chamfer_cap_face_edges(&body, &fa.frame, *distance)
-                } else {
-                    k::chamfer_cap_loop(&body, &fa.frame, *distance)
-                }
-                .map_err(kernel(id))?;
-                replace_body(&mut st, id, fa.body, out);
-                r.body = Some(fa.body);
-            }
-            FeatureKind::Hole {
-                plane,
-                center,
-                diameter,
-                depth,
-                counterbore,
-                target,
-            } => {
-                let (frame, rf) = plane_frame(id, plane, &st)?;
-                r.resolved_face = rf;
-                r.frame = Some(frame);
-                let tools = hole_tools(
-                    &st,
-                    id,
-                    &frame,
-                    *center,
-                    *diameter,
-                    *depth,
-                    *counterbore,
-                    *target,
-                )?;
-                let mut body = brep_target(&st, id, *target)?;
-                let labels: &[&str] = if tools.len() == 2 {
-                    &["counterbore", "hole"]
-                } else {
-                    &["hole"]
-                };
-                for (what, tool) in labels.iter().zip(&tools) {
-                    body = apply_tool(&body, tool, &frame, Some(what), id, None)?.0;
-                }
-                replace_body(&mut st, id, *target, body);
-                st.holes.insert(id, tools);
-                r.body = Some(*target);
-            }
-            FeatureKind::MoveBody {
-                body,
-                translate,
-                origin,
-                axis,
-                angle,
-                copy,
-            } => {
-                let t = k::Rigid::new(*translate, *origin, *axis, *angle)
-                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
-                let b = brep_target(&st, id, *body)?;
-                let moved = k::transform_body(&b, &t).map_err(kernel(id))?;
-                match copy {
-                    Some(c) => {
-                        create_body(
-                            &mut st,
-                            id,
-                            *c,
-                            BodyGeometry::Brep(moved),
-                            BodySource::Modeled,
-                        )?;
-                        r.body = Some(*c);
-                    }
-                    None => {
-                        replace_body(&mut st, id, *body, moved);
-                        st.moves.push((*body, i, t));
-                        r.body = Some(*body);
-                    }
-                }
-            }
-            FeatureKind::SheetMetal {
-                sketch,
-                thickness,
-                radius,
-                k_factor,
-                width,
-                flip,
-                body,
-            } => {
-                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let chain = crate::sheet::line_chain(&so.solved)
-                    .map_err(|m| DocError::Validation(format!("{id}: sheet metal profile: {m}")))?;
-                let part = crate::sheet::contour_flange(
-                    id, &chain, *thickness, *radius, *k_factor, *flip,
-                )?;
-                if !(width.is_finite() && *width > 0.0) {
-                    return Err(DocError::Validation(format!(
-                        "{id}.width: must be > 0 mm, got {width}"
-                    )));
-                }
-                let solid = k::extrude_region(&to_kernel(&part.section), &[], &so.frame, *width)
-                    .map_err(kernel(id))?;
-                r.frame = Some(so.frame);
-                r.notes.push(format!(
-                    "flat length {:.6} mm (K {}), bend lines at {}",
-                    part.flat_length,
-                    k_factor,
-                    part.bend_lines
-                        .iter()
-                        .map(|x| format!("{x:.6}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(solid),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            // Sheet metal (logic in `crate::sheet`).
-            FeatureKind::SheetBase {
-                sketch,
-                rule,
-                flip,
-                body,
-            } => {
-                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let region = so.usable(id, *sketch)?;
-                let model =
-                    crate::sheet::base_model(id, *body, so.frame, *flip, rule, region, &so.solved)?;
-                let built = crate::sheet::build(&model)?;
-                r.frame = Some(so.frame);
-                r.notes = crate::sheet::notes(&built, rule);
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(built.folded),
-                    BodySource::Modeled,
-                )?;
-                st.sheets.insert(*body, model);
-                r.body = Some(*body);
-            }
-            FeatureKind::SheetFlange { base, body, .. } => {
-                let mut model = sheet_of(&st, id, *base, *body)?;
-                // A flange after the flat pattern would leave the
-                // displayed flat out of date (the DXF includes every flange).
-                if let Some(flat) = model.flat {
-                    return Err(DocError::Validation(format!(
-                        "{id}: this flange comes after the flat pattern {flat} of the same sheet, which would be out of date; keep flanges before the flat pattern"
-                    )));
-                }
-                model.flanges.extend(crate::sheet::flange_def(id, &f.kind));
-                let built = crate::sheet::build(&model)?;
-                r.notes = crate::sheet::notes(&built, &model.rule);
-                replace_body(&mut st, id, *body, built.folded);
-                model.last_feature = id;
-                st.sheets.insert(*body, model);
-                r.body = Some(*body);
-            }
-            FeatureKind::SheetFlat { base, body } => {
-                let sheet_body = doc
-                    .feature(*base)?
-                    .created_bodies()
-                    .first()
-                    .copied()
-                    .ok_or(DocError::BrokenReference {
-                        from: id,
-                        detail: format!("{base} is not a sheet base"),
-                    })?;
-                let mut model = sheet_of(&st, id, *base, sheet_body)?;
-                let built = crate::sheet::build(&model)?;
-                let flat = crate::sheet::flat_body(&built, &model.rule, id)?;
-                r.notes = crate::sheet::notes(&built, &model.rule);
-                model.flat = Some(id);
-                st.sheets.insert(sheet_body, model);
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(flat),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            // Surfaces (logic in `crate::surface`).
-            FeatureKind::ImportSurfaces {
-                blob,
-                unit_override_to_mm,
-                body,
-            } => {
-                let b = doc.blob(*blob)?;
-                let (geom, name, notes) =
-                    crate::surface::import(id, &b.bytes()?, *unit_override_to_mm)?;
-                r.notes = notes;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(geom),
-                    BodySource::ImportedStep {
-                        file_name: b.file_name.clone(),
-                        solid_name: name,
-                    },
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::SurfaceStitch {
-                source,
-                tolerance,
-                body,
-            }
-            | FeatureKind::SurfaceFill {
-                source,
-                tolerance,
-                body,
-            } => {
-                let src = surface_source(&st, id, *source)?;
-                let (geom, notes) = if matches!(f.kind, FeatureKind::SurfaceStitch { .. }) {
-                    crate::surface::stitch(id, &src, *tolerance)?
-                } else {
-                    crate::surface::fill(id, &src, *tolerance)?
-                };
-                r.notes = notes;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(geom),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::MeshEdit {
-                source,
-                op,
-                body,
-                second_body,
-            } => {
-                let bs = st
-                    .bodies
-                    .get(source)
-                    .ok_or_else(|| DocError::BrokenReference {
-                        from: id,
-                        detail: format!("mesh edit source {source} is not in the model"),
-                    })?;
-                let BodyGeometry::Mesh(m) = &bs.geometry else {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: {source} is an exact (B-rep) body; mesh edits apply to mesh \
-                         bodies (STL/3MF imports)"
-                    )));
-                };
-                let (meshes, notes) = crate::mesh_edit::edited(m, op)?;
-                if meshes.len() != 1 + usize::from(second_body.is_some()) {
-                    return Err(DocError::Validation(format!(
-                        "{id}: the mesh edit made {} meshes for {} bodies",
-                        meshes.len(),
-                        1 + usize::from(second_body.is_some())
-                    )));
-                }
-                r.notes = notes;
-                for (mesh, b) in meshes
-                    .into_iter()
-                    .zip(std::iter::once(*body).chain(*second_body))
-                {
-                    create_body(
-                        &mut st,
-                        id,
-                        b,
-                        BodyGeometry::Mesh(Arc::new(mesh)),
-                        BodySource::EditedMesh {
-                            source: *source,
-                            operation: op.name().into(),
-                        },
-                    )?;
-                }
-                r.body = Some(*body);
-            }
-            FeatureKind::MeshRepair {
-                source,
-                options,
-                body,
-            } => {
-                let bs = st
-                    .bodies
-                    .get(source)
-                    .ok_or_else(|| DocError::BrokenReference {
-                        from: id,
-                        detail: format!("mesh repair source {source} is not in the model"),
-                    })?;
-                let BodyGeometry::Mesh(m) = &bs.geometry else {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: {source} is an exact (B-rep) body; mesh repair applies to \
-                         mesh bodies (STL/3MF imports)"
-                    )));
-                };
-                let (mesh, notes) = import::repaired(m, options)?;
-                r.notes = notes;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Mesh(Arc::new(mesh)),
-                    BodySource::RepairedMesh { source: *source },
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::SurfacePatch { sketch, body }
-            | FeatureKind::SurfaceExtrude { sketch, body, .. } => {
-                let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
-                let geom = crate::surface::from_sketch(
-                    id,
-                    &f.kind,
-                    so.profile.as_ref().ok(),
-                    &so.solved,
-                    &so.frame,
-                )?;
-                r.frame = Some(so.frame);
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(geom),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::Thicken {
-                source,
-                distance,
-                reverse,
-                body,
-            } => {
-                let src = surface_source(&st, id, *source)?;
-                let (geom, notes) = crate::surface::thicken(id, &src, *distance, *reverse)?;
-                r.notes = notes;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(geom),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::AlignBody { from, to, offset } => {
-                let a = resolve_face(id, from, &st)?;
-                let b = resolve_face(id, to, &st)?;
-                if a.body == b.body {
-                    return Err(DocError::Validation(format!(
-                        "{id}: align needs faces of two different bodies"
-                    )));
-                }
-                if !offset.is_finite() {
-                    return Err(DocError::Validation(format!("{id}.offset must be finite")));
-                }
-                // Rotate n_a onto −n_b (smallest rotation), then translate a's
-                // origin onto b's plane (+offset along n_b).
-                let (na, nb) = (a.frame.z, b.frame.z);
-                let want = scale(nb, -1.0);
-                let axis = cross(na, want);
-                let s = dot(axis, axis).sqrt();
-                let c = dot(na, want).clamp(-1.0, 1.0);
-                let (ax, ang) = if s > 1e-12 {
-                    (scale(axis, 1.0 / s), s.atan2(c))
-                } else if c > 0.0 {
-                    ([0.0, 0.0, 1.0], 0.0)
-                } else {
-                    (a.frame.x, std::f64::consts::PI)
-                };
-                let rot = k::Rigid::new([0.0; 3], a.frame.origin, ax, ang).map_err(kernel(id))?;
-                let pa = rot.point(a.frame.origin);
-                let h = dot(sub(pa, b.frame.origin), nb) - offset;
-                let t = k::Rigid::new(scale(nb, -h), [0.0; 3], [0.0, 0.0, 1.0], 0.0)
-                    .map_err(kernel(id))?
-                    .after(&rot);
-                let body = brep_target(&st, id, a.body)?;
-                let moved = k::transform_body(&body, &t).map_err(kernel(id))?;
-                replace_body(&mut st, id, a.body, moved);
-                st.moves.push((a.body, i, t));
-                r.body = Some(a.body);
-            }
-            FeatureKind::ScaleBody {
-                body,
-                center,
-                factor,
-            } => {
-                let t = k::Rigid::scaling(*center, *factor)
-                    .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
-                let b = brep_target(&st, id, *body)?;
-                let scaled = k::transform_body(&b, &t).map_err(kernel(id))?;
-                // Keep every dimension above the modelling
-                // tolerances.
-                let bb = k::bounds(&scaled).map_err(kernel(id))?;
-                let small = (0..3)
-                    .map(|i| bb.max[i] - bb.min[i])
-                    .fold(f64::INFINITY, f64::min);
-                if small < 10.0 * k::tol::MIN_LENGTH {
-                    return Err(DocError::Validation(format!(
-                        "{id}: scaled by {factor} the body would be {small:.6} mm thin, below the \
-                         modelling tolerances"
-                    )));
-                }
-                replace_body(&mut st, id, *body, scaled);
-                st.moves.push((*body, i, t));
-                r.body = Some(*body);
-            }
-            FeatureKind::ShellFace { face, thickness } => {
-                let rf = resolve_face(id, face, &st)?;
-                r.frame = Some(rf.frame);
-                let t = brep_target(&st, id, rf.body)?;
-                let out = shell_from_face(id, &t, &rf.frame, *thickness)?;
-                replace_body(&mut st, id, rf.body, out);
-                r.body = Some(rf.body);
-            }
-            FeatureKind::SplitBody {
-                body,
-                plane,
-                new_body,
-                pieces,
-            } => {
-                let (pf, rf) = plane_frame(id, plane, &st)?;
-                r.frame = Some(pf);
-                r.resolved_face = rf;
-                let t = brep_target(&st, id, *body)?;
-                let (behind, front) = split_by_plane(&t, &pf, id, true)?;
-                let mut behind = k::split_pieces(&behind).map_err(kernel(id))?.into_iter();
-                let mut front = k::split_pieces(&front).map_err(kernel(id))?.into_iter();
-                let (Some(b0), Some(f0)) = (behind.next(), front.next()) else {
-                    return Err(DocError::Kernel {
-                        feature: id,
-                        detail: "split: an empty side".into(),
-                    });
-                };
-                let rest: Vec<Body> = behind.chain(front).collect();
-                if rest.len() > pieces.len() {
-                    return Err(DocError::NeedsPieces {
-                        feature: id,
-                        pieces: rest.len() + 1,
-                        assigned: pieces.len(),
-                    });
-                }
-                replace_body(&mut st, id, *body, b0);
-                create_body(
-                    &mut st,
-                    id,
-                    *new_body,
-                    BodyGeometry::Brep(f0),
-                    BodySource::Modeled,
-                )?;
-                for (piece, b) in rest.into_iter().zip(pieces) {
-                    create_body(
-                        &mut st,
-                        id,
-                        *b,
-                        BodyGeometry::Brep(piece),
-                        BodySource::Modeled,
-                    )?;
-                }
-                r.body = Some(*new_body);
-            }
-            FeatureKind::Shell {
-                extrude,
-                open,
-                thickness,
-            } => {
-                if st.moved_since(st.body_of_extrude(*extrude), *extrude) {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: shell: the body of {extrude} was moved after it; the scoped \
-                         shell needs it in place (shell before the move)"
-                    )));
-                }
-                let (body, tool) = shell_tool(doc, &st, id, *extrude, *open, *thickness)?;
-                let target = brep_target(&st, id, body)?;
-                r.frame = Some(tool.start);
-                let out = apply_tool(&target, &tool, &tool.start, Some("shell"), id, None)?.0;
-                replace_body(&mut st, id, body, out);
-                r.body = Some(body);
-            }
-            FeatureKind::Thread {
-                plane,
-                center,
-                diameter,
-                pitch,
-                length,
-                left_hand,
-                chord_tol,
-                nut,
-                body,
-            } => {
-                let (frame, rf) = plane_frame(id, plane, &st)?;
-                r.resolved_face = rf;
-                let frame = Frame {
-                    origin: frame.to_world(*center),
-                    ..frame
-                };
-                r.frame = Some(frame);
-                let spec = k::ThreadSpec {
-                    major_diameter: *diameter,
-                    pitch: *pitch,
-                    length: *length,
-                    left_hand: *left_hand,
-                    chord_tol: *chord_tol,
-                };
-                let built = match nut {
-                    None => k::threaded_rod(&frame, &spec),
-                    Some(n) => k::threaded_nut(&frame, &spec, n.width, n.clearance),
-                };
-                let (solid, report) = built.map_err(|e| match e {
-                    k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
-                    other => DocError::Kernel {
-                        feature: id,
-                        detail: other.to_string(),
-                    },
-                })?;
-                r.notes = vec![format!(
-                    "faceted thread: {} segments per turn, {} planar faces, largest facet \
-                     deviation {:.4} mm (tolerance {} mm); not an exact helicoid",
-                    report.segments_per_turn, report.faces, report.max_facet_deviation, chord_tol
-                )];
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Brep(solid),
-                    BodySource::Modeled,
-                )?;
-                r.body = Some(*body);
-            }
-            FeatureKind::Countersink {
-                hole,
-                diameter,
-                angle,
-            } => {
-                let target = doc
-                    .feature(*hole)
-                    .ok()
-                    .and_then(|f| match f.kind {
-                        FeatureKind::Hole {
-                            counterbore: None,
-                            target,
-                            ..
-                        } => Some(Ok(target)),
-                        FeatureKind::Hole { .. } => Some(Err(DocError::ProductLimit(format!(
-                            "{id}: a countersink on a counterbored hole is not supported"
-                        )))),
-                        _ => None,
                     })
-                    .ok_or_else(|| {
-                        DocError::Validation(format!("{id}: {hole} is not a Hole feature"))
-                    })??;
-                // The hole's tool is where the hole was made;
-                // after a move/scale of its body that is not where it is now.
-                if st.moved_since(Some(target), *hole) {
-                    return Err(DocError::ProductLimit(format!(
-                        "{id}: the body of {hole} was moved or scaled after it; add the \
-                         countersink before the move"
-                    )));
-                }
-                let tool = st.holes.get(hole).and_then(|t| t.last()).ok_or_else(|| {
-                    DocError::BrokenReference {
-                        from: id,
-                        detail: format!("{hole} is not an evaluated hole"),
+                })
+            }
+            Ok(false) => Ok(()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = evaluated {
+            match e {
+                // Structural outcomes the caller acts on, never per-feature health.
+                DocError::NeedsPieces { .. } | DocError::Cancelled(_) => return Err(e),
+                e if !partial => return Err(e),
+                e => {
+                    if let Some(pre) = pre {
+                        st = pre;
                     }
-                })?;
-                let SketchProfile::Circle { center, radius } = tool.profile else {
-                    return Err(DocError::Validation(format!("{id}: hole profile")));
-                };
-                let frame = tool.start;
-                let body = brep_target(&st, id, target)?;
-                let out = k::countersink(
-                    &body,
-                    frame.to_world(center),
-                    frame.z,
-                    2.0 * radius,
-                    *diameter,
-                    *angle,
-                )
-                .map_err(|e| match e {
-                    k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
-                    other => DocError::Kernel {
-                        feature: id,
-                        detail: other.to_string(),
-                    },
-                })?;
-                replace_body(&mut st, id, target, out);
-                r.frame = Some(frame);
-                r.body = Some(target);
-            }
-            FeatureKind::Combine {
-                target,
-                tools,
-                op,
-                keep_tools,
-            } => {
-                let a = brep_target(&st, id, *target)?;
-                let bs = tools
-                    .iter()
-                    .map(|t| brep_target(&st, id, *t))
-                    .collect::<Result<Vec<_>>>()?;
-                let (out, notes) = crate::combine::evaluate(id, *target, tools, &a, &bs, *op)?;
-                replace_body(&mut st, id, *target, out);
-                if !keep_tools {
-                    for t in tools {
-                        st.bodies.remove(t);
-                    }
-                }
-                r.notes = notes;
-                r.body = Some(*target);
-            }
-            FeatureKind::DirectEdit { face, op } => {
-                let bid = doc.face_body(face).ok_or_else(|| {
-                    DocError::Validation(format!("{id}: a direct edit needs an imported face"))
-                })?;
-                let target = brep_target(&st, id, bid)?;
-                let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
-                let pivot = match face.role {
-                    FaceRole::Imported { face: index, .. } => st
-                        .imported_faces
-                        .get(&(face.feature, bid))
-                        .and_then(|t| t.iter().find(|f| f.index == index))
-                        .map(|f| f.frame),
-                    _ => None,
-                };
-                let out = crate::direct::apply(
-                    id,
-                    face,
-                    *op,
-                    &target,
-                    last,
-                    st.face_ids.get(&bid),
-                    pivot,
-                )?;
-                replace_body(&mut st, id, bid, out.body);
-                st.face_ids.insert(bid, out.ids);
-                if let (FaceRole::Imported { face: index, .. }, Some(t)) =
-                    (face.role, st.imported_faces.get_mut(&(face.feature, bid)))
-                {
-                    crate::direct::update_planar_table(Arc::make_mut(t), index, *op, &out.removed);
-                }
-                r.body = Some(bid);
-            }
-            FeatureKind::Import3mf { blob, bodies } => {
-                let b = doc.blob(*blob)?;
-                let bytes = b.bytes()?;
-                let (objects, notes) = import::threemf(&bytes)?;
-                if objects.len() != bodies.len() {
-                    return Err(DocError::Validation(format!(
-                        "{id}: {} contains {} build items but the feature records {} bodies",
-                        b.file_name,
-                        objects.len(),
-                        bodies.len()
-                    )));
-                }
-                r.notes = notes;
-                for (o, body) in objects.into_iter().zip(bodies) {
-                    create_body(
-                        &mut st,
+                    r = FeatureResult {
                         id,
-                        *body,
-                        BodyGeometry::Mesh(Arc::new(o.mesh)),
-                        BodySource::ImportedMesh {
-                            file_name: b.file_name.clone(),
-                        },
-                    )?;
+                        name: f.name.clone(),
+                        solve: r.solve,
+                        frame: None,
+                        resolved_face: None,
+                        measurements: None,
+                        solved_sketch: r.solved_sketch,
+                        profile_error: r.profile_error,
+                        body: None,
+                        notes: r.notes,
+                        health: crate::FeatureHealth::failed(e.clone(), repair_hint(doc, id, &e)),
+                    };
+                    st.mark_failed(doc, f, id);
+                    st.first_error.get_or_insert(e);
                 }
-                r.body = bodies.last().copied();
-            }
-            FeatureKind::ImportMesh { blob, to_mm, body } => {
-                let b = doc.blob(*blob)?;
-                let bytes = b.bytes()?;
-                let (mesh, notes) = import::stl(&bytes, *to_mm)?;
-                r.notes = notes;
-                create_body(
-                    &mut st,
-                    id,
-                    *body,
-                    BodyGeometry::Mesh(Arc::new(mesh)),
-                    BodySource::ImportedMesh {
-                        file_name: b.file_name.clone(),
-                    },
-                )?;
-                r.body = Some(*body);
             }
         }
         st.results.push(r);
@@ -1847,6 +980,1024 @@ fn regen_impl(
     };
     eval.refresh_legacy_view();
     Ok(Regen::Done(Box::new(eval)))
+}
+
+/// Evaluate feature `f` (at evaluation index `i`) on `st`, filling `r`.
+/// On error `st` may be partially changed; the caller restores it.
+/// The message of a caught panic payload (`&str` or `String`), else a placeholder.
+pub fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panic with a non-text payload".into())
+}
+
+fn eval_feature(
+    doc: &Document,
+    id: FeatureId,
+    i: usize,
+    f: &crate::Feature,
+    st: &mut Snapshot,
+    r: &mut FeatureResult,
+) -> Result<()> {
+    match &f.kind {
+        FeatureKind::Sketch {
+            plane,
+            sketch,
+            links,
+        } => {
+            let (frame, resolved) = plane_frame(id, plane, st)?;
+            let mut s = sketch.clone();
+            for (li, link) in links.iter().enumerate() {
+                let curves = link_curves(id, &frame, &link.source, st)?;
+                bind_link(id, li, link, &curves, &mut s)?;
+            }
+            let report = s.solve();
+            if !report.is_success() {
+                let culprits: Vec<String> = report
+                    .conflicting
+                    .iter()
+                    .map(|&i| sketch.constraint_label(i))
+                    .collect();
+                return Err(DocError::SketchSolve {
+                    feature: id,
+                    detail: format!(
+                        "{:?}, residual {:.3e} mm, conflicting constraints: {}",
+                        report.status,
+                        report.residual,
+                        if culprits.is_empty() {
+                            "not identified".to_string()
+                        } else {
+                            culprits.join("; ")
+                        }
+                    ),
+                });
+            }
+            let profile = s.profile_region().map_err(|e| e.to_string());
+            r.profile_error = profile.as_ref().err().cloned();
+            r.solve = Some(report);
+            r.frame = Some(frame);
+            r.resolved_face = resolved;
+            let solved = Arc::new(s.clone());
+            r.solved_sketch = Some(s);
+            st.sketches.insert(
+                id,
+                SketchOut {
+                    frame,
+                    profile,
+                    solved,
+                },
+            );
+        }
+        FeatureKind::Revolve {
+            sketch,
+            angle,
+            body,
+            axis,
+            reverse,
+            merge,
+        } => {
+            let s = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+            let profile = s.single_loop(id, *sketch, "Revolve")?.clone();
+            // Runs 1-5: about the sketch Y axis with the profile on +X,
+            // straight to the kernel (unchanged results); otherwise (other
+            // axes, the profile on −X, reverse) through `revolve_about`.
+            let legacy = (axis.is_default() && !*reverse)
+                .then(|| k::revolve(&to_kernel(&profile), &s.frame, *angle));
+            let b = match legacy {
+                Some(Ok(b)) => b,
+                Some(Err(e)) => {
+                    revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)
+                        .map_err(|_| DocError::Validation(format!("{id}: {e}")))?
+                }
+                None => revolve_about(id, &profile, &s.frame, &s.solved, *axis, *angle, *reverse)?,
+            };
+            match merge {
+                None | Some(Operation::NewBody { .. }) => {
+                    create_body(st, id, *body, BodyGeometry::Brep(b), BodySource::Modeled)?;
+                    r.body = Some(*body);
+                }
+                Some(Operation::Join { target } | Operation::Cut { target })
+                | Some(Operation::Intersect { target }) => {
+                    let op = match merge {
+                        Some(Operation::Join { .. }) => k::CombineOp::Join,
+                        Some(Operation::Cut { .. }) => k::CombineOp::Cut,
+                        _ => k::CombineOp::Intersect,
+                    };
+                    let t = brep_target(st, id, *target)?;
+                    // A full turn is the same solid whatever its seam:
+                    // Truck often fails when the tool's seam lies on the
+                    // target's (coaxial revolutions), so retry with the
+                    // seam turned about the axis.
+                    let (ao, ad) = revolve_axis_world(id, &s.frame, &s.solved, *axis)?;
+                    let full = *angle >= 2.0 * std::f64::consts::PI - 1e-12;
+                    let turns: &[f64] = if full {
+                        &[0.0, 0.37, 1.13, 2.71]
+                    } else {
+                        &[0.0]
+                    };
+                    let mut last = None;
+                    let mut done = None;
+                    for &a in turns {
+                        let tool = if a == 0.0 {
+                            b.clone()
+                        } else {
+                            let rot = k::Rigid::new([0.0; 3], ao, ad, a).map_err(kernel(id))?;
+                            k::transform_body(&b, &rot).map_err(kernel(id))?
+                        };
+                        match k::combine(&t, std::slice::from_ref(&tool), op) {
+                            Ok(x) => {
+                                done = Some(x);
+                                break;
+                            }
+                            Err(e) => last = Some(e),
+                        }
+                    }
+                    let (out, rep) = done.ok_or_else(|| DocError::Kernel {
+                        feature: id,
+                        detail: format!(
+                            "revolve {op:?}: {}",
+                            last.map(|e| e.to_string()).unwrap_or_default()
+                        ),
+                    })?;
+                    if !rep.passed() {
+                        return Err(DocError::GeometryCheck {
+                            feature: id,
+                            detail: format!(
+                                "revolve {op:?}: {}; refused (the model is unchanged)",
+                                rep.failure().unwrap_or_default()
+                            ),
+                        });
+                    }
+                    replace_body(st, id, *target, out);
+                    r.body = Some(*target);
+                }
+            }
+        }
+        FeatureKind::Sweep {
+            profile,
+            path,
+            body,
+        } => {
+            let sp = st.sketches.get(profile).ok_or(not_a_sketch(id, *profile))?;
+            let pp = st.sketches.get(path).ok_or(not_a_sketch(id, *path))?;
+            let prof = to_kernel(sp.single_loop(id, *profile, "Sweep")?);
+            let segs = path_segments(&pp.solved, &pp.frame, sp.frame.origin)
+                .map_err(|m| DocError::ProductLimit(format!("{id}: sweep path: {m}")))?;
+            let solid = k::sweep(&prof, &sp.frame, &segs).map_err(|e| match e {
+                k::KernelError::InvalidInput(m) => {
+                    // The kernel message already starts with "sweep: ".
+                    DocError::ProductLimit(format!("{id}: {m}"))
+                }
+                other => DocError::Kernel {
+                    feature: id,
+                    detail: other.to_string(),
+                },
+            })?;
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(solid),
+                BodySource::Modeled,
+            )?;
+            r.body = Some(*body);
+        }
+        FeatureKind::Loft { a, b, body, via } => {
+            let mut sections = Vec::new();
+            for f in std::iter::once(a).chain(via.iter()).chain([b]) {
+                let so = st.sketches.get(f).ok_or(not_a_sketch(id, *f))?;
+                sections.push((to_kernel(so.single_loop(id, *f, "Loft")?), so.frame));
+            }
+            let solid = k::loft_sections(&sections).map_err(|e| match e {
+                k::KernelError::InvalidInput(m) => {
+                    DocError::ProductLimit(format!("{id}: loft: {m}"))
+                }
+                other => DocError::Kernel {
+                    feature: id,
+                    detail: other.to_string(),
+                },
+            })?;
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(solid),
+                BodySource::Modeled,
+            )?;
+            r.body = Some(*body);
+        }
+        FeatureKind::Extrude {
+            sketch,
+            distance,
+            operation,
+            extent,
+            reverse,
+            region,
+            options,
+            pieces,
+        } => {
+            let out = extrude_feature(
+                st,
+                id,
+                *sketch,
+                *distance,
+                *operation,
+                *extent,
+                *reverse,
+                region.as_ref(),
+                options,
+                pieces,
+            )?;
+            r.body = Some(out.body);
+            st.extrudes.insert(id, out);
+        }
+        FeatureKind::Cut { sketch, target, .. } => {
+            legacy_cut(doc, st, id, *sketch, *target, None)?;
+            r.body = Some(*target);
+        }
+        FeatureKind::Pocket {
+            sketch,
+            depth,
+            target,
+        } => {
+            legacy_cut(doc, st, id, *sketch, *target, Some(*depth))?;
+            r.body = Some(*target);
+        }
+        FeatureKind::ImportStep {
+            blob,
+            unit_override_to_mm,
+            bodies,
+        } => {
+            let b = doc.blob(*blob)?;
+            let bytes = b.bytes()?;
+            let imp = import::step(&bytes, *unit_override_to_mm).map_err(|e| match e {
+                DocError::Validation(m) => DocError::Validation(format!("{id}: {m}")),
+                other => other,
+            })?;
+            if imp.solids.len() != bodies.len() {
+                return Err(DocError::Validation(format!(
+                    "{id}: {} contains {} solids but the feature records {} bodies",
+                    b.file_name,
+                    imp.solids.len(),
+                    bodies.len()
+                )));
+            }
+            r.notes = imp.notes.clone();
+            for (solid, body) in imp.solids.into_iter().zip(bodies) {
+                st.imported_faces
+                    .insert((id, *body), Arc::new(solid.planar_faces));
+                st.face_ids.insert(
+                    *body,
+                    crate::direct::ImportedFaceIds::at_import(id, k::face_count(&solid.body)),
+                );
+                create_body(
+                    st,
+                    id,
+                    *body,
+                    BodyGeometry::Brep(solid.body),
+                    BodySource::ImportedStep {
+                        file_name: b.file_name.clone(),
+                        solid_name: solid.name,
+                    },
+                )?;
+            }
+            r.body = bodies.last().copied();
+        }
+        FeatureKind::LinearPattern {
+            seed,
+            count,
+            spacing,
+            direction,
+            second,
+        } => {
+            r.body = Some(linear_pattern(
+                st, id, *seed, *count, *spacing, *direction, *second,
+            )?);
+        }
+        FeatureKind::CircularPattern {
+            seed,
+            count,
+            angle,
+            center,
+        } => {
+            r.body = Some(circular_pattern(st, id, *seed, *count, *angle, *center)?);
+        }
+        FeatureKind::Mirror { seed, plane } => {
+            let frame = plane_frame(id, plane, st)?.0;
+            r.frame = Some(frame);
+            r.body = Some(mirror_feature(st, id, *seed, &frame)?);
+        }
+        FeatureKind::Chamfer { a, b, distance } => {
+            let (fa, fb) = (resolve_face(id, a, st)?, resolve_face(id, b, st)?);
+            if fa.body != fb.body {
+                return Err(DocError::Validation(format!(
+                    "{id}: the two faces belong to different bodies ({} and {})",
+                    fa.body, fb.body
+                )));
+            }
+            // The kernel finds the edge along the whole line where the two
+            // planes meet; with other faces in either plane (pattern
+            // occurrences, split faces) that line spans several edges.
+            if fa.sample.is_some() || fb.sample.is_some() {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: this chamfer edge lies on a plane that other faces of the body \
+                     share (pattern copies, split faces), so the edge between the two picked \
+                     faces is not unique (product limit). For patterned pockets, round the \
+                     seed sketch's corners (sketch fillet) so every copy is rounded"
+                )));
+            }
+            let body = brep_target(st, id, fa.body)?;
+            let out =
+                k::chamfer_edge(&body, &fa.frame, &fb.frame, *distance).map_err(kernel(id))?;
+            replace_body(st, id, fa.body, out);
+            if let Some(frame) = chamfer_face_frame(&fa.frame, &fb.frame, *distance) {
+                st.chamfers.insert(id, (frame, fa.body));
+            }
+            r.body = Some(fa.body);
+        }
+        FeatureKind::Fillet { a, b, radius } => {
+            let (fa, fb) = (resolve_face(id, a, st)?, resolve_face(id, b, st)?);
+            if fa.body != fb.body {
+                return Err(DocError::Validation(format!(
+                    "{id}: the two faces belong to different bodies ({} and {})",
+                    fa.body, fb.body
+                )));
+            }
+            if fa.sample.is_some() || fb.sample.is_some() {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: this fillet edge lies on a plane that other faces of the body \
+                     share (pattern copies, split faces), so the edge between the two picked \
+                     faces is not unique (product limit). For patterned pockets, round the \
+                     seed sketch's corners (sketch fillet) so every copy is rounded"
+                )));
+            }
+            let body = brep_target(st, id, fa.body)?;
+            let out = k::fillet_edge(&body, &fa.frame, &fb.frame, *radius).map_err(kernel(id))?;
+            replace_body(st, id, fa.body, out);
+            r.body = Some(fa.body);
+        }
+        FeatureKind::FilletLoop {
+            face,
+            radius,
+            holes,
+        } => {
+            let fa = resolve_face(id, face, st)?;
+            let body = brep_target(st, id, fa.body)?;
+            let out = if *holes {
+                k::fillet_cap_face_edges(&body, &fa.frame, *radius)
+            } else {
+                k::fillet_cap_loop(&body, &fa.frame, *radius)
+            }
+            .map_err(kernel(id))?;
+            replace_body(st, id, fa.body, out);
+            r.body = Some(fa.body);
+        }
+        FeatureKind::ChamferLoop {
+            face,
+            distance,
+            holes,
+        } => {
+            let fa = resolve_face(id, face, st)?;
+            let body = brep_target(st, id, fa.body)?;
+            let out = if *holes {
+                k::chamfer_cap_face_edges(&body, &fa.frame, *distance)
+            } else {
+                k::chamfer_cap_loop(&body, &fa.frame, *distance)
+            }
+            .map_err(kernel(id))?;
+            replace_body(st, id, fa.body, out);
+            r.body = Some(fa.body);
+        }
+        FeatureKind::Hole {
+            plane,
+            center,
+            diameter,
+            depth,
+            counterbore,
+            target,
+        } => {
+            let (frame, rf) = plane_frame(id, plane, st)?;
+            r.resolved_face = rf;
+            r.frame = Some(frame);
+            let tools = hole_tools(
+                st,
+                id,
+                &frame,
+                *center,
+                *diameter,
+                *depth,
+                *counterbore,
+                *target,
+            )?;
+            let mut body = brep_target(st, id, *target)?;
+            let labels: &[&str] = if tools.len() == 2 {
+                &["counterbore", "hole"]
+            } else {
+                &["hole"]
+            };
+            for (what, tool) in labels.iter().zip(&tools) {
+                body = apply_tool(&body, tool, &frame, Some(what), id, None)?.0;
+            }
+            replace_body(st, id, *target, body);
+            st.holes.insert(id, tools);
+            r.body = Some(*target);
+        }
+        FeatureKind::MoveBody {
+            body,
+            translate,
+            origin,
+            axis,
+            angle,
+            copy,
+        } => {
+            let t = k::Rigid::new(*translate, *origin, *axis, *angle)
+                .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+            let b = brep_target(st, id, *body)?;
+            let moved = k::transform_body(&b, &t).map_err(kernel(id))?;
+            match copy {
+                Some(c) => {
+                    create_body(st, id, *c, BodyGeometry::Brep(moved), BodySource::Modeled)?;
+                    r.body = Some(*c);
+                }
+                None => {
+                    replace_body(st, id, *body, moved);
+                    st.moves.push((*body, i, t));
+                    r.body = Some(*body);
+                }
+            }
+        }
+        FeatureKind::SheetMetal {
+            sketch,
+            thickness,
+            radius,
+            k_factor,
+            width,
+            flip,
+            body,
+        } => {
+            let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+            let chain = crate::sheet::line_chain(&so.solved)
+                .map_err(|m| DocError::Validation(format!("{id}: sheet metal profile: {m}")))?;
+            let part =
+                crate::sheet::contour_flange(id, &chain, *thickness, *radius, *k_factor, *flip)?;
+            if !(width.is_finite() && *width > 0.0) {
+                return Err(DocError::Validation(format!(
+                    "{id}.width: must be > 0 mm, got {width}"
+                )));
+            }
+            let solid = k::extrude_region(&to_kernel(&part.section), &[], &so.frame, *width)
+                .map_err(kernel(id))?;
+            r.frame = Some(so.frame);
+            r.notes.push(format!(
+                "flat length {:.6} mm (K {}), bend lines at {}",
+                part.flat_length,
+                k_factor,
+                part.bend_lines
+                    .iter()
+                    .map(|x| format!("{x:.6}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(solid),
+                BodySource::Modeled,
+            )?;
+            r.body = Some(*body);
+        }
+        // Sheet metal (logic in `crate::sheet`).
+        FeatureKind::SheetBase {
+            sketch,
+            rule,
+            flip,
+            body,
+        } => {
+            let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+            let region = so.usable(id, *sketch)?;
+            let model =
+                crate::sheet::base_model(id, *body, so.frame, *flip, rule, region, &so.solved)?;
+            let built = crate::sheet::build(&model)?;
+            r.frame = Some(so.frame);
+            r.notes = crate::sheet::notes(&built, rule);
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(built.folded),
+                BodySource::Modeled,
+            )?;
+            st.sheets.insert(*body, model);
+            r.body = Some(*body);
+        }
+        FeatureKind::SheetFlange { base, body, .. } => {
+            let mut model = sheet_of(st, id, *base, *body)?;
+            // A flange after the flat pattern would leave the
+            // displayed flat out of date (the DXF includes every flange).
+            if let Some(flat) = model.flat {
+                return Err(DocError::Validation(format!(
+                    "{id}: this flange comes after the flat pattern {flat} of the same sheet, which would be out of date; keep flanges before the flat pattern"
+                )));
+            }
+            model.flanges.extend(crate::sheet::flange_def(id, &f.kind));
+            let built = crate::sheet::build(&model)?;
+            r.notes = crate::sheet::notes(&built, &model.rule);
+            replace_body(st, id, *body, built.folded);
+            model.last_feature = id;
+            st.sheets.insert(*body, model);
+            r.body = Some(*body);
+        }
+        FeatureKind::SheetFlat { base, body } => {
+            let sheet_body = doc
+                .feature(*base)?
+                .created_bodies()
+                .first()
+                .copied()
+                .ok_or(DocError::BrokenReference {
+                    from: id,
+                    detail: format!("{base} is not a sheet base"),
+                })?;
+            let mut model = sheet_of(st, id, *base, sheet_body)?;
+            let built = crate::sheet::build(&model)?;
+            let flat = crate::sheet::flat_body(&built, &model.rule, id)?;
+            r.notes = crate::sheet::notes(&built, &model.rule);
+            model.flat = Some(id);
+            st.sheets.insert(sheet_body, model);
+            create_body(st, id, *body, BodyGeometry::Brep(flat), BodySource::Modeled)?;
+            r.body = Some(*body);
+        }
+        // Surfaces (logic in `crate::surface`).
+        FeatureKind::ImportSurfaces {
+            blob,
+            unit_override_to_mm,
+            body,
+        } => {
+            let b = doc.blob(*blob)?;
+            let (geom, name, notes) =
+                crate::surface::import(id, &b.bytes()?, *unit_override_to_mm)?;
+            r.notes = notes;
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(geom),
+                BodySource::ImportedStep {
+                    file_name: b.file_name.clone(),
+                    solid_name: name,
+                },
+            )?;
+            r.body = Some(*body);
+        }
+        FeatureKind::SurfaceStitch {
+            source,
+            tolerance,
+            body,
+        }
+        | FeatureKind::SurfaceFill {
+            source,
+            tolerance,
+            body,
+        } => {
+            let src = surface_source(st, id, *source)?;
+            let (geom, notes) = if matches!(f.kind, FeatureKind::SurfaceStitch { .. }) {
+                crate::surface::stitch(id, &src, *tolerance)?
+            } else {
+                crate::surface::fill(id, &src, *tolerance)?
+            };
+            r.notes = notes;
+            create_body(st, id, *body, BodyGeometry::Brep(geom), BodySource::Modeled)?;
+            r.body = Some(*body);
+        }
+        FeatureKind::MeshEdit {
+            source,
+            op,
+            body,
+            second_body,
+        } => {
+            let bs = st
+                .bodies
+                .get(source)
+                .ok_or_else(|| DocError::BrokenReference {
+                    from: id,
+                    detail: format!("mesh edit source {source} is not in the model"),
+                })?;
+            let BodyGeometry::Mesh(m) = &bs.geometry else {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: {source} is an exact (B-rep) body; mesh edits apply to mesh \
+                     bodies (STL/3MF imports)"
+                )));
+            };
+            let (meshes, notes) = crate::mesh_edit::edited(m, op)?;
+            if meshes.len() != 1 + usize::from(second_body.is_some()) {
+                return Err(DocError::Validation(format!(
+                    "{id}: the mesh edit made {} meshes for {} bodies",
+                    meshes.len(),
+                    1 + usize::from(second_body.is_some())
+                )));
+            }
+            r.notes = notes;
+            for (mesh, b) in meshes
+                .into_iter()
+                .zip(std::iter::once(*body).chain(*second_body))
+            {
+                create_body(
+                    st,
+                    id,
+                    b,
+                    BodyGeometry::Mesh(Arc::new(mesh)),
+                    BodySource::EditedMesh {
+                        source: *source,
+                        operation: op.name().into(),
+                    },
+                )?;
+            }
+            r.body = Some(*body);
+        }
+        FeatureKind::MeshRepair {
+            source,
+            options,
+            body,
+        } => {
+            let bs = st
+                .bodies
+                .get(source)
+                .ok_or_else(|| DocError::BrokenReference {
+                    from: id,
+                    detail: format!("mesh repair source {source} is not in the model"),
+                })?;
+            let BodyGeometry::Mesh(m) = &bs.geometry else {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: {source} is an exact (B-rep) body; mesh repair applies to \
+                     mesh bodies (STL/3MF imports)"
+                )));
+            };
+            let (mesh, notes) = import::repaired(m, options)?;
+            r.notes = notes;
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Mesh(Arc::new(mesh)),
+                BodySource::RepairedMesh { source: *source },
+            )?;
+            r.body = Some(*body);
+        }
+        FeatureKind::SurfacePatch { sketch, body }
+        | FeatureKind::SurfaceExtrude { sketch, body, .. } => {
+            let so = st.sketches.get(sketch).ok_or(not_a_sketch(id, *sketch))?;
+            let geom = crate::surface::from_sketch(
+                id,
+                &f.kind,
+                so.profile.as_ref().ok(),
+                &so.solved,
+                &so.frame,
+            )?;
+            r.frame = Some(so.frame);
+            create_body(st, id, *body, BodyGeometry::Brep(geom), BodySource::Modeled)?;
+            r.body = Some(*body);
+        }
+        FeatureKind::Thicken {
+            source,
+            distance,
+            reverse,
+            body,
+        } => {
+            let src = surface_source(st, id, *source)?;
+            let (geom, notes) = crate::surface::thicken(id, &src, *distance, *reverse)?;
+            r.notes = notes;
+            create_body(st, id, *body, BodyGeometry::Brep(geom), BodySource::Modeled)?;
+            r.body = Some(*body);
+        }
+        FeatureKind::AlignBody { from, to, offset } => {
+            let a = resolve_face(id, from, st)?;
+            let b = resolve_face(id, to, st)?;
+            if a.body == b.body {
+                return Err(DocError::Validation(format!(
+                    "{id}: align needs faces of two different bodies"
+                )));
+            }
+            if !offset.is_finite() {
+                return Err(DocError::Validation(format!("{id}.offset must be finite")));
+            }
+            // Rotate n_a onto −n_b (smallest rotation), then translate a's
+            // origin onto b's plane (+offset along n_b).
+            let (na, nb) = (a.frame.z, b.frame.z);
+            let want = scale(nb, -1.0);
+            let axis = cross(na, want);
+            let s = dot(axis, axis).sqrt();
+            let c = dot(na, want).clamp(-1.0, 1.0);
+            let (ax, ang) = if s > 1e-12 {
+                (scale(axis, 1.0 / s), s.atan2(c))
+            } else if c > 0.0 {
+                ([0.0, 0.0, 1.0], 0.0)
+            } else {
+                (a.frame.x, std::f64::consts::PI)
+            };
+            let rot = k::Rigid::new([0.0; 3], a.frame.origin, ax, ang).map_err(kernel(id))?;
+            let pa = rot.point(a.frame.origin);
+            let h = dot(sub(pa, b.frame.origin), nb) - offset;
+            let t = k::Rigid::new(scale(nb, -h), [0.0; 3], [0.0, 0.0, 1.0], 0.0)
+                .map_err(kernel(id))?
+                .after(&rot);
+            let body = brep_target(st, id, a.body)?;
+            let moved = k::transform_body(&body, &t).map_err(kernel(id))?;
+            replace_body(st, id, a.body, moved);
+            st.moves.push((a.body, i, t));
+            r.body = Some(a.body);
+        }
+        FeatureKind::ScaleBody {
+            body,
+            center,
+            factor,
+        } => {
+            let t = k::Rigid::scaling(*center, *factor)
+                .map_err(|e| DocError::Validation(format!("{id}: {e}")))?;
+            let b = brep_target(st, id, *body)?;
+            let scaled = k::transform_body(&b, &t).map_err(kernel(id))?;
+            // Keep every dimension above the modelling
+            // tolerances.
+            let bb = k::bounds(&scaled).map_err(kernel(id))?;
+            let small = (0..3)
+                .map(|i| bb.max[i] - bb.min[i])
+                .fold(f64::INFINITY, f64::min);
+            if small < 10.0 * k::tol::MIN_LENGTH {
+                return Err(DocError::Validation(format!(
+                    "{id}: scaled by {factor} the body would be {small:.6} mm thin, below the \
+                     modelling tolerances"
+                )));
+            }
+            replace_body(st, id, *body, scaled);
+            st.moves.push((*body, i, t));
+            r.body = Some(*body);
+        }
+        FeatureKind::ShellFace { face, thickness } => {
+            let rf = resolve_face(id, face, st)?;
+            r.frame = Some(rf.frame);
+            let t = brep_target(st, id, rf.body)?;
+            let out = shell_from_face(id, &t, &rf.frame, *thickness)?;
+            replace_body(st, id, rf.body, out);
+            r.body = Some(rf.body);
+        }
+        FeatureKind::SplitBody {
+            body,
+            plane,
+            new_body,
+            pieces,
+        } => {
+            let (pf, rf) = plane_frame(id, plane, st)?;
+            r.frame = Some(pf);
+            r.resolved_face = rf;
+            let t = brep_target(st, id, *body)?;
+            let (behind, front) = split_by_plane(&t, &pf, id, true)?;
+            let mut behind = k::split_pieces(&behind).map_err(kernel(id))?.into_iter();
+            let mut front = k::split_pieces(&front).map_err(kernel(id))?.into_iter();
+            let (Some(b0), Some(f0)) = (behind.next(), front.next()) else {
+                return Err(DocError::Kernel {
+                    feature: id,
+                    detail: "split: an empty side".into(),
+                });
+            };
+            let rest: Vec<Body> = behind.chain(front).collect();
+            if rest.len() > pieces.len() {
+                return Err(DocError::NeedsPieces {
+                    feature: id,
+                    pieces: rest.len() + 1,
+                    assigned: pieces.len(),
+                });
+            }
+            replace_body(st, id, *body, b0);
+            create_body(
+                st,
+                id,
+                *new_body,
+                BodyGeometry::Brep(f0),
+                BodySource::Modeled,
+            )?;
+            for (piece, b) in rest.into_iter().zip(pieces) {
+                create_body(st, id, *b, BodyGeometry::Brep(piece), BodySource::Modeled)?;
+            }
+            r.body = Some(*new_body);
+        }
+        FeatureKind::Shell {
+            extrude,
+            open,
+            thickness,
+        } => {
+            if st.moved_since(st.body_of_extrude(*extrude), *extrude) {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: shell: the body of {extrude} was moved after it; the scoped \
+                     shell needs it in place (shell before the move)"
+                )));
+            }
+            let (body, tool) = shell_tool(doc, st, id, *extrude, *open, *thickness)?;
+            let target = brep_target(st, id, body)?;
+            r.frame = Some(tool.start);
+            let out = apply_tool(&target, &tool, &tool.start, Some("shell"), id, None)?.0;
+            replace_body(st, id, body, out);
+            r.body = Some(body);
+        }
+        FeatureKind::Thread {
+            plane,
+            center,
+            diameter,
+            pitch,
+            length,
+            left_hand,
+            chord_tol,
+            nut,
+            body,
+        } => {
+            let (frame, rf) = plane_frame(id, plane, st)?;
+            r.resolved_face = rf;
+            let frame = Frame {
+                origin: frame.to_world(*center),
+                ..frame
+            };
+            r.frame = Some(frame);
+            let spec = k::ThreadSpec {
+                major_diameter: *diameter,
+                pitch: *pitch,
+                length: *length,
+                left_hand: *left_hand,
+                chord_tol: *chord_tol,
+            };
+            let built = match nut {
+                None => k::threaded_rod(&frame, &spec),
+                Some(n) => k::threaded_nut(&frame, &spec, n.width, n.clearance),
+            };
+            let (solid, report) = built.map_err(|e| match e {
+                k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
+                other => DocError::Kernel {
+                    feature: id,
+                    detail: other.to_string(),
+                },
+            })?;
+            r.notes = vec![format!(
+                "faceted thread: {} segments per turn, {} planar faces, largest facet \
+                 deviation {:.4} mm (tolerance {} mm); not an exact helicoid",
+                report.segments_per_turn, report.faces, report.max_facet_deviation, chord_tol
+            )];
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Brep(solid),
+                BodySource::Modeled,
+            )?;
+            r.body = Some(*body);
+        }
+        FeatureKind::Countersink {
+            hole,
+            diameter,
+            angle,
+        } => {
+            let target = doc
+                .feature(*hole)
+                .ok()
+                .and_then(|f| match f.kind {
+                    FeatureKind::Hole {
+                        counterbore: None,
+                        target,
+                        ..
+                    } => Some(Ok(target)),
+                    FeatureKind::Hole { .. } => Some(Err(DocError::ProductLimit(format!(
+                        "{id}: a countersink on a counterbored hole is not supported"
+                    )))),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    DocError::Validation(format!("{id}: {hole} is not a Hole feature"))
+                })??;
+            // The hole's tool is where the hole was made;
+            // after a move/scale of its body that is not where it is now.
+            if st.moved_since(Some(target), *hole) {
+                return Err(DocError::ProductLimit(format!(
+                    "{id}: the body of {hole} was moved or scaled after it; add the \
+                     countersink before the move"
+                )));
+            }
+            let tool = st.holes.get(hole).and_then(|t| t.last()).ok_or_else(|| {
+                DocError::BrokenReference {
+                    from: id,
+                    detail: format!("{hole} is not an evaluated hole"),
+                }
+            })?;
+            let SketchProfile::Circle { center, radius } = tool.profile else {
+                return Err(DocError::Validation(format!("{id}: hole profile")));
+            };
+            let frame = tool.start;
+            let body = brep_target(st, id, target)?;
+            let out = k::countersink(
+                &body,
+                frame.to_world(center),
+                frame.z,
+                2.0 * radius,
+                *diameter,
+                *angle,
+            )
+            .map_err(|e| match e {
+                k::KernelError::InvalidInput(m) => DocError::ProductLimit(format!("{id}: {m}")),
+                other => DocError::Kernel {
+                    feature: id,
+                    detail: other.to_string(),
+                },
+            })?;
+            replace_body(st, id, target, out);
+            r.frame = Some(frame);
+            r.body = Some(target);
+        }
+        FeatureKind::Combine {
+            target,
+            tools,
+            op,
+            keep_tools,
+        } => {
+            let a = brep_target(st, id, *target)?;
+            let bs = tools
+                .iter()
+                .map(|t| brep_target(st, id, *t))
+                .collect::<Result<Vec<_>>>()?;
+            let (out, notes) = crate::combine::evaluate(id, *target, tools, &a, &bs, *op)?;
+            replace_body(st, id, *target, out);
+            if !keep_tools {
+                for t in tools {
+                    st.bodies.remove(t);
+                }
+            }
+            r.notes = notes;
+            r.body = Some(*target);
+        }
+        FeatureKind::DirectEdit { face, op } => {
+            let bid = doc.face_body(face).ok_or_else(|| {
+                DocError::Validation(format!("{id}: a direct edit needs an imported face"))
+            })?;
+            let target = brep_target(st, id, bid)?;
+            let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
+            let pivot = match face.role {
+                FaceRole::Imported { face: index, .. } => st
+                    .imported_faces
+                    .get(&(face.feature, bid))
+                    .and_then(|t| t.iter().find(|f| f.index == index))
+                    .map(|f| f.frame),
+                _ => None,
+            };
+            let out =
+                crate::direct::apply(id, face, *op, &target, last, st.face_ids.get(&bid), pivot)?;
+            replace_body(st, id, bid, out.body);
+            st.face_ids.insert(bid, out.ids);
+            if let (FaceRole::Imported { face: index, .. }, Some(t)) =
+                (face.role, st.imported_faces.get_mut(&(face.feature, bid)))
+            {
+                crate::direct::update_planar_table(Arc::make_mut(t), index, *op, &out.removed);
+            }
+            r.body = Some(bid);
+        }
+        FeatureKind::Import3mf { blob, bodies } => {
+            let b = doc.blob(*blob)?;
+            let bytes = b.bytes()?;
+            let (objects, notes) = import::threemf(&bytes)?;
+            if objects.len() != bodies.len() {
+                return Err(DocError::Validation(format!(
+                    "{id}: {} contains {} build items but the feature records {} bodies",
+                    b.file_name,
+                    objects.len(),
+                    bodies.len()
+                )));
+            }
+            r.notes = notes;
+            for (o, body) in objects.into_iter().zip(bodies) {
+                create_body(
+                    st,
+                    id,
+                    *body,
+                    BodyGeometry::Mesh(Arc::new(o.mesh)),
+                    BodySource::ImportedMesh {
+                        file_name: b.file_name.clone(),
+                    },
+                )?;
+            }
+            r.body = bodies.last().copied();
+        }
+        FeatureKind::ImportMesh { blob, to_mm, body } => {
+            let b = doc.blob(*blob)?;
+            let bytes = b.bytes()?;
+            let (mesh, notes) = import::stl(&bytes, *to_mm)?;
+            r.notes = notes;
+            create_body(
+                st,
+                id,
+                *body,
+                BodyGeometry::Mesh(Arc::new(mesh)),
+                BodySource::ImportedMesh {
+                    file_name: b.file_name.clone(),
+                },
+            )?;
+            r.body = Some(*body);
+        }
+    }
+    Ok(())
 }
 
 /// Every semantic planar face (extrusion caps and line sides, pattern/mirror
@@ -5624,7 +5775,7 @@ pub fn projection_curves(
              (a cycle)"
         )));
     }
-    match regen_impl(doc, None, false, Some(sketch))? {
+    match regen_impl(doc, None, false, Some(sketch), false)? {
         Regen::Stopped(st) => {
             let (frame, _) = plane_frame(sketch, plane, &st)?;
             link_curves(sketch, &frame, source, &st)

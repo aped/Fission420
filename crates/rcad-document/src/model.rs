@@ -2498,11 +2498,22 @@ impl Document {
     /// Every evaluated feature's dependencies are evaluated: a feature that is
     /// not suppressed may not depend on a suppressed one.
     pub fn check_suppression(&self) -> Result<()> {
+        match self.suppression_violations()?.into_iter().next() {
+            Some((_, e)) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// Evaluated features that depend on a suppressed or rolled-back one,
+    /// each with its error (history order). Fails only when the timeline
+    /// marker names a missing feature.
+    pub fn suppression_violations(&self) -> Result<Vec<(FeatureId, DocError)>> {
         if let Some(m) = self.rollback {
             self.feature(m).map_err(|_| {
                 DocError::Validation(format!("the timeline marker names missing feature {m}"))
             })?;
         }
+        let mut out = Vec::new();
         for f in self
             .features
             .iter()
@@ -2510,30 +2521,138 @@ impl Document {
         {
             for d in self.dependencies_of(f) {
                 if self.is_rolled_back(d) {
-                    return Err(DocError::BrokenReference {
-                        from: f.id,
-                        detail: format!(
-                            "{} ({}) depends on {d}, which is after the timeline marker; move \
-                             the marker past {d}",
-                            f.id, f.name
-                        ),
-                    });
+                    out.push((
+                        f.id,
+                        DocError::BrokenReference {
+                            from: f.id,
+                            detail: format!(
+                                "{} ({}) depends on {d}, which is after the timeline marker; move \
+                                 the marker past {d}",
+                                f.id, f.name
+                            ),
+                        },
+                    ));
+                    break;
                 }
                 if let Ok(g) = self.feature(d)
                     && g.suppressed
                 {
-                    return Err(DocError::BrokenReference {
-                        from: f.id,
-                        detail: format!(
-                            "{} ({}) depends on {} ({}), which is suppressed; suppress {} too \
-                             (with dependents) or restore {}",
-                            f.id, f.name, g.id, g.name, f.id, g.id
-                        ),
-                    });
+                    out.push((
+                        f.id,
+                        DocError::BrokenReference {
+                            from: f.id,
+                            detail: format!(
+                                "{} ({}) depends on {} ({}), which is suppressed; suppress {} too \
+                                 (with dependents) or restore {}",
+                                f.id, f.name, g.id, g.name, f.id, g.id
+                            ),
+                        },
+                    ));
+                    break;
                 }
             }
         }
+        Ok(out)
+    }
+
+    /// Replace the definition of feature `id` with `kind` (Edit Feature),
+    /// keeping its id, name (unless `name` is given) and history position.
+    /// `kind` must be the same feature type. Extrude and Revolve may change
+    /// their operation: a body they create that is not one they created
+    /// before (e.g. the placeholder id 0) becomes the body they created
+    /// before or a new body; bodies no longer created are removed (features
+    /// that used them then fail and are flagged). Other feature types keep
+    /// the bodies they create.
+    pub fn redefine_feature(
+        &mut self,
+        id: FeatureId,
+        mut kind: FeatureKind,
+        name: Option<String>,
+    ) -> Result<()> {
+        let old = self.feature(id)?.clone();
+        if std::mem::discriminant(&old.kind) != std::mem::discriminant(&kind) {
+            return Err(DocError::Validation(format!(
+                "{id} {}: Edit Feature cannot change the feature type",
+                old.name
+            )));
+        }
+        let old_created = old.created_bodies();
+        let mut reuse = old_created.iter().copied();
+        let fresh = |doc: &mut Document, reuse: &mut dyn Iterator<Item = BodyId>| {
+            reuse.next().unwrap_or_else(|| {
+                let n = doc.default_body_name();
+                doc.add_body(n)
+            })
+        };
+        match &mut kind {
+            FeatureKind::Extrude {
+                operation, pieces, ..
+            } => {
+                if let Operation::NewBody { body } = operation
+                    && !old_created.contains(body)
+                {
+                    *body = fresh(self, &mut reuse);
+                }
+                // Split pieces belong to a cut; regeneration assigns them again.
+                if !matches!(operation, Operation::Cut { .. }) {
+                    pieces.clear();
+                }
+                pieces.retain(|p| old_created.contains(p));
+            }
+            FeatureKind::Revolve { body, merge, .. } => {
+                if matches!(merge, None | Some(Operation::NewBody { .. })) {
+                    *merge = None;
+                    if !old_created.contains(body) {
+                        *body = fresh(self, &mut reuse);
+                    }
+                }
+            }
+            _ => {
+                let mut a = old_created.clone();
+                let mut b = Feature {
+                    kind: kind.clone(),
+                    ..old.clone()
+                }
+                .created_bodies();
+                a.sort();
+                b.sort();
+                if a != b {
+                    return Err(DocError::Validation(format!(
+                        "{id} {}: Edit Feature cannot change the bodies this feature creates",
+                        old.name
+                    )));
+                }
+            }
+        }
+        let f = self.feature_mut(id)?;
+        f.kind = kind;
+        if let Some(n) = name {
+            let n = n.trim();
+            if n.is_empty() || n.len() > 128 || n.chars().any(char::is_control) {
+                return Err(DocError::Validation(
+                    "feature name must be 1-128 printable characters".into(),
+                ));
+            }
+            f.name = n.to_string();
+        }
+        // Expressions bound to parameters the new definition no longer has
+        // are dropped; the remaining ones re-apply in the transaction.
+        let params: Vec<String> = f.parameters().into_iter().map(|(n, _)| n).collect();
+        f.expressions.retain(|k, _| params.contains(k));
+        self.prune_bodies();
         Ok(())
+    }
+
+    /// Bodies feature `f` reads or changes without creating them: its
+    /// target, the body it modifies, and tool/source bodies.
+    pub fn read_bodies(&self, f: &Feature) -> Vec<BodyId> {
+        let mut v: Vec<BodyId> = self.modified_body(f).into_iter().collect();
+        for b in f.target_body().into_iter().chain(f.tool_bodies()) {
+            if !v.contains(&b) {
+                v.push(b);
+            }
+        }
+        v
     }
 
     /// `id` and every feature that depends on it, directly or transitively
@@ -2570,6 +2689,52 @@ impl Document {
     /// existing bodies; blob references resolve; unused blobs are removed by
     /// [`Document::prune_blobs`], so they are an error here.
     pub fn validate_bodies(&self) -> Result<()> {
+        self.validate_body_tables()?;
+        if let Some((_, e)) = self.missing_body_refs().into_iter().next() {
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Target and tool bodies that no feature creates, each with the
+    /// referring feature (history order). A partial regeneration flags
+    /// those features instead of refusing the document.
+    pub fn missing_body_refs(&self) -> Vec<(FeatureId, DocError)> {
+        let created: std::collections::HashSet<BodyId> = self
+            .features
+            .iter()
+            .flat_map(Feature::created_bodies)
+            .collect();
+        let mut out = Vec::new();
+        for f in &self.features {
+            if let Some(t) = f.target_body()
+                && !created.contains(&t)
+            {
+                out.push((
+                    f.id,
+                    DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!("target body {t} does not exist"),
+                    },
+                ));
+                continue;
+            }
+            if let Some(t) = f.tool_bodies().into_iter().find(|t| !created.contains(t)) {
+                out.push((
+                    f.id,
+                    DocError::BrokenReference {
+                        from: f.id,
+                        detail: format!("tool body {t} does not exist"),
+                    },
+                ));
+            }
+        }
+        out
+    }
+
+    /// [`Document::validate_bodies`] without the target/tool reference
+    /// check ([`Document::missing_body_refs`]).
+    pub fn validate_body_tables(&self) -> Result<()> {
         let mut created = std::collections::HashMap::new();
         for f in &self.features {
             for b in f.created_bodies() {
@@ -2615,22 +2780,6 @@ impl Document {
             }
         }
         for f in &self.features {
-            if let Some(t) = f.target_body()
-                && !created.contains_key(&t)
-            {
-                return Err(DocError::BrokenReference {
-                    from: f.id,
-                    detail: format!("target body {t} does not exist"),
-                });
-            }
-            for t in f.tool_bodies() {
-                if !created.contains_key(&t) {
-                    return Err(DocError::BrokenReference {
-                        from: f.id,
-                        detail: format!("tool body {t} does not exist"),
-                    });
-                }
-            }
             if let Some(b) = f.blob() {
                 self.blob(b).map_err(|_| DocError::BrokenReference {
                     from: f.id,

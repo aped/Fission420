@@ -1,0 +1,392 @@
+{
+  "cache": {
+    "bounds": {
+      "max": [
+        105.0,
+        5.0,
+        5.0
+      ],
+      "min": [
+        95.0,
+        -5.0,
+        0.0
+      ]
+    },
+    "face_count": 6,
+    "volume": 500.0
+  },
+  "document": {
+    "blobs": [],
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Body1",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Body2",
+        "visible": true
+      }
+    ],
+    "features": [
+      {
+        "id": 1,
+        "kind": {
+          "plane": "WorldXY",
+          "sketch": {
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 40.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 20.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "a": 1,
+                  "b": 2,
+                  "id": 1
+                }
+              },
+              {
+                "Line": {
+                  "a": 2,
+                  "b": 3,
+                  "id": 2
+                }
+              },
+              {
+                "Line": {
+                  "a": 3,
+                  "b": 4,
+                  "id": 3
+                }
+              },
+              {
+                "Line": {
+                  "a": 4,
+                  "b": 1,
+                  "id": 4
+                }
+              }
+            ],
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -20.0,
+                "y": -10.0
+              },
+              {
+                "id": 2,
+                "x": 20.0,
+                "y": -10.0
+              },
+              {
+                "id": 3,
+                "x": 20.0,
+                "y": 10.0
+              },
+              {
+                "id": 4,
+                "x": -20.0,
+                "y": 10.0
+              }
+            ]
+          },
+          "type": "Sketch"
+        },
+        "name": "Sketch1"
+      },
+      {
+        "id": 2,
+        "kind": {
+          "distance": 10.0,
+          "extent": "Distance",
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "reverse": false,
+          "sketch": 1,
+          "type": "Extrude"
+        },
+        "name": "Extrude1"
+      },
+      {
+        "id": 3,
+        "kind": {
+          "plane": {
+            "Face": {
+              "feature": 2,
+              "role": {
+                "ExtrudeSide": {
+                  "entity": 99
+                }
+              }
+            }
+          },
+          "sketch": {
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Coincident": {
+                  "a": 0,
+                  "b": 1
+                }
+              },
+              {
+                "Diameter": {
+                  "circle": 1,
+                  "dim": {
+                    "name": "diameter",
+                    "value": 6.0
+                  }
+                }
+              }
+            ],
+            "entities": [
+              {
+                "Circle": {
+                  "center": 1,
+                  "id": 1,
+                  "radius": 3.0
+                }
+              }
+            ],
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ]
+          },
+          "type": "Sketch"
+        },
+        "name": "Sketch2"
+      },
+      {
+        "id": 4,
+        "kind": {
+          "extent": "ThroughAll",
+          "sketch": 3,
+          "target": 1,
+          "type": "Cut"
+        },
+        "name": "Cut1"
+      },
+      {
+        "id": 5,
+        "kind": {
+          "plane": "WorldXY",
+          "sketch": {
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 100.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 10.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 10.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "a": 1,
+                  "b": 2,
+                  "id": 1
+                }
+              },
+              {
+                "Line": {
+                  "a": 2,
+                  "b": 3,
+                  "id": 2
+                }
+              },
+              {
+                "Line": {
+                  "a": 3,
+                  "b": 4,
+                  "id": 3
+                }
+              },
+              {
+                "Line": {
+                  "a": 4,
+                  "b": 1,
+                  "id": 4
+                }
+              }
+            ],
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -5.0,
+                "y": -5.0
+              },
+              {
+                "id": 2,
+                "x": 5.0,
+                "y": -5.0
+              },
+              {
+                "id": 3,
+                "x": 5.0,
+                "y": 5.0
+              },
+              {
+                "id": 4,
+                "x": -5.0,
+                "y": 5.0
+              }
+            ]
+          },
+          "type": "Sketch"
+        },
+        "name": "Sketch3"
+      },
+      {
+        "id": 6,
+        "kind": {
+          "distance": 5.0,
+          "extent": "Distance",
+          "operation": {
+            "NewBody": {
+              "body": 2
+            }
+          },
+          "reverse": false,
+          "sketch": 5,
+          "type": "Extrude"
+        },
+        "name": "Extrude2"
+      }
+    ],
+    "next_blob_id": 1,
+    "next_body_id": 3,
+    "next_id": 7
+  },
+  "format": "r-cad",
+  "version": 4
+}
