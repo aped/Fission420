@@ -272,3 +272,35 @@ fn revolve_new_body_to_cut_with_a_target_from_the_dialog() {
     settle(&mut h);
     assert_eq!(h.state().summary().bodies.len(), 2);
 }
+
+/// Edit Feature on a Hole: the dialog reopens on its face with its values;
+/// a larger diameter replaces it in place (closed-form volume).
+#[test]
+fn hole_diameter_through_edit_feature() {
+    let mut h = harness();
+    plate_with_boss(&mut h);
+    let plate = h.state().feature_by_name("Extrude1").unwrap().id;
+    let body = h.state().summary().bodies[0].id;
+    h.state_mut().request(Command::Hole {
+        name: None,
+        plane: end_cap_of(plate),
+        center: [12.0, 8.0],
+        diameter: 5.5,
+        depth: None,
+        counterbore: None,
+        target: Some(body),
+    });
+    settle(&mut h);
+    let base = 12000.0 + 125.0 * PI;
+    assert_volume(&h, base - PI * 2.75 * 2.75 * 10.0);
+    let hole = h.state().summary().features.last().unwrap().name.clone();
+    edit(&mut h, &hole);
+    type_into(&mut h, "Hole diameter (mm)", "8");
+    click(&mut h, "OK");
+    assert_volume(&h, base - PI * 16.0 * 10.0);
+    assert_eq!(
+        h.state().summary().features.last().unwrap().name,
+        hole,
+        "edited in place"
+    );
+}
