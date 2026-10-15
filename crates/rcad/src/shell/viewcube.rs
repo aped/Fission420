@@ -33,6 +33,13 @@ const CUBE: f32 = 34.0; // half-size of the drawn cube (points)
 
 type V3 = [f32; 3];
 
+/// The area the view cube occupies in `view` (its projection never leaves
+/// it: the cube's corners are at most √3 half-sizes from the centre).
+pub fn view_cube_rect(view: Rect) -> Rect {
+    let c = pos2(view.max.x - CUBE * 1.9, view.min.y + CUBE * 1.9);
+    Rect::from_center_size(c, Vec2::splat(CUBE * 2.0 * 1.75 + 10.0))
+}
+
 fn dot(a: V3, b: V3) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
@@ -127,7 +134,7 @@ impl RcadApp {
         let (cam, _) = self.view_camera();
         let (right, up, fwd) = cam.basis();
         let eye = [-fwd[0], -fwd[1], -fwd[2]];
-        let c = pos2(view.max.x - CUBE * 1.9, view.min.y + CUBE * 1.9);
+        let c = view_cube_rect(view).center();
         let proj = |v: V3| c + vec2(dot(v, right), -dot(v, up)) * CUBE;
         let painter = ui.painter_at(view);
         // Faces facing the camera, back to front.

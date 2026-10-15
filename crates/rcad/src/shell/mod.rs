@@ -65,6 +65,10 @@ pub struct ShellState {
     pub pick_armed: bool,
     /// Right column shows the read-only Properties (else the Inspector).
     pub properties: bool,
+    /// Last frame's status chips along the top of the view, and the view
+    /// cube's area (layout checks: the chips must not run under the cube).
+    pub top_chips: Vec<eframe::egui::Rect>,
+    pub view_cube: Option<eframe::egui::Rect>,
     /// What a left drag in the view does (navigation bar).
     pub nav_mode: viewcube::NavMode,
     /// Display style: edges drawn over the shading.
@@ -102,6 +106,8 @@ impl Default for ShellState {
             search: None,
             properties: false,
             nav_mode: Default::default(),
+            top_chips: vec![],
+            view_cube: None,
             show_edges: true,
             last_pick: None,
             pick_revision: None,

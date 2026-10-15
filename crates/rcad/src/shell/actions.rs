@@ -658,6 +658,12 @@ impl RcadApp {
         self.shell.editing.filter(|_| self.dialog.is_some())
     }
 
+    /// Last frame's status chips along the top of the view and the view
+    /// cube's area.
+    pub fn view_chrome_rects(&self) -> (Vec<eframe::egui::Rect>, Option<eframe::egui::Rect>) {
+        (self.shell.top_chips.clone(), self.shell.view_cube)
+    }
+
     /// Active key layer.
     pub fn keymap(&self) -> super::KeymapLayer {
         self.shell.prefs.keymap

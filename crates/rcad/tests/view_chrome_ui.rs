@@ -165,3 +165,31 @@ fn drag(h: &mut Harness<'_, RcadApp>, a: Pos2, b: Pos2) {
     });
     settle(h);
 }
+
+/// In sketch mode at 1280 × 800 the sketch status line and the tool hint
+/// (long ones: Line, Dimension, Spline, Text) stay clear of the view cube,
+/// wrapping in the narrower area instead of running under it.
+#[test]
+fn sketch_banners_stay_clear_of_the_view_cube() {
+    let mut h = Harness::builder()
+        .with_size([1280.0, 800.0])
+        .with_max_steps(64)
+        .build_ui_state(
+            |ui, app: &mut RcadApp| app.ui(ui),
+            RcadApp::new(ExecMode::Sync, None),
+        );
+    click(&mut h, "New");
+    click(&mut h, "Create Sketch");
+    for tool in ["Line", "Dimension", "Spline", "Text"] {
+        click(&mut h, tool);
+        let (chips, cube) = h.state().view_chrome_rects();
+        let cube = cube.expect("view cube drawn");
+        assert!(chips.len() >= 2, "status and hint lines: {chips:?}");
+        for c in &chips {
+            assert!(
+                !c.intersects(cube),
+                "{tool}: banner {c:?} runs under the view cube {cube:?}"
+            );
+        }
+    }
+}
