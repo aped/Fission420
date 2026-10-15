@@ -56,7 +56,10 @@ unpinned; never the origin, not projected geometry; glyph `Fix`), **Concentric**
 circles/arcs with different centre points: centres coincide, 2 equations, `Con`), **Collinear**
 (two lines that share no end point: the second's ends lie on the first's line, 2 equations;
 lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a line: the points
-mirror each other about the line's infinite extension, 2 equations, `Sym`; two points that are
+mirror each other about the line's infinite extension, 2 equations, `Sym`; or two lines, or two
+circles, then the mirror line, in that selection order: lines get their ends mirrored pairwise
+as drawn, an end they share is held on the mirror line; circles get mirrored centres and equal
+radii; arcs are refused by name; two points that are
 close to each other and near the line can solve onto the line itself, which the zero-size guard
 refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
