@@ -1048,3 +1048,42 @@ fn relief_corner_just_inside_a_hole_is_refused() {
         }
     }
 }
+
+#[test]
+fn sheet_rule_and_flange_lengths_take_expressions() {
+    // Rule thickness and both flange lengths bound to user parameters; one
+    // edit of each regenerates the whole channel (closed-form volume and
+    // height R + t + leg).
+    let mut s = channel();
+    for v in [
+        json!({"cmd": "set_user_parameter", "name": "leg", "expression": "20 mm"}),
+        json!({"cmd": "set_user_parameter", "name": "t", "expression": "1 mm"}),
+        json!({"cmd": "set_expression", "feature": 2, "name": "thickness", "expression": "t"}),
+        json!({"cmd": "set_expression", "feature": 2, "name": "k_factor", "expression": "0.4"}),
+        json!({"cmd": "set_expression", "feature": 3, "name": "length", "expression": "leg"}),
+        json!({"cmd": "set_expression", "feature": 4, "name": "length", "expression": "leg"}),
+        json!({"cmd": "set_expression", "feature": 4, "name": "angle_deg", "expression": "45 + 45"}),
+        json!({"cmd": "set_user_parameter", "name": "leg", "expression": "25 mm"}),
+        json!({"cmd": "set_user_parameter", "name": "t", "expression": "1.5 mm"}),
+    ] {
+        tray::ok(&mut s, &v);
+    }
+    let half = PI / 2.0;
+    let want = folded(40.0, 1.5, 2.0, 110.0, &[half, half]);
+    let v = body_volume(&s, 1);
+    assert!((v - want).abs() < 1e-6, "{v} vs {want}");
+    let (_, hi) = bounds(&s, 1);
+    assert!((hi[2] - (2.0 + 1.5 + 25.0)).abs() < 1e-9, "{hi:?}");
+    // The rule editor refuses a bound field instead of reverting it later.
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "edit_sheet_rule", "base": 2, "thickness": 2.0}),
+    );
+    assert!(!r.ok && format!("{:?}", r.error).contains("bound to the expression"));
+    // A length cannot be bound to an angle.
+    let r = tray::exec(
+        &mut s,
+        &json!({"cmd": "set_expression", "feature": 3, "name": "length", "expression": "30 deg"}),
+    );
+    assert!(!r.ok);
+}

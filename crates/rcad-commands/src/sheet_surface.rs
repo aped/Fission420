@@ -372,6 +372,23 @@ impl Session {
                 let a = a.clone();
                 self.model_mut()?.transact("Edit sheet rule", |d| {
                     let f = d.feature_mut(a.base)?;
+                    // A field bound to an expression is edited through it
+                    // (a number here would be reverted silently).
+                    for (name, given) in [
+                        ("thickness", a.thickness.is_some()),
+                        ("radius", a.radius.is_some()),
+                        ("k_factor", a.k_factor.is_some()),
+                        ("relief_width", a.relief_width.is_some()),
+                        ("relief_depth", a.relief_depth.is_some()),
+                    ] {
+                        if let Some(e) = f.expressions.get(name).filter(|_| given) {
+                            return Err(DocError::Validation(format!(
+                                "{}.{name} is bound to the expression '{e}'; edit the \
+                                 expression (or replace it with a number to unbind it)",
+                                a.base
+                            )));
+                        }
+                    }
                     let FeatureKind::SheetBase { rule, .. } = &mut f.kind else {
                         return Err(DocError::Validation(format!(
                             "{} is not a sheet-metal base feature",
