@@ -7,7 +7,7 @@ use rcad_document::{FaceRef, FaceRole, FeatureId, SketchPlane};
 use rcad_sketch::Sketch;
 
 fn rect(clockwise: bool) -> Sketch {
-    let mut pts = vec![[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]];
+    let mut pts = [[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]];
     if clockwise {
         pts.reverse();
     }
