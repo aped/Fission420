@@ -1082,6 +1082,36 @@ fn levenberg_marquardt(sys: &System, rows: &[usize], x0: &[f64], tol: f64) -> Lm
     }
 }
 
+/// Constraints owning a row that lies (partly) in the left null space of
+/// `j`: P_ii = 1 − Σ U_ik² over the singular vectors with σ above the rank
+/// threshold is the squared norm of row i's projection onto that space; a
+/// row is a candidate when it exceeds 1e-12 (exact dependence gives O(1)
+/// values, independence 0 up to rounding).
+fn redundant_candidates(j: &DMatrix<f64>, owner: &[usize], n_constraints: usize) -> Vec<usize> {
+    if j.nrows() == 0 || j.ncols() == 0 {
+        return Vec::new();
+    }
+    let svd = j.clone().svd(true, false);
+    let Some(u) = svd.u.as_ref() else {
+        return (0..n_constraints).collect();
+    };
+    let smax = svd.singular_values.iter().fold(0.0_f64, |a, &x| a.max(x));
+    let keep: Vec<usize> = (0..svd.singular_values.len())
+        .filter(|&k| svd.singular_values[k] > RANK_REL_TOL * smax)
+        .collect();
+    let mut out: Vec<usize> = (0..j.nrows())
+        .filter(|&i| {
+            let proj: f64 = keep.iter().map(|&k| u[(i, k)] * u[(i, k)]).sum();
+            1.0 - proj > 1e-12
+        })
+        .filter_map(|i| owner.get(i).copied())
+        .filter(|&c| c < n_constraints)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 fn rank(j: &DMatrix<f64>) -> usize {
     if j.nrows() == 0 || j.ncols() == 0 {
         return 0;
@@ -1125,17 +1155,18 @@ pub(crate) fn solve_with(sketch: &mut Sketch, pins: &[Pin]) -> SolveReport {
         Outcome::Converged => {
             if m > full_rank {
                 // Redundant equations: a constraint is part of a redundant set
-                // when removing it leaves the rank unchanged.
-                let conflicting = if diagnose {
-                    (0..n_constraints)
-                        .filter(|&c| {
-                            let sub = sys.rows_without(c);
-                            sub.len() < m && rank(&sys.jacobian(&lm.x, &sub)) == full_rank
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                // when removing it leaves the rank unchanged. Candidates come
+                // from one SVD (rows with a component in the left null space of
+                // J); only those are confirmed by the rank test, so large
+                // sketches are diagnosed too (no constraint-count cap).
+                let candidates = redundant_candidates(&j, &sys.owner, n_constraints);
+                let conflicting = candidates
+                    .into_iter()
+                    .filter(|&c| {
+                        let sub = sys.rows_without(c);
+                        sub.len() < m && rank(&sys.jacobian(&lm.x, &sub)) == full_rank
+                    })
+                    .collect();
                 (SolveStatus::OverConstrained, conflicting)
             } else if dof > 0 {
                 (SolveStatus::UnderConstrained, Vec::new())

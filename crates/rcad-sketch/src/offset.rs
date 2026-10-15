@@ -126,14 +126,19 @@ fn walk(s: &Sketch, entity: EntityId) -> Result<Vec<Seg>, SketchError> {
     if s.is_construction(entity) {
         return Err(bad("construction geometry cannot be offset"));
     }
-    if let Some(e) = s.entities.iter().find(|e| {
-        live(e)
-            && matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. })
-            && e.points().iter().any(|p| first.points().contains(p))
-    }) {
+    // An ellipse or spline is refused only when it is part of the loop:
+    // one that merely touches a vertex of a line/arc loop is left alone.
+    let free_form_in_loop = |at: PointId| {
+        s.entities.iter().find(|e| {
+            live(e)
+                && matches!(e, Entity::Ellipse { .. } | Entity::Spline { .. })
+                && e.ends().is_some_and(|(u, v)| u == at || v == at)
+        })
+    };
+    if matches!(first, Entity::Ellipse { .. } | Entity::Spline { .. }) {
         return Err(bad(&format!(
             "ellipses and splines cannot be offset ({:?})",
-            e.id()
+            first.id()
         )));
     }
     let (p0, _) = ends(first).ok_or_else(|| bad("circles are offset as a whole"))?;
@@ -166,6 +171,14 @@ fn walk(s: &Sketch, entity: EntityId) -> Result<Vec<Seg>, SketchError> {
             .filter(|x| live(x) && x.id() != cur.id())
             .filter(|x| ends(x).is_some_and(|(u, v)| u == tp || v == tp))
             .collect();
+        if next.is_empty()
+            && let Some(e) = free_form_in_loop(tp)
+        {
+            return Err(bad(&format!(
+                "ellipses and splines cannot be offset ({:?} is part of the loop)",
+                e.id()
+            )));
+        }
         if next.len() != 1 {
             return Err(bad(&format!(
                 "the loop through entity {} is not closed through shared points \

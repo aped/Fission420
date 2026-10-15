@@ -333,3 +333,93 @@ fn offset_constraint_serde_and_label() {
             .any(|c| matches!(c, Constraint::Offset { .. }))
     );
 }
+
+/// An ellipse that only shares a point with the loop (here: centred on a
+/// slot's arc centre, inside the slot) does not block the loop's offset; a
+/// spline that is part of the loop is refused by name.
+#[test]
+fn a_free_form_curve_touching_the_loop_is_allowed_one_in_it_is_refused() {
+    // Slot: centres (0,0) and (20,0), radius 5; an ellipse 2 x 1 about the
+    // left centre point (an island inside the slot).
+    let mut s = Sketch::default();
+    let q = |s: &mut Sketch, x: f64, y: f64| s.add_point(x, y);
+    let (c1, c2) = (q(&mut s, 0.0, 0.0), q(&mut s, 20.0, 0.0));
+    let (b0, b1, t1, t0) = (
+        q(&mut s, 0.0, -5.0),
+        q(&mut s, 20.0, -5.0),
+        q(&mut s, 20.0, 5.0),
+        q(&mut s, 0.0, 5.0),
+    );
+    s.add_line(b0, b1);
+    let right = s.next_entity_id();
+    s.entities.push(Entity::Arc {
+        id: right,
+        center: c2,
+        start: b1,
+        end: t1,
+    });
+    s.add_line(t1, t0);
+    let left = s.next_entity_id();
+    s.entities.push(Entity::Arc {
+        id: left,
+        center: c1,
+        start: t0,
+        end: b0,
+    });
+    let m = q(&mut s, 2.0, 0.0);
+    s.entities.push(Entity::Ellipse {
+        id: s.next_entity_id(),
+        center: c1,
+        major: m,
+        minor: 1.0,
+    });
+    s.validate().unwrap();
+    let r = s.offset_loop(left, 1.0, None).unwrap();
+    assert_eq!(r.entities.len(), 4);
+    assert!(s.solve().is_success());
+    let want = 20.0 * 12.0 + PI * 36.0;
+    let rs = s.regions().unwrap();
+    let mut ids = r.entities.clone();
+    ids.sort();
+    let outer = rs
+        .iter()
+        .find(|x| {
+            let mut o = x.id.outer.clone();
+            o.sort();
+            o == ids
+        })
+        .expect("copy loop region");
+    // The copy's region is the ring around the slot (the slot is its hole).
+    let ring = want - (20.0 * 10.0 + PI * 25.0);
+    assert!(
+        (outer.area - ring).abs() < AREA_TOL,
+        "{} vs {ring}",
+        outer.area
+    );
+
+    // Two lines closed by a spline: the spline is part of the loop.
+    let mut t = Sketch::default();
+    let p: Vec<PointId> = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
+        .iter()
+        .map(|q| t.add_point(q[0], q[1]))
+        .collect();
+    let l0 = t.add_line(p[0], p[1]);
+    t.add_line(p[1], p[2]);
+    let (sp, pts) = t
+        .add_spline(&[[10.0, 10.0], [5.0, 12.0], [-2.0, 6.0], [0.0, 0.0]], false)
+        .unwrap();
+    for e in &mut t.entities {
+        if let Entity::Spline { id, points, .. } = e
+            && *id == sp
+        {
+            points[0] = p[2];
+            points[3] = p[0];
+        }
+    }
+    t.points.retain(|q| q.id != pts[0] && q.id != pts[3]);
+    t.validate().unwrap();
+    let before = t.clone();
+    let err = t.offset_loop(l0, 1.0, None).unwrap_err();
+    assert!(err.to_string().contains("part of the loop"), "{err}");
+    assert_eq!(t, before);
+}

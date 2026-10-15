@@ -1266,7 +1266,7 @@ impl SketchEditor {
         self.feedback = Some(Feedback { error: false, text });
     }
 
-    fn resolve(&mut self) {
+    pub(crate) fn resolve(&mut self) {
         let mut s = self.sketch.clone();
         self.report = s.solve();
         if self.report.is_success() {
