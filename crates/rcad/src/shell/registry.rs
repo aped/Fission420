@@ -106,6 +106,11 @@ pub enum CmdId {
     // MESH
     MeshRepair,
     MeshEdit,
+    // SHEET METAL / SURFACE
+    SheetFlange,
+    SheetBase,
+    SurfacePatch,
+    SurfaceExtrude,
 }
 
 /// Ribbon tab.
@@ -371,7 +376,7 @@ pub static COMMANDS: &[CommandDef] = &[
         enabled: open, run: |a| a.save_as_dialog()),
     def!(Import, "Import…", Import, "Import STEP / STL / DXF into this document (one undoable step)",
         fusion: [], classic: [],
-        places: [Place::AppBar, Place::File, S_INSERT], mm: None,
+        places: [S_INSERT, Place::File], mm: None,
         enabled: open, run: |a| a.open_import_dialog()),
     def!(Close, "Close", Generic, "Close this document",
         fusion: [cmd(Key::W)], classic: [],
@@ -407,7 +412,7 @@ pub static COMMANDS: &[CommandDef] = &[
         enabled: |a| a.redo_blocker(), run: |a| a.redo()),
     def!(Help, "Help", Help, "Navigation, keyboard shortcuts (generated from the command list)",
         fusion: [k(Key::F1)], classic: [k(Key::F1)],
-        places: [Place::AppBar, ribbon(Tab::Utilities, Group::Inspect, true)], mm: None,
+        places: [Place::AppBar], mm: None,
         enabled: always, run: |a| a.show_help = !a.show_help),
     // ----- View -----
     def!(Fit, "Fit view", View, "Fit the model in the view (in a sketch: look at the sketch)",
@@ -417,7 +422,7 @@ pub static COMMANDS: &[CommandDef] = &[
     def!(Section, "Section view…", Section,
         "Display-only clipping plane (not capped); the model and exports are unchanged",
         fusion: [], classic: [],
-        places: [Place::View, S_INSPECT], mm: None,
+        places: [Place::View, S_INSPECT_MORE], mm: None,
         enabled: always, run: |a| a.toggle_section()),
     def!(ViewTop, "Top", View, "Top view",
         fusion: [k(Key::Num7)], classic: [k(Key::Num7)],
@@ -464,12 +469,12 @@ pub static COMMANDS: &[CommandDef] = &[
     def!(CutThroughAll, "Cut through all…", Cut,
         "Cut a closed sketch profile through every body it crosses (Extrude, operation Cut)",
         fusion: [], classic: [],
-        places: [S_CREATE_MORE], mm: None,
+        places: [S_CREATE], mm: None,
         enabled: |a| a.cut_cmd_blocker(), run: |a| a.open_cut()),
     def!(Thread, "Thread…", Thread,
         "Modeled thread (faceted solid, stated 60° V test profile): a rod or a square nut",
         fusion: [], classic: [],
-        places: [S_CREATE_MORE], mm: None,
+        places: [S_CREATE], mm: None,
         enabled: open, run: |a| a.open_thread()),
     def!(Loft, "Loft…", Loft,
         "New body between two closed profiles on parallel planes (exact; same-count polygons with parallel edges, or coaxial circles)",
@@ -542,11 +547,11 @@ pub static COMMANDS: &[CommandDef] = &[
         enabled: |a| a.need_body(), run: |a| a.focus(Focus::MoveCopy)),
     def!(SplitBody, "Split Body", Split, "Split the selected body by a plane",
         fusion: [], classic: [],
-        places: [S_MODIFY], mm: None,
+        places: [S_MODIFY_MORE], mm: None,
         enabled: |a| a.need_body(), run: |a| a.focus(Focus::Split)),
     def!(Combine, "Combine…", Combine, "Join, cut or intersect the selected body with others",
         fusion: [], classic: [],
-        places: [S_MODIFY], mm: None,
+        places: [S_MODIFY_MORE], mm: None,
         enabled: |a| a.need_body(), run: |a| a.focus(Focus::Combine)),
     def!(Material, "Physical Material", Material, "Set the selected body's material (density for mass)",
         fusion: [], classic: [],
@@ -554,7 +559,7 @@ pub static COMMANDS: &[CommandDef] = &[
         enabled: |a| a.need_body(), run: |a| a.focus(Focus::Material)),
     def!(ChangeParameters, "Change Parameters", Parameters, "User parameters (names, expressions, units)",
         fusion: [], classic: [],
-        places: [S_MODIFY_MORE], mm: None,
+        places: [S_MODIFY_MORE, ribbon(Tab::Utilities, Group::Modify, true)], mm: None,
         enabled: open, run: |a| a.focus(Focus::Parameters)),
     def!(Delete, "Delete", Delete, "Delete the selected feature (Undo restores it)",
         fusion: [k(Key::Delete)], classic: [k(Key::Delete)],
@@ -691,6 +696,23 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [], classic: [],
         places: [ribbon(Tab::Mesh, Group::Modify, true)], mm: None,
         enabled: |a| a.need_mesh_body(), run: |a| a.focus(Focus::MeshEdit)),
+    // ----- SHEET METAL / SURFACE (forms of the selected sketch) -----
+    def!(SheetFlange, "Flange", Extrude, "Sheet-metal flange from the selected open sketch (line chain)",
+        fusion: [], classic: [],
+        places: [ribbon(Tab::SheetMetal, Group::Create, true)], mm: None,
+        enabled: |a| a.need_selected_sketch(), run: |a| a.focus(Focus::SheetFlange)),
+    def!(SheetBase, "Base Face", Plane, "Sheet-metal base face from the selected closed sketch",
+        fusion: [], classic: [],
+        places: [ribbon(Tab::SheetMetal, Group::Create, true)], mm: None,
+        enabled: |a| a.need_selected_sketch(), run: |a| a.focus(Focus::SheetBase)),
+    def!(SurfacePatch, "Patch", Plane, "Planar patch surface from the selected closed sketch",
+        fusion: [], classic: [],
+        places: [ribbon(Tab::Surface, Group::Create, true)], mm: None,
+        enabled: |a| a.need_selected_sketch(), run: |a| a.focus(Focus::SurfaceFromSketch)),
+    def!(SurfaceExtrude, "Extrude Surface", Extrude, "Extruded surface from the selected sketch",
+        fusion: [], classic: [],
+        places: [ribbon(Tab::Surface, Group::Create, true)], mm: None,
+        enabled: |a| a.need_selected_sketch(), run: |a| a.focus(Focus::SurfaceFromSketch)),
 ];
 
 /// The definition of `id`.
@@ -854,6 +876,10 @@ mod tests {
         CmdId::ClearSelection,
         CmdId::MeshRepair,
         CmdId::MeshEdit,
+        CmdId::SheetFlange,
+        CmdId::SheetBase,
+        CmdId::SurfacePatch,
+        CmdId::SurfaceExtrude,
     ];
 
     #[test]

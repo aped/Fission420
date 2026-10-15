@@ -2260,11 +2260,17 @@ impl RcadApp {
         }
         self.shortcuts(&ctx);
 
+        if self.shell.applied_theme != Some(self.shell.prefs.theme) {
+            self.apply_theme(&ctx);
+            self.shell.applied_theme = Some(self.shell.prefs.theme);
+        }
+        self.track_recent();
+        egui::Panel::top("rcad_appbar").show(ui, |ui| self.app_bar(ui, busy));
         egui::Panel::top("rcad_toolbar").show(ui, |ui| {
             if self.sketch.is_some() {
                 self.sketch_toolbar(ui);
             } else {
-                self.toolbar(ui, busy);
+                self.ribbon(ui);
             }
         });
         egui::Panel::bottom("rcad_status").show(ui, |ui| self.status_bar(ui, busy));
@@ -2312,6 +2318,7 @@ impl RcadApp {
         self.recovery_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
+        self.prefs_ui(&ctx);
         self.section_window(&ctx);
         self.import_summary_ui(&ctx);
         self.reattach_ui(&ctx);

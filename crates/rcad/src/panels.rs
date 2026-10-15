@@ -50,43 +50,6 @@ pub(crate) fn state_text(f: &FeatureSummary) -> Option<(String, Color32)> {
 impl RcadApp {
     // ----- command bars -----
 
-    pub(crate) fn toolbar(&mut self, ui: &mut egui::Ui, busy: bool) {
-        use crate::shell::CmdId as C;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("R-CAD");
-            ui.separator();
-            for id in [C::New, C::Open, C::Save, C::SaveAs, C::Import, C::Close] {
-                self.cmd_button(ui, id);
-            }
-            let export = ui.menu_button("Export", |ui| {
-                for id in [
-                    C::ExportStl,
-                    C::ExportStep,
-                    C::ExportDxf,
-                    C::ExportSvg,
-                    C::Export3mf,
-                ] {
-                    if self.cmd_button(ui, id) {
-                        ui.close();
-                    }
-                }
-            });
-            crate::probe::note("Export", export.response.rect);
-            ui.separator();
-            self.cmd_button(ui, C::Undo);
-            self.cmd_button(ui, C::Redo);
-            ui.separator();
-            self.modeling_buttons(ui);
-            ui.separator();
-            self.view_menu(ui);
-            self.cmd_button(ui, C::Fit);
-            self.cmd_button(ui, C::Help);
-            if busy {
-                self.regenerating_chip(ui);
-            }
-        });
-    }
-
     /// The View menu: fit, section view, standard views.
     pub(crate) fn view_menu(&mut self, ui: &mut egui::Ui) {
         use crate::shell::{CmdId as C, registry};
@@ -159,50 +122,6 @@ impl RcadApp {
         {
             self.engine.cancel_running();
         }
-    }
-
-    fn modeling_buttons(&mut self, ui: &mut egui::Ui) {
-        use crate::shell::CmdId as C;
-        let open = self.summary.open;
-        self.cmd_button(ui, C::CreateSketch);
-        // The world origin planes, whatever is selected (Fusion's Create
-        // Sketch offers the origin planes too).
-        let planes = ui.add_enabled_ui(open, |ui| {
-            ui.menu_button("Planes", |ui| {
-                for id in [C::SketchXY, C::SketchXZ, C::SketchYZ] {
-                    if self.cmd_button(ui, id) {
-                        ui.close();
-                    }
-                }
-            })
-        });
-        planes
-            .inner
-            .response
-            .named("Sketch plane menu")
-            .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)");
-        for id in [
-            C::OffsetPlane,
-            C::Extrude,
-            C::CutThroughAll,
-            C::Revolve,
-            C::Thread,
-        ] {
-            self.cmd_button(ui, id);
-        }
-        // Exact loft / sweep (new bodies from two sketches).
-        ui.menu_button("Loft / Sweep", |ui| {
-            for id in [C::Loft, C::Sweep] {
-                if self.cmd_button(ui, id) {
-                    ui.close();
-                }
-            }
-        })
-        .response
-        .probe("Loft / Sweep");
-        let templates = ui.menu_button("Templates", |ui| self.templates_menu(ui));
-        crate::probe::note("Templates", templates.response.rect);
-        self.placement_controls(ui);
     }
 
     /// Templates: printable parts, dimensioned sketch templates, placement tools.
@@ -2675,6 +2594,7 @@ impl RcadApp {
         let active = self.summary.active_configuration.clone();
         let header = egui::CollapsingHeader::new(format!("Configurations ({})", configs.len()))
             .id_salt("configurations_panel")
+            .open(self.shell.take_focus(crate::shell::Focus::Configurations))
             .show(ui, |ui| {
                 for c in &configs {
                     ui.horizontal(|ui| {
@@ -2785,6 +2705,7 @@ impl RcadApp {
         let mut send = None;
         let header = egui::CollapsingHeader::new("Sheet metal flange")
             .id_salt(("sheet_ui", f.id.0))
+            .open(self.shell.take_focus(crate::shell::Focus::SheetFlange))
             .show(ui, |ui| {
                 let b = &mut self.sheet_form;
                 for (i, l) in ["Thickness (mm)", "Inner bend radius (mm)", "K-factor", "Width (mm)"]

@@ -9,9 +9,11 @@
 //! button, a menu or a key.
 
 pub mod actions;
+pub mod icons;
 pub mod keymap;
 pub mod prefs;
 pub mod registry;
+pub mod ribbon;
 
 pub use keymap::KeymapLayer;
 pub use registry::CmdId;
@@ -31,10 +33,13 @@ pub enum Focus {
     Material,
     MeshRepair,
     MeshEdit,
+    SheetFlange,
+    SheetBase,
+    SurfaceFromSketch,
 }
 
 /// Shell state that is view-only (never part of the document or undo).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ShellState {
     /// Preferences (keymap layer, theme, dialog width, recent files).
     pub prefs: prefs::Prefs,
@@ -43,6 +48,11 @@ pub struct ShellState {
     pub prefs_path: Option<std::path::PathBuf>,
     /// Section to force open on its next draw.
     pub focus: Option<Focus>,
+    /// Active ribbon tab.
+    pub tab: registry::Tab,
+    pub show_prefs: bool,
+    /// Theme applied to the context (re-applied when it changes).
+    pub applied_theme: Option<prefs::Theme>,
 }
 
 impl ShellState {
@@ -54,6 +64,19 @@ impl ShellState {
             Some(true)
         } else {
             None
+        }
+    }
+}
+
+impl Default for ShellState {
+    fn default() -> Self {
+        Self {
+            prefs: Default::default(),
+            prefs_path: None,
+            focus: None,
+            tab: registry::Tab::Solid,
+            show_prefs: false,
+            applied_theme: None,
         }
     }
 }

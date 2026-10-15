@@ -98,3 +98,8 @@ Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tool
 | i_float / i_shape / i_tree / i_key_sort | 4.1.0 / 4.0.0 / 0.19.0 / 0.11.0 (transitive) | MIT | i_overlay |
 
 Pure Rust, no C code. `i_overlay` is the boolean engine `geo` uses.
+
+## Icons
+
+Command icons are original line glyphs drawn in code with the egui painter
+(`crates/rcad/src/shell/icons.rs`). No third-party icon assets are used.

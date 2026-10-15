@@ -33,6 +33,14 @@ impl RcadApp {
         }
     }
 
+    pub(crate) fn need_selected_sketch(&self) -> Result<(), String> {
+        self.need_open()?;
+        match self.selected_sketch() {
+            Some(_) => Ok(()),
+            None => Err("Select a sketch in History first".into()),
+        }
+    }
+
     pub(crate) fn need_extrude(&self) -> Result<(), String> {
         self.need_open()?;
         if self.summary.features.iter().any(|f| f.kind == "extrude") {
@@ -508,7 +516,14 @@ impl RcadApp {
     }
 
     pub(crate) fn open_shell(&mut self) {
-        if let Some(f) = self.selected_feature()
+        // A picked face is the face to leave open (it also selects its
+        // feature); otherwise a selected New Body extrusion's scoped shell.
+        if let Ok(face) = self.need_sketchable_face() {
+            self.dialog = Some(Dialog::ShellFace {
+                face,
+                thickness: self.shell_thickness.clone(),
+            });
+        } else if let Some(f) = self.selected_feature()
             && f.kind == "extrude"
             && matches!(f.operation, Some(rcad_document::Operation::NewBody { .. }))
         {
@@ -516,11 +531,6 @@ impl RcadApp {
                 extrude: f.id,
                 open_end: true,
                 thickness: "2".into(),
-            });
-        } else if let Ok(face) = self.need_sketchable_face() {
-            self.dialog = Some(Dialog::ShellFace {
-                face,
-                thickness: self.shell_thickness.clone(),
             });
         }
     }
@@ -668,6 +678,16 @@ impl RcadApp {
         };
         if let Err(e) = self.shell.prefs.save(&path) {
             self.diag(false, "info", format!("preferences not saved: {e}"));
+        }
+    }
+
+    /// Remember the open document's path in Open Recent (saved prefs).
+    pub(crate) fn track_recent(&mut self) {
+        if let Some(p) = self.summary.path.clone()
+            && self.shell.prefs.recent.first() != Some(&p)
+        {
+            self.shell.prefs.push_recent(p);
+            self.save_prefs();
         }
     }
 

@@ -86,6 +86,7 @@ impl RcadApp {
         let mut send: Vec<Command> = Vec::new();
         let header = egui::CollapsingHeader::new(format!("Drawings ({})", drawings.len()))
             .id_salt("drawings_panel")
+            .open(self.shell.take_focus(crate::shell::Focus::Drawings))
             .show(ui, |ui| {
                 let body = self
                     .selected_body
