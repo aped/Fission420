@@ -12,7 +12,7 @@ pub mod measure_faces;
 pub mod mesh_edit;
 pub mod mesh_repair;
 
-/// "R-CAD 0.1.0 (<git revision or "dev build">, native format v7)". The
+/// "R-CAD 1.0.0 (<git revision or "dev build">, native format v9)". The
 /// revision comes from `RCAD_GIT_REV` at build time (tools/release.sh sets it).
 pub fn version_string() -> String {
     format!(

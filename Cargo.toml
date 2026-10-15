@@ -6,7 +6,26 @@ exclude = ["spikes", "third_party"]
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-version = "0.1.0"
+version = "1.0.0"
+rust-version = "1.95"
+repository = "https://github.com/aped/R-CAD"
+homepage = "https://github.com/aped/R-CAD"
+# Workspace-internal crates; nothing is published to crates.io.
+publish = false
+
+[workspace.dependencies]
+rcad-cancel = { path = "crates/rcad-cancel", version = "1.0.0" }
+rcad-commands = { path = "crates/rcad-commands", version = "1.0.0" }
+rcad-document = { path = "crates/rcad-document", version = "1.0.0" }
+rcad-exchange = { path = "crates/rcad-exchange", version = "1.0.0" }
+rcad-kernel = { path = "crates/rcad-kernel", version = "1.0.0" }
+rcad-sketch = { path = "crates/rcad-sketch", version = "1.0.0" }
+rcad-viewport = { path = "crates/rcad-viewport", version = "1.0.0" }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "x11", "wgpu"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
 
 # Truck booleans are ~30x slower unoptimised; optimise dependencies in dev/test builds.
 [profile.dev.package."*"]

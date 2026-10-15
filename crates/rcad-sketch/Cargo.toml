@@ -3,12 +3,17 @@ name = "rcad-sketch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "Sketch entities, constraints, solver and profile extraction"
 
 [dependencies]
 nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
-serde = { version = "1.0.229", features = ["derive"] }
-thiserror = "2.0.21"
+serde.workspace = true
+thiserror.workspace = true
 ttf-parser = { version = "0.25.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-serde_json = "1.0.151"
+serde_json.workspace = true

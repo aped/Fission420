@@ -3,15 +3,20 @@ name = "rcad-document"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "Feature history, parameters, regeneration, undo and the native format of R-CAD"
 
 [dependencies]
-rcad-cancel = { version = "0.1.0", path = "../rcad-cancel" }
-rcad-kernel = { version = "0.1.0", path = "../rcad-kernel" }
-rcad-sketch = { version = "0.1.0", path = "../rcad-sketch" }
-rcad-exchange = { version = "0.1.0", path = "../rcad-exchange" }
-serde = { version = "1.0.229", features = ["derive"] }
+rcad-cancel.workspace = true
+rcad-kernel.workspace = true
+rcad-sketch.workspace = true
+rcad-exchange.workspace = true
+serde.workspace = true
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
-thiserror = "2.0.21"
+thiserror.workspace = true
 
 [features]
 # Test-only fault injection (a feature named `__panic__` panics when
@@ -19,4 +24,4 @@ thiserror = "2.0.21"
 test-hooks = []
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

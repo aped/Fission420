@@ -3,16 +3,21 @@ name = "rcad-commands"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "Typed, serialisable command API shared by the R-CAD app, CLI and tests"
 
 [dependencies]
-rcad-document = { version = "0.1.0", path = "../rcad-document" }
-rcad-exchange = { version = "0.1.0", path = "../rcad-exchange" }
-rcad-kernel = { version = "0.1.0", path = "../rcad-kernel" }
-rcad-sketch = { version = "0.1.0", path = "../rcad-sketch" }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+rcad-document.workspace = true
+rcad-exchange.workspace = true
+rcad-kernel.workspace = true
+rcad-sketch.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-rcad-document = { version = "0.1.0", path = "../rcad-document", features = ["test-hooks"] }
-serde_json = "1.0.151"
-tempfile = "3.27.0"
+rcad-document = { workspace = true, features = ["test-hooks"] }
+serde_json.workspace = true
+tempfile.workspace = true

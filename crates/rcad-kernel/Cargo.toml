@@ -3,12 +3,17 @@ name = "rcad-kernel"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "B-rep operations, validation, tessellation and STEP on the Truck kernel"
 
 [dependencies]
-rcad-cancel = { version = "0.1.0", path = "../rcad-cancel" }
+rcad-cancel.workspace = true
 i_overlay = "8.1.2"
-serde = { version = "1.0.229", features = ["derive"] }
-thiserror = "2.0.21"
+serde.workspace = true
+thiserror.workspace = true
 truck-meshalgo = { version = "0.4.0", default-features = false, features = ["analyzers", "tessellation"] }
 truck-modeling = "0.6.0"
 truck-shapeops = "0.4.0"

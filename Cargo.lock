@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "rcad"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -2494,11 +2494,11 @@ dependencies = [
 
 [[package]]
 name = "rcad-cancel"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "rcad-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rcad-commands",
  "serde",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-commands"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rcad-document",
  "rcad-exchange",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-document"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rcad-cancel",
  "rcad-exchange",
@@ -2534,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-exchange"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crc32fast",
  "miniz_oxide 0.8.9",
@@ -2548,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-kernel"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "i_overlay",
  "rcad-cancel",
@@ -2563,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-sketch"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "nalgebra",
  "serde",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "rcad-viewport"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "eframe",
@@ -4349,7 +4349,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "xz2"
