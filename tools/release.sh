@@ -20,13 +20,13 @@ NAME="r-cad-$VERSION-$REV-linux-x86_64"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target-release}
 case "$CARGO_TARGET_DIR" in /tmp/*) echo "refusing tmpfs target dir" >&2; exit 2;; esac
 echo "building $NAME (target $CARGO_TARGET_DIR)"
-RCAD_GIT_REV=$REV tools/heavy.sh cargo build --release --locked -p rcad -p rcad-cli
+RCAD_GIT_REV=$REV tools/heavy.sh cargo build --profile dist --locked -p rcad -p rcad-cli
 mkdir -p "$OUT"
 OUT=$(readlink -f "$OUT")
 STAGE="$OUT/$NAME"
 rm -rf -- "${STAGE:?}"
 mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/examples"
-cp "$CARGO_TARGET_DIR/release/rcad" "$CARGO_TARGET_DIR/release/rcad-cli" "$STAGE/bin/"
+cp "$CARGO_TARGET_DIR/dist/rcad" "$CARGO_TARGET_DIR/dist/rcad-cli" "$STAGE/bin/"
 cp LICENSE-MIT LICENSE-APACHE README.md CHANGELOG.md "$STAGE/"
 for d in INSTALL COMMANDS FORMAT_SUPPORT PRINT_EXPORT PARAMETERS CONFIGURATIONS ASSEMBLIES \
          DRAWINGS SHEET_METAL SURFACES MESH MATERIALS TOLERANCES UI DEPENDENCIES; do

@@ -127,7 +127,13 @@ jobs:
         run: cargo fetch --locked
 
       - name: Build release binaries
-        run: cargo build --release --locked -p rcad -p rcad-cli
+        # Tagged releases ship the whole-program-optimised `dist` profile (slower to build,
+        # 5-10 % faster at run time); every other run uses `release`, which the tests share.
+        run: |
+          profile=release
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then profile=dist; fi
+          echo "BIN_PROFILE=$profile" >> "$GITHUB_ENV"
+          cargo build --profile "$profile" --locked -p rcad -p rcad-cli
 
       - name: Build the test archive
         run: cargo nextest archive --workspace --release --locked --archive-file tests.tar.zst
@@ -145,7 +151,7 @@ jobs:
           mkdir -p stage
           exe=""
           if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
-          cp "target/release/rcad$exe" "target/release/rcad-cli$exe" stage/
+          cp "target/$BIN_PROFILE/rcad$exe" "target/$BIN_PROFILE/rcad-cli$exe" stage/
           py=python3; command -v python3 >/dev/null || py=python
           "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
             stage/THIRD_PARTY_LICENSES.txt

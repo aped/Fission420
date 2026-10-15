@@ -28,7 +28,7 @@ other native library is linked. Archives are not code-signed.
 tools/release.sh artifacts/release            # refuses a dirty tree; --allow-dirty for tests
 ```
 
-It builds with `--locked` into `target-release/` (disk-backed), embeds the git revision in
+It builds the `dist` profile (fat LTO) with `--locked` into `target-release/` (disk-backed), embeds the git revision in
 `--version`, smoke-tests the staged binaries (version, a byte-identical example replay, the
 drawing-set example) and writes `SHA256SUMS` plus `<name>.tar.gz.sha256`.
 
