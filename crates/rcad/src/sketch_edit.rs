@@ -457,6 +457,107 @@ pub struct SketchEditor {
     pub project_pick: Option<ProjectPick>,
     /// Project tool option: keep the projection link (Fusion's Projection Link).
     pub project_linked: bool,
+    /// Evaluated user parameters (name -> value), for dimension expressions.
+    pub param_env: std::collections::HashMap<String, rcad_document::params::Quantity>,
+    /// Dimension expressions typed in this session (name -> expression; an
+    /// empty expression unbinds), committed with the sketch at Finish.
+    pub bindings: std::collections::BTreeMap<String, String>,
+    /// User parameters created by `name = expr` in this session.
+    pub new_params: Vec<rcad_commands::sketch_ops::NewParameter>,
+    /// Dimensions bound to an expression in the document when the session
+    /// (or the last projection commit) started, with their expressions.
+    pub bound: std::collections::BTreeMap<String, String>,
+}
+
+/// What the inline dimension editor accepted.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DimInput {
+    /// A number (with an optional unit suffix): no binding.
+    Value(f64),
+    /// An expression using parameters: its value now, bound to `expr`.
+    Bound { value: f64, expr: String },
+    /// `name = expr`: a new user parameter; the dimension is bound to it.
+    NewParameter {
+        value: f64,
+        name: String,
+        expr: String,
+    },
+}
+
+/// Parse inline dimension input (docs/behavior/sketching.md "Dimension
+/// entry"): a number with an optional unit (mm, cm, m, in; deg or rad for
+/// angles), an expression over user parameters (`w/2`, `w + 2 mm`), or
+/// `name = expr` (a new user parameter). The result must be finite and > 0.
+pub fn parse_dim_input(
+    buf: &str,
+    angle: bool,
+    env: &std::collections::HashMap<String, rcad_document::params::Quantity>,
+) -> Result<DimInput, String> {
+    use rcad_document::params;
+    let text = buf.trim();
+    if text.is_empty() {
+        return Err("enter a value, a parameter or an expression".into());
+    }
+    let (name, src) = match text.split_once('=') {
+        Some((n, e)) => {
+            let n = n.trim();
+            params::valid_name(n).map_err(|e| format!("'{n}': {e}"))?;
+            if env.contains_key(n) {
+                return Err(format!(
+                    "parameter '{n}' already exists: type '{n}' to use it, or change it in \
+                     Parameters"
+                ));
+            }
+            (Some(n.to_string()), e.trim())
+        }
+        None => (None, text),
+    };
+    // Angle unit suffixes (the expression grammar's angles are degrees).
+    let (src, to_deg) = if angle {
+        if let Some(x) = src.strip_suffix("rad") {
+            (x.trim(), 180.0 / std::f64::consts::PI)
+        } else {
+            (
+                src.trim_end_matches('°').trim_end_matches("deg").trim(),
+                1.0,
+            )
+        }
+    } else {
+        (src, 1.0)
+    };
+    if src.is_empty() {
+        return Err("the expression is empty".into());
+    }
+    let kind = if angle {
+        params::SlotKind::Angle
+    } else {
+        params::SlotKind::Length
+    };
+    let value =
+        params::evaluate_for_slot(src, env, kind).map_err(|e| format!("'{src}': {e}"))? * to_deg;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!(
+            "'{text}' gives {}: a dimension must be > 0",
+            rcad_sketch::fmt_mm(value)
+        ));
+    }
+    let bound_src = if to_deg == 1.0 {
+        src.to_string()
+    } else {
+        format!("({src}) * 180 / {}", std::f64::consts::PI)
+    };
+    Ok(match name {
+        Some(name) => DimInput::NewParameter {
+            value,
+            name,
+            expr: bound_src,
+        },
+        None if params::references(src).is_empty() => DimInput::Value(value),
+        None => DimInput::Bound {
+            value,
+            expr: bound_src,
+        },
+    })
 }
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -514,7 +615,26 @@ impl SketchEditor {
             projected: Default::default(),
             project_pick: None,
             project_linked: true,
+            param_env: Default::default(),
+            bindings: Default::default(),
+            new_params: vec![],
+            bound: Default::default(),
         }
+    }
+
+    /// True when Finish must also commit typed expressions or parameters.
+    pub fn has_bindings(&self) -> bool {
+        !self.bindings.is_empty() || !self.new_params.is_empty()
+    }
+
+    /// The typed bindings that still name a dimension of the sketch.
+    pub fn live_bindings(&self) -> std::collections::BTreeMap<String, String> {
+        let dims = self.sketch.dimensions();
+        self.bindings
+            .iter()
+            .filter(|(n, _)| dims.iter().any(|(m, _)| m == *n))
+            .map(|(n, e)| (n.clone(), e.clone()))
+            .collect()
     }
 
     /// Mark the curves of each projection link (in link order) read-only.
@@ -2074,25 +2194,6 @@ impl SketchEditor {
         let Some(ed) = self.dim_edit.clone() else {
             return false;
         };
-        let value = match ed
-            .buffer
-            .trim()
-            .trim_end_matches("mm")
-            .trim_end_matches('°')
-            .trim_end_matches("deg")
-            .trim()
-            .parse::<f64>()
-        {
-            Ok(v) if v.is_finite() && v > 0.0 => v,
-            _ => {
-                self.fail(format!(
-                    "'{}' is not a valid dimension: enter a positive number (millimetres; \
-                     degrees for angles).",
-                    ed.buffer.trim()
-                ));
-                return false;
-            }
-        };
         let Some(name) = self
             .sketch
             .constraints
@@ -2103,19 +2204,69 @@ impl SketchEditor {
             self.dim_edit = None;
             return false;
         };
+        let angle = matches!(
+            self.sketch.constraints.get(ed.constraint),
+            Some(Constraint::Angle { .. } | Constraint::PatternRotate { .. })
+        );
+        let input = match parse_dim_input(&ed.buffer, angle, &self.param_env) {
+            Ok(i) => i,
+            Err(why) => {
+                self.fail(format!(
+                    "'{}' is not a valid dimension: {why}. Enter a positive number (mm, cm, in; \
+                     deg or rad for angles), a parameter expression, or name = value.",
+                    ed.buffer.trim()
+                ));
+                return false;
+            }
+        };
+        let value = match &input {
+            DimInput::Value(v) | DimInput::Bound { value: v, .. } => *v,
+            DimInput::NewParameter { value, .. } => *value,
+        };
         let ok = self.try_change(false, |sk| {
             sk.set_dimension(&name, value).map_err(|e| e.to_string())
         });
         if ok {
             self.dim_edit = None;
-            let angle = matches!(
-                self.sketch.constraints.get(ed.constraint),
-                Some(Constraint::Angle { .. })
-            );
+            let unit = if angle { "°" } else { " mm" };
+            let shown = match input {
+                DimInput::Value(_) => {
+                    // A typed number replaces an expression binding.
+                    if self.bound.contains_key(&name) || self.bindings.contains_key(&name) {
+                        self.bindings.insert(name.clone(), String::new());
+                    }
+                    String::new()
+                }
+                DimInput::Bound { expr, .. } => {
+                    let shown = format!(" (= {expr})");
+                    self.bindings.insert(name.clone(), expr);
+                    shown
+                }
+                DimInput::NewParameter {
+                    value,
+                    name: p,
+                    expr,
+                } => {
+                    self.param_env.insert(
+                        p.clone(),
+                        rcad_document::params::Quantity {
+                            value,
+                            dim: Some(if angle { 0 } else { 1 }),
+                        },
+                    );
+                    self.new_params
+                        .push(rcad_commands::sketch_ops::NewParameter {
+                            name: p.clone(),
+                            expression: expr.clone(),
+                            unit: angle.then_some(rcad_document::ParamUnit::Deg),
+                        });
+                    self.bindings.insert(name.clone(), p.clone());
+                    format!(" (= {p}, new parameter {p} = {expr})")
+                }
+            };
             self.info(format!(
-                "{name} = {}{}",
-                rcad_sketch::fmt_mm(value),
-                if angle { "°" } else { " mm" }
+                "{name} = {}{unit}{shown}",
+                rcad_sketch::fmt_mm(value)
             ));
         }
         ok
@@ -4224,5 +4375,65 @@ mod tests {
         // Escape closes an open entry.
         click(&mut ed, [20.0, 0.0]);
         assert!(ed.escape() && ed.offset_edit.is_none());
+    }
+
+    #[test]
+    fn dimension_input_units_expressions_and_new_parameters() {
+        use rcad_document::params::Quantity;
+        let mut env = std::collections::HashMap::new();
+        env.insert(
+            "w".to_string(),
+            Quantity {
+                value: 40.0,
+                dim: Some(1),
+            },
+        );
+        env.insert(
+            "a".to_string(),
+            Quantity {
+                value: 30.0,
+                dim: Some(0),
+            },
+        );
+        let p = |s: &str, angle: bool| parse_dim_input(s, angle, &env);
+        assert_eq!(p("12.5", false), Ok(DimInput::Value(12.5)));
+        assert_eq!(p("12.5 mm", false), Ok(DimInput::Value(12.5)));
+        assert_eq!(p("1 in", false), Ok(DimInput::Value(25.4)));
+        assert_eq!(p("2cm", false), Ok(DimInput::Value(20.0)));
+        assert_eq!(
+            p("w/2", false),
+            Ok(DimInput::Bound {
+                value: 20.0,
+                expr: "w/2".into()
+            })
+        );
+        assert_eq!(
+            p("d = w + 5 mm", false),
+            Ok(DimInput::NewParameter {
+                value: 45.0,
+                name: "d".into(),
+                expr: "w + 5 mm".into()
+            })
+        );
+        assert_eq!(p("30deg", true), Ok(DimInput::Value(30.0)));
+        assert_eq!(p("45°", true), Ok(DimInput::Value(45.0)));
+        match p("0.5 rad", true) {
+            Ok(DimInput::Value(v)) => {
+                assert!((v - 0.5 * 180.0 / std::f64::consts::PI).abs() < 1e-12)
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(p("a * 2", true), Ok(DimInput::Bound { value, .. }) if value == 60.0));
+        for (bad, angle) in [
+            ("", false),
+            ("q/2", false),
+            ("10 - 30", false),
+            ("w = 3", false),
+            ("2w = 3", false),
+            ("30 mm", true),
+            ("x = ", false),
+        ] {
+            assert!(p(bad, angle).is_err(), "{bad} accepted");
+        }
     }
 }

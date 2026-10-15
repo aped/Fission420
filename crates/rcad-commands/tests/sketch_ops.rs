@@ -254,3 +254,77 @@ fn trim_and_break_ops_keep_ids_and_undo_in_one_step() {
         Constraint::Horizontal { line: h },
     );
 }
+
+#[test]
+fn replace_commits_sketch_parameters_and_bindings_in_one_step() {
+    use rcad_commands::sketch_ops::NewParameter;
+    let mut s = Session::new();
+    assert!(s.execute(&Command::NewDocument).ok);
+    let r = s.execute(&Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 30.0,
+            height: 10.0,
+            center: None,
+        },
+    });
+    let f = r.feature.unwrap();
+    let mut sk = stored(&s, f);
+    sk.set_dimension("width", 40.0).unwrap();
+    sk.set_dimension("height", 20.0).unwrap();
+    let rev = revision(&s);
+    let op = SketchOp::Replace {
+        sketch: sk.clone(),
+        parameters: vec![NewParameter {
+            name: "w".into(),
+            expression: "40".into(),
+            unit: None,
+        }],
+        expressions: [
+            ("width".to_string(), "w".to_string()),
+            ("height".to_string(), "w/2".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let r = s.execute(&Command::SketchOp { feature: f, op });
+    assert!(r.ok, "{r:?}");
+    assert_eq!(revision(&s), rev + 1, "one step");
+    assert!(
+        s.execute(&Command::SetUserParameter {
+            name: "w".into(),
+            expression: "50".into(),
+            unit: None,
+            comment: None,
+        })
+        .ok
+    );
+    let d: std::collections::HashMap<String, f64> =
+        stored(&s, f).dimensions().into_iter().collect();
+    assert_eq!((d["width"], d["height"]), (50.0, 25.0));
+    // Changing a bound dimension without rebinding it is refused.
+    let mut sk = stored(&s, f);
+    sk.set_dimension("width", 70.0).unwrap();
+    let rev = revision(&s);
+    let r = s.execute(&Command::SketchOp {
+        feature: f,
+        op: SketchOp::Replace {
+            sketch: sk,
+            parameters: vec![],
+            expressions: Default::default(),
+        },
+    });
+    assert!(
+        !r.ok
+            && r.error
+                .unwrap()
+                .to_string()
+                .contains("bound to the expression")
+    );
+    assert_eq!(revision(&s), rev);
+    // One undo removes the parameter and the bindings together.
+    assert!(s.execute(&Command::Undo).ok);
+    assert!(s.execute(&Command::Undo).ok);
+    assert!(s.summary().parameters.is_empty());
+}

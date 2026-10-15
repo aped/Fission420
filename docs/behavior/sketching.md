@@ -82,6 +82,19 @@ rubber band shows the live length / size / radius.
   **Escape** cancels (a freshly created dimension keeps its measured value). Invalid input
   ("abc", ≤ 0) or a value the solver cannot satisfy keeps the editor open with the error; the
   sketch keeps its last valid state.
+* **Dimension entry** (the inline field) accepts:
+  * a number with an optional unit: `25`, `25 mm`, `2.5 cm`, `1 in` (lengths, stored in mm);
+    `30`, `30deg`, `30°`, `0.5 rad` (angles, stored in degrees);
+  * an expression over user parameters (`w/2`, `w + 2 mm`, `max(w, 30)`; docs/PARAMETERS.md):
+    the dimension takes its value now and is **bound** to the expression;
+  * `name = expr`: creates the user parameter `name` (refused if it exists: type its name to
+    use it) and binds the dimension to it.
+
+  A typed number on a bound dimension unbinds it. The parameters and bindings are committed with
+  the sketch at Finish in the same undo step (`sketch_op` `replace`; a new sketch is created
+  first, so it takes two steps); later parameter edits drive the dimension. Invalid input (an
+  unknown name, a unit that does not fit, a result ≤ 0, an existing parameter name) keeps the
+  field open with the reason and leaves the sketch unchanged.
 * Dimension names are unique per sketch (`width`, `width2`, …) and become document parameters
   editable in the inspector and through the annotations in the 3D view.
 * Keyboard shortcuts never fire while a text field has focus.

@@ -1848,7 +1848,7 @@ impl RcadApp {
             project: Default::default(),
         });
         self.orient_to_sketch();
-        self.auto_project_host_face();
+        self.sketch_session_started();
     }
 
     /// Point the camera along the sketch normal and frame the sketch.
@@ -1877,6 +1877,11 @@ impl RcadApp {
                 error: true,
                 text: format!("Cannot finish: {why}. Fix or delete the conflicting constraint."),
             });
+            return;
+        }
+        if s.editor.has_bindings() {
+            // Typed expressions / new parameters: committed with the sketch.
+            self.finish_with_bindings();
             return;
         }
         let sketch = s.editor.sketch.clone();
@@ -1914,7 +1919,7 @@ impl RcadApp {
         self.end_sketch_session();
     }
 
-    fn end_sketch_session(&mut self) {
+    pub(crate) fn end_sketch_session(&mut self) {
         if let Some(s) = self.sketch.take()
             && let Some(cam) = s.saved_camera
         {

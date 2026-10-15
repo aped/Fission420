@@ -10,6 +10,7 @@
 use rcad_document::{DocError, FeatureId, FeatureKind, Model};
 use rcad_sketch::{Constraint, Entity, EntityId, PointId, Sketch, SolveStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// A point operand: an existing point id, or new coordinates (mm).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -73,6 +74,29 @@ pub enum SketchOp {
     /// Break `entity` at the intersections either side of `at`: the span
     /// under `at` becomes its own curve, nothing is removed.
     BreakAt { entity: u32, at: [f64; 2] },
+    /// Replace the whole sketch definition, creating or redefining the user
+    /// `parameters` and setting dimension `expressions` (dimension name ->
+    /// expression; an empty expression unbinds) in the same step: the sketch
+    /// editor's Finish when dimensions were typed as expressions. A bound
+    /// dimension whose value the sketch changes without rebinding it is
+    /// refused (its expression would silently win).
+    Replace {
+        sketch: Sketch,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parameters: Vec<NewParameter>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        expressions: BTreeMap<String, String>,
+    },
+}
+
+/// A user parameter created (or redefined) by [`SketchOp::Replace`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewParameter {
+    pub name: String,
+    pub expression: String,
+    /// Declared unit (default mm; `deg` for a parameter typed into an angle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<rcad_document::ParamUnit>,
 }
 
 /// Result of a sketch op (ids for scripts, and the solve state).
@@ -310,6 +334,19 @@ fn edit(
             let r = sk.break_at(id, *at);
             curve(sk, r, "Broken", out)
         }
+        SketchOp::Replace { sketch, .. } => {
+            // Projected curves keep their definition (their link drives them).
+            for e in locked {
+                if sketch.entity(*e) != sk.entity(*e) {
+                    return Err(refused(format!(
+                        "entity {} is projected geometry (read-only); unlink its projection first",
+                        e.0
+                    )));
+                }
+            }
+            *sk = sketch.clone();
+            Ok(false)
+        }
     }
 }
 
@@ -392,11 +429,85 @@ pub fn apply(
     };
     let dim = out.dimension.clone();
     let label = format!("{} in {name}", op_label(op));
+    let (params, binds) = match op {
+        SketchOp::Replace {
+            parameters,
+            expressions,
+            ..
+        } => (parameters.clone(), expressions.clone()),
+        _ => (vec![], BTreeMap::new()),
+    };
+    for p in &params {
+        rcad_document::params::valid_name(p.name.trim()).map_err(|e| DocError::Expression {
+            name: p.name.clone(),
+            detail: e,
+        })?;
+        rcad_document::params::check_syntax(&p.expression).map_err(|e| DocError::Expression {
+            name: p.name.clone(),
+            detail: format!("'{}': {e}", p.expression),
+        })?;
+    }
+    for (n, e) in &binds {
+        if !e.trim().is_empty() && rcad_document::params::plain_number(e).is_none() {
+            rcad_document::params::check_syntax(e).map_err(|why| DocError::Expression {
+                name: format!("{name}.{n}"),
+                detail: format!("'{e}': {why}"),
+            })?;
+        }
+    }
+    // A bound dimension changed without rebinding: its expression would win.
+    if let SketchOp::Replace { .. } = op {
+        let f = model.document().feature(feature)?;
+        let old_dims = old.dimensions();
+        for (n, v) in new.dimensions() {
+            let changed = old_dims
+                .iter()
+                .find(|(o, _)| *o == n)
+                .is_some_and(|(_, ov)| (ov - v).abs() > 1e-9 * ov.abs().max(1.0));
+            if changed
+                && !binds.contains_key(&n)
+                && let Some(e) = f.expressions.get(&n)
+            {
+                return Err(refused(format!(
+                    "dimension '{n}' of {name} is bound to the expression '{e}'; type a new \
+                     value or expression for it in the sketch, or change the expression"
+                )));
+            }
+        }
+    }
     model.transact(&label, |d| {
+        for p in &params {
+            let (pn, pe) = (p.name.trim().to_string(), p.expression.trim().to_string());
+            match d.parameters.iter_mut().find(|x| x.name == pn) {
+                Some(x) => {
+                    x.expression = pe;
+                    if let Some(u) = p.unit {
+                        x.unit = u;
+                    }
+                }
+                None => d.parameters.push(rcad_document::Parameter {
+                    name: pn,
+                    expression: pe,
+                    unit: p.unit.unwrap_or_default(),
+                    comment: String::new(),
+                }),
+            }
+        }
         let f = d.feature_mut(feature)?;
         match &mut f.kind {
             FeatureKind::Sketch { sketch, .. } => *sketch = new,
             _ => return Err(refused(format!("{feature} is not a sketch"))),
+        }
+        for (n, e) in &binds {
+            let e = e.trim();
+            if e.is_empty() {
+                f.expressions.remove(n);
+            } else if let Some(v) = rcad_document::params::plain_number(e) {
+                f.expressions.remove(n);
+                f.set_parameter(n, v)?;
+            } else {
+                f.expressions.insert(n.clone(), e.to_string());
+            }
         }
         if let (Some(e), Some(n)) = (&expression, &dim) {
             match rcad_document::params::plain_number(e) {
@@ -428,5 +539,6 @@ fn op_label(op: &SketchOp) -> &'static str {
         SketchOp::Trim { .. } => "Trim",
         SketchOp::Extend { .. } => "Extend",
         SketchOp::BreakAt { .. } => "Break",
+        SketchOp::Replace { .. } => "Edit sketch",
     }
 }
