@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use rcad_commands::{Command, DocSummary, ExtrudeOp, FeatureSummary, SketchTemplate, end_cap_of};
-use rcad_document::{BodyId, DocError, FaceRole, FeatureId, SketchPlane};
+use rcad_document::{BodyId, DocError, FeatureId, SketchPlane};
 use rcad_kernel::{Measurements, MeshCheck, VolumeResult};
 use rcad_viewport::{Camera, Viewport};
 
@@ -2082,19 +2082,13 @@ impl RcadApp {
             SketchPlane::WorldXY => "on World XY".into(),
             SketchPlane::WorldXZ => "on World XZ".into(),
             SketchPlane::WorldYZ => "on World YZ".into(),
-            SketchPlane::Face(r) => {
-                let role = match r.role {
-                    FaceRole::ExtrudeEndCap => "EndCap".to_string(),
-                    FaceRole::ExtrudeStartCap => "StartCap".to_string(),
-                    ref other => crate::face_role_label(other),
-                };
-                format!(
-                    "on {}.{role} (semantic: {} {:?})",
-                    self.feature_name(r.feature),
-                    r.feature,
-                    r.role
-                )
-            }
+            // Plain words ("on Extrude1 end cap"); the reference itself is
+            // the feature's business, not the reader's.
+            SketchPlane::Face(r) => format!(
+                "on {} {}",
+                self.feature_name(r.feature),
+                crate::face_role_label(&r.role)
+            ),
         }
     }
 

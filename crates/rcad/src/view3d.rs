@@ -691,7 +691,7 @@ impl RcadApp {
                     .into()
             }
             crate::place::Tool::Hole { extrude } => format!(
-                "Place hole on {}.EndCap: press at centre, drag to set size · Shift = no snap · Esc cancels",
+                "Place hole on the end cap of {}: press at centre, drag to set size · Shift = no snap · Esc cancels",
                 self.feature_name(extrude)
             ),
         })

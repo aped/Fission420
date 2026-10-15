@@ -126,7 +126,7 @@ fn build_plate_and_hole_sketch(h: &mut Harness<'_, RcadApp>) {
     let circle = h.state().summary().features[2].clone();
     // Semantic face reference (feature + role), not a face index.
     assert_eq!(circle.plane, Some(rcad_commands::end_cap_of(extrude.id)));
-    h.get_by_label_contains(&format!("on {}.EndCap (semantic", extrude.name));
+    h.get_by_label_contains(&format!("on {} end cap", extrude.name));
 
     click(h, "Cut through all…");
 }
