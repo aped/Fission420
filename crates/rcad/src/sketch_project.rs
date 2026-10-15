@@ -316,7 +316,6 @@ impl RcadApp {
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
-        let auto = s.project.pending.as_ref().is_some_and(|p| p.auto);
         s.project.pending = None;
         s.committing = false;
         if let Some(sk) = sk {
@@ -325,11 +324,9 @@ impl RcadApp {
         if let Some(text) = text {
             s.editor.feedback = Some(crate::sketch_edit::Feedback { error, text });
         }
-        // The session started framed on an empty sketch: frame the host
-        // face's projected outline instead.
-        if auto && !error {
-            self.orient_to_sketch();
-        }
+        // The camera is not re-framed here: the session was already oriented
+        // when it opened, and moving the view under the user's next click
+        // (or a script's) would shift what that click hits.
     }
 
     fn links_of(&self, id: FeatureId) -> Vec<Vec<rcad_sketch::EntityId>> {
