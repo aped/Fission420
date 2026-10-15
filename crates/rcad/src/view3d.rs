@@ -255,12 +255,9 @@ pub fn analyse_faces(
                 let role = crate::face_role_label(&r.role);
                 (
                     Some(r.feature),
-                    format!(
-                        "{body_name}: {} {role} (semantic {} {:?})",
-                        name(r.feature),
-                        r.feature,
-                        r.role
-                    ),
+                    // Plain words; the reference itself is on hover in the
+                    // inspector.
+                    format!("{body_name}: {} {role}", name(r.feature)),
                 )
             } else if let Some(id) = floor {
                 (Some(id), format!("{body_name}: floor of {}", name(id)))
@@ -694,7 +691,7 @@ impl RcadApp {
                     .into()
             }
             crate::place::Tool::Hole { extrude } => format!(
-                "Place hole on {}.EndCap: press at centre, drag to set size · Shift = no snap · Esc cancels",
+                "Place hole on the end cap of {}: press at centre, drag to set size · Shift = no snap · Esc cancels",
                 self.feature_name(extrude)
             ),
         })

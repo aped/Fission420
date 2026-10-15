@@ -833,7 +833,7 @@ impl RcadApp {
                 }
                 ui.horizontal(|ui| {
                     crate::panels::num_field(ui, "Snap (mm)", &mut f.snap);
-                    crate::panels::num_field(ui, "Step (°)", &mut f.rotate_step);
+                    crate::panels::num_field(ui, "Step (deg)", &mut f.rotate_step);
                 });
                 let (step, rstep) = (parse(&f.snap), parse(&f.rotate_step));
                 if let (Some(step), Some(rstep), [Some(x), Some(y), Some(z), Some(a)]) =

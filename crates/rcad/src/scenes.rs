@@ -46,10 +46,26 @@ pub const SCENES: &[&str] = &[
     "sketch_project",
 ];
 
+/// `rel` (from the repository root) as scenes open it: relative to the
+/// working directory when that is the repository (the usual case for
+/// `tools/screenshots.sh`), so the status bar and title show
+/// `examples/…` rather than a machine-specific absolute path; otherwise
+/// the full path.
+fn repo_path(rel: &str) -> PathBuf {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root.canonicalize().unwrap_or(root);
+    let full = root.join(rel);
+    std::env::current_dir()
+        .and_then(|d| d.canonicalize())
+        .ok()
+        .and_then(|cwd| full.strip_prefix(cwd).ok().map(PathBuf::from))
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(full)
+}
+
+/// A test fixture under `crates/`.
 fn fixture(rel: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(rel)
+    repo_path(&format!("crates/{rel}"))
 }
 
 fn rect(w: f64, h: f64, c: [f64; 2], plane: SketchPlane) -> Command {
@@ -88,10 +104,10 @@ fn import(app: &mut RcadApp, path: PathBuf, unit: usize, partial: bool) {
 /// The organizer tray example (committed document).
 fn tray(finished: bool) -> SceneStep {
     SceneStep::Cmd(Command::Open {
-        path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if finished {
-            "../../examples/organizer_tray_finished.rcad.json"
+        path: repo_path(if finished {
+            "examples/organizer_tray_finished.rcad.json"
         } else {
-            "../../examples/organizer_tray.rcad.json"
+            "examples/organizer_tray.rcad.json"
         }),
         safe_mode: false,
     })
@@ -99,7 +115,7 @@ fn tray(finished: bool) -> SceneStep {
 
 fn enclosure() -> SceneStep {
     SceneStep::Cmd(Command::Open {
-        path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.rcad.json"),
+        path: repo_path("examples/enclosure.rcad.json"),
         safe_mode: false,
     })
 }
@@ -178,8 +194,7 @@ impl RcadApp {
                 };
                 vec![
                     Cmd(Command::Open {
-                        path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                            .join(format!("../../examples/{file}.rcad.json")),
+                        path: repo_path(&format!("examples/{file}.rcad.json")),
                         safe_mode: false,
                     }),
                     Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
@@ -189,8 +204,7 @@ impl RcadApp {
             "mesh_repair" => vec![
                 Cmd(Command::NewDocument),
                 Cmd(Command::ImportStl {
-                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../tools/fixtures/stl/broken_cube.stl"),
+                    path: repo_path("tools/fixtures/stl/broken_cube.stl"),
                     units_to_mm: Some(1.0),
                 }),
                 Ui(|a| {
@@ -203,8 +217,7 @@ impl RcadApp {
             "mesh_edit" => vec![
                 Cmd(Command::NewDocument),
                 Cmd(Command::ImportStl {
-                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../tools/fixtures/corpus/m2_sphere_ascii.stl"),
+                    path: repo_path("tools/fixtures/corpus/m2_sphere_ascii.stl"),
                     units_to_mm: Some(1.0),
                 }),
                 Ui(|a| {
@@ -235,8 +248,7 @@ impl RcadApp {
             // The rounded labelled enclosure (committed example).
             "rounded_enclosure" => vec![
                 Cmd(Command::Open {
-                    path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../examples/rounded_enclosure.rcad.json"),
+                    path: repo_path("examples/rounded_enclosure.rcad.json"),
                     safe_mode: false,
                 }),
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
@@ -762,6 +774,27 @@ impl RcadApp {
                     Some(std::time::Instant::now() + std::time::Duration::from_millis(800));
             }
             None => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scene documents open by a path without `..` (shown in the status bar
+    /// and title), relative when the working directory is the repository.
+    #[test]
+    fn scene_paths_are_clean() {
+        for rel in ["examples/enclosure.rcad.json", "crates/rcad/Cargo.toml"] {
+            let p = repo_path(rel);
+            assert!(p.exists(), "{}", p.display());
+            assert!(
+                !p.components().any(|c| c == std::path::Component::ParentDir),
+                "{}",
+                p.display()
+            );
+            assert_eq!(p.file_name(), std::path::Path::new(rel).file_name());
         }
     }
 }

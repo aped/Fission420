@@ -34,6 +34,7 @@ pub enum CmdId {
     Redo,
     Help,
     About,
+    Quit,
     // View
     Fit,
     Section,
@@ -147,6 +148,16 @@ impl Tab {
             Tab::Mesh => "MESH",
             Tab::SheetMetal => "SHEET METAL",
             Tab::Utilities => "UTILITIES",
+        }
+    }
+    /// What the workspace holds (tab tooltip).
+    pub fn hint(self) -> &'static str {
+        match self {
+            Tab::Solid => "Solid modeling: sketches, features, assembly, inspection",
+            Tab::Surface => "Surfaces from sketches: patches and extruded surfaces",
+            Tab::Mesh => "Mesh bodies (STL, 3MF): repair and edit",
+            Tab::SheetMetal => "Sheet metal: base faces and flanges",
+            Tab::Utilities => "Parameters and export for printing (STL, 3MF)",
         }
     }
 }
@@ -427,6 +438,10 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [], classic: [],
         places: [Place::File], mm: None,
         enabled: always, run: |a| a.shell.show_about = true),
+    def!(Quit, "Quit", Generic, "Close R-CAD (asks first when there are unsaved changes)",
+        fusion: [cmd(Key::Q)], classic: [cmd(Key::Q)],
+        places: [Place::File], mm: None,
+        enabled: always, run: |a| a.guarded(Guarded::Exit)),
     def!(CommandSearch, "Command search", Select,
         "Find any command by name and run it",
         fusion: [k(Key::S)], classic: [],
@@ -861,6 +876,7 @@ mod tests {
         CmdId::Redo,
         CmdId::Help,
         CmdId::About,
+        CmdId::Quit,
         CmdId::Fit,
         CmdId::Section,
         CmdId::ViewTop,

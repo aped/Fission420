@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use rcad_commands::{Command, DocSummary, ExtrudeOp, FeatureSummary, SketchTemplate, end_cap_of};
-use rcad_document::{BodyId, DocError, FaceRole, FeatureId, SketchPlane};
+use rcad_document::{BodyId, DocError, FeatureId, SketchPlane};
 use rcad_kernel::{Measurements, MeshCheck, VolumeResult};
 use rcad_viewport::{Camera, Viewport};
 
@@ -2082,19 +2082,13 @@ impl RcadApp {
             SketchPlane::WorldXY => "on World XY".into(),
             SketchPlane::WorldXZ => "on World XZ".into(),
             SketchPlane::WorldYZ => "on World YZ".into(),
-            SketchPlane::Face(r) => {
-                let role = match r.role {
-                    FaceRole::ExtrudeEndCap => "EndCap".to_string(),
-                    FaceRole::ExtrudeStartCap => "StartCap".to_string(),
-                    ref other => crate::face_role_label(other),
-                };
-                format!(
-                    "on {}.{role} (semantic: {} {:?})",
-                    self.feature_name(r.feature),
-                    r.feature,
-                    r.role
-                )
-            }
+            // Plain words ("on Extrude1 end cap"); the reference itself is
+            // the feature's business, not the reader's.
+            SketchPlane::Face(r) => format!(
+                "on {} {}",
+                self.feature_name(r.feature),
+                crate::face_role_label(&r.role)
+            ),
         }
     }
 
@@ -2322,10 +2316,11 @@ impl RcadApp {
             }
         });
         egui::Panel::bottom("rcad_status").show(ui, |ui| self.status_bar(ui, busy));
-        egui::Panel::left("rcad_browser")
+        use crate::shell::prefs::{PANEL_MAX, PANEL_MIN};
+        let browser = egui::Panel::left("rcad_browser")
             .resizable(true)
-            .default_size(260.0)
-            .max_size(560.0)
+            .default_size(self.shell.prefs.browser_width.unwrap_or(260.0))
+            .max_size(PANEL_MAX)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("browser_scroll")
@@ -2341,9 +2336,9 @@ impl RcadApp {
                         self.diagnostics_ui(ui);
                     });
             });
-        egui::Panel::right("rcad_inspector")
+        let inspector = egui::Panel::right("rcad_inspector")
             .resizable(true)
-            .default_size(290.0)
+            .default_size(self.shell.prefs.inspector_width.unwrap_or(290.0))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("inspector_scroll")
@@ -2360,6 +2355,39 @@ impl RcadApp {
                         }
                     });
             });
+        // Remember a column width the user dragged: when a column's drawn
+        // width changed while the pointer was down, egui's stored size of
+        // each column (what `default_size` sets) is saved once the button is
+        // released. Layout changes on their own are never saved.
+        let drawn = [
+            browser.response.rect.width().round(),
+            inspector.response.rect.width().round(),
+        ];
+        let down = ui.ctx().input(|i| i.pointer.any_down());
+        let last = self.shell.panel_widths.replace(drawn);
+        if down && last.is_some_and(|l| l != drawn) {
+            self.shell.panel_dragged = true;
+        }
+        if !down && std::mem::take(&mut self.shell.panel_dragged) {
+            let stored = |name: &str, fallback: f32| {
+                egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::new(name))
+                    .map_or(fallback, |s| s.outer_rect.width())
+                    .round()
+            };
+            let widths = [
+                stored("rcad_browser", drawn[0]),
+                stored("rcad_inspector", drawn[1]),
+            ];
+            for (w, saved) in widths.into_iter().zip([
+                &mut self.shell.prefs.browser_width,
+                &mut self.shell.prefs.inspector_width,
+            ]) {
+                if (PANEL_MIN..=PANEL_MAX).contains(&w) {
+                    *saved = Some(w);
+                }
+            }
+            self.save_prefs();
+        }
         self.dialog_ui(ui, busy);
         egui::CentralPanel::no_frame().show(ui, |ui| {
             // The timeline runs along the bottom of the canvas (the browser
@@ -2421,6 +2449,22 @@ impl RcadApp {
         {
             return;
         }
+        // Esc closes an open About, Help or Preferences window first (the
+        // topmost one), in model and sketch mode alike.
+        if (self.shell.show_about || self.show_help || self.shell.show_prefs)
+            && ctx.input_mut(|i| {
+                i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::Escape))
+            })
+        {
+            if self.shell.show_about {
+                self.shell.show_about = false;
+            } else if self.show_help {
+                self.show_help = false;
+            } else {
+                self.shell.show_prefs = false;
+            }
+            return;
+        }
         if self.sketch.is_some() {
             if ctx
                 .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1)))
@@ -2439,6 +2483,8 @@ impl RcadApp {
                 self.dialog = None;
             } else if self.doc_dim_edit.is_some() {
                 self.doc_dim_edit = None;
+            } else if self.notice.is_some() {
+                self.notice = None;
             } else {
                 self.select(None);
             }

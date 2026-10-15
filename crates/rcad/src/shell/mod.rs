@@ -58,6 +58,10 @@ pub struct ShellState {
     pub show_prefs: bool,
     /// The About window is open.
     pub show_about: bool,
+    /// Browser and inspector widths last frame, and whether one changed
+    /// during the current pointer drag (saved to the preferences on release).
+    pub panel_widths: Option<[f32; 2]>,
+    pub panel_dragged: bool,
     /// Model revision shown when the current face was picked (commands
     /// built from the pick run only at that revision).
     pub pick_revision: Option<u64>,
@@ -105,6 +109,8 @@ impl Default for ShellState {
             tab: registry::Tab::Solid,
             show_prefs: false,
             show_about: false,
+            panel_widths: None,
+            panel_dragged: false,
             editing: None,
             search: None,
             properties: false,

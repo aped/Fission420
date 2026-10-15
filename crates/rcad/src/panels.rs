@@ -663,7 +663,10 @@ impl RcadApp {
         // The "Inspector" heading is the right column's tab (shell::properties).
         if let Some(info) = self.selected_face().cloned() {
             ui.label(RichText::new("Selected face").strong());
-            ui.label(&info.description);
+            let l = ui.label(&info.description);
+            if let Some(r) = info.reference {
+                l.on_hover_text(format!("Reference: {} {:?}", r.feature, r.role));
+            }
             self.face_measure_ui(ui, &info);
             self.exact_face_ui(ui, &info);
             match (info.reference, info.sketch_blocker()) {
@@ -1618,47 +1621,58 @@ impl RcadApp {
                     ui.label(text);
                 }
             } else {
-            match &self.measurements {
-                Some(m) => {
-                    let mut vol = match &m.volume {
-                        VolumeResult::Value {
-                            volume,
-                            error_estimate,
-                            ..
-                        } => format!("Volume {volume:.4} mm³ (±{error_estimate:.0e})"),
-                        VolumeResult::Unavailable { reason } => {
-                            format!("Volume unavailable: {reason}")
-                        }
-                    };
-                    let (a, b) = (m.bounds.min, m.bounds.max);
-                    vol += &format!(
-                        " · Bounds X[{:.3}, {:.3}] Y[{:.3}, {:.3}] Z[{:.3}, {:.3}] · Solids {} {}",
-                        a[0],
-                        b[0],
-                        a[1],
-                        b[1],
-                        a[2],
-                        b[2],
-                        m.shell_count,
-                        if m.all_shells_closed {
-                            "closed"
+                match &self.measurements {
+                    Some(m) => {
+                        let mut vol = match &m.volume {
+                            VolumeResult::Value {
+                                volume,
+                                error_estimate,
+                                ..
+                            } => {
+                                // The error bound only when it shows at this
+                                // precision ("±0e0" read as noise).
+                                if *error_estimate >= 5e-5 {
+                                    format!("Volume {volume:.4} mm³ (±{error_estimate:.1e})")
+                                } else {
+                                    format!("Volume {volume:.4} mm³")
+                                }
+                            }
+                            VolumeResult::Unavailable { reason } => {
+                                format!("Volume unavailable: {reason}")
+                            }
+                        };
+                        let (a, b) = (m.bounds.min, m.bounds.max);
+                        vol += &format!(
+                            " · Bounds X[{:.3}, {:.3}] Y[{:.3}, {:.3}] Z[{:.3}, {:.3}] · {} {}",
+                            a[0],
+                            b[0],
+                            a[1],
+                            b[1],
+                            a[2],
+                            b[2],
+                            match m.shell_count {
+                                1 => "1 solid".to_string(),
+                                n => format!("{n} solids"),
+                            },
+                            if m.all_shells_closed {
+                                "closed"
+                            } else {
+                                "OPEN (not watertight)"
+                            }
+                        );
+                        if stale {
+                            ui.label(RichText::new(format!("(pending) {vol}")).weak().italics())
+                                .on_hover_text(
+                                    "Regenerating: these values belong to the previous model",
+                                );
                         } else {
-                            "OPEN"
+                            ui.label(vol);
                         }
-                    );
-                    if stale {
-                        ui.label(RichText::new(format!("(pending) {vol}")).weak().italics())
-                            .on_hover_text(
-                                "Regenerating: these values belong to the previous model",
-                            );
-                    } else {
-                        ui.label(vol);
+                    }
+                    None => {
+                        ui.label(if stale { "Regenerating…" } else { "No body" });
                     }
                 }
-                None => {
-                    ui.label(if stale { "Regenerating…" } else { "No body" });
-                }
-            }
             }
             ui.separator();
             if self.summary.open {
@@ -1678,7 +1692,11 @@ impl RcadApp {
                 };
                 ui.label(RichText::new(path).weak());
                 ui.label(state).probe("Save state");
-                ui.label(RichText::new(format!("rev {}", self.summary.revision)).weak().small());
+                ui.label(
+                    RichText::new(format!("rev {}", self.summary.revision))
+                        .weak()
+                        .small(),
+                );
             } else {
                 ui.label("no document");
             }
@@ -2193,8 +2211,8 @@ impl RcadApp {
                             PatternKind::Circular => {
                                 num_field(ui, "Pattern count", count);
                                 num_field(ui, "Angle between instances (deg)", angle);
-                                num_field(ui, "Centre x (mm)", center_x);
-                                num_field(ui, "Centre y (mm)", center_y);
+                                num_field(ui, "Centre X (mm)", center_x);
+                                num_field(ui, "Centre Y (mm)", center_y);
                                 ui.small("Counter-clockwise about the seed sketch's normal through the centre (seed sketch coordinates). Count includes the seed; instances may not wrap past a full turn.");
                             }
                             PatternKind::Mirror => {

@@ -991,7 +991,7 @@ impl RcadApp {
                 crate::panels::num_field(ui, "Wall (mm)", &mut m.thin_t);
             }
         });
-        crate::panels::num_field(ui, "Taper (°)", &mut m.taper_deg);
+        crate::panels::num_field(ui, "Taper (deg)", &mut m.taper_deg);
         ui.small(
             "Thin: walls of that thickness inside the closed profile. Taper (New Body, \
              polygons/circles): positive shrinks the profile along the extrusion.",
