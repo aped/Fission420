@@ -3205,7 +3205,7 @@ impl Session {
                     let mut loops = Vec::new();
                     for l in &curves {
                         let mut out = Vec::new();
-                        for (c, from) in l {
+                        for (c, from, from_tool) in l {
                             let (entity, points) = match *c {
                                 rcad_kernel::Curve2::Line { a, b } => {
                                     let (pa, pb) = (point(sketch, a), point(sketch, b));
@@ -3275,6 +3275,7 @@ impl Session {
                                 entity,
                                 points,
                                 from: *from,
+                                from_tool: *from_tool,
                             });
                         }
                         loops.push(out);
@@ -5021,9 +5022,16 @@ pub fn polygon_sketch(vertices: &[[f64; 2]]) -> Result<Sketch, rcad_sketch::Sket
 /// The projected face edge nearest to sketch point `p`, unambiguous
 /// (another edge within 1e-6 mm of the same distance is refused).
 fn pick_projected_edge(
-    curves: &[Vec<(rcad_kernel::Curve2, Option<rcad_sketch::EntityId>)>],
+    curves: &rcad_document::SourceCurves,
     p: [f64; 2],
-) -> Result<(rcad_kernel::Curve2, Option<rcad_sketch::EntityId>), DocError> {
+) -> Result<
+    (
+        rcad_kernel::Curve2,
+        Option<rcad_sketch::EntityId>,
+        Option<rcad_document::FeatureId>,
+    ),
+    DocError,
+> {
     use rcad_kernel::Curve2;
     let dist = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
     let seg = |a: [f64; 2], b: [f64; 2]| {
@@ -5065,14 +5073,18 @@ fn pick_projected_edge(
                 .fold(f64::INFINITY, f64::min)
         }
     };
-    let mut ranked: Vec<(f64, &(Curve2, Option<rcad_sketch::EntityId>))> =
-        curves.iter().flatten().map(|c| (d(&c.0), c)).collect();
+    type Tagged = (
+        Curve2,
+        Option<rcad_sketch::EntityId>,
+        Option<rcad_document::FeatureId>,
+    );
+    let mut ranked: Vec<(f64, &Tagged)> = curves.iter().flatten().map(|c| (d(&c.0), c)).collect();
     ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
     match ranked.as_slice() {
         [] => Err(DocError::Validation(
             "the face has no edges to project".into(),
         )),
-        [(_, (_, Some(e))), ..] if *e == rcad_document::UNPROJECTABLE => {
+        [(_, (_, Some(e), _)), ..] if *e == rcad_document::UNPROJECTABLE => {
             Err(DocError::ProductLimit(
                 "the picked edge is an arc on a face oblique to the sketch: its projection is an \
                  elliptical arc, which is not supported (full circles project to ellipses)"
