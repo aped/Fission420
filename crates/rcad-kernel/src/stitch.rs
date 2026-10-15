@@ -51,7 +51,7 @@ fn dist(a: Point3, b: Point3) -> f64 {
 
 fn eval(c: &Curve, t: f64) -> Option<Point3> {
     match c {
-        Curve::IntersectionCurve(ic) => ic.search_triple(t).map(|r| r.0),
+        Curve::IntersectionCurve(ic) => crate::icurve::search_triple(ic, t).map(|r| r.0),
         other => Some(other.subs(t)),
     }
 }

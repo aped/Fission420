@@ -98,7 +98,7 @@ const BOUNDS_SAMPLES: usize = 256;
 
 fn eval_curve(c: &Curve, t: f64) -> Option<Point3> {
     match c {
-        Curve::IntersectionCurve(ic) => ic.search_triple(t).map(|x| x.0),
+        Curve::IntersectionCurve(ic) => crate::icurve::search_triple(ic, t).map(|x| x.0),
         other => Some(other.subs(t)),
     }
 }

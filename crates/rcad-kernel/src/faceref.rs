@@ -73,7 +73,7 @@ fn fine_face_loops(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
             for i in 0..n {
                 let t = t0 + (t1 - t0) * i as f64 / n as f64;
                 let p = match &c {
-                    Curve::IntersectionCurve(ic) => ic.search_triple(t)?.0,
+                    Curve::IntersectionCurve(ic) => crate::icurve::search_triple(ic, t)?.0,
                     other => other.subs(t),
                 };
                 pts.push([(p - o).dot(x), (p - o).dot(y)]);

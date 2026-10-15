@@ -233,8 +233,7 @@ pub(crate) fn exact_edge(
     let mut prev_t = s0 - 1e-9;
     for k in 0..=VERIFY_SAMPLES + 1 {
         let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
-        let q = ic
-            .search_triple(l)
+        let q = crate::icurve::search_triple(ic, l)
             .ok_or_else(|| unsupported("cannot evaluate original edge"))?
             .0;
         let t = sub
@@ -297,8 +296,7 @@ fn plane_revolution_edge(
     let sample = |k: usize| -> Result<Point3> {
         let (l0, l1) = ic.leader().range_tuple();
         let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
-        Ok(ic
-            .search_triple(l)
+        Ok(crate::icurve::search_triple(ic, l)
             .ok_or_else(|| unsupported("cannot evaluate original edge"))?
             .0)
     };
@@ -396,8 +394,7 @@ fn plane_ruling_edge(
     let mut prev = -1e-9;
     for k in 0..=VERIFY_SAMPLES + 1 {
         let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
-        let q = ic
-            .search_triple(l)
+        let q = crate::icurve::search_triple(ic, l)
             .ok_or_else(|| unsupported("cannot evaluate original edge"))?
             .0;
         let t = (q - p0).dot(d) / len2;
@@ -442,8 +439,7 @@ fn plane_plane_edge(
     let mut prev = -1e-9;
     for k in 0..=VERIFY_SAMPLES + 1 {
         let l = l0 + (l1 - l0) * k as f64 / (VERIFY_SAMPLES + 1) as f64;
-        let q = ic
-            .search_triple(l)
+        let q = crate::icurve::search_triple(ic, l)
             .ok_or_else(|| unsupported("cannot evaluate original edge"))?
             .0;
         let t = (q - p0).dot(d) / len2;

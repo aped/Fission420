@@ -169,10 +169,11 @@ fn canonical_face_order(solid: &truck_modeling::Solid) -> Vec<usize> {
                     let c = e.curve();
                     let (t0, t1) = c.range_tuple();
                     let mid = match &c {
-                        Curve::IntersectionCurve(ic) => ic
-                            .search_triple(0.5 * (t0 + t1))
-                            .map(|x| x.0)
-                            .unwrap_or_else(|| e.front().point()),
+                        Curve::IntersectionCurve(ic) => {
+                            crate::icurve::search_triple(ic, 0.5 * (t0 + t1))
+                                .map(|x| x.0)
+                                .unwrap_or_else(|| e.front().point())
+                        }
                         other => other.subs(0.5 * (t0 + t1)),
                     };
                     pts.push(q(mid));

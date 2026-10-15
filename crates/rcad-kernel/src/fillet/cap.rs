@@ -1532,7 +1532,9 @@ fn band_is_clear(segs: &[Seg], lower: &Lower, g: &Geo, r: f64) -> Result<()> {
                     .filter_map(|k| {
                         let t = t0 + (t1 - t0) * k as f64 / FIT_SAMPLES as f64;
                         match &c {
-                            Curve::IntersectionCurve(ic) => ic.search_triple(t).map(|x| x.0),
+                            Curve::IntersectionCurve(ic) => {
+                                crate::icurve::search_triple(ic, t).map(|x| x.0)
+                            }
                             other => Some(other.subs(t)),
                         }
                     })

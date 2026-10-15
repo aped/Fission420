@@ -951,7 +951,9 @@ fn planar_faces(body: &Body) -> std::result::Result<Vec<ImportedPlanarFace>, Ste
                         (d.dot(x), d.dot(y))
                     };
                     let eval = |t: f64| match &c {
-                        Curve::IntersectionCurve(ic) => ic.search_triple(t).map(|r| r.0),
+                        Curve::IntersectionCurve(ic) => {
+                            crate::icurve::search_triple(ic, t).map(|r| r.0)
+                        }
                         other => Some(other.subs(t)),
                     };
                     let mut prev =

@@ -14,6 +14,7 @@ mod edges;
 mod exact;
 mod faceref;
 mod fillet;
+mod icurve;
 mod loft;
 mod measure;
 mod mesh;
