@@ -117,6 +117,7 @@ pub fn constraint_mentions(c: &Constraint, p: PointId) -> bool {
         | Constraint::Distance { a, b, .. }
         | Constraint::Coincident { a, b } => *a == p || *b == p,
         Constraint::SymmetricAboutPoint { a, b, center } => *a == p || *b == p || *center == p,
+        Constraint::Symmetric { a, b, .. } => *a == p || *b == p,
         Constraint::PointOnLine { point, .. } | Constraint::PointOnCircle { point, .. } => {
             *point == p
         }

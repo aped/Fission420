@@ -50,7 +50,15 @@ Horizontal / Vertical (lines, glyph `H`/`V`), Parallel / Perpendicular (two line
 Equal (two lines → equal length, two arcs/circles → equal radius, `=`), Coincident (two points,
 `C`), Midpoint (a line and a point: the point stays at the line's midpoint, `Mid`), On line (a
 line and a point: the point stays on the line's infinite extension, `On`), Tangent (a line and
-an arc sharing an endpoint, `T`). **Construction** (X) toggles selected curves to reference
+an arc sharing an endpoint, `T`), **Fix / Unfix** (selected points and the points of selected
+curves are pinned where they are with `FixedPoint`; when all are already pinned they are
+unpinned; never the origin, not projected geometry; glyph `Fix`), **Concentric** (two
+circles/arcs with different centre points: centres coincide, 2 equations, `Con`), **Collinear**
+(two lines that share no end point: the second's ends lie on the first's line, 2 equations;
+lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a line: the points
+mirror each other about the line's infinite extension, 2 equations, `Sym`; two points that are
+close to each other and near the line can solve onto the line itself, which the zero-size guard
+refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
 Del (refused, with the dependents named, while anything uses them; one undo step).
 

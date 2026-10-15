@@ -309,6 +309,20 @@ pub enum Constraint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis: Option<u8>,
     },
+    /// Circles/arcs `a` and `b` (different centre points) share their centre
+    /// position. 2 equations (serde-additive).
+    Concentric { a: EntityId, b: EntityId },
+    /// Line `b` lies on the infinite line through line `a`: both ends of `b`
+    /// on `a`. 2 equations (serde-additive).
+    Collinear { a: EntityId, b: EntityId },
+    /// Points `a` and `b` are mirror images about the infinite line through
+    /// `line`: their midpoint lies on it and `b − a` is perpendicular to it.
+    /// 2 equations (serde-additive).
+    Symmetric {
+        a: PointId,
+        b: PointId,
+        line: EntityId,
+    },
     /// Circular sketch pattern copy: `to = c + R(k θ) (from − c)`, θ =
     /// `dim.value` degrees counter-clockwise (0 < θ < 360). 2 equations, or 1
     /// (`axis`) as for [`Constraint::PatternStep`].
@@ -1043,6 +1057,45 @@ impl Sketch {
                         });
                     }
                 }
+                Constraint::Concentric { a, b } => {
+                    let ea = need_entity(i, a, "arc or circle")?;
+                    let eb = need_entity(i, b, "arc or circle")?;
+                    let centre = |e: &Entity| match e {
+                        Entity::Circle { center, .. } | Entity::Arc { center, .. } => Some(*center),
+                        _ => None,
+                    };
+                    if a == b || centre(ea) == centre(eb) {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: concentric needs two curves with different centre \
+                             points"
+                        )));
+                    }
+                }
+                Constraint::Collinear { a, b } => {
+                    need_entity(i, a, "line")?;
+                    let eb = need_entity(i, b, "line")?;
+                    let ea = kinds.get(a).copied();
+                    // The equations put b's ends on a; an end shared with a
+                    // would be a vacuous row.
+                    if a == b
+                        || ea.is_some_and(|ea| ea.points().iter().any(|p| eb.points().contains(p)))
+                    {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: collinear needs two lines that share no end point \
+                             (lines joined end to end: use Parallel)"
+                        )));
+                    }
+                }
+                Constraint::Symmetric { a, b, line } => {
+                    need_point(a)?;
+                    need_point(b)?;
+                    need_entity(i, line, "line")?;
+                    if a == b {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: symmetry needs two different points"
+                        )));
+                    }
+                }
                 Constraint::PointOnLine { point, line } => {
                     need_point(point)?;
                     if let Entity::Line { a, b, .. } = need_entity(i, line, "line")?
@@ -1306,6 +1359,8 @@ mod tests_arc;
 
 #[cfg(test)]
 mod tests_angle;
+#[cfg(test)]
+mod tests_constraints;
 #[cfg(test)]
 mod tests_curves;
 #[cfg(test)]

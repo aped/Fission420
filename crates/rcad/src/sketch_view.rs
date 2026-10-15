@@ -513,6 +513,34 @@ pub fn paint_sketch(
                     targets.push((item, glyph("On", sp + egui::vec2(14.0, -12.0))));
                 }
             }
+            Constraint::Concentric { a, .. } => {
+                let centre = match s.entity(*a) {
+                    Some(Entity::Circle { center, .. } | Entity::Arc { center, .. }) => {
+                        s.point_xy(*center)
+                    }
+                    _ => None,
+                };
+                if let Some(sp) = centre.and_then(|p| pr.screen(p)) {
+                    targets.push((item, glyph("Con", sp + egui::vec2(12.0, 12.0))));
+                }
+            }
+            Constraint::Collinear { a, b } => {
+                for l in [a, b] {
+                    if let Some(Entity::Line { a: p, b: q, .. }) = s.entity(*l)
+                        && let (Some(pp), Some(pq)) = (s.point_xy(*p), s.point_xy(*q))
+                        && let Some(sm) = pr.screen([0.5 * (pp[0] + pq[0]), 0.5 * (pp[1] + pq[1])])
+                    {
+                        targets.push((item, glyph("Col", sm + egui::vec2(0.0, 12.0))));
+                    }
+                }
+            }
+            Constraint::Symmetric { a, b, .. } => {
+                for p in [a, b] {
+                    if let Some(sp) = s.point_xy(*p).and_then(|q| pr.screen(q)) {
+                        targets.push((item, glyph("Sym", sp + egui::vec2(14.0, 12.0))));
+                    }
+                }
+            }
             Constraint::Coincident { a, .. } => {
                 if let Some(sp) = s.point_xy(*a).and_then(|p| pr.screen(p)) {
                     targets.push((item, glyph("C", sp + egui::vec2(11.0, -11.0))));

@@ -2624,6 +2624,133 @@ impl SketchEditor {
             .collect()
     }
 
+    /// Points of the selection: selected points plus every point of selected
+    /// curves (not the origin).
+    fn selected_curve_points(&self) -> Vec<PointId> {
+        let mut pts = self.selected_points();
+        for e in self.selected_entities() {
+            if let Some(x) = self.sketch.entity(e) {
+                pts.extend(x.points());
+            }
+        }
+        pts.sort();
+        pts.dedup();
+        pts.retain(|p| Some(*p) != self.sketch.origin);
+        pts
+    }
+
+    pub fn fix_disabled_reason(&self) -> Option<&'static str> {
+        if self.selected_curve_points().is_empty() {
+            return Some("Select points or curves to fix (or unfix)");
+        }
+        if self
+            .selected_entities()
+            .iter()
+            .any(|e| self.projected.contains_key(e))
+        {
+            return Some("Projected geometry is already held by its projection link");
+        }
+        None
+    }
+
+    /// Fix the selected points/curves where they are; when all of them are
+    /// already fixed, unfix them instead (Fix/UnFix toggle).
+    pub fn toggle_fix(&mut self) {
+        self.end_lone_chain();
+        if let Some(why) = self.fix_disabled_reason() {
+            self.fail(why.into());
+            return;
+        }
+        let pts = self.selected_curve_points();
+        let all_fixed = pts.iter().all(|p| {
+            self.sketch
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::FixedPoint { p: q, .. } if q == p))
+        });
+        let ok = self.try_change(!all_fixed, |sk| {
+            if all_fixed {
+                sk.unfix_points(&pts);
+            } else {
+                sk.fix_points(&pts);
+            }
+            Ok(())
+        });
+        if ok {
+            self.info(if all_fixed {
+                format!("Unfixed {} point(s).", pts.len())
+            } else {
+                format!("Fixed {} point(s) where they are.", pts.len())
+            });
+        }
+    }
+
+    fn two_rounds(&self) -> Option<(EntityId, EntityId)> {
+        let es = self.selected_entities();
+        let round = |e: &EntityId| {
+            matches!(
+                self.sketch.entity(*e),
+                Some(Entity::Circle { .. } | Entity::Arc { .. })
+            )
+        };
+        (self.selection.len() == 2 && es.len() == 2 && es.iter().all(round)).then(|| (es[0], es[1]))
+    }
+
+    pub fn concentric_disabled_reason(&self) -> Option<&'static str> {
+        self.two_rounds()
+            .is_none()
+            .then_some("Select two circles or arcs")
+    }
+
+    /// Concentric: the two selected circles/arcs share their centre.
+    pub fn constrain_concentric(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b)) = self.two_rounds() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Concentric { a, b });
+            sk.validate().map_err(|e| e.to_string())
+        });
+    }
+
+    /// Collinear: the second selected line lies on the first one's line.
+    pub fn constrain_collinear(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b)) = self.two_lines() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Collinear { a, b });
+            sk.validate().map_err(|e| e.to_string())
+        });
+    }
+
+    /// Two points and a line, if that is the selection.
+    fn symmetry_pick(&self) -> Option<(PointId, PointId, EntityId)> {
+        let (p, l) = (self.selected_points(), self.selected_lines());
+        (self.selection.len() == 3 && p.len() == 2 && l.len() == 1).then(|| (p[0], p[1], l[0]))
+    }
+
+    pub fn symmetry_disabled_reason(&self) -> Option<&'static str> {
+        self.symmetry_pick()
+            .is_none()
+            .then_some("Select two points and the line to mirror about")
+    }
+
+    /// Symmetry: the two selected points mirror each other about the
+    /// selected line.
+    pub fn constrain_symmetric(&mut self) {
+        self.end_lone_chain();
+        let Some((a, b, line)) = self.symmetry_pick() else {
+            return;
+        };
+        self.try_change(true, |sk| {
+            sk.constraints.push(Constraint::Symmetric { a, b, line });
+            sk.validate().map_err(|e| e.to_string())
+        });
+    }
+
     /// A (line, arc) pair sharing an endpoint, if that is the selection.
     fn tangent_pair(&self) -> Option<(EntityId, EntityId)> {
         let es = self.selected_entities();

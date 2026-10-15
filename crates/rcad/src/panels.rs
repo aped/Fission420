@@ -1720,6 +1720,36 @@ impl RcadApp {
                         ed.constrain_tangent();
                     }
                     ui.end_row();
+                    if action(ui, "Fix / Unfix", ed.fix_disabled_reason()) {
+                        ed.toggle_fix();
+                    }
+                    if action(ui, "Concentric", ed.concentric_disabled_reason()) {
+                        ed.constrain_concentric();
+                    }
+                    if action(ui, "Collinear", ed.two_lines_disabled_reason()) {
+                        ed.constrain_collinear();
+                    }
+                    ui.end_row();
+                    if action(ui, "Symmetric", ed.symmetry_disabled_reason()) {
+                        ed.constrain_symmetric();
+                    }
+                    let driven = ed
+                        .selection
+                        .first()
+                        .and_then(|i| match i {
+                            Item::Constraint(c) => ed.sketch.constraints.get(*c),
+                            _ => None,
+                        })
+                        .and_then(|c| c.dimension())
+                        .is_some();
+                    if action(
+                        ui,
+                        "Driven / Driving",
+                        (!driven).then_some("Select a dimension"),
+                    ) {
+                        ed.toggle_driven();
+                    }
+                    ui.end_row();
                 });
             ui.weak("Hover a disabled button to see what to select.");
         }
