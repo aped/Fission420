@@ -85,8 +85,10 @@ impl Bounds3 {
 /// possible from them, i.e. away from the cut that separated them, so that
 /// moving the cut does not move it into a neighbour. Candidates come from
 /// the largest triangles of a fine tessellation; the result is deterministic
-/// for a given geometry. Each point is farther than three chords from the
-/// surface and inside by the winding-number check; refused when none is.
+/// for a given geometry. Up to three further points are spread over the
+/// piece (farthest-point sampling among the candidates). Each point is
+/// farther than three chords from the surface and inside by the
+/// winding-number check; refused when none is.
 pub fn piece_seeds(body: &Body, others: &[&Body]) -> Result<Vec<[f64; 3]>> {
     let b = raw_bounds(&body.solid)?;
     let diag = (0..3)
@@ -117,6 +119,8 @@ pub fn piece_seeds(body: &Body, others: &[&Body]) -> Result<Vec<[f64; 3]>> {
     let margin = 3.0 * chord;
     // (score, point); higher score wins, first wins ties.
     let mut deep: Option<(f64, [f64; 3])> = None;
+    // Every candidate clear of the surface, for spreading further seeds.
+    let mut pool: Vec<[f64; 3]> = vec![];
     let mut far: Option<(f64, [f64; 3])> = None;
     let better = |best: &Option<(f64, [f64; 3])>, score: f64| best.is_none_or(|(s0, _)| score > s0);
     for &(area2, i) in order.iter().take(256) {
@@ -137,8 +141,11 @@ pub fn piece_seeds(body: &Body, others: &[&Body]) -> Result<Vec<[f64; 3]>> {
         let Some(depth) = hit else { continue };
         let p = add(c, scale(inward, depth / 2.0));
         let clearance = nearest(p, &tris);
-        if clearance > margin && better(&deep, clearance) {
-            deep = Some((clearance, p));
+        if clearance > margin {
+            pool.push(p);
+            if better(&deep, clearance) {
+                deep = Some((clearance, p));
+            }
         }
         if !other_tris.is_empty() {
             // Just under the surface, a few margins deep.
@@ -151,7 +158,27 @@ pub fn piece_seeds(body: &Body, others: &[&Body]) -> Result<Vec<[f64; 3]>> {
             }
         }
     }
-    let points: Vec<[f64; 3]> = deep.into_iter().chain(far).map(|(_, p)| p).collect();
+    let mut points: Vec<[f64; 3]> = deep.into_iter().chain(far).map(|(_, p)| p).collect();
+    // Up to three more, spread over the piece (farthest-point sampling), so
+    // that a moved appendage carries off only a minority of its seeds.
+    while points.len() < 5 && !points.is_empty() {
+        let spread = |q: [f64; 3]| {
+            points
+                .iter()
+                .map(|p| norm(sub(*p, q)))
+                .fold(f64::INFINITY, f64::min)
+        };
+        let next = pool
+            .iter()
+            .map(|q| (spread(*q), *q))
+            .filter(|(d, _)| *d > margin)
+            .fold(None::<(f64, [f64; 3])>, |b, c| match b {
+                Some(b) if b.0 >= c.0 => Some(b),
+                _ => Some(c),
+            });
+        let Some((_, q)) = next else { break };
+        points.push(q);
+    }
     let inside = if points.is_empty() {
         vec![]
     } else {
@@ -281,7 +308,12 @@ mod interior_tests {
         assert!(p[0] < 40.0 && p[1] < 20.0 && p[2] < 2.0, "{p:?}");
         // Halfway through the thinnest direction.
         assert!((p[2] - 1.0).abs() < 1e-9, "{p:?}");
-        assert_eq!(piece_seeds(&b, &[]).unwrap(), [p], "deterministic");
+        assert_eq!(piece_seeds(&b, &[]).unwrap()[0], p);
+        assert_eq!(
+            piece_seeds(&b, &[]).unwrap(),
+            piece_seeds(&b, &[]).unwrap(),
+            "deterministic"
+        );
     }
 
     #[test]
@@ -295,7 +327,7 @@ mod interior_tests {
             crate::extrude(&crate::Profile::Polygon(pts), &crate::Frame::XY, 10.0).unwrap()
         };
         let p = piece_seeds(&right, &[&left]).unwrap();
-        assert_eq!(p.len(), 2);
+        assert!(p.len() >= 2);
         assert!(p[1][0] > 39.0 && p[1][0] < 40.0, "{p:?}");
         let q = piece_seeds(&left, &[&right]).unwrap();
         assert!(q[1][0] > 0.0 && q[1][0] < 1.0, "{q:?}");

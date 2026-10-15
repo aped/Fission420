@@ -5,9 +5,10 @@
 //! plate edge rejoins the pieces; a later edit separates them again), the
 //! tab position (which flips the pieces' bounding-box order) and the plate
 //! width. Invariant after every edit, accepted or refused: Body1 is the
-//! piece above the slot and Body2 the one below (or absent while the
-//! pieces are joined); no other body appears. An edit may be refused, never
-//! applied with the ids swapped.
+//! piece above the slot; the piece below keeps its id, except that after
+//! the pieces were joined it may come back under a new id; an id never
+//! moves to the other piece. An edit may be refused, never applied with the
+//! ids swapped.
 mod support;
 use rcad_commands::Session;
 use serde_json::json;
@@ -54,8 +55,9 @@ fn split_pieces_never_swap_ids_under_random_edits() {
     ] {
         tray::ok(&mut s, &v);
     }
-    let mut rng = Rng(0x5eed_0f_91ec_e5);
-    let (mut accepted, mut refused, mut joined) = (0, 0, 0);
+    let mut rng = Rng(0x5eed_0f91_ece5);
+    let (mut accepted, mut refused, mut joined, mut renamed) = (0, 0, 0, 0);
+    let (mut bottom_id, mut was_joined) = (Some(2u32), false);
     for step in 0..200 {
         let (feature, name, value) = match (rng.next() * 4.0) as u32 {
             0 => (5, "center_y", rng.range(8.0, 22.0)),
@@ -77,38 +79,53 @@ fn split_pieces_never_swap_ids_under_random_edits() {
         } else {
             refused += 1;
         }
-        let ids: Vec<u32> = s.summary().bodies.iter().map(|b| b.id.0).collect();
         let ctx = format!(
             "step {step}: {name} = {value:.3} (c {c:.3}, tab {ty:.3}), ok {}",
             r.ok
         );
-        assert!(
-            ids.iter().all(|i| *i == 1 || *i == 2),
-            "{ctx}: bodies {ids:?}"
-        );
+        let ids: Vec<u32> = s.summary().bodies.iter().map(|b| b.id.0).collect();
         let top = y_range(&s, 1).unwrap_or_else(|| panic!("{ctx}: Body1 missing"));
-        match y_range(&s, 2) {
-            Some(bottom) => {
+        match ids.len() {
+            1 => {
+                // Joined: the slot no longer crosses the part.
+                assert!(
+                    top.0.abs() < 1e-9 && (top.1 - 30.0).abs() < 1e-9,
+                    "{ctx}: one body {ids:?} but Body1 is {top:?}"
+                );
+                joined += 1;
+            }
+            2 => {
                 assert!(
                     (top.1 - 30.0).abs() < 1e-9 && top.0 > 1.0,
                     "{ctx}: Body1 is not the top piece: {top:?}"
                 );
+                let other = ids[1];
+                let bottom = y_range(&s, other).unwrap();
                 assert!(
                     bottom.0.abs() < 1e-9 && bottom.1 < 29.0,
-                    "{ctx}: Body2 is not the bottom piece: {bottom:?}"
+                    "{ctx}: Body{other} is not the bottom piece: {bottom:?}"
                 );
+                // An id that named the bottom piece never names another
+                // piece; a new id appears only after the pieces were joined
+                // (the old one's seeds may then no longer single it out).
+                if let Some(prev) = bottom_id
+                    && prev != other
+                {
+                    assert!(
+                        was_joined,
+                        "{ctx}: bottom piece moved from Body{prev} to Body{other}"
+                    );
+                    renamed += 1;
+                }
+                bottom_id = Some(other);
+                was_joined = false;
+                continue;
             }
-            None => {
-                // Joined: the slot no longer crosses the part.
-                assert!(
-                    top.0.abs() < 1e-9 && (top.1 - 30.0).abs() < 1e-9,
-                    "{ctx}: Body2 vanished but Body1 is {top:?}"
-                );
-                joined += 1;
-            }
+            _ => panic!("{ctx}: bodies {ids:?}"),
         }
+        was_joined = true;
     }
-    eprintln!("accepted {accepted}, refused {refused}, joined {joined}");
+    eprintln!("accepted {accepted}, refused {refused}, joined {joined}, new bottom ids {renamed}");
     assert!(accepted >= 150, "too many refusals: {refused}");
     assert!(
         joined > 10 && joined < 150,

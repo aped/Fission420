@@ -59,8 +59,16 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("resaved.rcad.json");
     assert!(s.execute(&Command::Save { path: out.clone() }).ok);
-    // No v5 features: written as v4 (readable by v4 readers).
-    assert_eq!(version(&out), 4);
+    // Written at the lowest version that holds the document: v4 (readable
+    // by v4 readers) unless opening added v9 identity data (prints of
+    // referenced imported faces, piece seeds).
+    let doc = s.model().unwrap().document();
+    let want = if rcad_document::v9_feature(doc).is_some() {
+        9
+    } else {
+        4
+    };
+    assert_eq!(version(&out), want, "{rel}");
     let mut t = Session::new();
     assert!(
         t.execute(&Command::Open {

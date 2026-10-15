@@ -1061,8 +1061,7 @@ type Pieces<'a> = (
 /// twice) is taken, provided
 /// that count is the unique maximum for the id (over free pieces) and the
 /// maximum for the piece (over unmatched ids; when pieces rejoined, the
-/// earliest id, the target first, keeps the piece). When one seeded id and
-/// one piece are left over, they are paired (the only possibility). Ids without seeds (new ids,
+/// earliest id, the target first, keeps the piece). Ids without seeds (new ids,
 /// documents written before seeds) then take the remaining pieces in
 /// positional order. A required id left unmatched by its seeds is a broken
 /// reference (the piece is never guessed); a spare one makes no body (a
@@ -1159,17 +1158,6 @@ fn assign_pieces(
             let Some((_, k, j)) = best else { break };
             matched[k] = true;
             owner[j] = Some(with_seed[k].0);
-        }
-        // One seeded id and one piece left over (its seeds now lie in
-        // pieces others claimed more strongly): the pairing is forced.
-        let left: Vec<usize> = (0..with_seed.len()).filter(|&k| !matched[k]).collect();
-        let free: Vec<usize> = (0..parts.len()).filter(|&j| owner[j].is_none()).collect();
-        let unseeded_free = ids.iter().any(|b| !with_seed.iter().any(|(x, _)| x == b));
-        if let ([k], [j]) = (&left[..], &free[..])
-            && !unseeded_free
-        {
-            matched[*k] = true;
-            owner[*j] = Some(with_seed[*k].0);
         }
         for (k, (b, _)) in with_seed.iter().enumerate() {
             seeded.insert(*b);
