@@ -5,7 +5,7 @@ the native document format has its own version number (`"version"` in `*.rcad.js
 which format versions a build reads and writes is listed in
 [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md).
 
-## [1.0.0] - unreleased
+## [1.0.0] - 2026-10-15
 
 First stable release. From 1.0 on, the command API (`docs/COMMANDS.md`), the CLI and the
 native format follow semantic versioning: a document saved by 1.x opens in every later 1.x
