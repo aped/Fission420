@@ -33,8 +33,8 @@ pub use model::*;
 pub use params::{ParamUnit, Parameter, SlotKind};
 pub use regen::{
     BodyGeometry, BodySource, EvalBody, Evaluation, FRAME_YZ, FaceCandidate, FeatureResult,
-    MeshBody, RegenCache, ResolvedFace, UNPROJECTABLE, projection_curves, regenerate,
-    regenerate_cached, regenerate_cached_opts,
+    MeshBody, RegenCache, ResolvedFace, UNPROJECTABLE, panic_text, projection_curves, regenerate,
+    regenerate_cached, regenerate_cached_opts, regenerate_partial,
 };
 pub use session::{LoadReport, Model, ModelSnapshot, ParamChange};
 
@@ -94,6 +94,10 @@ pub enum DocError {
     ImportCancelled(String),
     #[error("file error: {0}")]
     File(String),
+    /// A defect inside the application (a caught panic) stopped the command.
+    /// The document is left at the last committed revision.
+    #[error("internal error in '{command}': {detail}")]
+    Internal { command: String, detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;

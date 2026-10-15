@@ -1,5 +1,5 @@
 //! Transactions and undo/redo over the authoritative document.
-use crate::regen::{RegenCache, regenerate_cached, regenerate_cached_opts};
+use crate::regen::{RegenCache, regenerate_partial};
 use crate::{DocError, Document, Evaluation, FeatureId, Result};
 use rcad_kernel::Measurements;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,12 @@ pub struct LoadReport {
     /// Stale entries removed on load (one line each); the model is dirty
     /// when this is non-empty.
     pub cleaned: Vec<String>,
+    /// Features that did not regenerate (failed, or depend on a failure):
+    /// the document still opens with them flagged in their health.
+    pub failures: Vec<(FeatureId, String)>,
+    /// Safe-mode open: the timeline marker was moved to just before this
+    /// failed feature (the document is then unsaved).
+    pub rolled_back_to: Option<FeatureId>,
 }
 
 /// Cap on undo depth; documents are small, so this is generous.
@@ -99,7 +105,15 @@ impl Model {
     /// dropped and listed in
     /// [`LoadReport::cleaned`]; the model is then dirty, so saving keeps the
     /// cleaned state.
-    pub fn from_document_reporting(mut doc: Document) -> Result<(Self, LoadReport)> {
+    pub fn from_document_reporting(doc: Document) -> Result<(Self, LoadReport)> {
+        Self::open_document(doc, false)
+    }
+
+    /// [`Model::from_document_reporting`]; with `safe_mode` the timeline
+    /// marker is moved to just before the first feature that fails, so the
+    /// model opens fully healthy (rolled back) and can be repaired step by
+    /// step. A document whose very first feature fails opens flagged as usual.
+    pub fn open_document(mut doc: Document, safe_mode: bool) -> Result<(Self, LoadReport)> {
         let mut cleaned = Vec::new();
         let pruned = doc.prune_configuration_occurrences();
         if pruned > 0 {
@@ -139,13 +153,43 @@ impl Model {
                     .into(),
             );
         }
-        m.dirty = !cleaned.is_empty();
+        let mut rolled_back_to = None;
+        let first_failure = m.eval.failures().next().map(|r| r.id);
+        if safe_mode
+            && let Some(first) = first_failure
+            && let Some(p) = doc.features.iter().position(|f| f.id == first)
+            && p > 0
+        {
+            let mut rolled = doc.clone();
+            rolled.rollback = Some(rolled.features[p - 1].id);
+            let eval = m.regen(&rolled)?;
+            // Earlier features can depend on later ones only through the
+            // evaluation order; keep the safe-mode result only when healthy.
+            if eval.is_healthy() {
+                doc = rolled;
+                m.eval = eval;
+                rolled_back_to = Some(first);
+            }
+        }
+        let failures = m
+            .eval
+            .failures()
+            .map(|r| {
+                (
+                    r.id,
+                    r.health.message.clone().unwrap_or_else(|| "failed".into()),
+                )
+            })
+            .collect();
+        m.dirty = !cleaned.is_empty() || rolled_back_to.is_some();
         m.doc = doc;
         Ok((
             m,
             LoadReport {
                 expression_error,
                 cleaned,
+                failures,
+                rolled_back_to,
             },
         ))
     }
@@ -226,13 +270,13 @@ impl Model {
     /// Measure synchronously if measurement was deferred (Save, Measure).
     pub fn complete_measurements(&mut self) -> Result<()> {
         if self.measurements_pending() {
-            self.eval = regenerate_cached(&self.doc, Some(&mut self.cache))?;
+            self.eval = regenerate_partial(&self.doc, Some(&mut self.cache), true)?;
         }
         Ok(())
     }
 
     fn regen(&mut self, doc: &Document) -> Result<Evaluation> {
-        regenerate_cached_opts(doc, Some(&mut self.cache), !self.defer_measurements)
+        regenerate_partial(doc, Some(&mut self.cache), !self.defer_measurements)
     }
 
     /// Regenerate `doc`; when a cut splits its target into more separate
@@ -287,6 +331,12 @@ impl Model {
     }
 
     /// (hits, misses) of the regeneration cache, for diagnostics.
+    /// Drop the regeneration memo (after a caught panic may have left a
+    /// half-built entry); the next regeneration rebuilds it.
+    pub fn discard_cache(&mut self) {
+        self.cache = RegenCache::default();
+    }
+
     pub fn cache_stats(&self) -> (u64, u64) {
         (self.cache.hits, self.cache.misses)
     }
@@ -299,10 +349,24 @@ impl Model {
         &self.eval
     }
 
-    /// Apply `edit` transactionally. `label` names the history entry.
+    /// Apply `edit` transactionally. `label` names the history entry. The
+    /// edit is refused (nothing changes) when any feature that evaluated
+    /// before fails after it: an edit never makes the document less healthy.
     pub fn transact<T>(
         &mut self,
         label: &str,
+        edit: impl FnOnce(&mut Document) -> Result<T>,
+    ) -> Result<T> {
+        self.transact_allowing(label, None, edit)
+    }
+
+    /// [`Model::transact`], except that features downstream of `edited`
+    /// that newly fail are committed flagged in their health (Edit Feature,
+    /// as in Fusion); `edited` itself must still evaluate.
+    pub fn transact_allowing<T>(
+        &mut self,
+        label: &str,
+        edited: Option<FeatureId>,
         edit: impl FnOnce(&mut Document) -> Result<T>,
     ) -> Result<T> {
         let mut candidate = self.doc.clone();
@@ -310,6 +374,22 @@ impl Model {
         // Bound values follow their expressions in the same transaction.
         crate::params::apply_expressions(&mut candidate)?;
         let eval = self.regen_assigning_pieces(&mut candidate)?;
+        let before: std::collections::HashSet<FeatureId> =
+            self.eval.failures().map(|r| r.id).collect();
+        let allowed: Vec<FeatureId> = match edited {
+            Some(e) => candidate
+                .with_dependents(e)
+                .into_iter()
+                .filter(|f| *f != e)
+                .collect(),
+            None => vec![],
+        };
+        if let Some(r) = eval
+            .failures()
+            .find(|r| !before.contains(&r.id) && !allowed.contains(&r.id))
+        {
+            return Err(new_failure(&eval, r));
+        }
         let old = std::mem::replace(&mut self.doc, candidate);
         self.eval = eval;
         self.undo.push((label.to_string(), old));
@@ -430,6 +510,20 @@ impl Model {
             }
         }
     }
+}
+
+/// The error to report for a feature that newly fails in a candidate
+/// evaluation: its own error, or (failed upstream) the root feature's.
+fn new_failure(eval: &Evaluation, r: &crate::FeatureResult) -> DocError {
+    if let Some(e) = &r.health.error {
+        return e.clone();
+    }
+    let root = r.health.upstream;
+    eval.features
+        .iter()
+        .find(|x| Some(x.id) == root)
+        .and_then(|x| x.health.error.clone())
+        .unwrap_or_else(|| DocError::Validation(r.health.message.clone().unwrap_or_default()))
 }
 
 impl Default for Model {

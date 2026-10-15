@@ -36,7 +36,10 @@ fn sketch_op_round_trips() {
         },
     };
     let j = serde_json::to_string(&c).unwrap();
-    assert!(j.contains(r#""cmd":"sketch_op""#) && j.contains(r#""op":"trim""#), "{j}");
+    assert!(
+        j.contains(r#""cmd":"sketch_op""#) && j.contains(r#""op":"trim""#),
+        "{j}"
+    );
     assert_eq!(round_trip(&c), c);
 }
 
@@ -58,8 +61,9 @@ fn redefine_feature_round_trips() {
     let f = doc.features[0].clone();
     let c = Command::RedefineFeature {
         feature: f.id,
-        kind: f.kind.clone(),
+        kind: Box::new(f.kind.clone()),
         name: Some("Profile".into()),
+        expressions: None,
     };
     assert_eq!(round_trip(&c), c);
 }
