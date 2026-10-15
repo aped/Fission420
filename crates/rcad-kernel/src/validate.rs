@@ -128,7 +128,7 @@ fn profile_polygon(p: &Profile) -> Vec<[f64; 2]> {
 
 /// Up to n×n grid points of the polygon's bounding box that lie inside it,
 /// away from its boundary (1 % of the box size).
-fn interior_samples(poly: &[[f64; 2]], n: usize) -> Vec<[f64; 2]> {
+fn interior_samples(poly: &[[f64; 2]], ix: &PolyIndex, n: usize) -> Vec<[f64; 2]> {
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
     for p in poly {
         for i in 0..2 {
@@ -144,7 +144,7 @@ fn interior_samples(poly: &[[f64; 2]], n: usize) -> Vec<[f64; 2]> {
                 lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / n as f64,
                 lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / n as f64,
             ];
-            if point_in_polygon(q, poly) && dist_to_polygon(q, poly) > 0.01 * size {
+            if ix.contains(q, poly) && ix.dist(q, poly) > 0.01 * size {
                 out.push(q);
             }
         }
@@ -159,11 +159,12 @@ fn deepest_point(poly: &[[f64; 2]]) -> Option<([f64; 2], f64)> {
         let (a, b, c) = (poly[0], poly[i], poly[i + 1]);
         [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0]
     });
-    interior_samples(poly, 15)
+    let ix = PolyIndex::new(poly);
+    interior_samples(poly, &ix, 15)
         .into_iter()
         .chain(fan)
-        .filter(|q| point_in_polygon(*q, poly))
-        .map(|q| (q, dist_to_polygon(q, poly)))
+        .filter(|q| ix.contains(*q, poly))
+        .map(|q| (q, ix.dist(q, poly)))
         .max_by(|a, b| a.1.total_cmp(&b.1))
 }
 
@@ -200,6 +201,102 @@ fn dist_to_polygon(p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
+/// Edges per block of a [`PolyIndex`].
+const POLY_BLOCK: usize = 32;
+
+/// Runs of consecutive edges of one polygon with their bounding boxes, so a
+/// point query skips the runs that cannot change its answer. The answers are
+/// those of [`point_in_polygon`] and [`dist_to_polygon`] exactly: a skipped
+/// run has every edge entirely above, below or (beyond a rounding margin) left
+/// of the point, so none of its crossings toggles the parity; for the
+/// distance, runs are visited nearest box first and only runs whose box is
+/// farther than the best edge so far (plus the margin) are skipped, so the
+/// minimum is taken over a set that contains the minimal edge.
+struct PolyIndex {
+    /// (first edge, end edge, box low, box high).
+    blocks: Vec<(usize, usize, [f64; 2], [f64; 2])>,
+    /// Largest absolute coordinate of the polygon (rounding margin scale).
+    scale: f64,
+}
+
+impl PolyIndex {
+    fn new(poly: &[[f64; 2]]) -> Self {
+        let n = poly.len();
+        let blocks = (0..n)
+            .step_by(POLY_BLOCK)
+            .map(|s| {
+                let e = (s + POLY_BLOCK).min(n);
+                let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+                for i in s..e {
+                    for p in [poly[i], poly[(i + 1) % n]] {
+                        for k in 0..2 {
+                            lo[k] = lo[k].min(p[k]);
+                            hi[k] = hi[k].max(p[k]);
+                        }
+                    }
+                }
+                (s, e, lo, hi)
+            })
+            .collect();
+        let scale = poly
+            .iter()
+            .flat_map(|p| p.iter())
+            .fold(0.0f64, |m, v| m.max(v.abs()));
+        Self { blocks, scale }
+    }
+    fn margin(&self, p: [f64; 2]) -> f64 {
+        1.0e-9 * (1.0 + self.scale + p[0].abs() + p[1].abs())
+    }
+    /// [`point_in_polygon`] of `poly` (the polygon this index was built for).
+    fn contains(&self, p: [f64; 2], poly: &[[f64; 2]]) -> bool {
+        let n = poly.len();
+        let margin = self.margin(p);
+        let mut inside = false;
+        for &(s, e, lo, hi) in &self.blocks {
+            if hi[1] <= p[1] || lo[1] > p[1] || hi[0] + margin < p[0] {
+                continue;
+            }
+            for i in s..e {
+                let (a, b) = (poly[i], poly[(i + 1) % n]);
+                if (a[1] > p[1]) != (b[1] > p[1]) {
+                    let x = a[0] + (p[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+                    if p[0] < x {
+                        inside = !inside;
+                    }
+                }
+            }
+        }
+        inside
+    }
+    /// [`dist_to_polygon`] of `poly` (the polygon this index was built for).
+    fn dist(&self, p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
+        let n = poly.len();
+        let margin = self.margin(p);
+        let mut order: Vec<(f64, usize)> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(k, &(_, _, lo, hi))| {
+                let dx = (lo[0] - p[0]).max(p[0] - hi[0]).max(0.0);
+                let dy = (lo[1] - p[1]).max(p[1] - hi[1]).max(0.0);
+                (dx.hypot(dy), k)
+            })
+            .collect();
+        order.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+        let mut best = f64::INFINITY;
+        for (lb, k) in order {
+            if lb > best + margin {
+                break;
+            }
+            let (s, e, _, _) = self.blocks[k];
+            for i in s..e {
+                best = best.min(seg_dist(p, poly[i], poly[(i + 1) % n]));
+            }
+        }
+        best
+    }
+}
+
 /// Local coordinates of a world point in `f` (u, v in-plane, w along `f.z`).
 fn local(f: &Frame, p: [f64; 3]) -> [f64; 3] {
     let d = [p[0] - f.origin[0], p[1] - f.origin[1], p[2] - f.origin[2]];
@@ -213,6 +310,9 @@ struct PrismTest {
     length: f64,
     poly: Vec<[f64; 2]>,
     holes: Vec<Vec<[f64; 2]>>,
+    /// Point-query indexes of `poly` and `holes`.
+    poly_ix: PolyIndex,
+    holes_ix: Vec<PolyIndex>,
     /// Tan of the draft angle; the section at height `w` is the
     /// profile offset inward by `w * taper` (0: a right prism).
     taper: f64,
@@ -245,11 +345,15 @@ enum Section {
 
 impl PrismTest {
     fn tapered(p: &Prism, taper_tan: f64) -> Self {
+        let poly = profile_polygon(p.profile);
+        let holes: Vec<Vec<[f64; 2]>> = p.holes.iter().map(profile_polygon).collect();
         Self {
             start: *p.start,
             length: p.length,
-            poly: profile_polygon(p.profile),
-            holes: p.holes.iter().map(profile_polygon).collect(),
+            poly_ix: PolyIndex::new(&poly),
+            holes_ix: holes.iter().map(|h| PolyIndex::new(h)).collect(),
+            poly,
+            holes,
             taper: taper_tan,
             base: match p.profile {
                 Profile::Polygon(v) => Section::Polygon(v.clone()),
@@ -293,13 +397,15 @@ impl PrismTest {
             return (d < rr, (d - rr).abs());
         }
         match self.section_poly(w) {
+            // The profile's own polygon (untapered): the indexed queries.
+            Some(std::borrow::Cow::Borrowed(_)) => (self.inside(q), self.boundary_dist(q)),
             Some(poly) => {
-                let inside = point_in_polygon(q, &poly)
-                    && !self.holes.iter().any(|h| point_in_polygon(q, h));
+                let inside = point_in_polygon(q, &poly) && !self.in_hole(q);
                 let d = self
                     .holes
                     .iter()
-                    .map(|h| dist_to_polygon(q, h))
+                    .zip(&self.holes_ix)
+                    .map(|(h, ix)| ix.dist(q, h))
                     .fold(dist_to_polygon(q, &poly), f64::min);
                 (inside, d)
             }
@@ -308,14 +414,21 @@ impl PrismTest {
     }
     /// Inside the profile region (outer loop minus holes).
     fn inside(&self, q: [f64; 2]) -> bool {
-        point_in_polygon(q, &self.poly) && !self.holes.iter().any(|h| point_in_polygon(q, h))
+        self.poly_ix.contains(q, &self.poly) && !self.in_hole(q)
+    }
+    fn in_hole(&self, q: [f64; 2]) -> bool {
+        self.holes
+            .iter()
+            .zip(&self.holes_ix)
+            .any(|(h, ix)| ix.contains(q, h))
     }
     /// Distance to the region's boundary (outer loop and holes).
     fn boundary_dist(&self, q: [f64; 2]) -> f64 {
         self.holes
             .iter()
-            .map(|h| dist_to_polygon(q, h))
-            .fold(dist_to_polygon(q, &self.poly), f64::min)
+            .zip(&self.holes_ix)
+            .map(|(h, ix)| ix.dist(q, h))
+            .fold(self.poly_ix.dist(q, &self.poly), f64::min)
     }
     /// In-plane sample points of the actual tool region (outer loop minus
     /// holes): a 7 x 7 grid of its bounding box (points inside the region, 1 %
@@ -1089,6 +1202,7 @@ pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Re
     let mesh = tessellate(body, chord)?;
     let planar = planar_faces(body);
     let poly = profile_polygon(profile);
+    let poly_ix = PolyIndex::new(&poly);
     let (mut fp_lo, mut fp_hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
     for p in &poly {
         for i in 0..2 {
@@ -1130,7 +1244,7 @@ pub fn clear_depth(body: &Body, face: &Frame, profile: &Profile, max: f64) -> Re
             if clipped.is_empty() {
                 continue;
             }
-            if let Some(d) = invasion_depth(&clipped, &poly, slack) {
+            if let Some(d) = invasion_depth(&clipped, &poly, &poly_ix, slack) {
                 let d = if curved { (d - chord).max(0.0) } else { d };
                 best = best.min(d);
             }
@@ -1159,11 +1273,15 @@ fn clip_below(p: &[[f64; 3]], w_min: f64) -> Vec<[f64; 3]> {
 
 /// Smallest depth `w` of the part of the convex 3D polygon `p` whose (u, v)
 /// projection lies strictly inside `poly` (by more than `slack`), if any.
-fn invasion_depth(p: &[[f64; 3]], poly: &[[f64; 2]], slack: f64) -> Option<f64> {
+fn invasion_depth(
+    p: &[[f64; 3]],
+    poly: &[[f64; 2]],
+    poly_ix: &PolyIndex,
+    slack: f64,
+) -> Option<f64> {
     let mut best: Option<f64> = None;
     let mut take = |w: f64| best = Some(best.map_or(w, |b: f64| b.min(w)));
-    let strictly_inside =
-        |q: [f64; 2]| point_in_polygon(q, poly) && dist_to_polygon(q, poly) > slack;
+    let strictly_inside = |q: [f64; 2]| poly_ix.contains(q, poly) && poly_ix.dist(q, poly) > slack;
     // (a) polygon vertices inside the footprint.
     for v in p {
         if strictly_inside([v[0], v[1]]) {

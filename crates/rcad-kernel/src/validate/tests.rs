@@ -584,3 +584,58 @@ fn refilled_slot_beside_a_planar_tool_wall_is_refused() {
         "{e:?}"
     );
 }
+
+/// The indexed point queries give exactly the plain scans' answers: random
+/// points around a fine circle polygon, a star (concave) polygon and an
+/// L-shape, plus points on their vertices, edge midpoints and vertex rows.
+#[test]
+fn poly_index_matches_the_plain_scans_exactly() {
+    let circle = profile_polygon(&Profile::Circle {
+        center: [3.0, -2.0],
+        radius: 7.5,
+    });
+    let star: Vec<[f64; 2]> = (0..40)
+        .map(|k| {
+            let t = k as f64 * std::f64::consts::TAU / 40.0;
+            let r = if k % 2 == 0 { 10.0 } else { 4.0 };
+            [r * t.cos(), r * t.sin()]
+        })
+        .collect();
+    let ell = vec![
+        [0.0, 0.0],
+        [8.0, 0.0],
+        [8.0, 2.0],
+        [2.0, 2.0],
+        [2.0, 8.0],
+        [0.0, 8.0],
+    ];
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for poly in [circle, star, ell] {
+        assert!(poly.len() > 4);
+        let ix = PolyIndex::new(&poly);
+        let mut pts: Vec<[f64; 2]> = (0..3000)
+            .map(|_| [rnd() * 30.0 - 15.0, rnd() * 30.0 - 15.0])
+            .collect();
+        for (i, p) in poly.iter().enumerate() {
+            let q = poly[(i + 1) % poly.len()];
+            pts.push(*p);
+            pts.push([(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0]);
+            pts.push([p[0] - 1.0, p[1]]);
+            pts.push([p[0] + 1.0, p[1]]);
+        }
+        for p in pts {
+            assert_eq!(ix.contains(p, &poly), point_in_polygon(p, &poly), "{p:?}");
+            assert_eq!(
+                ix.dist(p, &poly).to_bits(),
+                dist_to_polygon(p, &poly).to_bits(),
+                "{p:?}"
+            );
+        }
+    }
+}
