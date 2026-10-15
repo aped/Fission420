@@ -21,6 +21,7 @@ pub mod curves;
 mod edit;
 pub mod fillet;
 pub mod font;
+pub mod guard;
 pub mod offset;
 pub mod pattern;
 mod profile;
@@ -159,11 +160,21 @@ impl Entity {
     }
 }
 
-/// A named driving dimension. `value` is in mm and must be finite and > 0.
+/// A named dimension. `value` is in mm (degrees for angles) and must be
+/// finite and > 0 for a driving dimension.
+///
+/// A **driven** dimension (`driven == true`) adds no equation: it measures
+/// the solved sketch (its value is refreshed after every successful solve,
+/// signed for horizontal/vertical distances) and cannot be set. A redundant
+/// new dimension becomes driven instead of being refused (shown in
+/// parentheses). Distances, diameters, radii, ellipse radii and angles may
+/// be driven. Serde-additive (absent = driving).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Dimension {
     pub name: String,
     pub value: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
 }
 
 impl Dimension {
@@ -171,6 +182,15 @@ impl Dimension {
         Self {
             name: name.into(),
             value,
+            driven: false,
+        }
+    }
+
+    /// A driven (measuring) dimension.
+    pub fn driven(name: impl Into<String>, value: f64) -> Self {
+        Self {
+            driven: true,
+            ..Self::new(name, value)
         }
     }
 }
@@ -720,6 +740,17 @@ impl Sketch {
     /// non-positive values and unknown names; on error the sketch is unchanged.
     pub fn set_dimension(&mut self, name: &str, value: f64) -> Result<(), SketchError> {
         check_dim_value(name, value)?;
+        if self
+            .constraints
+            .iter()
+            .filter_map(Constraint::dimension)
+            .any(|d| d.name == name && d.driven)
+        {
+            return Err(SketchError::Refused(format!(
+                "'{name}' is a driven dimension: it measures the sketch and cannot be set \
+                 (make it driving first, after removing a constraint it is redundant with)"
+            )));
+        }
         let is_angle = self
             .constraints
             .iter()
@@ -1025,7 +1056,26 @@ impl Sketch {
                 }
             }
             if let Some(d) = c.dimension() {
-                check_dim_value(&d.name, d.value)?;
+                if d.driven {
+                    let drivable = matches!(
+                        c,
+                        Constraint::HorizontalDistance { .. }
+                            | Constraint::VerticalDistance { .. }
+                            | Constraint::Distance { .. }
+                            | Constraint::Diameter { .. }
+                            | Constraint::Radius { .. }
+                            | Constraint::EllipseRadius { .. }
+                            | Constraint::Angle { .. }
+                    );
+                    if !drivable || !d.value.is_finite() {
+                        return Err(SketchError::InvalidValue(format!(
+                            "constraint {i}: only a finite distance, diameter, radius or angle \
+                             can be a driven dimension"
+                        )));
+                    }
+                } else {
+                    check_dim_value(&d.name, d.value)?;
+                }
                 // One circular pattern's copies share their angle dimension
                 // (same name and value, all PatternRotate).
                 let shared = |name: &str| {
@@ -1102,7 +1152,102 @@ impl Sketch {
     /// the status is FullyConstrained, UnderConstrained or OverConstrained
     /// (consistent redundancy); otherwise the sketch is left unchanged.
     pub fn solve(&mut self) -> SolveReport {
-        solver::solve(self)
+        let r = solver::solve(self);
+        if r.is_success() {
+            self.refresh_driven();
+        }
+        r
+    }
+
+    /// The value constraint `c`'s dimension measures in the current geometry
+    /// (mm; degrees for angles; signed for horizontal/vertical distances).
+    pub fn measure(&self, c: &Constraint) -> Option<f64> {
+        let p = |id: &PointId| self.point_xy(*id);
+        let radius = |e: &EntityId| match self.entity(*e)? {
+            Entity::Circle { radius, .. } => Some(*radius),
+            Entity::Arc { id, .. } => self.arc_geometry(*id).map(|g| g.radius),
+            _ => None,
+        };
+        let dir = |l: &EntityId| match self.entity(*l)? {
+            Entity::Line { a, b, .. } => {
+                let (pa, pb) = (p(a)?, p(b)?);
+                Some([pb[0] - pa[0], pb[1] - pa[1]])
+            }
+            _ => None,
+        };
+        match c {
+            Constraint::HorizontalDistance { a, b, .. } => Some(p(b)?[0] - p(a)?[0]),
+            Constraint::VerticalDistance { a, b, .. } => Some(p(b)?[1] - p(a)?[1]),
+            Constraint::Distance { a, b, .. } => {
+                let (u, v) = (p(a)?, p(b)?);
+                Some((v[0] - u[0]).hypot(v[1] - u[1]))
+            }
+            Constraint::Diameter { circle, .. } => radius(circle).map(|r| 2.0 * r),
+            Constraint::Radius { entity, .. } => radius(entity),
+            Constraint::EllipseRadius { ellipse, major, .. } => match self.entity(*ellipse)? {
+                Entity::Ellipse {
+                    center,
+                    major: m,
+                    minor,
+                    ..
+                } => {
+                    if *major {
+                        let (c0, m0) = (p(center)?, p(m)?);
+                        Some((m0[0] - c0[0]).hypot(m0[1] - c0[1]))
+                    } else {
+                        Some(*minor)
+                    }
+                }
+                _ => None,
+            },
+            Constraint::Angle { a, b, .. } => {
+                let (u, v) = (dir(a)?, dir(b)?);
+                let cross = u[0] * v[1] - u[1] * v[0];
+                let dot = u[0] * v[0] + u[1] * v[1];
+                Some(cross.atan2(dot).to_degrees())
+            }
+            _ => None,
+        }
+    }
+
+    /// Would adding dimension constraint `c` (at its value) make the sketch
+    /// consistently over-defined? Such a dimension is added driven instead
+    /// of refused (a conflicting one, whose value disagrees, stays refused).
+    pub fn dimension_is_redundant(&self, c: &Constraint) -> bool {
+        if c.dimension().is_none_or(|d| d.driven) {
+            return false;
+        }
+        let mut t = self.clone();
+        t.constraints.push(c.clone());
+        let r = t.solve();
+        if r.status != SolveStatus::OverConstrained {
+            return false;
+        }
+        // Named among the redundant rows; or, when diagnosis was skipped
+        // (large sketch), the sketch was not over-defined before.
+        r.conflicting.contains(&(t.constraints.len() - 1))
+            || (r.conflicting.is_empty()
+                && self.clone().solve().status != SolveStatus::OverConstrained)
+    }
+
+    /// Refresh every driven dimension to the value it measures.
+    pub fn refresh_driven(&mut self) {
+        let values: Vec<Option<f64>> = self
+            .constraints
+            .iter()
+            .map(|c| {
+                c.dimension()
+                    .filter(|d| d.driven)
+                    .and_then(|_| self.measure(c))
+            })
+            .collect();
+        for (c, v) in self.constraints.iter_mut().zip(values) {
+            if let (Some(d), Some(v)) = (c.dimension_mut(), v)
+                && v.is_finite()
+            {
+                d.value = v;
+            }
+        }
     }
 
     /// Max absolute equation residual at the current values, mm.
@@ -1164,7 +1309,11 @@ mod tests_angle;
 #[cfg(test)]
 mod tests_curves;
 #[cfg(test)]
+mod tests_driven;
+#[cfg(test)]
 mod tests_fillet;
+#[cfg(test)]
+mod tests_guard;
 #[cfg(test)]
 mod tests_lines;
 #[cfg(test)]

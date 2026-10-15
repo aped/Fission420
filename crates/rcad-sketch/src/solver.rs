@@ -498,6 +498,10 @@ impl System {
         let mut eqs = Vec::new();
         let mut owner = Vec::new();
         for (ci, c) in s.constraints.iter().enumerate() {
+            // A driven dimension measures; it adds no equation.
+            if c.dimension().is_some_and(|d| d.driven) {
+                continue;
+            }
             let mut push = |e: Eq| {
                 eqs.push(e);
                 owner.push(ci);

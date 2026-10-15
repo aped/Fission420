@@ -87,9 +87,20 @@ rubber band shows the live length / size / radius.
 ## Dimensions and constraints
 
 * New constraints and dimensions are applied to a copy and solved first. If the copy does not
-  solve, or the new item is redundant (over-constrains), it is **rejected** and the message
+  solve, or a new constraint is redundant (over-constrains), it is **rejected** and the message
   names the conflicting constraints, e.g. "Rejected: this would over-constrain the sketch
   (redundant with: width = 80 mm (horizontal P1 to P2); …)". The sketch is unchanged.
+* **Driven dimensions**: a new *dimension* that is redundant (the sketch already fixes that
+  distance, diameter, radius or angle) is added **driven** instead of being refused: it adds no
+  equation, shows its measured value in parentheses, follows the geometry after every solve
+  (horizontal/vertical distances are signed), and cannot be edited or set as a parameter
+  (refused by name). A dimension whose value conflicts (inconsistent) is still refused.
+  `toggle_driven` (editor) turns a driven dimension driving only when it is no longer redundant.
+  Stored as `"driven": true` on the dimension (absent = driving, so older files load unchanged).
+* **Branch-flip guard**: a typed dimension value is solved directly; if an arc's sweep jumps by
+  more than 90° (its centre crossed the chord: a different shape) or a line reverses direction,
+  the edit is re-solved by continuation in 16 steps; if a step still jumps, the edit is refused
+  ("would flip arc N"), the field stays open and the sketch is unchanged (`rcad_sketch::guard`).
 * The inline editor opens with the value selected, so typing replaces it. **Enter** applies,
   **Escape** cancels (a freshly created dimension keeps its measured value). Invalid input
   ("abc", ≤ 0) or a value the solver cannot satisfy keeps the editor open with the error; the

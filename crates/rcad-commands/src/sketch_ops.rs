@@ -285,6 +285,15 @@ fn edit(
                 d.name = sk.unique_dimension_name("d");
             }
             out.dimension = Some(d.name.clone());
+            if sk.dimension_is_redundant(&c) {
+                // Redundant: added driven (measuring), as in the editor.
+                if let Some(d) = c.dimension_mut() {
+                    d.driven = true;
+                }
+                out.note = "added as a driven dimension (the sketch already fixes it)".into();
+                sk.constraints.push(c);
+                return Ok(false);
+            }
             sk.constraints.push(c);
             Ok(true)
         }

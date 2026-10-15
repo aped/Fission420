@@ -1057,8 +1057,31 @@ impl SketchEditor {
                 };
                 (d <= tol).then_some((e.id(), d))
             })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .min_by(|a, b| {
+                // Coincident curves (a projected edge under a drawn or a
+                // re-projected one): the same distance picks the drawn
+                // curve first, construction projections last.
+                let eq = rcad_sketch::solve_tolerance(self.sketch.scale());
+                if (a.1 - b.1).abs() <= eq {
+                    self.pick_rank(a.0).cmp(&self.pick_rank(b.0))
+                } else {
+                    a.1.total_cmp(&b.1)
+                }
+            })
             .map(|(id, _)| Item::Entity(id))
+    }
+
+    /// Pick priority among coincident curves (lower first).
+    fn pick_rank(&self, e: EntityId) -> u8 {
+        match (
+            self.projected.contains_key(&e),
+            self.sketch.is_construction(e),
+        ) {
+            (false, false) => 0,
+            (false, true) => 1,
+            (true, false) => 2,
+            (true, true) => 3,
+        }
     }
 
     /// Snap a raw plane position. `anchor` enables H/V alignment; `exclude`
@@ -2332,6 +2355,35 @@ impl SketchEditor {
             return;
         }
         let idx = self.sketch.constraints.len();
+        if self.sketch.dimension_is_redundant(&c) {
+            // Redundant: added as a driven (measuring) dimension, Fusion's
+            // behaviour, instead of being refused.
+            let mut c = c;
+            let name = match c.dimension_mut() {
+                Some(d) => {
+                    d.driven = true;
+                    d.name.clone()
+                }
+                None => return,
+            };
+            if self.try_change(false, |sk| {
+                sk.constraints.push(c);
+                Ok(())
+            }) {
+                let v = self
+                    .sketch
+                    .constraints
+                    .get(idx)
+                    .and_then(|c| c.dimension())
+                    .map_or(0.0, |d| d.value);
+                self.info(format!(
+                    "{name} = ({}) added as a driven dimension: the sketch already fixes it, so it \
+                     measures instead of driving.",
+                    rcad_sketch::fmt_mm(v.abs())
+                ));
+            }
+            return;
+        }
         if self.try_change(true, |sk| {
             sk.constraints.push(c);
             Ok(())
@@ -2340,7 +2392,52 @@ impl SketchEditor {
         }
     }
 
+    /// Toggle the selected dimension between driving and driven. Driving is
+    /// refused while it is redundant (the reason names the constraints).
+    pub fn toggle_driven(&mut self) {
+        let Some(&Item::Constraint(i)) = self.selection.first() else {
+            self.fail("Select a dimension first.".into());
+            return;
+        };
+        let Some(d) = self.sketch.constraints.get(i).and_then(|c| c.dimension()) else {
+            self.fail("Select a dimension first.".into());
+            return;
+        };
+        let (name, driven) = (d.name.clone(), d.driven);
+        let ok = self.try_change(true, |sk| {
+            let c = sk.constraints.get_mut(i).ok_or("no such dimension")?;
+            let d = c.dimension_mut().ok_or("not a dimension")?;
+            d.driven = !driven;
+            if driven && !(d.value.is_finite() && d.value > 0.0) {
+                // A signed measurement turns into its driving magnitude.
+                d.value = d.value.abs();
+            }
+            Ok(())
+        });
+        if ok {
+            self.info(if driven {
+                format!("{name} is now driving.")
+            } else {
+                format!("{name} is now driven (it measures).")
+            });
+        }
+    }
+
     pub fn begin_dim_edit(&mut self, constraint: usize, fresh: bool) {
+        if let Some(d) = self
+            .sketch
+            .constraints
+            .get(constraint)
+            .and_then(|c| c.dimension())
+            .filter(|d| d.driven)
+        {
+            self.fail(format!(
+                "{} is a driven dimension: it measures the sketch and cannot be edited (make it \
+                 driving first).",
+                d.name
+            ));
+            return;
+        }
         let value = self
             .sketch
             .constraints
@@ -2398,8 +2495,12 @@ impl SketchEditor {
             DimInput::Value(v) | DimInput::Bound { value: v, .. } => *v,
             DimInput::NewParameter { value, .. } => *value,
         };
+        // Solved with the branch-flip guard (rcad_sketch::guard): an edit that
+        // would flip an arc or reverse a line is refused by name.
         let ok = self.try_change(false, |sk| {
-            sk.set_dimension(&name, value).map_err(|e| e.to_string())
+            sk.set_dimension_solved(&name, value)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         });
         if ok {
             self.dim_edit = None;
@@ -3487,19 +3588,26 @@ mod tests {
             "{:?}",
             ed.status()
         );
-        // A third dimension of the pair is redundant (refused, sketch kept).
+        // A third dimension of the pair is redundant: added driven, the
+        // geometry and DOF are unchanged.
         let before = ed.sketch.clone();
         click(&mut ed, [0.0, 0.0]);
         click(&mut ed, [3.0, 3.0]);
-        if let Some(e) = ed.dim_edit.as_mut() {
-            e.buffer = "3".into();
-            ed.apply_dim_edit();
-        }
-        assert_eq!(ed.sketch.constraints.len(), before.constraints.len());
+        assert!(ed.dim_edit.is_none());
+        assert_eq!(ed.sketch.constraints.len(), before.constraints.len() + 1);
+        assert!(
+            ed.sketch
+                .constraints
+                .last()
+                .and_then(|c| c.dimension())
+                .is_some_and(|d| d.driven)
+        );
+        assert_eq!(ed.sketch.points, before.points);
+        assert_eq!(ed.report.status, SolveStatus::FullyConstrained);
     }
 
     #[test]
-    fn redundant_dimension_is_rejected_and_sketch_kept() {
+    fn redundant_dimension_becomes_driven() {
         let mut ed = SketchEditor::new(Sketch::default());
         ed.set_tool(SketchTool::CenterRectangle);
         click(&mut ed, [0.0, 0.0]);
@@ -3507,15 +3615,49 @@ mod tests {
         ed.set_tool(SketchTool::Dimension);
         click(&mut ed, [0.0, -20.0]); // width (bottom)
         ed.apply_dim_edit();
-        let before = ed.sketch.clone();
+        let dof = ed.report.dof;
         click(&mut ed, [0.0, 20.0]); // top line: also horizontal → redundant width
-        assert_eq!(ed.sketch, before);
-        assert!(ed.dim_edit.is_none());
+        assert!(ed.dim_edit.is_none(), "a driven dimension is not edited");
         let fb = ed.feedback.clone().expect("feedback");
+        assert!(!fb.error && fb.text.contains("driven"), "{}", fb.text);
+        let d = ed
+            .sketch
+            .constraints
+            .last()
+            .and_then(|c| c.dimension())
+            .cloned()
+            .unwrap();
+        assert!(d.driven && (d.value.abs() - 60.0).abs() < 1e-9, "{d:?}");
+        assert_eq!(ed.report.dof, dof, "no equation added");
+        // Editing the width moves the driven one.
+        let w = ed
+            .sketch
+            .constraints
+            .iter()
+            .position(|c| c.dimension().is_some_and(|d| d.name == "width"))
+            .unwrap();
+        ed.begin_dim_edit(w, false);
+        ed.dim_edit.as_mut().unwrap().buffer = "70".into();
+        assert!(ed.apply_dim_edit());
+        let d = ed
+            .sketch
+            .constraints
+            .last()
+            .and_then(|c| c.dimension())
+            .unwrap();
+        assert!((d.value.abs() - 70.0).abs() < 1e-9, "{d:?}");
+        // It cannot be edited, and making it driving is refused as redundant.
+        let i = ed.sketch.constraints.len() - 1;
+        ed.begin_dim_edit(i, false);
+        assert!(ed.dim_edit.is_none());
+        ed.selection = vec![Item::Constraint(i)];
+        let before = ed.sketch.clone();
+        ed.toggle_driven();
+        assert_eq!(ed.sketch, before);
         assert!(
-            fb.error && fb.text.contains("over-constrain"),
-            "{}",
-            fb.text
+            ed.feedback
+                .as_ref()
+                .is_some_and(|f| f.error && f.text.contains("over-constrain"))
         );
     }
 
@@ -4610,5 +4752,40 @@ mod tests {
         ] {
             assert!(p(bad, angle).is_err(), "{bad} accepted");
         }
+    }
+
+    #[test]
+    fn a_dimension_edit_that_would_flip_a_fillet_is_refused() {
+        // 2-point rectangle 0..20 x 0..10, filleted at two corners.
+        let mut ed = SketchEditor::new(Sketch::default());
+        ed.set_tool(SketchTool::CornerRectangle);
+        click(&mut ed, [0.0, 0.0]);
+        click(&mut ed, [20.0, 10.0]);
+        let corner = |ed: &SketchEditor, x: f64, y: f64| {
+            ed.sketch
+                .points
+                .iter()
+                .find(|p| (p.x - x).abs() < 1e-9 && (p.y - y).abs() < 1e-9)
+                .unwrap()
+                .id
+        };
+        let (a, b) = (corner(&ed, 20.0, 0.0), corner(&ed, 20.0, 10.0));
+        ed.sketch.fillet_corner(a, 2.0, Some("ra")).unwrap();
+        ed.sketch.fillet_corner(b, 2.0, Some("rb")).unwrap();
+        assert!(ed.sketch.solve().is_success());
+        let i = ed
+            .sketch
+            .constraints
+            .iter()
+            .position(|c| c.dimension().is_some_and(|d| d.name == "ra"))
+            .unwrap();
+        let before = ed.sketch.clone();
+        ed.begin_dim_edit(i, false);
+        ed.dim_edit.as_mut().unwrap().buffer = "9".into();
+        assert!(!ed.apply_dim_edit());
+        assert_eq!(ed.sketch, before);
+        let fb = ed.feedback.clone().unwrap();
+        assert!(fb.error && fb.text.contains("would flip"), "{}", fb.text);
+        assert!(ed.dim_edit.is_some(), "the field stays open");
     }
 }

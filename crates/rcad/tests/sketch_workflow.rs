@@ -560,9 +560,7 @@ fn scenario_c_drag_escape_undo_and_conflicts() {
     // Conflicting dimension and invalid numeric input inside a sketch.
     click(&mut h, "Create Sketch");
     centred_rectangle(&mut h, "80", "50");
-    let before = session_sketch(&h);
     sk_click(&mut h, [0.0, 25.0]); // top edge: a second width is redundant
-    assert_eq!(session_sketch(&h), before, "redundant dimension rejected");
     let fb = h
         .state()
         .sketch_session()
@@ -571,7 +569,21 @@ fn scenario_c_drag_escape_undo_and_conflicts() {
         .feedback
         .clone()
         .unwrap();
-    assert!(fb.error && fb.text.contains("over-constrain"), "{fb:?}");
+    assert!(!fb.error && fb.text.contains("driven"), "{fb:?}");
+    let driven: Vec<_> = session_sketch(&h)
+        .constraints
+        .iter()
+        .filter_map(|c| c.dimension())
+        .filter(|d| d.driven)
+        .map(|d| (d.name.clone(), d.value))
+        .collect();
+    assert_eq!(
+        driven,
+        vec![("width2".to_string(), 80.0)],
+        "redundant → driven"
+    );
+    assert_eq!(status(&h), SolveStatus::FullyConstrained);
+    let before = session_sketch(&h);
     let label = h.state().dimension_label("width").expect("width label");
     click(&mut h, "Select");
     pointer_click(&mut h, label.center());

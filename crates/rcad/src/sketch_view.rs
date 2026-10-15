@@ -528,7 +528,15 @@ pub fn paint_sketch(
                     targets.push((item, glyph(t, sp + egui::vec2(22.0, 16.0))));
                 }
             }
-            Constraint::FixedPoint { p, .. } if s.origin != Some(*p) => {
+            // Pins of projected curves follow their link: no glyph (the
+            // curve's colour says it is projected).
+            Constraint::FixedPoint { p, .. }
+                if s.origin != Some(*p)
+                    && !st
+                        .projected
+                        .iter()
+                        .any(|e| s.entity(*e).is_some_and(|x| x.points().contains(p))) =>
+            {
                 if let Some(sp) = s.point_xy(*p).and_then(|q| pr.screen(q)) {
                     targets.push((item, glyph("Fix", sp + egui::vec2(-16.0, 12.0))));
                 }
@@ -549,12 +557,15 @@ fn paint_dimension(
     editing: bool,
 ) -> Option<egui::Rect> {
     let d = c.dimension()?;
+    let v = if d.driven { d.value.abs() } else { d.value };
     let text = match c {
-        Constraint::Diameter { .. } => format!("Ø{} mm", rcad_sketch::fmt_mm(d.value)),
-        Constraint::Radius { .. } => format!("R{} mm", rcad_sketch::fmt_mm(d.value)),
-        Constraint::Angle { .. } => format!("{}°", rcad_sketch::fmt_mm(d.value)),
-        _ => format!("{} mm", rcad_sketch::fmt_mm(d.value)),
+        Constraint::Diameter { .. } => format!("Ø{} mm", rcad_sketch::fmt_mm(v)),
+        Constraint::Radius { .. } => format!("R{} mm", rcad_sketch::fmt_mm(v)),
+        Constraint::Angle { .. } => format!("{}°", rcad_sketch::fmt_mm(v)),
+        _ => format!("{} mm", rcad_sketch::fmt_mm(v)),
     };
+    // Driven (measuring) dimensions are shown in parentheses.
+    let text = if d.driven { format!("({text})") } else { text };
     let stroke = Stroke::new(1.2, col);
     match c {
         Constraint::HorizontalDistance { a, b, .. }
