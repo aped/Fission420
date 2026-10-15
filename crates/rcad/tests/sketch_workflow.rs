@@ -480,14 +480,22 @@ fn scenario_b_arbitrary_closed_profile() {
         let f = h.state().summary().features[0].clone();
         assert!(f.profile_error.is_some(), "{why}: {f:?}");
         let rev = h.state().summary().revision;
-        // The UI refuses with a visible reason...
-        assert!(
-            h.get_by_label("Extrude this sketch…")
-                .accesskit_node()
-                .is_disabled()
-        );
-        assert!(h.get_by_label("Extrude…").accesskit_node().is_disabled());
-        h.get_by_label_contains("Profile not usable:");
+        if why == "closed loop" {
+            // The UI refuses with a visible reason...
+            assert!(
+                h.get_by_label("Extrude this sketch…")
+                    .accesskit_node()
+                    .is_disabled()
+            );
+            assert!(h.get_by_label("Extrude…").accesskit_node().is_disabled());
+            h.get_by_label_contains("Profile not usable:");
+        } else {
+            // A self-crossing loop has no whole-sketch profile, but its
+            // two triangles are regions (the planar arrangement) that the
+            // Extrude dialog offers to pick.
+            let sk = f.sketch.clone().unwrap();
+            assert_eq!(sk.regions().unwrap().len(), 2, "{why}");
+        }
         // ...and the shared command path rejects it without changing the document.
         let id = f.id;
         h.state_mut()

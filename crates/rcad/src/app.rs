@@ -391,6 +391,8 @@ pub enum ConfirmAnswer {
 
 /// One step of the `--demo` script, resolved against the current document
 /// when it is submitted (feature ids come from earlier replies).
+// A short, built-once script: the size of the `Cmd` variant does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 enum DemoStep {
     Cmd(Command),

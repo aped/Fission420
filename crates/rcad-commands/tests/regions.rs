@@ -319,3 +319,72 @@ fn cut_with_a_holed_region_is_exact_and_a_single_loop_region_cuts() {
     ok(&mut s, extrude(f, 3.0, ExtrudeOp::Cut, Some(rs[2].clone())));
     assert!((volume(&s, 0) - (v0 - 1600.0 * 3.0 - 25.0 * PI * 3.0)).abs() < 1e-3);
 }
+
+/// Two overlapping circles (r = 10, centres 10 apart): the lens is picked
+/// and extruded 5 mm (closed-form lens area × 5); a radius edit regenerates
+/// the same picked face (same reference).
+#[test]
+fn extrude_the_lens_of_two_overlapping_circles() {
+    let mut sk = Sketch::default();
+    let o = sk.add_point(0.0, 0.0);
+    sk.origin = Some(o);
+    let c1 = sk.add_point(0.0, 0.0);
+    let c2 = sk.add_point(10.0, 0.0);
+    let k1 = sk.add_circle(c1, 10.0);
+    let k2 = sk.add_circle(c2, 10.0);
+    sk.constraints.extend([
+        Constraint::FixedPoint {
+            p: o,
+            x: 0.0,
+            y: 0.0,
+        },
+        Constraint::Coincident { a: c1, b: o },
+        Constraint::FixedPoint {
+            p: c2,
+            x: 10.0,
+            y: 0.0,
+        },
+        Constraint::Radius {
+            entity: k1,
+            dim: Dimension::new("r1", 10.0),
+        },
+        Constraint::Radius {
+            entity: k2,
+            dim: Dimension::new("r2", 10.0),
+        },
+    ]);
+    let lens = |r: f64, d: f64| {
+        2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+    };
+    let lens_id = sk.region_at([5.0, 0.0]).unwrap().expect("lens");
+    let mut s = Session::new();
+    ok(&mut s, Command::NewDocument);
+    let f = ok(
+        &mut s,
+        Command::CreateSketch {
+            name: None,
+            plane: SketchPlane::WorldXY,
+            template: SketchTemplate::Custom { sketch: sk },
+        },
+    )
+    .feature
+    .unwrap();
+    ok(&mut s, extrude(f, 5.0, ExtrudeOp::NewBody, Some(lens_id)));
+    let v = volume(&s, 0);
+    let want = lens(10.0, 10.0) * 5.0;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    // Both radii 12: the lens of the same circles grows, same reference.
+    for name in ["r1", "r2"] {
+        ok(
+            &mut s,
+            Command::SetParameter {
+                feature: f,
+                name: name.into(),
+                value: 12.0,
+            },
+        );
+    }
+    let v = volume(&s, 0);
+    let want = lens(12.0, 10.0) * 5.0;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}

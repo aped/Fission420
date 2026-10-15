@@ -77,14 +77,17 @@ fn three_nested_regions_with_identities_and_areas() {
     let ring = RegionRef {
         outer: sorted(outer.clone()),
         holes: vec![sorted(inner.clone())],
+        outside: vec![],
     };
     let middle = RegionRef {
         outer: sorted(inner.clone()),
         holes: vec![vec![circle]],
+        outside: vec![],
     };
     let disc = RegionRef {
         outer: vec![circle],
         holes: vec![],
+        outside: vec![],
     };
     assert_eq!(
         rs.iter()
@@ -132,12 +135,14 @@ fn identities_survive_dimension_edits_and_break_only_for_the_changed_region() {
     let ring = RegionRef {
         outer: sorted(outer),
         holes: vec![sorted(inner.clone())],
+        outside: vec![],
     };
     assert!(s.region_by_ref(&ring).unwrap().is_some());
     assert!(s.region_by_ref(&before[1]).unwrap().is_none());
     let plain_inner = RegionRef {
         outer: sorted(inner),
         holes: vec![],
+        outside: vec![],
     };
     assert!(s.region_by_ref(&plain_inner).unwrap().is_some());
     // Now one outer + one hole: the default profile works again.
@@ -159,11 +164,12 @@ fn separate_outer_loops_are_separate_regions() {
     assert!(rs.iter().all(|r| r.depth == 0));
     assert_eq!(s.region_at([20.0, 1.0]).unwrap().unwrap().outer, vec![cb]);
     assert_eq!(s.region_at([-20.0, 1.0]).unwrap().unwrap().outer, vec![ca]);
-    // Touching loops are still refused.
+    // Touching loops give regions too (the planar arrangement): the two
+    // touching discs and the separate one.
     let mut t = s.clone();
     let c = t.add_point(-12.0, 0.0);
     t.add_circle(c, 3.0);
-    assert!(t.regions().is_err());
+    assert_eq!(t.regions().unwrap().len(), 3);
 }
 
 #[test]
@@ -171,6 +177,7 @@ fn region_ref_json_shape() {
     let r = RegionRef {
         outer: vec![EntityId(1), EntityId(2), EntityId(3)],
         holes: vec![vec![EntityId(5)]],
+        outside: vec![],
     };
     let j = serde_json::to_string(&r).unwrap();
     assert_eq!(j, r#"{"outer":[1,2,3],"holes":[[5]]}"#);
