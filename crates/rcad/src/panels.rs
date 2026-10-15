@@ -609,24 +609,7 @@ impl RcadApp {
             ui.separator();
             ui.add_enabled_ui(!committing, |ui| {
                 let ed = &mut s.editor;
-                for t in [
-                    SketchTool::Select,
-                    SketchTool::Line,
-                    SketchTool::CenterRectangle,
-                    SketchTool::CornerRectangle,
-                    SketchTool::Circle,
-                    SketchTool::Arc,
-                    SketchTool::Ellipse,
-                    SketchTool::Spline,
-                    SketchTool::Dimension,
-                    SketchTool::Trim,
-                    SketchTool::Extend,
-                    SketchTool::Offset,
-                    SketchTool::Fillet,
-                    SketchTool::Slot,
-                    SketchTool::Polygon,
-                    SketchTool::Text,
-                ] {
+                for t in SketchTool::TOOLBAR {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
                         .probe(t.label())

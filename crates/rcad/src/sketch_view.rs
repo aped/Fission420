@@ -903,6 +903,7 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
             SketchTool::Select
             | SketchTool::Trim
             | SketchTool::Extend
+            | SketchTool::Break
             | SketchTool::Offset
             | SketchTool::Fillet
             | SketchTool::Text => {}

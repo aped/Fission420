@@ -28,6 +28,7 @@ mod region;
 pub mod shapes;
 mod solver;
 pub mod text;
+pub mod trim;
 
 pub use arc::{ArcGeometry, MAX_ARC_RADIUS_RATIO, arc_through_3_points};
 pub use edit::{DragOutcome, DragResult, fmt_mm};
@@ -41,6 +42,7 @@ pub use profile::{LoopSegment, Profile, loop_area};
 pub use region::{Region, RegionRef, SketchRegion};
 pub use shapes::{PolygonFit, PolygonResult, SlotResult};
 pub use text::{FontSpec, HAlign, SketchText, TextLoop, TextSpec, VAlign};
+pub use trim::{CurveEdit, arc_distance, constraint_mentions, seg_dist};
 
 /// Absolute floor of the convergence tolerance, mm.
 pub const ABS_SOLVE_TOL: f64 = 1e-9;
@@ -424,6 +426,10 @@ pub enum SketchError {
     /// Sketch text: invalid string/height or an unusable font.
     #[error("text: {0}")]
     Text(String),
+    /// A sketch edit (trim, extend, break, ...) that cannot be applied here;
+    /// the text says why. The sketch is unchanged.
+    #[error("{0}")]
+    Refused(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -1169,3 +1175,5 @@ mod tests_on_circle;
 mod tests_region;
 #[cfg(test)]
 mod tests_regions_pick;
+#[cfg(test)]
+mod tests_trim;
