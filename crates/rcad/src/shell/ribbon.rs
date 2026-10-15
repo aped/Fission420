@@ -342,7 +342,9 @@ impl RcadApp {
                         !sketching,
                         egui::Button::selectable(on, RichText::new(t.label()).small().strong()),
                     )
-                    .named(&format!("{} tab", t.label()));
+                    .named(&format!("{} tab", t.label()))
+                    .on_hover_text(t.hint())
+                    .on_disabled_hover_text("Finish or cancel the sketch to switch workspace");
                 if r.clicked() {
                     self.shell.tab = t;
                 }
@@ -423,7 +425,9 @@ impl RcadApp {
                     small: false,
                     dropdown: true,
                 });
-                let r = r.probe("Loft / Sweep");
+                let r = r.probe("Loft / Sweep").on_hover_text(
+                    "Loft between two profile sketches, or sweep a profile along a path",
+                );
                 egui::Popup::menu(&r).show(|ui| {
                     for id in [C::Loft, C::Sweep] {
                         if self.cmd_button(ui, id) {
@@ -446,7 +450,8 @@ impl RcadApp {
                         },
                     )
                     .probe("Planes")
-                    .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)");
+                    .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)")
+                    .on_disabled_hover_text("Create or open a document first");
                 egui::Popup::menu(&r).show(|ui| {
                     for id in [C::SketchXY, C::SketchXZ, C::SketchYZ] {
                         if self.cmd_button(ui, id) {
@@ -464,7 +469,11 @@ impl RcadApp {
                         small: false,
                         dropdown: true,
                     })
-                    .probe("Templates");
+                    .probe("Templates")
+                    .on_hover_text(
+                        "Printable parametric parts (new document), dimensioned sketch \
+                         templates and drag-to-place tools",
+                    );
                 egui::Popup::menu(&r).show(|ui| self.templates_menu(ui));
                 self.placement_controls(ui);
             }

@@ -149,6 +149,16 @@ impl Tab {
             Tab::Utilities => "UTILITIES",
         }
     }
+    /// What the workspace holds (tab tooltip).
+    pub fn hint(self) -> &'static str {
+        match self {
+            Tab::Solid => "Solid modeling: sketches, features, assembly, inspection",
+            Tab::Surface => "Surfaces from sketches: patches and extruded surfaces",
+            Tab::Mesh => "Mesh bodies (STL, 3MF): repair and edit",
+            Tab::SheetMetal => "Sheet metal: base faces and flanges",
+            Tab::Utilities => "Parameters and export for printing (STL, 3MF)",
+        }
+    }
 }
 
 /// Ribbon group (order of declaration = order on the tab).
