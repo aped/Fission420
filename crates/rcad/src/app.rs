@@ -2324,7 +2324,12 @@ impl RcadApp {
                     });
             });
         self.dialog_ui(ui, busy);
-        egui::CentralPanel::no_frame().show(ui, |ui| self.view_ui(ui));
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            // The timeline runs along the bottom of the canvas (the browser
+            // and inspector columns keep their height).
+            egui::Panel::bottom("rcad_timeline").show(ui, |ui| self.timeline_ui(ui));
+            self.view_ui(ui)
+        });
         if self.dialog.is_none() {
             self.last_dialog = None;
             self.shell.editing = None;

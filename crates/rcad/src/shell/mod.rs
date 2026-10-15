@@ -14,6 +14,7 @@ pub mod keymap;
 pub mod prefs;
 pub mod registry;
 pub mod ribbon;
+pub mod timeline;
 
 pub use keymap::KeymapLayer;
 pub use registry::CmdId;

@@ -288,7 +288,11 @@ fn a_pick_made_before_an_edit_is_refused_as_stale() {
     settle(&mut h);
     let n = h.state().summary().features.len();
     click(&mut h, "OK");
-    assert_eq!(h.state().summary().features.len(), n, "stale hole was added");
+    assert_eq!(
+        h.state().summary().features.len(),
+        n,
+        "stale hole was added"
+    );
     assert!((h.state().volume().unwrap() - 14400.0).abs() < 1e-6);
     let last = h.state().diagnostics().last().cloned().unwrap();
     assert!(last.error, "{last:?}");

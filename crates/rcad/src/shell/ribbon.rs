@@ -90,7 +90,7 @@ impl Widget for IconButton<'_> {
                     icons::paint(icon, ui.painter(), r, color);
                     let mut text = self.caption.to_string();
                     if self.dropdown {
-                        text.push_str(" ▾");
+                        text.push_str(" ⏷");
                     }
                     let job = egui::text::LayoutJob {
                         wrap: egui::text::TextWrapping::truncate_at_width(rect.width() - 2.0),
@@ -116,6 +116,41 @@ impl Widget for IconButton<'_> {
                     );
                 }
             }
+        }
+        resp
+    }
+}
+
+/// A group title drawn vertically beside the group's buttons; clicking it
+/// opens the group dropdown. Accessible name: the group label.
+pub struct GroupTitle<'a>(pub &'a str);
+
+impl Widget for GroupTitle<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let (rect, resp) = ui.allocate_exact_size(vec2(15.0, BTN_H), Sense::click());
+        let name = self.0.to_string();
+        resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
+        if ui.is_rect_visible(rect) {
+            let vis = ui.style().interact(&resp);
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 2.0, vis.weak_bg_fill);
+            }
+            let color = ui.visuals().weak_text_color();
+            let galley = ui.painter().layout_no_wrap(
+                format!("{} ⏷", self.0),
+                egui::FontId::proportional(8.5),
+                color,
+            );
+            // Rotated a quarter turn: reads bottom to top.
+            let w = galley.size().x.min(BTN_H);
+            let pos = egui::pos2(
+                rect.center().x - galley.size().y / 2.0,
+                rect.center().y + w / 2.0,
+            );
+            ui.painter().add(
+                egui::epaint::TextShape::new(pos, galley, color)
+                    .with_angle(-std::f32::consts::FRAC_PI_2),
+            );
         }
         resp
     }
@@ -318,27 +353,22 @@ impl RcadApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
                     ui.spacing_mut().button_padding.y = 0.0;
+                    // One row: each group's promoted buttons, then its title
+                    // as a narrow dropdown (the group's full command list).
                     for g in registry::groups(tab) {
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                for d in registry::in_group(tab, g, true) {
-                                    self.cmd_icon_button(ui, d.id, false);
+                        for d in registry::in_group(tab, g, true) {
+                            self.cmd_icon_button(ui, d.id, false);
+                        }
+                        self.ribbon_extras(ui, tab, g);
+                        let title = ui
+                            .add(GroupTitle(g.label()))
+                            .on_hover_text(format!("{} commands", g.label()));
+                        egui::Popup::menu(&title).show(|ui| {
+                            for d in registry::in_group(tab, g, false) {
+                                if self.cmd_button(ui, d.id) {
+                                    ui.close();
                                 }
-                                self.ribbon_extras(ui, tab, g);
-                            });
-                            let title = ui
-                                .menu_button(
-                                    RichText::new(format!("{} ▾", g.label())).size(9.5),
-                                    |ui| {
-                                        for d in registry::in_group(tab, g, false) {
-                                            if self.cmd_button(ui, d.id) {
-                                                ui.close();
-                                            }
-                                        }
-                                    },
-                                )
-                                .response;
-                            title.named(g.label());
+                            }
                         });
                         ui.separator();
                     }
