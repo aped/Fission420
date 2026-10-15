@@ -29,8 +29,9 @@ fn correct_results_pass_and_wrong_ones_are_caught() {
         let rep = verify_boolean_by_membership(&a, &b, &r, op, 12).unwrap();
         eprintln!("{op:?}: {rep:?}");
         assert!(rep.passed(), "{op:?}: {rep:?}");
-        // The union grid plus a grid over the tool's own bounds.
-        assert_eq!(rep.samples, 2 * 12 * 12 * 12);
+        // The union grid, a grid over the tool's own bounds, and both sides
+        // of each face's triangles (2 boxes x 6 faces x 2 triangles x 2).
+        assert_eq!(rep.samples, 2 * 12 * 12 * 12 + 2 * 6 * 2 * 2);
         assert!(rep.compared > rep.samples / 2);
         assert_eq!(rep.volume_ok, Some(true));
     }
