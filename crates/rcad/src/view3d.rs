@@ -512,7 +512,6 @@ impl RcadApp {
         }
         self.paint_view_chrome(ui, rect);
         self.view_cube(ui, rect);
-        self.nav_bar(ui, rect);
     }
 
     // ----- normal mode -----
