@@ -30,6 +30,8 @@ pub(crate) const FALLBACK_VIEW_SIZE: [f32; 2] = [800.0, 600.0];
 
 /// Max diagnostics kept in the messages panel.
 const MAX_DIAGNOSTICS: usize = 50;
+/// Seconds a refusal notice stays over the 3D view.
+pub(crate) const NOTICE_SECS: u64 = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
@@ -446,6 +448,10 @@ pub struct RcadApp {
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Latest error shown as a banner over the 3D view until dismissed.
     pub(crate) banner: Option<Diagnostic>,
+    /// Latest refusal of a key press or menu action ("Extrude: select a
+    /// sketch first"), shown over the bottom of the 3D view until dismissed,
+    /// replaced, the next command is sent, or [`NOTICE_SECS`] pass.
+    pub(crate) notice: Option<(String, Instant)>,
     pub(crate) last_export: Option<MeshCheck>,
     pub viewport: Option<Viewport>,
     /// Display-only section view; None = off.
@@ -576,6 +582,7 @@ impl RcadApp {
             last_dialog: None,
             diagnostics: vec![],
             banner: None,
+            notice: None,
             last_export: None,
             viewport: None,
             section: None,
@@ -656,6 +663,10 @@ impl RcadApp {
     }
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+    /// The refusal notice shown over the 3D view, if any.
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_ref().map(|(t, _)| t.as_str())
     }
     pub fn last_export(&self) -> Option<&MeshCheck> {
         self.last_export.as_ref()
@@ -1009,6 +1020,7 @@ impl RcadApp {
     pub fn request_token(&mut self, cmd: Command) -> Option<u64> {
         let name = cmd.name().to_string();
         if self.engine.submit(cmd) {
+            self.notice = None;
             self.in_flight.push_back((name, Instant::now()));
             self.submitted = self.engine.submitted();
             Some(self.submitted)
@@ -1035,6 +1047,13 @@ impl RcadApp {
         if self.diagnostics.len() > MAX_DIAGNOSTICS {
             self.diagnostics.remove(0);
         }
+    }
+
+    /// Tell the user why an action did nothing: logged, and shown as a
+    /// notice over the 3D view (the log alone is easy to miss).
+    pub(crate) fn notify(&mut self, text: String) {
+        self.diag(false, "info", text.clone());
+        self.notice = Some((text, Instant::now()));
     }
 
     /// Hand a new display scene to the renderer (`upload`; the viewport's

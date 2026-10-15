@@ -764,14 +764,10 @@ impl RcadApp {
                 self.shell.editing = Some(id);
                 self.last_dialog = None;
             }
-            None => self.diag(
-                false,
-                "info",
-                format!(
-                    "Edit Feature: {} has no edit dialog yet; change its values in the Inspector",
-                    f.name
-                ),
-            ),
+            None => self.notify(format!(
+                "Edit Feature: {} has no edit dialog; change its values in the Inspector",
+                f.name
+            )),
         }
     }
 

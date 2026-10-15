@@ -1282,6 +1282,53 @@ impl RcadApp {
                 Color32::from_gray(225),
             );
         }
+        self.paint_notice(ui, rect);
+    }
+
+    /// Why the last key press or menu action did nothing, above the face
+    /// line at the bottom of the view; it goes with ×, the next command,
+    /// or after a few seconds.
+    fn paint_notice(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|(_, t)| t.elapsed().as_secs() >= crate::app::NOTICE_SECS)
+        {
+            self.notice = None;
+        }
+        let Some((text, _)) = self.notice.clone() else {
+            return;
+        };
+        let painter = ui.painter_at(rect);
+        let color = Color32::from_rgb(255, 210, 120);
+        // Wrapped to the view (room for ×); the bottom edge stays above the
+        // selected-face line however many lines it takes.
+        let galley = painter.layout(
+            format!("ⓘ {text}"),
+            egui::FontId::proportional(13.5),
+            color,
+            (rect.width() - 150.0).max(160.0),
+        );
+        let size = galley.size() + egui::vec2(10.0, 6.0);
+        let r = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x + 110.0, rect.max.y - 40.0 - size.y),
+            size,
+        );
+        painter.rect_filled(r, 4.0, Color32::from_black_alpha(200));
+        painter.galley(r.min + egui::vec2(5.0, 3.0), galley, color);
+        let btn = egui::Rect::from_min_size(
+            egui::pos2(r.max.x + 4.0, r.min.y),
+            egui::vec2(22.0, r.height()),
+        );
+        if ui
+            .put(btn, egui::Button::new("×"))
+            .on_hover_text("Dismiss")
+            .named("Dismiss notice")
+            .probe("Dismiss notice")
+            .clicked()
+        {
+            self.notice = None;
+        }
     }
 
     fn empty_state(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {

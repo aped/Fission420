@@ -725,7 +725,7 @@ impl RcadApp {
         let d = registry::def(id);
         match (d.enabled)(self) {
             Ok(()) => (d.run)(self),
-            Err(why) => self.diag(false, "info", format!("{}: {why}", d.label)),
+            Err(why) => self.notify(format!("{}: {why}", d.label)),
         }
     }
 
