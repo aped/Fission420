@@ -44,13 +44,15 @@ pub fn split_pieces(body: &Body) -> Result<Vec<Body>> {
         // a void (inward shell); any chord that keeps the mesh closed gives
         // the sign, the size only bounds the cost.
         let chord = tol::MESH_CHORD.max(1e-3 * diag);
-        let check = check_mesh(&tessellate(&piece, chord)?);
+        let mesh = tessellate(&piece, chord)?;
+        let check = check_mesh(&mesh);
         if !check.watertight {
             return Err(KernelError::InvalidResult(format!(
                 "piece {} of the result does not tessellate to a closed mesh",
                 i + 1
             )));
         }
+        check_not_self_crossing(&mesh, chord, i)?;
         if check.mesh_volume <= 0.0 {
             return Err(KernelError::InvalidResult(
                 "the result would enclose an internal void (a cavity closed on all sides); \
@@ -63,6 +65,23 @@ pub fn split_pieces(body: &Body) -> Result<Vec<Body>> {
     }
     pieces.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(pieces.into_iter().map(|(_, p)| p).collect())
+}
+
+/// A closed piece shell can still pass through itself (a wrong boolean that
+/// kept overlapping walls). Crossings within two chords are what the
+/// tessellations of surfaces meeting tangentially can show, so they do not
+/// count; past the test budget nothing is claimed. `i`: piece index.
+fn check_not_self_crossing(mesh: &crate::TriMesh, chord: f64, i: usize) -> Result<()> {
+    match crate::self_intersection(mesh, 2.0 * chord, 4_000_000).found {
+        Some((_, _, p)) => Err(KernelError::InvalidResult(format!(
+            "piece {} of the result passes through itself near ({:.3}, {:.3}, {:.3}) mm",
+            i + 1,
+            p[0],
+            p[1],
+            p[2]
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Lowest bounding-box corner, compared lexicographically with `total_cmp`.
@@ -331,5 +350,104 @@ mod interior_tests {
         assert!(p[1][0] > 39.0 && p[1][0] < 40.0, "{p:?}");
         let q = piece_seeds(&left, &[&right]).unwrap();
         assert!(q[1][0] > 0.0 && q[1][0] < 1.0, "{q:?}");
+    }
+}
+
+#[cfg(test)]
+mod self_intersection_tests {
+    use super::*;
+
+    fn block(x0: f64, y0: f64, z0: f64, s: f64) -> Body {
+        let pts = vec![[x0, y0], [x0 + s, y0], [x0 + s, y0 + s], [x0, y0 + s]];
+        crate::extrude(
+            &crate::Profile::Polygon(pts),
+            &crate::Frame::XY.offset(z0),
+            s,
+        )
+        .unwrap()
+    }
+
+    fn shell(b: &Body) -> Shell {
+        b.solid.boundaries()[0].clone()
+    }
+
+    /// A closed mesh that passes through itself (two interpenetrating cube
+    /// meshes) is refused by the piece check; each cube alone passes.
+    #[test]
+    fn self_crossing_piece_mesh_is_refused() {
+        let chord = tol::MESH_CHORD;
+        let mesh = |b: &Body| tessellate(b, chord).unwrap();
+        let (a, b) = (
+            mesh(&block(0.0, 0.0, 0.0, 10.0)),
+            mesh(&block(5.0, 5.0, 5.0, 10.0)),
+        );
+        check_not_self_crossing(&a, chord, 0).unwrap();
+        check_not_self_crossing(&b, chord, 0).unwrap();
+        let mut both = a.clone();
+        let off = both.positions.len() as u32;
+        both.positions.extend(&b.positions);
+        both.normals.extend(&b.normals);
+        both.triangles
+            .extend(b.triangles.iter().map(|t| t.map(|v| v + off)));
+        both.tri_face.extend(&b.tri_face);
+        assert!(
+            check_mesh(&both).watertight,
+            "closed, so only the crossing check sees it"
+        );
+        let e = check_not_self_crossing(&both, chord, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("piece 2 of the result passes through itself"),
+            "{e}"
+        );
+        // Touching cubes (a shared face plane, no overlap) do not cross.
+        let mut touch = a.clone();
+        let c = mesh(&block(10.0, 0.0, 0.0, 10.0));
+        let off = touch.positions.len() as u32;
+        touch.positions.extend(&c.positions);
+        touch.normals.extend(&c.normals);
+        touch
+            .triangles
+            .extend(c.triangles.iter().map(|t| t.map(|v| v + off)));
+        touch.tri_face.extend(&c.tri_face);
+        check_not_self_crossing(&touch, chord, 0).unwrap();
+        // Split results still split.
+        let far = block(100.0, 0.0, 0.0, 10.0);
+        let good = Body {
+            solid: Solid::new_unchecked(vec![shell(&far), shell(&block(30.0, 0.0, 0.0, 10.0))]),
+        };
+        assert_eq!(split_pieces(&good).unwrap().len(), 2);
+    }
+
+    /// Correct curved pieces (a holed block, a cylinder) show no crossing
+    /// at the chord-based tolerance.
+    #[test]
+    fn curved_pieces_do_not_self_intersect() {
+        let holed = crate::cut_prism(
+            &block(0.0, 0.0, 0.0, 20.0),
+            &crate::Profile::Circle {
+                center: [10.0, 10.0],
+                radius: 4.0,
+            },
+            &crate::Frame::XY.offset(-1.0),
+            22.0,
+        )
+        .unwrap();
+        let cyl = crate::extrude(
+            &crate::Profile::Circle {
+                center: [0.0, 0.0],
+                radius: 3.0,
+            },
+            &crate::Frame::XY,
+            7.0,
+        )
+        .unwrap();
+        for b in [holed, cyl] {
+            let chord = tol::MESH_CHORD;
+            let m = tessellate(&b, chord).unwrap();
+            let r = crate::self_intersection(&m, 2.0 * chord, 4_000_000);
+            assert!(r.complete && r.found.is_none(), "{r:?}");
+        }
     }
 }

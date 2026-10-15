@@ -1094,6 +1094,161 @@ pub fn vertex_points(body: &Body) -> Result<Vec<VertexPoint>> {
     })
 }
 
+/// Result of [`self_intersection`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelfIntersection {
+    /// A crossing pair of triangles and a point near the crossing.
+    pub found: Option<(usize, usize, [f64; 3])>,
+    /// Every candidate pair was tested (false: the test budget ran out, and
+    /// "none found" proves nothing).
+    pub complete: bool,
+}
+
+/// Whether two triangles of a closed mesh cross by more than `eps`: each has
+/// vertices more than `eps` on both sides of the other's plane, and their
+/// intervals on the common line overlap by more than `eps`. Contacts and
+/// crossings within `eps` (tessellations of surfaces that meet tangentially)
+/// do not count; coplanar overlaps are not tested.
+fn triangles_cross(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3], eps: f64) -> bool {
+    let unit = |n: [f64; 3]| {
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        (l > 0.0).then(|| n.map(|x| x / l))
+    };
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let (Some(na), Some(nb)) = (
+        unit(cross3(sub3(a[1], a[0]), sub3(a[2], a[0]))),
+        unit(cross3(sub3(b[1], b[0]), sub3(b[2], b[0]))),
+    ) else {
+        return false;
+    };
+    let side = |t: &[[f64; 3]; 3], o: [f64; 3], n: [f64; 3]| t.map(|p| dot(sub3(p, o), n));
+    let straddles = |d: [f64; 3]| {
+        d.iter().copied().fold(f64::NEG_INFINITY, f64::max) > eps
+            && d.iter().copied().fold(f64::INFINITY, f64::min) < -eps
+    };
+    let (da, db) = (side(a, b[0], nb), side(b, a[0], na));
+    if !straddles(da) || !straddles(db) {
+        return false;
+    }
+    let Some(dir) = unit(cross3(na, nb)) else {
+        return false;
+    };
+    // Interval of `t` on the line: where its edges cross the other plane.
+    let interval = |t: &[[f64; 3]; 3], d: [f64; 3]| {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+            if (d[i] > 0.0) != (d[j] > 0.0) && d[i] != d[j] {
+                let s = d[i] / (d[i] - d[j]);
+                let p = [0, 1, 2].map(|k| t[i][k] + s * (t[j][k] - t[i][k]));
+                let x = dot(p, dir);
+                lo = lo.min(x);
+                hi = hi.max(x);
+            }
+        }
+        (lo, hi)
+    };
+    let ((a0, a1), (b0, b1)) = (interval(a, da), interval(b, db));
+    a1.min(b1) - a0.max(b0) > eps
+}
+
+/// Bounded self-intersection test of a closed triangle mesh: pairs of
+/// triangles that share no vertex (vertices compared by exact position) and
+/// cross by more than `eps` ([`triangles_cross`]). A uniform grid of the
+/// triangles' boxes limits the candidates; at most `max_tests` pairs are
+/// tested.
+pub fn self_intersection(m: &TriMesh, eps: f64, max_tests: usize) -> SelfIntersection {
+    let tris: Vec<[[f64; 3]; 3]> = m
+        .triangles
+        .iter()
+        .map(|t| t.map(|i| m.positions[i as usize]))
+        .collect();
+    let key = |p: [f64; 3]| p.map(f64::to_bits);
+    let keys: Vec<[[u64; 3]; 3]> = tris.iter().map(|t| t.map(key)).collect();
+    let n = tris.len();
+    if n < 2 {
+        return SelfIntersection {
+            found: None,
+            complete: true,
+        };
+    }
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for t in &tris {
+        for p in t {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+    }
+    // About one triangle per cell on average, at most 128 cells per axis.
+    let cells = ((n as f64).cbrt().ceil() as usize).clamp(1, 128);
+    let size = [0, 1, 2].map(|k| ((hi[k] - lo[k]) / cells as f64).max(f64::MIN_POSITIVE));
+    let cell_of = |x: f64, k: usize| (((x - lo[k]) / size[k]) as usize).min(cells - 1);
+    let tbox = |t: &[[f64; 3]; 3]| {
+        let mn = [0, 1, 2].map(|k| t.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min));
+        let mx = [0, 1, 2].map(|k| t.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
+        (mn, mx)
+    };
+    let mut grid: HashMap<[usize; 3], Vec<u32>> = HashMap::new();
+    let boxes: Vec<_> = tris.iter().map(tbox).collect();
+    for (i, (mn, mx)) in boxes.iter().enumerate() {
+        let (c0, c1) = (
+            [0, 1, 2].map(|k| cell_of(mn[k], k)),
+            [0, 1, 2].map(|k| cell_of(mx[k], k)),
+        );
+        for x in c0[0]..=c1[0] {
+            for y in c0[1]..=c1[1] {
+                for z in c0[2]..=c1[2] {
+                    grid.entry([x, y, z]).or_default().push(i as u32);
+                }
+            }
+        }
+    }
+    // Cells in a fixed order, so the first pair reported is deterministic.
+    let mut cell_keys: Vec<[usize; 3]> = grid.keys().copied().collect();
+    cell_keys.sort_unstable();
+    let mut tests = 0usize;
+    for c in cell_keys {
+        let list = &grid[&c];
+        for (x, &i) in list.iter().enumerate() {
+            for &j in &list[x + 1..] {
+                let (i, j) = (i as usize, j as usize);
+                let ((ai, bi), (aj, bj)) = (boxes[i], boxes[j]);
+                if (0..3).any(|k| ai[k] > bj[k] + eps || aj[k] > bi[k] + eps) {
+                    continue;
+                }
+                // Test a pair only in the lowest cell both boxes share.
+                let low = [0, 1, 2].map(|k| cell_of(ai[k].max(aj[k]), k));
+                if low != c {
+                    continue;
+                }
+                if keys[i].iter().any(|p| keys[j].contains(p)) {
+                    continue;
+                }
+                tests += 1;
+                if tests > max_tests {
+                    return SelfIntersection {
+                        found: None,
+                        complete: false,
+                    };
+                }
+                if triangles_cross(&tris[i], &tris[j], eps) {
+                    let p =
+                        [0, 1, 2].map(|k| (tris[i][0][k] + tris[i][1][k] + tris[i][2][k]) / 3.0);
+                    return SelfIntersection {
+                        found: Some((i, j, p)),
+                        complete: true,
+                    };
+                }
+            }
+        }
+    }
+    SelfIntersection {
+        found: None,
+        complete: true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
