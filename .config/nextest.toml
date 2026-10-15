@@ -1,0 +1,40 @@
+# cargo-nextest configuration. `cargo xtask check` uses the `default` profile locally and
+# the `ci` profile when the CI environment variable is set (GitHub Actions sets it);
+# NEXTEST_PROFILE overrides both. See docs/CI.md.
+
+[profile.default]
+# Report tests running longer than a minute; never kill them locally.
+slow-timeout = { period = "60s" }
+fail-fast = false
+
+[profile.ci]
+fail-fast = false
+# Slow tests are reported every 60 s and killed after 15 periods. The slowest legitimate
+# tests take about 3 minutes on a 16-thread desktop and up to about 3x that on a 4-vCPU
+# runner, so 15 minutes only stops a hung test, well before the job timeout.
+slow-timeout = { period = "60s", terminate-after = 15, grace-period = "10s" }
+# No blanket retries: a failure is a failure. The exceptions are listed below by filter.
+retries = 0
+# Failures are printed as they happen and again in the summary; flaky (passed on retry)
+# and slow tests are listed in the final summary so they are not lost.
+failure-output = "immediate-final"
+success-output = "never"
+status-level = "retry"
+final-status-level = "flaky"
+
+[profile.ci.junit]
+# Written to target/nextest/ci/junit.xml; uploaded by the CI test jobs.
+path = "junit.xml"
+
+# Threaded-engine UI tests with wall-clock guards (20-120 s) tuned on a fast desktop. They
+# guard against hangs, not performance; on a loaded shared runner one may exceed its bound.
+# One retry each; a retry that passes shows up as FLAKY in the log and in junit.xml.
+[[profile.ci.overrides]]
+filter = "package(rcad) & (binary(exchange_ui) | binary(measure_imports) | binary(frame_pacing))"
+retries = 1
+
+# The slowest tests start first, so none of them is left to run alone at the end of a shard.
+# Keep the list short: the slowest few test files.
+[[profile.ci.overrides]]
+filter = "binary(cross_process_determinism) | binary(arc_fuzz) | binary(gate_fuzz) | binary(rounded_enclosure)"
+priority = 50
