@@ -488,3 +488,118 @@ fn overlay_projects_polylines_and_dashes() {
     ov.polylines[0].points = vec![behind, math::add(behind, [1.0, 0.0, 0.0])];
     assert!(overlay_shapes(&c, rect, &ov).is_empty());
 }
+
+/// A fine grid surface with ridges: `n` x `n` quads (2 triangles each) over
+/// [0, 100]², z a smooth bump, one group per row.
+fn wavy_grid(n: usize) -> RenderMesh {
+    let mut m = RenderMesh::default();
+    for j in 0..=n {
+        for i in 0..=n {
+            let (x, y) = (100.0 * i as f32 / n as f32, 100.0 * j as f32 / n as f32);
+            m.positions
+                .push([x, y, 5.0 * (x * 0.05).sin() * (y * 0.07).cos()]);
+        }
+    }
+    let at = |i: usize, j: usize| (j * (n + 1) + i) as u32;
+    for j in 0..n {
+        for i in 0..n {
+            m.indices.extend([at(i, j), at(i + 1, j), at(i + 1, j + 1)]);
+            m.indices.extend([at(i, j), at(i + 1, j + 1), at(i, j + 1)]);
+            m.tri_group.extend([j as u32, j as u32]);
+        }
+    }
+    m
+}
+
+/// The viewport's hover pick through the hierarchy returns exactly what the
+/// plain scan returns (same depth bits, triangle and group), with and without
+/// a section plane, including rays through shared edges and vertices.
+#[test]
+fn hierarchy_face_pick_matches_the_plain_scan() {
+    let m = wavy_grid(60);
+    let scene = PickScene::new(&m, &[], &[]).unwrap();
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f32 / (1u64 << 53) as f32
+    };
+    let section = SectionPlane {
+        normal: [0.6, 0.0, 0.8],
+        offset: 40.0,
+    };
+    let mut hits = 0;
+    for k in 0..4000 {
+        // Every 4th ray straight down through a grid vertex (ties between triangles).
+        let (x, y) = if k % 4 == 0 {
+            (
+                (rnd() * 60.0).floor() * 100.0 / 60.0,
+                (rnd() * 60.0).floor() * 100.0 / 60.0,
+            )
+        } else {
+            (rnd() * 120.0 - 10.0, rnd() * 120.0 - 10.0)
+        };
+        let dir = if k % 4 == 0 {
+            [0.0, 0.0, -1.0]
+        } else {
+            let d = [rnd() - 0.5, rnd() - 0.5, -1.0];
+            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            [d[0] / l, d[1] / l, d[2] / l]
+        };
+        let ray = Ray {
+            origin: [x, y, 50.0],
+            dir,
+        };
+        for s in [None, Some(section)] {
+            let a = m.pick_section(&ray, s);
+            let b = scene.pick_face_section(&ray, s);
+            assert_eq!(
+                a.map(|(d, t, g)| (d.to_bits(), t, g)),
+                b.map(|(d, t, g)| (d.to_bits(), t, g)),
+                "ray {ray:?} section {s:?}"
+            );
+            hits += usize::from(a.is_some());
+        }
+    }
+    assert!(hits > 4000, "{hits}");
+}
+
+/// Hover-pick cost on a 2-million-triangle mesh: plain scan vs hierarchy.
+/// `cargo test -p rcad-viewport --release hover_pick_timing -- --ignored --nocapture`
+#[test]
+#[ignore = "timing report; run explicitly"]
+fn hover_pick_timing() {
+    let m = wavy_grid(1000);
+    let t = std::time::Instant::now();
+    let scene = PickScene::new(&m, &[], &[]).unwrap();
+    let build = t.elapsed().as_secs_f64();
+    let rays: Vec<Ray> = (0..200)
+        .map(|k| Ray {
+            origin: [
+                (k % 20) as f32 * 5.0 + 1.3,
+                (k / 20) as f32 * 10.0 + 2.1,
+                50.0,
+            ],
+            dir: [0.0, 0.0, -1.0],
+        })
+        .collect();
+    let t = std::time::Instant::now();
+    let a: Vec<_> = rays.iter().map(|r| m.pick_section(r, None)).collect();
+    let scan = t.elapsed().as_secs_f64() / rays.len() as f64;
+    let t = std::time::Instant::now();
+    let b: Vec<_> = rays
+        .iter()
+        .map(|r| scene.pick_face_section(r, None))
+        .collect();
+    let tree = t.elapsed().as_secs_f64() / rays.len() as f64;
+    assert_eq!(a, b);
+    eprintln!(
+        "BENCH hover pick, {} triangles: plain scan {:.3} ms/pick, hierarchy {:.4} ms/pick \
+         (built once per mesh in {:.1} ms)",
+        m.triangle_count(),
+        scan * 1e3,
+        tree * 1e3,
+        build * 1e3
+    );
+}

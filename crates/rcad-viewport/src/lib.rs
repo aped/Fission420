@@ -75,6 +75,8 @@ pub struct Viewport {
     gpu: Gpu,
     pub camera: Camera,
     mesh: RenderMesh,
+    /// Picking hierarchy of `mesh` (hover picks every frame).
+    picker: PickScene,
     mesh_bounds: Option<Aabb>,
     /// Group id per expanded (de-indexed) mesh vertex, for selection flags.
     vertex_groups: Vec<u32>,
@@ -115,6 +117,7 @@ impl Viewport {
             gpu: Gpu::new(rs),
             camera: Camera::default(),
             mesh: RenderMesh::default(),
+            picker: PickScene::default(),
             mesh_bounds: None,
             vertex_groups: vec![],
             edges: vec![],
@@ -146,6 +149,7 @@ impl Viewport {
         self.gpu.set_mesh(&verts, &flags);
         self.edges = feature_edges(mesh);
         self.upload_edges();
+        self.picker = PickScene::new(mesh, &[], &[])?;
         self.mesh = mesh.clone();
         self.mesh_bounds = mesh.bounds();
         self.hovered = None;
@@ -312,8 +316,8 @@ impl Viewport {
             let ray = self
                 .camera
                 .ray(local.x, local.y, rect.width(), rect.height())?;
-            self.mesh
-                .pick_section(&ray, self.section)
+            self.picker
+                .pick_face_section(&ray, self.section)
                 .map(|(_, _, g)| g)
         });
 

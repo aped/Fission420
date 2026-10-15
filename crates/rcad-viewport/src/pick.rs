@@ -347,6 +347,35 @@ impl PickScene {
         best.get()
     }
 
+    /// Exactly [`RenderMesh::pick_section`] of the mesh this scene was built
+    /// from (the nearest hit on the visible side of `section`, the lowest
+    /// triangle index among equally near hits), through the hierarchy instead
+    /// of every triangle. Boxes are grown by a small margin so rounding in the
+    /// box test cannot drop a hit the plain scan finds.
+    pub fn pick_face_section(
+        &self,
+        ray: &Ray,
+        section: Option<crate::SectionPlane>,
+    ) -> Option<(f32, usize, u32)> {
+        let best = std::cell::Cell::new(None::<(f32, usize, u32)>);
+        self.tri_bvh.visit(
+            ray,
+            |far| 1.0e-4 * (1.0 + far),
+            || best.get().map_or(f32::INFINITY, |b| b.0),
+            |i| {
+                let i = i as usize;
+                if let Some(d) = ray_triangle(ray, self.tris[i])
+                    && best.get().is_none_or(|b| (d, i) < (b.0, b.1))
+                    && section
+                        .is_none_or(|s| s.keeps(math::add(ray.origin, math::scale(ray.dir, d))))
+                {
+                    best.set(Some((d, i, self.tri_group[i])));
+                }
+            },
+        );
+        best.get()
+    }
+
     /// Vertex, else edge, else face under the ray (see the module docs).
     pub fn pick(&self, ray: &Ray, tol: PixelTolerance) -> Option<Pick> {
         let face = self.pick_face(ray);
