@@ -2156,11 +2156,18 @@ impl RcadApp {
                     } => {
                         use crate::app::PatternKind;
                         ui.label(format!("Seed: {}", self.feature_name(*feature)));
-                        ui.horizontal(|ui| {
-                            ui.radio_value(kind, PatternKind::Linear, "Linear");
-                            ui.radio_value(kind, PatternKind::Circular, "Circular");
-                            ui.radio_value(kind, PatternKind::Mirror, "Mirror");
-                        });
+                        // Edit Feature keeps the feature type (a stored
+                        // linear pattern stays linear).
+                        let fixed = self.shell.editing.is_some();
+                        ui.add_enabled_ui(!fixed, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.radio_value(kind, PatternKind::Linear, "Linear");
+                                ui.radio_value(kind, PatternKind::Circular, "Circular");
+                                ui.radio_value(kind, PatternKind::Mirror, "Mirror");
+                            })
+                        })
+                        .response
+                        .on_disabled_hover_text("Edit Feature cannot change the feature type");
                         match kind {
                             PatternKind::Linear => {
                                 num_field(ui, "Pattern count", count);

@@ -304,3 +304,209 @@ fn hole_diameter_through_edit_feature() {
         "edited in place"
     );
 }
+
+/// A 40 × 30 × 10 plate (Extrude1) and the reference of its top face.
+fn plate(h: &mut Harness<'_, RcadApp>) -> (FeatureId, rcad_document::FaceRef) {
+    click(h, "New");
+    let s = h.state_mut();
+    s.request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: None,
+        },
+    });
+    s.request(Command::extrude(None, FeatureId(1), 10.0));
+    settle(h);
+    assert_volume(h, 12000.0);
+    let plate = h.state().feature_by_name("Extrude1").expect("Extrude1").id;
+    let SketchPlane::Face(top) = end_cap_of(plate) else {
+        unreachable!()
+    };
+    (plate, top)
+}
+
+/// The last feature's name (the one a test just made).
+fn last_name(h: &Harness<'_, RcadApp>) -> String {
+    h.state().summary().features.last().unwrap().name.clone()
+}
+
+/// The text a value field shows.
+fn field_shows(h: &Harness<'_, RcadApp>, label: &str, want: &str) {
+    let node = format!("{:?}", h.get_by_label(label).accesskit_node());
+    assert!(node.contains(&format!("\"{want}\"")), "{label}: {node}");
+}
+
+/// Edit Feature on a face shell: prefilled thickness, a thinner wall
+/// replaces it in place, Undo restores it. Walls and floor equal the
+/// thickness: 12000 − (40 − 2t)(30 − 2t)(10 − t).
+#[test]
+fn shell_thickness_through_edit_feature() {
+    let mut h = harness();
+    let (_, top) = plate(&mut h);
+    h.state_mut().request(Command::ShellFace {
+        name: None,
+        face: top,
+        thickness: 2.0,
+    });
+    settle(&mut h);
+    let shell = |t: f64| 12000.0 - (40.0 - 2.0 * t) * (30.0 - 2.0 * t) * (10.0 - t);
+    assert_volume(&h, shell(2.0));
+    let n = h.state().summary().features.len();
+    let name = last_name(&h);
+    edit(&mut h, &name);
+    field_shows(&h, "Shell thickness (mm)", "2");
+    type_into(&mut h, "Shell thickness (mm)", "1");
+    click(&mut h, "OK");
+    assert_volume(&h, shell(1.0));
+    assert_eq!(h.state().summary().features.len(), n);
+    assert_eq!(last_name(&h), name, "edited in place");
+    h.state_mut().request(Command::Undo);
+    settle(&mut h);
+    assert_volume(&h, shell(2.0));
+}
+
+/// Edit Feature on a chamfer loop of the top face: the distance is
+/// prefilled and a parameter expression binds it. The removed ring is a
+/// prismatoid: d·W·H − d/6·(W·H + 4(W − d)(H − d) + (W − 2d)(H − 2d)).
+#[test]
+fn chamfer_loop_distance_binds_through_edit_feature() {
+    let mut h = harness();
+    let (_, top) = plate(&mut h);
+    h.state_mut().request(Command::ChamferLoop {
+        name: None,
+        face: top,
+        distance: 1.0,
+        holes: false,
+    });
+    h.state_mut().request(Command::SetUserParameter {
+        name: "edge".into(),
+        expression: "2".into(),
+        unit: None,
+        comment: None,
+    });
+    settle(&mut h);
+    let ring = |d: f64| {
+        let (w, l) = (40.0, 30.0);
+        d * w * l - d / 6.0 * (w * l + 4.0 * (w - d) * (l - d) + (w - 2.0 * d) * (l - 2.0 * d))
+    };
+    assert_volume(&h, 12000.0 - ring(1.0));
+    let name = last_name(&h);
+    edit(&mut h, &name);
+    field_shows(&h, "Chamfer distance (mm)", "1");
+    type_into(&mut h, "Chamfer distance (mm)", "edge");
+    click(&mut h, "OK");
+    assert_volume(&h, 12000.0 - ring(2.0));
+    let f = h.state().feature_by_name(&name).unwrap();
+    assert_eq!(
+        f.expressions.get("distance").map(String::as_str),
+        Some("edge")
+    );
+    // Reopened, the field shows the expression, not its value.
+    edit(&mut h, &name);
+    field_shows(&h, "Chamfer distance (mm)", "edge");
+    click(&mut h, "Cancel");
+}
+
+/// Edit Feature on an edge chamfer (top face and a side face): the
+/// distance is prefilled; the wedge is d²/2 · edge length.
+#[test]
+fn edge_chamfer_distance_through_edit_feature() {
+    let mut h = harness();
+    let (plate, top) = plate(&mut h);
+    // A side wall of the plate, and the length of its top edge.
+    let side = h
+        .state()
+        .summary()
+        .features
+        .iter()
+        .find(|f| f.id == plate)
+        .unwrap()
+        .faces
+        .iter()
+        .find(|f| {
+            matches!(
+                f.reference.role,
+                rcad_document::FaceRole::ExtrudeSide { .. }
+            )
+        })
+        .cloned()
+        .expect("side face");
+    let len = if side.frame.z[0].abs() > 0.5 {
+        30.0
+    } else {
+        40.0
+    };
+    h.state_mut().request(Command::Chamfer {
+        name: None,
+        a: top,
+        b: side.reference,
+        distance: 1.0,
+    });
+    settle(&mut h);
+    assert_volume(&h, 12000.0 - 0.5 * len);
+    let name = last_name(&h);
+    edit(&mut h, &name);
+    field_shows(&h, "Chamfer distance (mm)", "1");
+    type_into(&mut h, "Chamfer distance (mm)", "2");
+    click(&mut h, "OK");
+    assert_volume(&h, 12000.0 - 2.0 * len);
+}
+
+/// Edit Feature on a linear pattern of a Ø4 through hole: the count and
+/// spacing are prefilled, the pattern type cannot change, and two
+/// instances replace three (12000 − n·π·2²·10).
+#[test]
+fn linear_pattern_count_through_edit_feature() {
+    let mut h = harness();
+    let (plate, _) = plate(&mut h);
+    let body = h.state().summary().bodies[0].id;
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: end_cap_of(plate),
+        template: SketchTemplate::CenteredCircle {
+            diameter: 4.0,
+            center: Some([-10.0, 0.0]),
+        },
+    });
+    settle(&mut h);
+    let circle = h.state().summary().features.last().unwrap().id;
+    h.state_mut().request(Command::Extrude {
+        name: None,
+        sketch: circle,
+        distance: 10.0,
+        op: ExtrudeOp::Cut,
+        target: Some(body),
+        through_all: true,
+        reverse: false,
+        body_name: None,
+        region: None,
+        options: Default::default(),
+    });
+    settle(&mut h);
+    let seed = h.state().summary().features.last().unwrap().id;
+    h.state_mut().request(Command::LinearPattern {
+        name: None,
+        feature: seed,
+        count: 3,
+        spacing: 10.0,
+        direction: [1.0, 0.0],
+        second: None,
+    });
+    settle(&mut h);
+    let holes = |n: f64| 12000.0 - n * PI * 4.0 * 10.0;
+    assert_volume(&h, holes(3.0));
+    let name = last_name(&h);
+    edit(&mut h, &name);
+    field_shows(&h, "Pattern count", "3");
+    field_shows(&h, "Pattern spacing (mm)", "10");
+    // The type is fixed while editing: Circular does nothing.
+    click(&mut h, "Circular");
+    h.get_by_label("Pattern spacing (mm)");
+    type_into(&mut h, "Pattern count", "2");
+    click(&mut h, "OK");
+    assert_volume(&h, holes(2.0));
+    assert_eq!(last_name(&h), name, "edited in place");
+}
