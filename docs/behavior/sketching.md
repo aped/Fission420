@@ -194,6 +194,20 @@ ring (outer minus inner rectangle), the inner rectangle minus the circle, and th
 * API: `Sketch::regions()` (each with `RegionRef`, depth, area), `Sketch::region_by_ref`,
   `Sketch::region_at(point)`; tests `crates/rcad-sketch/src/tests_regions_pick.rs`,
   `crates/rcad-commands/tests/regions.rs`, `crates/rcad/tests/region_pick_ui.rs`.
+* **Crossing, touching and T-joined curves** (as Fusion offers them): when the curves are not
+  disjoint simple loops, the regions are the bounded faces of their planar arrangement. Lines,
+  arcs and circles are split at their exact intersections (and where an end lies on another
+  curve), dangling pieces (overhangs, stems) are ignored, and each bounded face is a region with
+  exact line/arc loops (no polygonisation); a component inside a face is its hole. Examples: two
+  overlapping circles give three regions (the lens and two crescents), a line across a rectangle
+  gives two, a self-crossing bow-tie gives two triangles. The whole-sketch default profile still
+  refuses such sketches ("pick one region"). Identity: `RegionRef` adds `outside`, the boundary
+  entities the face lies to the right of (a line against its a→b direction, a circle or arc
+  clockwise), so faces bounded by the same entities (lens and crescents) differ; faces that are
+  still identical are refused rather than told apart by position. Not supported (refused by
+  name): ellipses, splines and text in such a sketch, and overlapping (coincident) curves. The
+  offset tool still requires its copy to be a separate loop. Tests
+  `crates/rcad-sketch/src/tests_arrange.rs`, `regions.rs::extrude_the_lens_of_two_overlapping_circles`.
 
 ## Sketch text
 

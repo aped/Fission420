@@ -142,6 +142,7 @@ fn lip_opening_by_offset_matches_the_analytic_lid_volume_and_follows_wall() {
     let region = RegionRef {
         outer: inner,
         holes: vec![],
+        outside: vec![],
     };
     let cut = ok(
         &mut s,

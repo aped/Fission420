@@ -365,6 +365,11 @@ pub struct RegionRef {
     pub outer: Vec<EntityId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<Vec<EntityId>>,
+    /// Regions of crossing curves (`crate::arrange`): the boundary entities
+    /// the region lies to the right of (a line against its a→b direction, a
+    /// circle or arc clockwise), sorted. Empty for disjoint loops.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<EntityId>,
 }
 
 impl RegionRef {
@@ -381,7 +386,12 @@ impl RegionRef {
         RegionRef {
             outer: sorted(outer),
             holes,
+            outside: vec![],
         }
+    }
+
+    pub(crate) fn of_parts(outer: &[EntityId], holes: &[&[EntityId]]) -> Self {
+        Self::of(outer, holes)
     }
 
     /// Short label, e.g. `E1-4 − E5-8` (entity ids of the outer loop, minus holes).
@@ -405,6 +415,11 @@ impl RegionRef {
         for h in &self.holes {
             s.push_str(" − ");
             s.push_str(&ids(h));
+        }
+        if !self.outside.is_empty() {
+            s.push_str(" (outside ");
+            s.push_str(&ids(&self.outside));
+            s.push(')');
         }
         s
     }
@@ -434,13 +449,36 @@ fn loop_area(p: &Profile) -> f64 {
 /// Loops may nest to any depth and there may be several outermost loops. Sorted
 /// by (depth, identity), so the order is deterministic but carries no identity.
 pub(crate) fn regions(s: &Sketch) -> Result<Vec<SketchRegion>, SketchError> {
+    regions_with(s, true)
+}
+
+/// Regions of disjoint simple loops only (no arrangement fallback): the
+/// offset tool's check that its copy is a separate loop.
+pub(crate) fn regions_disjoint(s: &Sketch) -> Result<Vec<SketchRegion>, SketchError> {
+    regions_with(s, false)
+}
+
+fn regions_with(s: &Sketch, arrangement: bool) -> Result<Vec<SketchRegion>, SketchError> {
     s.validate()?;
     let groups = groups(s);
     if groups.is_empty() && s.texts.is_empty() {
         // Same diagnostic as the single-profile extraction.
         crate::profile::extract_with_entities(s)?;
     }
-    let l = analyse(s, &groups)?;
+    let l = match analyse(s, &groups) {
+        Ok(l) => l,
+        // Crossing, touching or T-joined curves: the planar arrangement.
+        Err(e @ SketchError::UnsupportedProfile(_)) if arrangement => {
+            return crate::arrange::arrangement_regions(s).map_err(|a| match a {
+                SketchError::UnsupportedProfile(why) => SketchError::UnsupportedProfile(format!(
+                    "{why} (simple loops: {})",
+                    e.to_string().trim_start_matches("unsupported profile: ")
+                )),
+                other => other,
+            });
+        }
+        Err(e) => return Err(e),
+    };
     let mut out = Vec::with_capacity(l.loops.len());
     for i in 0..l.loops.len() {
         let kids: Vec<usize> = (0..l.loops.len())
@@ -581,4 +619,14 @@ pub(crate) fn extract_region(s: &Sketch) -> Result<Region, SketchError> {
         outer_entities,
         holes,
     })
+}
+
+/// Line/arc primitives of a profile loop (exact for lines and arcs).
+pub(crate) fn profile_prims(p: &Profile) -> Vec<Prim> {
+    prims(p, loop_delta(p))
+}
+
+/// Is `x` inside the loop `g` (see [`profile_prims`])?
+pub(crate) fn inside_loop(x: [f64; 2], g: &[Prim]) -> bool {
+    inside(x, g)
 }

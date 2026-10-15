@@ -17,6 +17,7 @@
 //! Geometric/profile tolerances reuse the solve tolerance (a length in mm).
 
 mod arc;
+mod arrange;
 pub mod curves;
 mod edit;
 pub mod fillet;
@@ -1365,6 +1366,8 @@ mod tests_arc;
 
 #[cfg(test)]
 mod tests_angle;
+#[cfg(test)]
+mod tests_arrange;
 #[cfg(test)]
 mod tests_constraints;
 #[cfg(test)]

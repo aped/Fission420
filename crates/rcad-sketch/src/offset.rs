@@ -369,7 +369,7 @@ impl Sketch {
         });
         work.validate()?;
         // The copy must be a simple loop disjoint from every other loop.
-        work.regions().map_err(|e| {
+        crate::region::regions_disjoint(&work).map_err(|e| {
             SketchError::UnsupportedProfile(format!(
                 "offset by {distance} mm gives a loop that self-intersects or touches \
                  another loop ({e})"
