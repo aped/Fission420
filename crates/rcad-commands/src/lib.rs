@@ -1571,6 +1571,10 @@ pub struct FeatureSummary {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projections: Vec<rcad_document::ProjectSource>,
+    /// Sketches: the entities each projection link drives (same order as
+    /// `projections`); read-only in the sketch editor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projection_entities: Vec<Vec<rcad_sketch::EntityId>>,
     /// Health after the last regeneration (Healthy/Warning/Error/...).
     #[serde(default)]
     pub health: rcad_document::FeatureHealth,
@@ -4571,6 +4575,13 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 health: res.map(|r| r.health.clone()).unwrap_or_default(),
                 projections: match &f.kind {
                     FeatureKind::Sketch { links, .. } => links.iter().map(|l| l.source).collect(),
+                    _ => vec![],
+                },
+                projection_entities: match &f.kind {
+                    FeatureKind::Sketch { links, .. } => links
+                        .iter()
+                        .map(|l| l.loops.iter().flatten().map(|c| c.entity).collect())
+                        .collect(),
                     _ => vec![],
                 },
                 sheet_relief: match &f.kind {

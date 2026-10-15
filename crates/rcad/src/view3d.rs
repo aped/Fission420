@@ -616,6 +616,8 @@ impl RcadApp {
                 .as_ref()
                 .filter(|d| d.feature == f.id)
                 .map(|d| d.constraint);
+            let projected: Vec<rcad_sketch::EntityId> =
+                f.projection_entities.iter().flatten().copied().collect();
             let style = SketchStyle {
                 selection: &[],
                 hover: None,
@@ -624,6 +626,7 @@ impl RcadApp {
                 conflicts: &[],
                 glyphs: false,
                 alpha: if selected { 1.0 } else { 0.55 },
+                projected: &projected,
             };
             let mut shown = sk.clone();
             if !selected {
@@ -980,6 +983,7 @@ impl RcadApp {
         if resp.clicked_by(egui::PointerButton::Secondary) {
             ed.finish_chain();
         }
+        self.sketch_project_poll();
     }
 
     fn paint_sketch_session(&mut self, painter: &egui::Painter, rect: egui::Rect) {
@@ -1008,6 +1012,7 @@ impl RcadApp {
         } else {
             vec![]
         };
+        let projected: Vec<rcad_sketch::EntityId> = ed.projected.keys().copied().collect();
         let style = SketchStyle {
             selection: &ed.selection,
             hover: ed.hover,
@@ -1016,6 +1021,7 @@ impl RcadApp {
             conflicts: &conflicts,
             glyphs: true,
             alpha: 1.0,
+            projected: &projected,
         };
         let targets = sketch_view::paint_sketch(painter, &pr, &ed.sketch, &style);
         for (it, r) in &targets {

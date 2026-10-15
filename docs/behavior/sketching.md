@@ -338,6 +338,29 @@ of the arc, or the refusal reason), Enter. One undo step.
   `crates/rcad-commands/tests/sketch_fillet.rs` (rounded plate extruded: (w·h − (4 − π)r²)·d,
   regenerated after width/radius edits), `crates/rcad/tests/sketch_fillet_ui.rs`.
 
+## Project inside the sketch (P, Intersect)
+
+* **Project (P)**, second row of the sketch bar: click a model face next to the edge to project;
+  the face edge nearest the click is projected into the open sketch (the same associative
+  projection as the inspector's Project edge below). **Intersect**: click a body; its section by
+  the sketch plane is added. A projected edge comes in as construction (an open curve would make
+  the profile fail: profiles need closed loops); a section's closed loops are profile geometry.
+  Projected curves are drawn purple, are read-only (Delete, Trim,
+  Extend, Break, drags and deleting their pins are refused with the reason) and can be
+  dimensioned and constrained to at once. **Projection Link** (shown with the tools, on by
+  default) off copies the curves unlinked.
+* **Auto-project face edges** (Fusion's default, on): a new sketch on a planar face starts with
+  that face's edges projected, as construction so they stay out of profiles. The checkbox (shown
+  with the Project tool) turns it off for later sketches.
+* **Unlink projection** (shown when a projected curve is selected) breaks its link: the curves
+  stay as plain fixed geometry.
+* Projection reads the model, so it is a document step: the sketch so far is committed first
+  (`create_sketch` or `edit_sketch`), then `project` (and `unlink_projection`). The editor's local
+  undo restarts after it (the document's Undo holds those steps). **Cancel Sketch undoes every
+  document step the session made**, so cancelling still leaves the document as it was.
+* Live probe: `editing.entities` counts drawn (non-projected) curves, `editing.projected` the
+  projected ones.
+
 ## Projected edges and sections (Project edge / Intersect)
 
 Sketch inspector, **Project geometry into this sketch** (commands: docs/COMMANDS.md `project`):

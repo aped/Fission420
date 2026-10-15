@@ -53,6 +53,11 @@ pub enum SketchTool {
     /// Break a curve at the crossings either side of the click (nothing is
     /// removed; the clicked span becomes its own curve).
     Break,
+    /// Project a model edge into the sketch: click a face next to the edge
+    /// (the app resolves the face; see `ProjectPick`).
+    Project,
+    /// Intersect: the section of the clicked body by the sketch plane.
+    Intersect,
     /// Offset a closed loop by an editable distance (docs/behavior/sketching.md).
     Offset,
     /// SKETCH corner fillet: round the corner where two lines (or a line and an
@@ -74,7 +79,7 @@ pub enum SketchTool {
 
 impl SketchTool {
     /// The sketch toolbar's tools, in order (the toolbar iterates this).
-    pub const TOOLBAR: [SketchTool; 17] = [
+    pub const TOOLBAR: [SketchTool; 16] = [
         SketchTool::Select,
         SketchTool::Line,
         SketchTool::CenterRectangle,
@@ -86,12 +91,18 @@ impl SketchTool {
         SketchTool::Dimension,
         SketchTool::Trim,
         SketchTool::Extend,
-        SketchTool::Break,
         SketchTool::Offset,
         SketchTool::Fillet,
         SketchTool::Slot,
         SketchTool::Polygon,
         SketchTool::Text,
+    ];
+
+    /// Tools on the sketch bar's second row (the first row is full at 1280 px).
+    pub const SECOND_ROW: [SketchTool; 3] = [
+        SketchTool::Break,
+        SketchTool::Project,
+        SketchTool::Intersect,
     ];
 
     pub fn label(self) -> &'static str {
@@ -106,6 +117,8 @@ impl SketchTool {
             SketchTool::Trim => "Trim",
             SketchTool::Extend => "Extend",
             SketchTool::Break => "Break",
+            SketchTool::Project => "Project",
+            SketchTool::Intersect => "Intersect",
             SketchTool::Offset => "Offset",
             SketchTool::Fillet => "Fillet",
             SketchTool::Text => "Text",
@@ -128,6 +141,8 @@ impl SketchTool {
             SketchTool::Trim => "T",
             SketchTool::Extend => "E",
             SketchTool::Break => "toolbar",
+            SketchTool::Project => "P",
+            SketchTool::Intersect => "toolbar",
             SketchTool::Offset => "O",
             SketchTool::Fillet => "toolbar",
             SketchTool::Text => "toolbar",
@@ -162,6 +177,15 @@ impl SketchTool {
             SketchTool::Trim => {
                 "Click the part of a line, arc or circle to remove: it is cut at the nearest \
                  intersections with other curves (a curve with none is deleted)"
+            }
+            SketchTool::Project => {
+                "Click a model face next to the edge to project: the face edge nearest the click \
+                 is projected into the sketch (purple, read-only, follows the model while linked) · \
+                 Projection Link off: the curves are copied unlinked"
+            }
+            SketchTool::Intersect => {
+                "Click a body: its section by the sketch plane is added (purple, read-only, follows \
+                 the model while linked)"
             }
             SketchTool::Break => {
                 "Click the span of a line, arc or circle to break off: it is split at the nearest \
@@ -376,6 +400,17 @@ pub struct Feedback {
     pub text: String,
 }
 
+/// A Project / Intersect click for the app to resolve against the model (the
+/// editor has no 3D geometry): the face (edge) or body under `at`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectPick {
+    pub at: egui::Pos2,
+    /// Intersect (body section) instead of an edge projection.
+    pub section: bool,
+    /// Keep the projection link (false: copy the curves unlinked).
+    pub linked: bool,
+}
+
 /// Overall constraint state shown to the user (text + symbol, not only colour).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StateKind {
@@ -416,6 +451,12 @@ pub struct SketchEditor {
     /// Bumped whenever a gesture is cancelled or the tool/history changes, so
     /// the view can drop a pointer press that started before (see `epoch`).
     epoch: u64,
+    /// Projected (linked) entities and their link index: read-only.
+    pub projected: std::collections::BTreeMap<EntityId, usize>,
+    /// A Project / Intersect click waiting for the app.
+    pub project_pick: Option<ProjectPick>,
+    /// Project tool option: keep the projection link (Fusion's Projection Link).
+    pub project_linked: bool,
 }
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -470,7 +511,44 @@ impl SketchEditor {
             screen_targets: vec![],
             original,
             epoch: 0,
+            projected: Default::default(),
+            project_pick: None,
+            project_linked: true,
         }
+    }
+
+    /// Mark the curves of each projection link (in link order) read-only.
+    pub fn set_projected(&mut self, links: &[Vec<EntityId>]) {
+        self.projected = links
+            .iter()
+            .enumerate()
+            .flat_map(|(i, l)| l.iter().map(move |e| (*e, i)))
+            .collect();
+    }
+
+    /// Continue on `sketch` as committed to the document (after Project
+    /// committed the work so far): local undo restarts here, because the
+    /// document's undo now holds the earlier steps.
+    pub fn rebase(&mut self, sketch: Sketch, links: &[Vec<EntityId>]) {
+        self.cancel_gesture();
+        self.epoch += 1;
+        self.sketch = sketch.clone();
+        self.original = sketch;
+        self.undo.clear();
+        self.redo.clear();
+        self.selection.clear();
+        self.dim_edit = None;
+        self.set_projected(links);
+        self.resolve();
+    }
+
+    /// Entities drawn by the user (not projected).
+    pub fn drawn_entity_count(&self) -> usize {
+        self.sketch
+            .entities
+            .iter()
+            .filter(|e| !self.projected.contains_key(&e.id()))
+            .count()
     }
 
     pub fn modified(&self) -> bool {
@@ -809,6 +887,10 @@ impl SketchEditor {
             self.fail(e);
             return false;
         }
+        if let Some(why) = self.projected_change(&cand) {
+            self.fail(why);
+            return false;
+        }
         let original = cand.clone();
         let mut solved = cand;
         let rep = solved.solve();
@@ -1069,7 +1151,22 @@ impl SketchEditor {
         if self.tool != SketchTool::Select || self.dim_edit.is_some() {
             return;
         }
-        let item = match self.pick(pos, screen, view) {
+        let hit = self.pick(pos, screen, view);
+        let locked = match hit {
+            Some(Item::Entity(e)) => self.locked_reason(e),
+            Some(Item::Point(p)) => self
+                .sketch
+                .entities
+                .iter()
+                .filter(|x| x.points().contains(&p))
+                .find_map(|x| self.locked_reason(x.id())),
+            _ => None,
+        };
+        if let Some(why) = locked {
+            self.fail(why);
+            return;
+        }
+        let item = match hit {
             Some(Item::Point(p)) => DragItem::Point(p),
             Some(Item::Entity(e)) => match self.sketch.entity(e) {
                 Some(Entity::Circle { .. } | Entity::Ellipse { .. }) => DragItem::Radius(e),
@@ -1148,6 +1245,16 @@ impl SketchEditor {
             SketchTool::Trim => self.trim_click(pos, screen, view),
             SketchTool::Extend => self.extend_click(pos, screen, view),
             SketchTool::Break => self.break_click(pos, screen, view),
+            SketchTool::Project | SketchTool::Intersect => match screen {
+                Some(at) => {
+                    self.project_pick = Some(ProjectPick {
+                        at,
+                        section: self.tool == SketchTool::Intersect,
+                        linked: self.project_linked,
+                    });
+                }
+                None => self.fail("Project: click a model face in the view.".into()),
+            },
             SketchTool::Offset => self.offset_click(pos, screen, view),
             SketchTool::Fillet => self.fillet_click(pos, screen, view),
             SketchTool::Text => self.text_click(pos, view),
@@ -1669,7 +1776,53 @@ impl SketchEditor {
 
     /// Why entity `e` may not be edited (projected geometry is read-only).
     pub fn locked_reason(&self, e: EntityId) -> Option<String> {
-        let _ = e;
+        self.projected.get(&e).map(|l| {
+            format!(
+                "Entity {} is projected geometry (link {}) and is read-only: select it and use \
+                 Unlink projection first.",
+                e.0,
+                l + 1
+            )
+        })
+    }
+
+    /// Why `before` -> `after` is refused: it removes or reshapes projected
+    /// geometry, or drops a pin of a projected point.
+    fn projected_change(&self, after: &Sketch) -> Option<String> {
+        for (e, l) in &self.projected {
+            let (Some(old), new) = (self.sketch.entity(*e), after.entity(*e)) else {
+                continue;
+            };
+            if new != Some(old) {
+                return Some(format!(
+                    "Rejected: entity {} is projected geometry (link {}) and is read-only; \
+                     unlink the projection first.",
+                    e.0,
+                    l + 1
+                ));
+            }
+            for p in old.points() {
+                let pins = |sk: &Sketch| {
+                    sk.constraints
+                        .iter()
+                        .filter(|c| match c {
+                            Constraint::FixedPoint { p: q, .. }
+                            | Constraint::FixedX { p: q, .. }
+                            | Constraint::FixedY { p: q, .. } => *q == p,
+                            _ => false,
+                        })
+                        .count()
+                };
+                if pins(after) < pins(&self.sketch) {
+                    return Some(format!(
+                        "Rejected: that constraint holds projected entity {} (link {}); unlink \
+                         the projection first.",
+                        e.0,
+                        l + 1
+                    ));
+                }
+            }
+        }
         None
     }
 

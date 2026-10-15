@@ -604,6 +604,7 @@ impl RcadApp {
         let committing = s.committing;
         let mut finish = false;
         let mut cancel = false;
+        let mut unlink = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Sketch");
             ui.separator();
@@ -701,11 +702,33 @@ impl RcadApp {
             {
                 s.editor.redo();
             }
+            // Second-row sketch tools (Break, Project, Intersect) and the
+            // Project options.
+            ui.separator();
+            ui.add_enabled_ui(!committing, |ui| {
+                let ed = &mut s.editor;
+                for t in SketchTool::SECOND_ROW {
+                    if ui
+                        .add(egui::Button::new(t.label()).selected(ed.tool == t))
+                        .probe(t.label())
+                        .on_hover_text(format!("{} ({})", t.hint(), t.shortcut()))
+                        .clicked()
+                    {
+                        ed.set_tool(t);
+                    }
+                }
+                if crate::sketch_project::options_ui(ui, ed, &mut self.auto_project_faces) {
+                    unlink = true;
+                }
+            });
             if committing {
                 ui.spinner();
                 ui.label("Committing…");
             }
         });
+        if unlink {
+            self.unlink_selected_projection();
+        }
         if finish {
             self.finish_sketch();
         } else if cancel {

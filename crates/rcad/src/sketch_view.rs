@@ -30,6 +30,8 @@ pub struct Palette {
     pub conflict: Color32,
     pub preview: Color32,
     pub plane: Color32,
+    /// Projected (linked, read-only) geometry.
+    pub projected: Color32,
 }
 
 pub const PALETTE: Palette = Palette {
@@ -42,6 +44,7 @@ pub const PALETTE: Palette = Palette {
     conflict: Color32::from_rgb(255, 90, 90),
     preview: Color32::from_rgb(255, 205, 60),
     plane: Color32::from_rgba_premultiplied(8, 16, 30, 30),
+    projected: Color32::from_rgb(190, 120, 255),
 };
 
 /// Projection of sketch-plane points to absolute screen positions.
@@ -94,6 +97,8 @@ pub struct SketchStyle<'a> {
     pub glyphs: bool,
     /// Multiplier for all colours' alpha (dimmed read-only previews).
     pub alpha: f32,
+    /// Projected (linked) entities, drawn in the projected colour.
+    pub projected: &'a [EntityId],
 }
 
 fn fade(c: Color32, a: f32) -> Color32 {
@@ -245,7 +250,15 @@ pub fn paint_sketch(
     for e in &s.entities {
         let item = Item::Entity(e.id());
         let construction = s.is_construction(e.id());
-        let c = if construction {
+        let c = if st.projected.contains(&e.id())
+            && !st.selection.contains(&item)
+            && st.hover != Some(item)
+        {
+            fade(
+                PALETTE.projected,
+                st.alpha * if construction { 0.75 } else { 1.0 },
+            )
+        } else if construction {
             fade(color_of(item), 0.6)
         } else {
             color_of(item)
@@ -904,6 +917,8 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
             | SketchTool::Trim
             | SketchTool::Extend
             | SketchTool::Break
+            | SketchTool::Project
+            | SketchTool::Intersect
             | SketchTool::Offset
             | SketchTool::Fillet
             | SketchTool::Text => {}

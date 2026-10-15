@@ -256,10 +256,15 @@ fn scenario_a_dimension_driven_plate_with_attached_hole() {
     sk_click(&mut h, [0.1, -0.2]); // origin snap
     sk_click(&mut h, [6.0, 0.0]);
     click(&mut h, "Dimension");
-    let r = match session_sketch(&h).entities[0] {
-        rcad_sketch::Entity::Circle { radius, .. } => radius,
-        _ => panic!("circle"),
-    };
+    // The cap's edges were auto-projected (construction): find the circle.
+    let r = session_sketch(&h)
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            rcad_sketch::Entity::Circle { radius, .. } => Some(*radius),
+            _ => None,
+        })
+        .expect("circle");
     sk_click(&mut h, [0.0, r]);
     enter_dimension(&mut h, "diameter", "10");
     assert_eq!(status(&h), SolveStatus::FullyConstrained);
@@ -660,8 +665,21 @@ fn selection_sync_and_contextual_commands() {
     // is the face's outward normal (+X for the x = 40 wall).
     click(&mut h, "Create Sketch");
     let ses = h.state().sketch_session().expect("sketch on side face");
-    assert!(matches!(ses.target, rcad::SketchTarget::New {
-        plane: SketchPlane::Face(r) } if Some(r) == f.reference));
+    // The face's edges were auto-projected, which created the sketch
+    // feature on that face (Cancel undoes it).
+    let on_face = match &ses.target {
+        rcad::SketchTarget::New {
+            plane: SketchPlane::Face(r),
+        } => Some(*r) == f.reference,
+        rcad::SketchTarget::Existing(id) => h
+            .state()
+            .summary()
+            .features
+            .iter()
+            .any(|x| x.id == *id && x.plane == f.reference.map(SketchPlane::Face)),
+        _ => false,
+    };
+    assert!(on_face, "{:?}", ses.target);
     assert!((ses.frame.z[0] - 1.0).abs() < 1e-9, "{:?}", ses.frame.z);
     click(&mut h, "Cancel Sketch");
     // Tree click → feature selection highlights every face of the extrusion.
@@ -671,9 +689,17 @@ fn selection_sync_and_contextual_commands() {
     assert_eq!(h.state().highlighted_faces().len(), 6);
     // Extrude selected → inspector offers sketches on its caps.
     click(&mut h, "Sketch on end cap");
+    // New, or already created by the auto-projection of the cap's edges.
     let plane = match &h.state().sketch_session().unwrap().target {
         rcad::SketchTarget::New { plane } => *plane,
-        _ => panic!(),
+        rcad::SketchTarget::Existing(id) => h
+            .state()
+            .summary()
+            .features
+            .iter()
+            .find(|x| x.id == *id)
+            .and_then(|x| x.plane)
+            .unwrap(),
     };
     assert!(matches!(plane, SketchPlane::Face(r) if r.role == FaceRole::ExtrudeEndCap));
     click(&mut h, "Cancel Sketch");
