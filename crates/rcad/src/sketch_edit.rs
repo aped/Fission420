@@ -409,6 +409,9 @@ pub struct ProjectPick {
     pub section: bool,
     /// Keep the projection link (false: copy the curves unlinked).
     pub linked: bool,
+    /// Auto-project on reference: replay this click (plane position, view)
+    /// once the edge is projected.
+    pub replay: Option<([f64; 2], View)>,
 }
 
 /// Overall constraint state shown to the user (text + symbol, not only colour).
@@ -469,6 +472,9 @@ pub struct SketchEditor {
     pub bound: std::collections::BTreeMap<String, String>,
     /// Heads-up typed fields while drawing (Tab opens, Tab cycles).
     pub hud: Option<Hud>,
+    /// Preference: a Dimension click on no sketch geometry projects the
+    /// model edge under the cursor first, then dimensions it.
+    pub auto_project_on_reference: bool,
     /// The last pointer event's view (scale), for typed input.
     last_view: Option<View>,
 }
@@ -635,6 +641,7 @@ impl SketchEditor {
             new_params: vec![],
             bound: Default::default(),
             hud: None,
+            auto_project_on_reference: false,
             last_view: None,
         }
     }
@@ -823,6 +830,11 @@ impl SketchEditor {
     /// committed the work so far): local undo restarts here, because the
     /// document's undo now holds the earlier steps.
     pub fn rebase(&mut self, sketch: Sketch, links: &[Vec<EntityId>]) {
+        // A two-point dimension in progress survives (point ids are stable).
+        let keep = match &self.gesture {
+            Gesture::DimFirst(p) if sketch.point(*p).is_some() => Some(Gesture::DimFirst(*p)),
+            _ => None,
+        };
         self.cancel_gesture();
         self.epoch += 1;
         self.sketch = sketch.clone();
@@ -833,6 +845,9 @@ impl SketchEditor {
         self.dim_edit = None;
         self.set_projected(links);
         self.resolve();
+        if let Some(g) = keep {
+            self.gesture = g;
+        }
     }
 
     /// Entities drawn by the user (not projected).
@@ -1569,6 +1584,7 @@ impl SketchEditor {
                         at,
                         section: self.tool == SketchTool::Intersect,
                         linked: self.project_linked,
+                        replay: None,
                     });
                 }
                 None => self.fail("Project: click a model face in the view.".into()),
@@ -2164,6 +2180,20 @@ impl SketchEditor {
 
     fn dimension_click(&mut self, pos: [f64; 2], screen: Option<egui::Pos2>, view: &View) {
         let hit = self.pick(pos, screen, view);
+        if hit.is_none()
+            && self.auto_project_on_reference
+            && let Some(at) = screen
+        {
+            // Auto-project on reference: project the model edge under the
+            // cursor, then replay this click on it (sketch_project.rs).
+            self.project_pick = Some(ProjectPick {
+                at,
+                section: false,
+                linked: true,
+                replay: Some((pos, *view)),
+            });
+            return;
+        }
         match (self.gesture.clone(), hit) {
             (Gesture::DimFirst(a), Some(Item::Point(b))) if a != b => {
                 self.gesture = Gesture::Idle;

@@ -512,9 +512,6 @@ pub struct RcadApp {
     /// (a newly opened editor selects its text so typing replaces it).
     pub(crate) sketch_dim_opened: Option<usize>,
     pub(crate) show_help: bool,
-    /// Preference: a new sketch on a planar face starts with the face's
-    /// edges projected as construction (Fusion's default; on).
-    pub(crate) auto_project_faces: bool,
     /// Summary of the last successful import (window until closed).
     pub(crate) import_summary: Option<crate::exchange::ImportSummary>,
     /// Open "Re-attach sketch" window.
@@ -623,7 +620,6 @@ impl RcadApp {
             doc_dim_targets: vec![],
             sketch_dim_opened: None,
             show_help: false,
-            auto_project_faces: true,
             import_summary: None,
             reattach: None,
             params: Default::default(),

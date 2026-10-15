@@ -47,6 +47,19 @@ pub struct Prefs {
     /// Most recent first.
     #[serde(default)]
     pub recent: Vec<PathBuf>,
+    /// Sketch: a new sketch on a planar face starts with the face's edges
+    /// projected (as construction). Fusion's default: on.
+    #[serde(default = "yes")]
+    pub auto_project_face_edges: bool,
+    /// Sketch: a dimension click on a model edge (no sketch geometry under
+    /// the cursor) projects that edge first, then dimensions it. Fusion's
+    /// "auto project edges on reference"; off by default here.
+    #[serde(default)]
+    pub auto_project_on_reference: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Prefs {
@@ -57,6 +70,8 @@ impl Default for Prefs {
             theme: Theme::FollowOs,
             dialog_width: None,
             recent: vec![],
+            auto_project_face_edges: true,
+            auto_project_on_reference: false,
         }
     }
 }

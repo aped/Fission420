@@ -275,3 +275,51 @@ fn unlink_breaks_the_link_and_link_off_copies() {
     assert!(editor(&h).projected.is_empty());
     assert_eq!(editor(&h).sketch.entities.len(), n + 1);
 }
+
+/// "Auto-project edges on reference" (Preferences, off by default, saved in
+/// the preferences file): a Dimension click on a model edge with no sketch
+/// geometry under it projects the edge, then dimensions it. The projected
+/// edge is fixed, so its length dimension is driven (20 mm, the cap's right
+/// edge). With the preference off the same click adds nothing.
+#[test]
+fn dimension_on_a_model_edge_projects_it_when_the_preference_is_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("r-cad").join("prefs.json");
+    let mut h = harness();
+    h.state_mut().load_prefs(path.clone());
+    let (_, ext) = plate(&mut h);
+    h.state_mut().set_auto_project_faces(false);
+    // Off (default): nothing is projected.
+    sketch_on_cap(&mut h, ext);
+    click(&mut h, "Dimension");
+    let s = h.state().world_to_screen([19.7, 2.0, 10.0]).unwrap();
+    screen_click(&mut h, s);
+    assert!(editor(&h).projected.is_empty());
+    assert!(editor(&h).sketch.entities.is_empty());
+    click(&mut h, "Cancel Sketch");
+    // On, through the Preferences window; saved to the file.
+    click(&mut h, "Preferences");
+    click(&mut h, "Pref auto-project edges on reference");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("\"auto_project_on_reference\": true"),
+        "{text}"
+    );
+    sketch_on_cap(&mut h, ext);
+    click(&mut h, "Dimension");
+    let s = h.state().world_to_screen([19.7, 2.0, 10.0]).unwrap();
+    screen_click(&mut h, s);
+    let ed = editor(&h);
+    assert_eq!(ed.projected.len(), 1, "{}", feedback(&h));
+    let dims: Vec<_> = ed
+        .sketch
+        .constraints
+        .iter()
+        .filter_map(|c| c.dimension())
+        .collect();
+    assert_eq!(dims.len(), 1, "{}", feedback(&h));
+    assert!(
+        dims[0].driven && (dims[0].value.abs() - 20.0).abs() < 1e-9,
+        "{dims:?}"
+    );
+}
