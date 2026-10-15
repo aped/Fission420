@@ -95,7 +95,7 @@ toolchain, CI run). See [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ### From source
 
-Requires Rust **1.95+** (CI uses 1.99.0) and a C compiler (one dependency builds liblzma).
+Requires Rust **1.95+** (CI uses 1.99.0) and the platform linker (on Linux, `cc`); no C or C++ code is compiled.
 
 ```bash
 git clone https://github.com/aped/R-CAD.git
