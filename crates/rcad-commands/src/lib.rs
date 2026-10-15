@@ -1069,7 +1069,7 @@ pub enum Command {
     /// `safe_mode` opens it rolled back to just before the first failure.
     Open {
         path: PathBuf,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         safe_mode: bool,
     },
     /// Replace the definition of feature `feature` (Edit Feature): same id
@@ -1080,9 +1080,14 @@ pub enum Command {
     /// that break are committed flagged in health (as in Fusion).
     RedefineFeature {
         feature: FeatureId,
-        kind: FeatureKind,
+        kind: Box<FeatureKind>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        /// When given, replaces the feature's parameter expressions
+        /// (parameter name -> expression, e.g. `"distance": "w / 2"`); values
+        /// in `kind` bound by an expression are derived from it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expressions: Option<std::collections::BTreeMap<String, String>>,
     },
     /// One granular sketch edit (trim, extend, break, ...); see
     /// [`sketch_ops::SketchOp`].
@@ -1841,13 +1846,63 @@ impl Session {
             .ok_or(DocError::Validation("no document is open".into()))
     }
 
+    /// Geometry exports of a document whose history did not fully regenerate
+    /// are refused: they would write a model the history does not describe.
+    fn refuse_unhealthy_export(&self, cmd: &Command) -> Result<(), DocError> {
+        let geometry_export = matches!(
+            cmd.name(),
+            "export_stl"
+                | "export_3mf"
+                | "export_step"
+                | "export_assembly"
+                | "export_drawing"
+                | "export_flat_pattern"
+                | "export_configurations"
+        );
+        let Some(m) = self.model.as_ref().filter(|_| geometry_export) else {
+            return Ok(());
+        };
+        let failed: Vec<String> = m
+            .evaluation()
+            .failures()
+            .map(|f| format!("{} {}", f.id, f.name))
+            .collect();
+        if failed.is_empty() {
+            return Ok(());
+        }
+        Err(DocError::Validation(format!(
+            "the history does not fully regenerate ({} failed: {}); repair, suppress or roll \
+             back those features before exporting",
+            failed.len(),
+            failed.join(", ")
+        )))
+    }
+
     /// Execute a command. Never panics on user input; failures leave state unchanged.
     pub fn execute(&mut self, cmd: &Command) -> Response {
         let mut r = Response {
             command: cmd.name().into(),
             ..Default::default()
         };
-        match self.run(cmd, &mut r) {
+        // Command-level panic boundary: a defect anywhere below becomes a
+        // structured error. Transactions only replace the model on commit,
+        // so the document stays at its last committed revision; the
+        // regeneration memo is discarded in case it holds a partial entry.
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(cmd, &mut r)))
+                .unwrap_or_else(|p| {
+                    if let Some(m) = &mut self.model {
+                        m.discard_cache();
+                    }
+                    Err(DocError::Internal {
+                        command: cmd.name().into(),
+                        detail: format!(
+                            "{}; the document is at its last committed state",
+                            rcad_document::panic_text(&p)
+                        ),
+                    })
+                });
+        match outcome {
             Ok(()) => r.ok = true,
             Err(e) => {
                 r.ok = false;
@@ -1878,6 +1933,7 @@ impl Session {
     }
 
     fn run(&mut self, cmd: &Command, r: &mut Response) -> Result<(), DocError> {
+        self.refuse_unhealthy_export(cmd)?;
         if self.run_drawing(cmd, r)? {
             return Ok(());
         }
@@ -4202,11 +4258,33 @@ impl Session {
                 feature,
                 kind,
                 name,
+                expressions,
             } => {
-                let _ = (feature, kind, name);
-                return Err(DocError::ProductLimit(
-                    "redefining a feature is not implemented yet".into(),
-                ));
+                let feature = *feature;
+                let m = self.model_mut()?;
+                let old = m.document().feature(feature)?.name.clone();
+                m.transact_allowing(&format!("Edit {old}"), Some(feature), |d| {
+                    if let Some(e) = expressions {
+                        d.feature_mut(feature)?.expressions = e.clone();
+                    }
+                    d.redefine_feature(feature, (**kind).clone(), name.clone())
+                })?;
+                let broken: Vec<String> = m
+                    .evaluation()
+                    .failures()
+                    .filter(|f| f.id != feature)
+                    .map(|f| format!("{} {}", f.id, f.name))
+                    .collect();
+                r.feature = Some(feature);
+                r.message = Some(if broken.is_empty() {
+                    format!("edited {feature} {old}")
+                } else {
+                    format!(
+                        "edited {feature} {old}; {} feature(s) now fail and are flagged: {}",
+                        broken.len(),
+                        broken.join(", ")
+                    )
+                });
             }
             Command::SketchOp { feature, op } => {
                 let m = self.model_mut()?;
@@ -4218,9 +4296,8 @@ impl Session {
                 ));
             }
             Command::Open { path, safe_mode } => {
-                let _ = safe_mode;
                 let nf = load_file(path)?;
-                let (model, report) = Model::from_document_reporting(nf.document)?;
+                let (model, report) = Model::open_document(nf.document, *safe_mode)?;
                 let mut msg = format!("opened {}", path.display());
                 msg += &load_notes(&report);
                 if let (Some(c), Some(m)) = (&nf.cache, &model.evaluation().measurements)
@@ -4773,6 +4850,25 @@ fn load_notes(r: &rcad_document::LoadReport) -> String {
             "; NOTE: cleaned stale configuration entries ({}); the document is marked \
              changed: save it to keep the cleanup",
             r.cleaned.join("; ")
+        );
+    }
+    if let Some(f) = r.rolled_back_to {
+        msg += &format!(
+            "; SAFE MODE: the timeline marker was moved to just before {f}, the first feature \
+             that fails (the document is marked changed)"
+        );
+    }
+    if !r.failures.is_empty() {
+        let list: Vec<String> = r
+            .failures
+            .iter()
+            .map(|(id, why)| format!("{id}: {why}"))
+            .collect();
+        msg += &format!(
+            "; ERRORS: {} feature(s) did not regenerate and are flagged in the history ({}); \
+             unrelated features were evaluated",
+            r.failures.len(),
+            list.join("; ")
         );
     }
     msg

@@ -1,0 +1,321 @@
+{
+  "format": "r-cad",
+  "version": 8,
+  "document": {
+    "features": [
+      {
+        "id": 1,
+        "name": "Bar",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -50.0,
+                "y": -10.0
+              },
+              {
+                "id": 2,
+                "x": 50.0,
+                "y": -10.0
+              },
+              {
+                "id": 3,
+                "x": 50.0,
+                "y": 10.0
+              },
+              {
+                "id": 4,
+                "x": -50.0,
+                "y": 10.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 50.0,
+                  "y": 10.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 100.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 20.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Extrude1",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 1,
+          "distance": 10.0,
+          "operation": {
+            "NewBody": {
+              "body": 1
+            }
+          },
+          "extent": "Distance",
+          "reverse": false
+        }
+      },
+      {
+        "id": 3,
+        "name": "Slot",
+        "kind": {
+          "type": "Sketch",
+          "plane": "WorldXY",
+          "sketch": {
+            "points": [
+              {
+                "id": 0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "id": 1,
+                "x": -2.0,
+                "y": -15.0
+              },
+              {
+                "id": 2,
+                "x": 2.0,
+                "y": -15.0
+              },
+              {
+                "id": 3,
+                "x": 2.0,
+                "y": 15.0
+              },
+              {
+                "id": 4,
+                "x": -2.0,
+                "y": 15.0
+              }
+            ],
+            "entities": [
+              {
+                "Line": {
+                  "id": 1,
+                  "a": 1,
+                  "b": 2
+                }
+              },
+              {
+                "Line": {
+                  "id": 2,
+                  "a": 2,
+                  "b": 3
+                }
+              },
+              {
+                "Line": {
+                  "id": 3,
+                  "a": 3,
+                  "b": 4
+                }
+              },
+              {
+                "Line": {
+                  "id": 4,
+                  "a": 4,
+                  "b": 1
+                }
+              }
+            ],
+            "constraints": [
+              {
+                "FixedPoint": {
+                  "p": 0,
+                  "x": 50.0,
+                  "y": 10.0
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 1
+                }
+              },
+              {
+                "Horizontal": {
+                  "line": 3
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 2
+                }
+              },
+              {
+                "Vertical": {
+                  "line": 4
+                }
+              },
+              {
+                "HorizontalDistance": {
+                  "a": 1,
+                  "b": 2,
+                  "dim": {
+                    "name": "width",
+                    "value": 4.0
+                  }
+                }
+              },
+              {
+                "VerticalDistance": {
+                  "a": 1,
+                  "b": 4,
+                  "dim": {
+                    "name": "height",
+                    "value": 30.0
+                  }
+                }
+              },
+              {
+                "SymmetricAboutPoint": {
+                  "a": 1,
+                  "b": 3,
+                  "center": 0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "Extrude2",
+        "kind": {
+          "type": "Extrude",
+          "sketch": 3,
+          "distance": 0.0,
+          "operation": {
+            "Cut": {
+              "target": 1
+            }
+          },
+          "extent": "ThroughAll",
+          "reverse": false,
+          "pieces": [
+            2
+          ]
+        }
+      }
+    ],
+    "next_id": 5,
+    "bodies": [
+      {
+        "id": 1,
+        "name": "Bar",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "name": "Bar (2)",
+        "visible": true
+      }
+    ],
+    "next_body_id": 3,
+    "blobs": [],
+    "next_blob_id": 1
+  },
+  "cache": {
+    "volume": 9600.0,
+    "bounds": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max": [
+        48.0,
+        20.0,
+        10.0
+      ]
+    },
+    "face_count": 6
+  }
+}
