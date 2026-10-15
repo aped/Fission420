@@ -740,6 +740,26 @@ pub fn help_rows(layer: KeymapLayer) -> Vec<(&'static str, String, String)> {
         .collect()
 }
 
+/// "Ctrl+N new · Ctrl+O open · …" for the bound commands `pick` selects.
+pub fn shortcut_line(layer: KeymapLayer, pick: fn(&CommandDef) -> bool) -> String {
+    COMMANDS
+        .iter()
+        .filter(|d| pick(d) && !d.keys(layer).is_empty())
+        .map(|d| {
+            format!(
+                "{} {}",
+                d.keys(layer)
+                    .iter()
+                    .map(|c| c.text())
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                d.label.trim_end_matches('…').to_lowercase()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// "SOLID ▸ CREATE", "File", … (first placement).
 pub fn placement_text(d: &CommandDef) -> String {
     match d.places.first() {

@@ -2338,13 +2338,17 @@ impl RcadApp {
             return;
         }
         if self.sketch.is_some() {
-            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1))) {
+            if ctx
+                .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1)))
+            {
                 self.show_help = !self.show_help;
             }
             self.sketch_shortcuts(ctx);
             return;
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::Escape))) {
+        if ctx
+            .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::Escape)))
+        {
             if self.placement.is_some() {
                 self.cancel_tool();
             } else if self.dialog.is_some() {
@@ -2361,7 +2365,7 @@ impl RcadApp {
 
     fn sketch_shortcuts(&mut self, ctx: &egui::Context) {
         use crate::shell::keymap::{SketchKey, k};
-        let layer = self.shell.keymap;
+        let layer = self.shell.prefs.keymap;
         let Some(s) = &mut self.sketch else { return };
         if s.committing {
             return;

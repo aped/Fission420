@@ -59,7 +59,13 @@ impl RcadApp {
                 self.cmd_button(ui, id);
             }
             let export = ui.menu_button("Export", |ui| {
-                for id in [C::ExportStl, C::ExportStep, C::ExportDxf, C::ExportSvg, C::Export3mf] {
+                for id in [
+                    C::ExportStl,
+                    C::ExportStep,
+                    C::ExportDxf,
+                    C::ExportSvg,
+                    C::Export3mf,
+                ] {
                     if self.cmd_button(ui, id) {
                         ui.close();
                     }
@@ -87,7 +93,7 @@ impl RcadApp {
         ui.menu_button("View", |ui| {
             let fit = registry::def(C::Fit);
             if ui
-                .button(format!("Fit ({})", fit.key_text(self.shell.keymap)))
+                .button(format!("Fit ({})", fit.key_text(self.shell.prefs.keymap)))
                 .probe("Fit (F)")
                 .clicked()
             {
@@ -118,7 +124,11 @@ impl RcadApp {
             ] {
                 let d = registry::def(id);
                 if ui
-                    .button(format!("{} ({})", d.label, d.key_text(self.shell.keymap)))
+                    .button(format!(
+                        "{} ({})",
+                        d.label,
+                        d.key_text(self.shell.prefs.keymap)
+                    ))
                     .clicked()
                 {
                     (d.run)(self);
@@ -255,6 +265,7 @@ impl RcadApp {
     }
 
     pub(crate) fn sketch_toolbar(&mut self, ui: &mut egui::Ui) {
+        let layer = self.shell.prefs.keymap;
         let Some(s) = self.sketch.as_mut() else {
             return;
         };
@@ -287,7 +298,10 @@ impl RcadApp {
                     if ui
                         .add(egui::Button::new(t.label()).selected(ed.tool == t))
                         .probe(t.label())
-                        .on_hover_text(format!("{} ({})", t.hint(), t.shortcut()))
+                        .on_hover_text(match crate::shell::keymap::sketch_key_for(layer, t) {
+                            Some(k) => format!("{} ({k})", t.hint()),
+                            None => t.hint().to_string(),
+                        })
                         .clicked()
                     {
                         ed.set_tool(t);
@@ -2194,7 +2208,9 @@ impl RcadApp {
             Guarded::New | Guarded::NewAndSketch | Guarded::NewTemplate(_) => {
                 "creating a new document"
             }
-            Guarded::Open(_) | Guarded::OpenSafe(_) | Guarded::OpenCopy(_) => "opening another document",
+            Guarded::Open(_) | Guarded::OpenSafe(_) | Guarded::OpenCopy(_) => {
+                "opening another document"
+            }
             Guarded::Close => "closing",
             Guarded::Exit => "quitting",
         };
@@ -2295,27 +2311,71 @@ impl RcadApp {
     }
 
     pub(crate) fn help_ui(&mut self, ctx: &egui::Context) {
+        use crate::shell::{KeymapLayer, keymap, registry};
         let mut open = self.show_help;
+        let layer = self.shell.prefs.keymap;
         egui::Window::new("Help")
             .open(&mut open)
             .collapsible(false)
-            .default_width(460.0)
+            .default_width(520.0)
             .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Keyboard layer:");
+                    for l in [KeymapLayer::Fusion, KeymapLayer::Classic] {
+                        if ui
+                            .selectable_label(layer == l, l.label())
+                            .named(&format!("Keymap {}", l.label()))
+                            .clicked()
+                        {
+                            self.set_keymap(l);
+                            self.save_prefs();
+                        }
+                    }
+                });
                 ui.label(RichText::new("Navigation").strong());
                 ui.label(rcad_viewport::NAV_HELP);
                 ui.label("In sketch mode the left button draws; use the middle button to orbit and the right button to pan.");
-                ui.label("Views: F fit · 7 top · 1 front · 3 right · 0 isometric.");
+                ui.label(format!(
+                    "Views: {}",
+                    registry::shortcut_line(layer, |d| matches!(
+                        d.places.first(),
+                        Some(registry::Place::View)
+                    ))
+                ));
                 ui.separator();
                 ui.label(RichText::new("Document").strong());
-                ui.label("Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo");
+                ui.label(registry::shortcut_line(layer, |d| {
+                    d.places
+                        .iter()
+                        .any(|p| matches!(p, registry::Place::File | registry::Place::AppBar))
+                }));
+                ui.separator();
+                ui.label(RichText::new("Modeling").strong());
+                ui.label(registry::shortcut_line(layer, |d| {
+                    d.places
+                        .iter()
+                        .any(|p| matches!(p, registry::Place::Ribbon { .. }))
+                }));
                 ui.separator();
                 ui.label(RichText::new("Sketch").strong());
-                ui.label("S select · L line · R centre rectangle · Shift+R 2-point rectangle · C circle · A 3-point arc · D dimension");
+                ui.label(keymap::sketch_help(layer));
                 ui.label("Constraints: lines for Horizontal/Vertical; two lines for Parallel/Perpendicular/Equal length/Angle (degrees, counter-clockwise); two points for Coincident; a line + a point for Midpoint/On line; a line + arc sharing an end for Tangent; two arcs/circles for Equal radius. X toggles construction (reference) geometry, which profiles ignore.");
-                ui.label("Del delete · Enter end line chain · Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
+                ui.label("Esc cancels the gesture, then the tool · Shift while drawing disables snapping");
                 ui.label("Snaps: existing points (shared endpoint), horizontal/vertical alignment (adds an H/V constraint), grid (position only).");
                 ui.label("Ctrl+Z inside a sketch undoes sketch steps; Finish Sketch records one document undo step; Cancel Sketch discards the session.");
                 ui.separator();
+                egui::CollapsingHeader::new("All commands")
+                    .id_salt("help_all_commands")
+                    .show(ui, |ui| {
+                        egui::Grid::new("help_commands").striped(true).show(ui, |ui| {
+                            for d in registry::COMMANDS {
+                                ui.label(d.label);
+                                ui.label(d.key_text(layer));
+                                ui.label(registry::placement_text(d));
+                                ui.end_row();
+                            }
+                        });
+                    });
                 ui.label("Shortcuts are ignored while a text field has focus.");
             });
         self.show_help = open;

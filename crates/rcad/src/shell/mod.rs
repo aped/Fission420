@@ -10,6 +10,7 @@
 
 pub mod actions;
 pub mod keymap;
+pub mod prefs;
 pub mod registry;
 
 pub use keymap::KeymapLayer;
@@ -33,20 +34,15 @@ pub enum Focus {
 }
 
 /// Shell state that is view-only (never part of the document or undo).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ShellState {
-    pub keymap: KeymapLayer,
+    /// Preferences (keymap layer, theme, dialog width, recent files).
+    pub prefs: prefs::Prefs,
+    /// Where preferences are saved (None: tests and scripted runs keep
+    /// them in memory only).
+    pub prefs_path: Option<std::path::PathBuf>,
     /// Section to force open on its next draw.
     pub focus: Option<Focus>,
-}
-
-impl Default for ShellState {
-    fn default() -> Self {
-        Self {
-            keymap: KeymapLayer::Fusion,
-            focus: None,
-        }
-    }
 }
 
 impl ShellState {

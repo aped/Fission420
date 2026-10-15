@@ -159,3 +159,25 @@ pub fn sketch_key_for(layer: KeymapLayer, tool: SketchTool) -> Option<String> {
         .find(|(_, a)| *a == SketchKey::Tool(tool))
         .map(|(c, _)| c.text())
 }
+
+/// One line of sketch keys for the help sheet ("L line · R 2-point rectangle · …").
+pub fn sketch_help(layer: KeymapLayer) -> String {
+    let mut out: Vec<String> = vec![];
+    for (c, a) in sketch_bindings(layer) {
+        let what = match a {
+            SketchKey::Tool(t) => t.label().to_lowercase(),
+            SketchKey::Construction => "construction toggle".into(),
+            SketchKey::Undo => "sketch step undo".into(),
+            SketchKey::Redo => "sketch step redo".into(),
+            SketchKey::Delete => "delete".into(),
+            SketchKey::FinishChain => "end line chain".into(),
+            SketchKey::Escape => "cancel gesture, then tool".into(),
+            SketchKey::LookAt => "look at the sketch".into(),
+        };
+        if c.key == Key::Backspace {
+            continue;
+        }
+        out.push(format!("{} {what}", c.text()));
+    }
+    out.join(" · ")
+}

@@ -73,7 +73,9 @@ impl RcadApp {
 
     pub(crate) fn need_mesh_body(&self) -> Result<(), String> {
         self.need_body()?;
-        let b = self.selected_body.and_then(|b| self.summary.bodies.iter().find(|x| x.id == b));
+        let b = self
+            .selected_body
+            .and_then(|b| self.summary.bodies.iter().find(|x| x.id == b));
         match b {
             Some(b) if b.kind == "mesh" => Ok(()),
             _ => Err("Select a mesh body (STL import) first".into()),
@@ -81,8 +83,7 @@ impl RcadApp {
     }
 
     pub(crate) fn need_selection(&self) -> Result<(), String> {
-        if self.selected.is_some() || self.selected_face.is_some() || self.selected_body.is_some()
-        {
+        if self.selected.is_some() || self.selected_face.is_some() || self.selected_body.is_some() {
             Ok(())
         } else {
             Err("Nothing is selected".into())
@@ -105,7 +106,13 @@ impl RcadApp {
 
     pub(crate) fn need_joints(&self) -> Result<(), String> {
         self.need_open()?;
-        if self.summary.assembly.joints.iter().any(|j| j.kind.dof() > 0) {
+        if self
+            .summary
+            .assembly
+            .joints
+            .iter()
+            .any(|j| j.kind.dof() > 0)
+        {
             Ok(())
         } else {
             Err("Needs a joint with a free value (ASSEMBLE ▸ Joint)".into())
@@ -220,9 +227,9 @@ impl RcadApp {
     /// or Hole.
     pub(crate) fn pattern_source(&self) -> Result<FeatureId, String> {
         self.need_open()?;
-        let f = self
-            .selected_feature()
-            .ok_or_else(|| "Select an Extrude (join or cut) or a Hole in History first".to_string())?;
+        let f = self.selected_feature().ok_or_else(|| {
+            "Select an Extrude (join or cut) or a Hole in History first".to_string()
+        })?;
         let ok = match f.kind.as_str() {
             "extrude" => matches!(
                 f.operation,
@@ -638,10 +645,30 @@ impl RcadApp {
 
     /// Active key layer.
     pub fn keymap(&self) -> super::KeymapLayer {
-        self.shell.keymap
+        self.shell.prefs.keymap
     }
     pub fn set_keymap(&mut self, layer: super::KeymapLayer) {
-        self.shell.keymap = layer;
+        self.shell.prefs.keymap = layer;
+    }
+
+    /// Load preferences from `path` (and save changes there from now on).
+    pub fn load_prefs(&mut self, path: std::path::PathBuf) {
+        let (p, why) = super::prefs::Prefs::load(&path);
+        self.shell.prefs = p;
+        self.shell.prefs_path = Some(path);
+        if let Some(why) = why {
+            self.diag(false, "info", why);
+        }
+    }
+
+    /// Save preferences (atomic); a failure is reported, never fatal.
+    pub(crate) fn save_prefs(&mut self) {
+        let Some(path) = self.shell.prefs_path.clone() else {
+            return;
+        };
+        if let Err(e) = self.shell.prefs.save(&path) {
+            self.diag(false, "info", format!("preferences not saved: {e}"));
+        }
     }
 
     pub(crate) fn focus(&mut self, f: Focus) {
@@ -666,7 +693,7 @@ impl RcadApp {
 
     /// Hover text: the tooltip and the active layer's key.
     pub(crate) fn command_tooltip(&self, d: &CommandDef) -> String {
-        let keys = d.key_text(self.shell.keymap);
+        let keys = d.key_text(self.shell.prefs.keymap);
         let tip = match d.id {
             CmdId::Undo => self
                 .summary
@@ -708,7 +735,7 @@ impl RcadApp {
 
     /// Model-mode shortcuts of the active layer (most specific first).
     pub(crate) fn command_shortcuts(&mut self, ctx: &egui::Context) {
-        let layer = self.shell.keymap;
+        let layer = self.shell.prefs.keymap;
         let mut binds: Vec<(super::keymap::Chord, CmdId)> = registry::COMMANDS
             .iter()
             .flat_map(|d| d.keys(layer).iter().map(move |c| (*c, d.id)))
