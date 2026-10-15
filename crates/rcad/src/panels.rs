@@ -354,7 +354,7 @@ impl RcadApp {
             }
         });
         if !self.summary.open {
-            ui.weak("No document open. Use New or Open….");
+            ui.weak("No document open. Use New or Open…");
             return;
         }
         self.parameters_panel(ui);

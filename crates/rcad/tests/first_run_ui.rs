@@ -113,6 +113,20 @@ fn title_and_status_bar_show_the_name_and_unsaved_state() {
     assert!(h.state().window_title().starts_with("● "));
 }
 
+/// The start card offers a template as well as a first sketch: a
+/// first-time user gets an editable part in one pick.
+#[test]
+fn start_card_offers_a_template() {
+    let mut h = harness();
+    h.get_by_label("No document open");
+    click(&mut h, "Start from a template");
+    click(&mut h, "Mounting bracket");
+    assert!(h.state().summary().open);
+    assert!(!h.state().summary().bodies.is_empty());
+    assert!(h.query_by_label("No document open").is_none());
+    assert!(h.query_by_label("Empty document").is_none());
+}
+
 /// File ▸ About R-CAD shows this build's version, license and source.
 #[test]
 fn about_shows_version_license_and_source() {

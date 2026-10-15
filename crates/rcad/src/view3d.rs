@@ -1344,7 +1344,10 @@ impl RcadApp {
     }
 
     fn empty_state(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let size = egui::vec2(360.0, 150.0);
+        // Sized to its content (last frame's height), narrower than the view.
+        let id = egui::Id::new("rcad_empty_state_height");
+        let h = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(170.0);
+        let size = egui::vec2(470.0_f32.min(rect.width() - 40.0).max(260.0), h);
         let card = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 40.0), size);
         ui.painter()
             .rect_filled(card, 8.0, Color32::from_black_alpha(190));
@@ -1355,9 +1358,14 @@ impl RcadApp {
             } else {
                 "No document open"
             });
-            ui.label("Start by sketching a profile on the XY plane, then extrude it.");
+            ui.label("Sketch a closed profile, then extrude it into a solid.");
             ui.add_space(8.0);
+            // One centred row (its width is known from the last frame).
+            let row = id.with("row");
+            let row_w = ui.ctx().data(|d| d.get_temp::<f32>(row)).unwrap_or(0.0);
             ui.horizontal(|ui| {
+                ui.add_space(((ui.available_width() - row_w) / 2.0).max(0.0));
+                let x0 = ui.cursor().min.x;
                 if ui
                     .button("New Sketch on XY")
                     .probe("New Sketch on XY")
@@ -1379,9 +1387,29 @@ impl RcadApp {
                 {
                     self.open_dialog(false);
                 }
+                // A ready-made parametric part (opens as a new document).
+                let t = ui
+                    .button("Start from a template ⏷")
+                    .named("Start from a template");
+                egui::Popup::menu(&t).show(|ui| self.templates_menu(ui));
+                let w = t.rect.max.x - x0;
+                if (w - row_w).abs() > 0.5 {
+                    ui.ctx().data_mut(|d| d.insert_temp(row, w));
+                    ui.ctx().request_repaint();
+                }
             });
-            ui.weak("Help: F1 · Navigate: MMB orbit, RMB pan, wheel zoom");
+            ui.add_space(6.0);
+            ui.weak(
+                "Other planes: CONSTRUCT › Planes, or select a face of a body and press \
+                 Create Sketch.",
+            );
+            ui.weak("F1 help · drag to orbit · right-drag to pan · scroll to zoom");
         });
+        let used = child.min_rect().height() + 32.0;
+        if (used - h).abs() > 0.5 {
+            ui.ctx().data_mut(|d| d.insert_temp(id, used));
+            ui.ctx().request_repaint();
+        }
     }
 }
 
