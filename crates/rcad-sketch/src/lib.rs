@@ -53,8 +53,10 @@ pub const REL_SOLVE_TOL: f64 = 1e-12;
 pub const RANK_REL_TOL: f64 = 1e-9;
 /// Upper bound on solver unknowns; the solver uses dense linear algebra.
 pub const MAX_UNKNOWNS: usize = 2048;
-/// Above this many constraints the per-constraint conflict diagnosis is skipped
-/// (it costs one rank computation / solve per constraint).
+/// Above this many constraints the per-constraint diagnosis of an
+/// *inconsistent* sketch is skipped (it costs one solve per constraint).
+/// Redundancy (over-definition) is always diagnosed: one SVD names the
+/// candidate rows, and only those are confirmed by a rank test.
 pub const MAX_DIAGNOSED_CONSTRAINTS: usize = 128;
 
 /// Convergence tolerance (mm) for a sketch of the given characteristic size (mm).

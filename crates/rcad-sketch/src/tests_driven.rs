@@ -2,6 +2,42 @@
 //! Expected values are the rectangle's diagonal sqrt(w² + h²).
 use super::*;
 
+/// More constraints than the old per-constraint diagnosis cap: a redundant
+/// pair is still named (one SVD finds the candidates).
+#[test]
+fn redundancy_is_diagnosed_in_a_large_sketch() {
+    let mut s = Sketch::default();
+    let mut last = None;
+    for i in 0..70 {
+        let y = 3.0 * f64::from(i);
+        let a = s.add_point(0.0, y);
+        let b = s.add_point(10.0, y + 0.5);
+        let l = s.add_line(a, b);
+        s.constraints
+            .push(Constraint::FixedPoint { p: a, x: 0.0, y });
+        s.constraints.push(Constraint::Horizontal { line: l });
+        s.constraints.push(Constraint::HorizontalDistance {
+            a,
+            b,
+            dim: Dimension::new(format!("w{i}"), 10.0),
+        });
+        last = Some((a, b));
+    }
+    assert!(s.constraints.len() > MAX_DIAGNOSED_CONSTRAINTS);
+    let (a, b) = last.unwrap();
+    s.constraints.push(Constraint::Distance {
+        a,
+        b,
+        dim: Dimension::new("again", 10.0),
+    });
+    let n = s.constraints.len();
+    let r = s.solve();
+    assert_eq!(r.status, SolveStatus::OverConstrained);
+    assert!(r.conflicting.contains(&(n - 1)), "{:?}", r.conflicting);
+    assert!(r.conflicting.contains(&(n - 2)), "{:?}", r.conflicting);
+    assert!(r.conflicting.len() <= 4, "{:?}", r.conflicting);
+}
+
 /// Fully dimensioned w x h rectangle with its first corner fixed at the
 /// origin. Returns the sketch and the corner points (BL, BR, TR, TL).
 fn rect(w: f64, h: f64) -> (Sketch, [PointId; 4]) {
