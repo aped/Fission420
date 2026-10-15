@@ -295,11 +295,13 @@ fn tangent_round_cut_beside_a_shallow_rounded_pocket() {
             region: None,
             options: Default::default(),
         });
-        // Cut 4 used to depend on Truck's run-to-run topology order (refilled pocket or the
-        // right solid). With order-stable topology walks in the truck-shapeops fork Truck
-        // refills the pocket in every process, and the check refuses it with the model
-        // unchanged (`cross_process_determinism.rs` covers the whole corpus).
-        if i == 4 {
+        // Cut 4: Truck either refills the pocket, which the check must refuse with the model
+        // unchanged, or builds the right solid, which must then pass the same oracle volume
+        // and point probes as every other cut below. With order-stable topology walks in the
+        // truck-shapeops fork the outcome no longer varies between processes of one build
+        // (`cross_process_determinism.rs`), but optimised and debug builds round differently
+        // here: release refuses, debug builds the right solid.
+        if i == 4 && !r.ok {
             assert!(
                 matches!(r.error, Some(rcad_document::DocError::GeometryCheck { ref detail, .. })
                     if detail.contains("beside a face of the target")),
