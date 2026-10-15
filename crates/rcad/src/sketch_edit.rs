@@ -2732,16 +2732,37 @@ impl SketchEditor {
         (self.selection.len() == 3 && p.len() == 2 && l.len() == 1).then(|| (p[0], p[1], l[0]))
     }
 
+    /// Two entities then the mirror line (selection order), if that is the
+    /// selection.
+    fn symmetry_entities_pick(&self) -> Option<(EntityId, EntityId, EntityId)> {
+        let es = self.selected_entities();
+        (self.selection.len() == 3
+            && es.len() == 3
+            && matches!(self.sketch.entity(es[2]), Some(Entity::Line { .. })))
+        .then(|| (es[0], es[1], es[2]))
+    }
+
     pub fn symmetry_disabled_reason(&self) -> Option<&'static str> {
-        self.symmetry_pick()
-            .is_none()
-            .then_some("Select two points and the line to mirror about")
+        (self.symmetry_pick().is_none() && self.symmetry_entities_pick().is_none()).then_some(
+            "Select two points (or two lines, or two circles), then the line to mirror about",
+        )
     }
 
     /// Symmetry: the two selected points mirror each other about the
     /// selected line.
     pub fn constrain_symmetric(&mut self) {
         self.end_lone_chain();
+        if let Some((a, b, line)) = self.symmetry_entities_pick() {
+            // Two like entities: their points mirrored (Sketch::symmetric_entities).
+            self.try_change(true, |sk| {
+                let cs = sk
+                    .symmetric_entities(a, b, line)
+                    .map_err(|e| e.to_string())?;
+                sk.constraints.extend(cs);
+                sk.validate().map_err(|e| e.to_string())
+            });
+            return;
+        }
         let Some((a, b, line)) = self.symmetry_pick() else {
             return;
         };

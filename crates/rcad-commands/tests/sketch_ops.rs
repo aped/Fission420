@@ -470,3 +470,55 @@ fn parameter_edits_are_guarded_against_branch_flips() {
     let want = 200.0 * 10.0 - (4.0 - std::f64::consts::PI) * 4.0;
     assert!((area - want).abs() < 1e-6, "{area} vs {want}");
 }
+
+/// Two lines mirrored about the vertical axis line x = 0 through the
+/// `symmetric_entities` op: the second line's ends land on the images of the
+/// first's (which is fixed), paired as drawn.
+#[test]
+fn symmetric_entities_op_mirrors_lines() {
+    let mut s = Session::new();
+    let f = empty_sketch(&mut s);
+    for json in [
+        r#"{"op":"add_line","a":[0,-20],"b":[0,20]}"#,
+        r#"{"op":"add_line","a":[5,2],"b":[12,9]}"#,
+        r#"{"op":"add_line","a":[-6,3],"b":[-11,10]}"#,
+    ] {
+        assert!(op(&mut s, f, json).ok, "{json}");
+    }
+    let sk = stored(&s, f);
+    let ids: Vec<u32> = sk.entities.iter().map(|e| e.id().0).collect();
+    let pts: Vec<u32> = sk
+        .points
+        .iter()
+        .filter(|p| Some(p.id) != sk.origin)
+        .map(|p| p.id.0)
+        .collect();
+    assert!(
+        op(
+            &mut s,
+            f,
+            &format!(r#"{{"op":"fix","points":{:?}}}"#, &pts[..4])
+        )
+        .ok
+    );
+    let r = op(
+        &mut s,
+        f,
+        &format!(
+            r#"{{"op":"symmetric_entities","a":{},"b":{},"line":{}}}"#,
+            ids[1], ids[2], ids[0]
+        ),
+    );
+    assert!(r.ok, "{r:?}");
+    let sk = stored(&s, f);
+    let Some(Entity::Line { a, b, .. }) = sk.entity(EntityId(ids[2])).cloned() else {
+        panic!()
+    };
+    let (pa, pb) = (sk.point_xy(a).unwrap(), sk.point_xy(b).unwrap());
+    for (got, want) in [(pa, [-5.0, 2.0]), (pb, [-12.0, 9.0])] {
+        assert!(
+            (got[0] - want[0]).abs() < 1e-8 && (got[1] - want[1]).abs() < 1e-8,
+            "{got:?} vs {want:?}"
+        );
+    }
+}
