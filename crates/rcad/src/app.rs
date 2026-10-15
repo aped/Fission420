@@ -2421,6 +2421,22 @@ impl RcadApp {
         {
             return;
         }
+        // Esc closes an open About, Help or Preferences window first (the
+        // topmost one), in model and sketch mode alike.
+        if (self.shell.show_about || self.show_help || self.shell.show_prefs)
+            && ctx.input_mut(|i| {
+                i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::Escape))
+            })
+        {
+            if self.shell.show_about {
+                self.shell.show_about = false;
+            } else if self.show_help {
+                self.show_help = false;
+            } else {
+                self.shell.show_prefs = false;
+            }
+            return;
+        }
         if self.sketch.is_some() {
             if ctx
                 .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1)))
@@ -2439,6 +2455,8 @@ impl RcadApp {
                 self.dialog = None;
             } else if self.doc_dim_edit.is_some() {
                 self.doc_dim_edit = None;
+            } else if self.notice.is_some() {
+                self.notice = None;
             } else {
                 self.select(None);
             }
