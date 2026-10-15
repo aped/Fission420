@@ -342,8 +342,8 @@ fn extrude_dialog_join_cut_through_all_cancel_and_refusal() {
     let _ = h.try_run();
     type_into(&mut h, "Pattern count", "2");
     type_into(&mut h, "Angle between instances (deg)", "180");
-    type_into(&mut h, "Centre x (mm)", "20");
-    type_into(&mut h, "Centre y (mm)", "15");
+    type_into(&mut h, "Centre X (mm)", "20");
+    type_into(&mut h, "Centre Y (mm)", "15");
     click(&mut h, "OK");
     let pat = h.state().summary().features.last().unwrap().clone();
     assert_eq!(

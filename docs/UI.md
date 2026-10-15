@@ -112,7 +112,7 @@ be interrupted and still completes, and Undo removes it in one step.
   `crates/rcad/tests/it/sketch_shapes_ui.rs`.
 * **Pattern… (sketch toolbar):** enabled when curves are selected; dialog *Rectangular* /
   *Circular*, *Instances*, *Step x/y (mm)* (+ *Second direction*), or *Angle between (°)* and
-  *Centre x/y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
+  *Centre X/Y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
   the spacing/angle become dimensions. UI test `crates/rcad/tests/it/sketch_pattern_ui.rs`.
 
 ## Edit Feature, messages and first run

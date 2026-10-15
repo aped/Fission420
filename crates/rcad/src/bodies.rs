@@ -739,7 +739,7 @@ impl RcadApp {
                     }
                 });
                 ui.horizontal(|ui| {
-                    crate::panels::num_field(ui, "Rotate (°)", &mut f.angle);
+                    crate::panels::num_field(ui, "Rotate (deg)", &mut f.angle);
                     ui.label("about");
                     ui.radio_value(&mut f.axis, 0, "X");
                     ui.radio_value(&mut f.axis, 1, "Y");

@@ -36,8 +36,8 @@ pub fn pattern_window(ctx: &egui::Context, ed: &mut SketchEditor) {
                     if p.circular {
                         field(ui, "Instances", &mut p.ccount);
                         field(ui, "Angle between (°)", &mut p.angle);
-                        field(ui, "Centre x (mm)", &mut p.cx);
-                        field(ui, "Centre y (mm)", &mut p.cy);
+                        field(ui, "Centre X (mm)", &mut p.cx);
+                        field(ui, "Centre Y (mm)", &mut p.cy);
                     } else {
                         field(ui, "Instances", &mut p.count);
                         field(ui, "Step x (mm)", &mut p.dx);

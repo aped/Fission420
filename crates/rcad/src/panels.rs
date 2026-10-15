@@ -2211,8 +2211,8 @@ impl RcadApp {
                             PatternKind::Circular => {
                                 num_field(ui, "Pattern count", count);
                                 num_field(ui, "Angle between instances (deg)", angle);
-                                num_field(ui, "Centre x (mm)", center_x);
-                                num_field(ui, "Centre y (mm)", center_y);
+                                num_field(ui, "Centre X (mm)", center_x);
+                                num_field(ui, "Centre Y (mm)", center_y);
                                 ui.small("Counter-clockwise about the seed sketch's normal through the centre (seed sketch coordinates). Count includes the seed; instances may not wrap past a full turn.");
                             }
                             PatternKind::Mirror => {
