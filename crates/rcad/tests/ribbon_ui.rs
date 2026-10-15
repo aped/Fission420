@@ -266,3 +266,34 @@ fn preferences_are_saved_atomically_and_reloaded() {
     assert_eq!(h2.state().keymap(), KeymapLayer::Classic);
     let _ = h2.try_run();
 }
+
+/// A dialog built from a face pick runs only at the model revision of the
+/// pick: an edit applied in between makes OK a refused stale pick, and the
+/// document keeps the edit and nothing else.
+#[test]
+fn a_pick_made_before_an_edit_is_refused_as_stale() {
+    let mut h = harness(1280.0, 800.0);
+    let top = plate(&mut h);
+    h.state_mut().select_face(Some(top));
+    let _ = h.try_run();
+    click(&mut h, "Hole");
+    h.get_by_label("Hole centre X (face mm)");
+    // An edit lands while the dialog is open (the plate gets thicker).
+    let plate_id = h.state().feature_by_name("Extrude1").unwrap().id;
+    h.state_mut().request(Command::SetParameter {
+        feature: plate_id,
+        name: "distance".into(),
+        value: 12.0,
+    });
+    settle(&mut h);
+    let n = h.state().summary().features.len();
+    click(&mut h, "OK");
+    assert_eq!(
+        h.state().summary().features.len(),
+        n,
+        "stale hole was added"
+    );
+    assert!((h.state().volume().unwrap() - 14400.0).abs() < 1e-6);
+    let last = h.state().diagnostics().last().cloned().unwrap();
+    assert!(last.error, "{last:?}");
+}

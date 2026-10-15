@@ -591,6 +591,66 @@ impl RcadApp {
             });
     }
 
+    /// Canvas picks feed the dialog's active selection input: a face picked
+    /// while the dialog is open replaces the dialog's face (Hole re-centres
+    /// on it). The preselection already filled it when the dialog opened.
+    fn feed_selection_input(&mut self, dlg: &mut Dialog) {
+        let pick = self.selected_face;
+        let changed = pick != self.shell.last_pick;
+        self.shell.last_pick = pick;
+        if !changed || self.last_dialog != Some(dlg.title()) {
+            return;
+        }
+        let Some(info) = self.selected_face().cloned() else {
+            return;
+        };
+        let Some(r) = info.reference else {
+            return;
+        };
+        let centre = self.face_centre_local(&info, &r);
+        match dlg {
+            Dialog::Hole { face, cx, cy, .. } => {
+                *face = r;
+                if let Some([x, y]) = centre {
+                    *cx = crate::params_ui::fmt_value(x);
+                    *cy = crate::params_ui::fmt_value(y);
+                }
+            }
+            Dialog::ShellFace { face, .. } | Dialog::FilletLoop { face, .. } => *face = r,
+            Dialog::Align { from, to } if r != *from => *to = Some(r),
+            _ => return,
+        }
+        self.shell.pick_armed = false;
+    }
+
+    /// A selection input row: "<what>: 1 selected (<item>)" with ✕ to clear
+    /// it; while cleared, the next face picked in the view fills it and OK
+    /// stays disabled. Returns false while it is empty.
+    fn selection_row(&mut self, ui: &mut egui::Ui, what: &str, item: &str) -> bool {
+        let armed = self.shell.pick_armed;
+        ui.horizontal(|ui| {
+            ui.label(format!("{what}:"));
+            if armed {
+                ui.colored_label(UNDER_COLOR, "Select a face in the view");
+            } else {
+                ui.label(RichText::new("1 selected").strong())
+                    .on_hover_text(item);
+                if ui
+                    .small_button("✕")
+                    .named(&format!("Clear {what}"))
+                    .on_hover_text("Clear: pick another face in the view")
+                    .clicked()
+                {
+                    self.shell.pick_armed = true;
+                }
+            }
+        });
+        if !armed {
+            ui.small(item);
+        }
+        !armed
+    }
+
     // ----- inspector -----
 
     pub(crate) fn inspector_ui(&mut self, ui: &mut egui::Ui, _busy: bool) {
@@ -1639,6 +1699,7 @@ impl RcadApp {
             return;
         };
         crate::dialogs::set_expression_env(&self.summary.parameters);
+        self.feed_selection_input(&mut dlg);
         let features = self.summary.features.clone();
         let sketches: Vec<&FeatureSummary> =
             features.iter().filter(|f| f.kind == "sketch").collect();
@@ -1860,11 +1921,13 @@ impl RcadApp {
                         ui.small("One STEP product per component (reused definitions written once), occurrences with their placements.");
                     }
                     Dialog::ShellFace { face, thickness } => {
-                        ui.label(format!(
-                            "Open face: {} {}",
+                        let text = format!(
+                            "{} {}",
                             self.feature_name(face.feature),
                             crate::face_role_label(&face.role)
-                        ));
+                        );
+                        ui.label(format!("Open face: {text}"));
+                        ok_allowed &= self.selection_row(ui, "Faces to remove", &text);
                         num_field(ui, "Shell thickness (mm)", thickness);
                         ui.small("Hollows the body under this face (left open) to walls and floor of this thickness; bodies prismatic along the face normal.");
                     }
@@ -1941,11 +2004,12 @@ impl RcadApp {
                         cb_depth,
                         offset,
                     } => {
-                        ui.label(format!(
-                            "On {} {}",
+                        let text = format!(
+                            "{} {}",
                             self.feature_name(face.feature),
                             crate::face_role_label(&face.role)
-                        ));
+                        );
+                        ok_allowed &= self.selection_row(ui, "Face", &text);
                         num_field(ui, "Hole centre X (face mm)", cx);
                         num_field(ui, "Hole centre Y (face mm)", cy);
                         ui.small("Face coordinates: origin and axes of the face's frame (for a face of an XY-sketched extrusion: world X/Y).");
@@ -2276,6 +2340,11 @@ impl RcadApp {
                     return;
                 }
                 Ok(cmd) => {
+                    let cmd = if crate::app::built_from_pick(&dlg) {
+                        self.at_pick_revision(cmd)
+                    } else {
+                        cmd
+                    };
                     let keep = matches!(
                         dlg,
                         Dialog::ExportStl(_) | Dialog::Export3mf(_) | Dialog::Import(_)

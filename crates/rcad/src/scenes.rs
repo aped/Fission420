@@ -40,6 +40,9 @@ pub const SCENES: &[&str] = &[
     "tray_refusal",
     "sketch_text",
     "sketch_text_edit",
+    "shell_overview",
+    "edit_feature",
+    "open_with_errors",
 ];
 
 fn fixture(rel: &str) -> PathBuf {
@@ -635,6 +638,64 @@ impl RcadApp {
                 }));
                 v
             }
+            // The application bar, ribbon and browser on the enclosure
+            // example, a cap face selected (face commands enabled).
+            "shell_overview" => vec![
+                enclosure(),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    let top = a
+                        .faces
+                        .iter()
+                        .filter(|f| f.plane.is_some_and(|p| p.normal[2] > 0.99))
+                        .max_by(|x, y| {
+                            let z =
+                                |f: &crate::view3d::FaceInfo| f.plane.map_or(0.0, |p| p.point[2]);
+                            z(x).total_cmp(&z(y))
+                        })
+                        .map(|f| f.group);
+                    a.select_face(top);
+                }),
+            ],
+            // Edit Feature: a boss on a plate reopened as a symmetric Cut.
+            "edit_feature" => vec![
+                Cmd(Command::NewDocument),
+                Cmd(rect(40.0, 30.0, [20.0, 15.0], SketchPlane::WorldXY)),
+                Cmd(Command::extrude(None, FeatureId(1), 10.0)),
+                Cmd(Command::CreateSketch {
+                    name: None,
+                    plane: end_cap_of(FeatureId(2)),
+                    template: SketchTemplate::CenteredCircle {
+                        diameter: 10.0,
+                        center: Some([20.0, 15.0]),
+                    },
+                }),
+                Cmd(Command::Extrude {
+                    name: None,
+                    sketch: FeatureId(3),
+                    distance: 5.0,
+                    op: ExtrudeOp::Join,
+                    target: Some(BodyId(1)),
+                    through_all: false,
+                    reverse: false,
+                    body_name: None,
+                    region: None,
+                    options: Default::default(),
+                }),
+                Ui(|a| {
+                    a.set_view(rcad_viewport::ViewPreset::Iso);
+                    a.edit_feature(FeatureId(4));
+                    if let Some(Dialog::Extrude(f)) = &mut a.dialog {
+                        f.op = ExtrudeOp::Cut;
+                        f.more.mode = crate::extrude::ExtentMode::Symmetric;
+                    }
+                }),
+            ],
+            // A document whose history no longer fully regenerates.
+            "open_with_errors" => vec![Cmd(Command::Open {
+                path: fixture("rcad-commands/tests/fixtures/open_with_errors.rcad.json"),
+                safe_mode: false,
+            })],
             "tray_refusal" => vec![
                 tray(false),
                 Cmd(Command::SetUserParameter {

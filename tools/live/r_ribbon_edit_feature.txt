@@ -1,0 +1,71 @@
+# keymap: fusion
+# Fusion-style flow with real input: ribbon sketch on XY, R / D keys,
+# FINISH SKETCH, E opens the docked Extrude dialog, a joined boss,
+# then double-click Extrude2 in History (Edit Feature) to make it a
+# symmetric Cut (15 mm centred on XY: 7.5 mm into the plate); Ctrl+Z restores the Join.
+clickw New
+wait_idle
+clickw Planes
+clickw Sketch on XY
+wait_idle
+expect editing.dims 0
+# Fusion R: 2-point rectangle from the origin.
+key r
+sclick 0.3 0.2
+smove 40 30
+sclick 40 30
+key d
+sclick 20 0
+type 40
+key Return
+sclick 40 15
+type 30
+key Return
+expect editing.dims 2
+shot
+clickw FINISH SKETCH
+wait_idle
+expect features 1
+key e
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 12000 0.01
+shot
+# Boss: circle Ø10 on XY at the plate centre, joined 15 mm
+# (a Join from a face of the target goes away from the material: 15 mm
+# below the plate, +375π).
+clickw Planes
+clickw Sketch on XY
+wait_idle
+key c
+sclick 20 15
+sclick 25 15
+key d
+sclick 20 20
+type 10
+key Return
+expect editing.dims 1
+clickw FINISH SKETCH
+wait_idle
+key e
+typew Extrude distance (mm) | 15
+clickw Join
+key Return
+wait_idle
+expect features 4
+expect volume 13178.0972451 0.01
+# Edit Feature: double-click the History row, Cut + Symmetric, OK.
+dclickw Extrude2
+wait_idle
+clickw Cut
+clickw Symmetric
+shot
+clickw OK
+wait_idle
+expect features 4
+expect volume 11410.9502563 0.01
+shot
+key ctrl+z
+wait_idle
+expect volume 13178.0972451 0.01

@@ -111,7 +111,8 @@ impl RcadApp {
 
     fn measure_faces(&mut self, a: FacePick, b: Option<FacePick>) {
         self.exact_measure.pending = Some((a, b));
-        self.request(Command::MeasureFaces { a, b });
+        let cmd = self.at_pick_revision(Command::MeasureFaces { a, b });
+        self.request(cmd);
     }
 
     /// Exact measurement section of the face inspector.

@@ -1613,6 +1613,7 @@ impl RcadApp {
         self.doc_dim_edit = None;
         match group.and_then(|g| self.faces.iter().find(|f| f.group == g).cloned()) {
             Some(info) => {
+                self.shell.pick_revision = Some(self.summary.revision);
                 self.selected = info.owner;
                 self.selected_face = Some(info.group);
                 self.selected_body = info.body;
@@ -2323,10 +2324,17 @@ impl RcadApp {
                     });
             });
         self.dialog_ui(ui, busy);
-        egui::CentralPanel::no_frame().show(ui, |ui| self.view_ui(ui));
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            // The timeline runs along the bottom of the canvas (the browser
+            // and inspector columns keep their height).
+            egui::Panel::bottom("rcad_timeline").show(ui, |ui| self.timeline_ui(ui));
+            self.view_ui(ui)
+        });
         if self.dialog.is_none() {
             self.last_dialog = None;
             self.shell.editing = None;
+            self.shell.pick_armed = false;
+            self.shell.last_pick = self.selected_face;
         }
         if !matches!(
             self.dialog,
@@ -2837,6 +2845,22 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
 
 /// `plane` moved `distance` mm along its normal (a construction plane), or
 /// `plane` itself for a zero distance.
+/// Dialogs whose command names faces picked in the view: they run only at
+/// the model revision of the pick.
+pub(crate) fn built_from_pick(d: &Dialog) -> bool {
+    match d {
+        Dialog::Hole { .. }
+        | Dialog::ShellFace { .. }
+        | Dialog::Chamfer { .. }
+        | Dialog::FilletLoop { .. }
+        | Dialog::Align { .. }
+        | Dialog::DirectEdit(_) => true,
+        Dialog::Pattern { mirror_face, .. } => mirror_face.is_some(),
+        Dialog::Thread { plane, .. } => matches!(plane, SketchPlane::Face(_)),
+        _ => false,
+    }
+}
+
 pub(crate) fn offset_plane(plane: SketchPlane, distance: f64) -> SketchPlane {
     use rcad_document::PlaneBase;
     let base = match plane {

@@ -14,6 +14,7 @@ pub mod keymap;
 pub mod prefs;
 pub mod registry;
 pub mod ribbon;
+pub mod timeline;
 
 pub use keymap::KeymapLayer;
 pub use registry::CmdId;
@@ -51,6 +52,13 @@ pub struct ShellState {
     /// Active ribbon tab.
     pub tab: registry::Tab,
     pub show_prefs: bool,
+    /// Model revision shown when the current face was picked (commands
+    /// built from the pick run only at that revision).
+    pub pick_revision: Option<u64>,
+    /// Face pick seen by the open dialog (new picks feed its input).
+    pub last_pick: Option<u32>,
+    /// The dialog's selection input was cleared and waits for a pick.
+    pub pick_armed: bool,
     /// Feature the open dialog edits (Edit Feature), if any.
     pub editing: Option<rcad_document::FeatureId>,
     /// Theme applied to the context (re-applied when it changes).
@@ -79,6 +87,9 @@ impl Default for ShellState {
             tab: registry::Tab::Solid,
             show_prefs: false,
             editing: None,
+            last_pick: None,
+            pick_revision: None,
+            pick_armed: false,
             applied_theme: None,
         }
     }
