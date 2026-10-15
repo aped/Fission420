@@ -212,7 +212,7 @@ const POLY_BLOCK: usize = 32;
 /// distance, runs are visited nearest box first and only runs whose box is
 /// farther than the best edge so far (plus the margin) are skipped, so the
 /// minimum is taken over a set that contains the minimal edge.
-struct PolyIndex {
+pub(crate) struct PolyIndex {
     /// (first edge, end edge, box low, box high).
     blocks: Vec<(usize, usize, [f64; 2], [f64; 2])>,
     /// Largest absolute coordinate of the polygon (rounding margin scale).
@@ -220,7 +220,7 @@ struct PolyIndex {
 }
 
 impl PolyIndex {
-    fn new(poly: &[[f64; 2]]) -> Self {
+    pub(crate) fn new(poly: &[[f64; 2]]) -> Self {
         let n = poly.len();
         let blocks = (0..n)
             .step_by(POLY_BLOCK)
@@ -248,7 +248,7 @@ impl PolyIndex {
         1.0e-9 * (1.0 + self.scale + p[0].abs() + p[1].abs())
     }
     /// [`point_in_polygon`] of `poly` (the polygon this index was built for).
-    fn contains(&self, p: [f64; 2], poly: &[[f64; 2]]) -> bool {
+    pub(crate) fn contains(&self, p: [f64; 2], poly: &[[f64; 2]]) -> bool {
         let n = poly.len();
         let margin = self.margin(p);
         let mut inside = false;
@@ -269,7 +269,7 @@ impl PolyIndex {
         inside
     }
     /// [`dist_to_polygon`] of `poly` (the polygon this index was built for).
-    fn dist(&self, p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
+    pub(crate) fn dist(&self, p: [f64; 2], poly: &[[f64; 2]]) -> f64 {
         let n = poly.len();
         let margin = self.margin(p);
         let mut order: Vec<(f64, usize)> = self

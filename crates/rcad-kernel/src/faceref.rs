@@ -187,6 +187,61 @@ fn interior_point(contours: &[Vec<[f64; 2]>]) -> Option<[f64; 2]> {
     best.map(|(_, p)| p)
 }
 
+/// A disk inside both the footprint `foot` and the face region `loops` (even-odd)
+/// whose area exceeds `10 * slack`: proof that their overlap is larger than
+/// `slack` without computing it. Probes an 8 x 8 grid of the boxes' common part;
+/// a probe proves it when it is inside both regions and its distance `d` to every
+/// boundary edge of both has `pi d^2 > 10 slack` (the disk of radius `d` then lies
+/// in both). No probe proving it is not evidence of anything.
+fn overlap_exceeds(foot: &[[f64; 2]], loops: &[Vec<[f64; 2]>], slack: f64) -> bool {
+    use crate::validate::PolyIndex;
+    let bbox = |pts: &mut dyn Iterator<Item = &[f64; 2]>| {
+        pts.fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(l, h), p| {
+            (
+                [l[0].min(p[0]), l[1].min(p[1])],
+                [h[0].max(p[0]), h[1].max(p[1])],
+            )
+        })
+    };
+    let (fl, fh) = bbox(&mut foot.iter());
+    let (gl, gh) = bbox(&mut loops.iter().flatten());
+    let lo = [fl[0].max(gl[0]), fl[1].max(gl[1])];
+    let hi = [fh[0].min(gh[0]), fh[1].min(gh[1])];
+    if !(lo[0] < hi[0] && lo[1] < hi[1]) {
+        return false;
+    }
+    let foot_ix = PolyIndex::new(foot);
+    let loop_ix: Vec<PolyIndex> = loops.iter().map(|l| PolyIndex::new(l)).collect();
+    const N: usize = 8;
+    for i in 0..N {
+        for j in 0..N {
+            let q = [
+                lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / N as f64,
+                lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / N as f64,
+            ];
+            let in_face = loops
+                .iter()
+                .zip(&loop_ix)
+                .filter(|(l, ix)| ix.contains(q, l))
+                .count()
+                % 2
+                == 1;
+            if !in_face || !foot_ix.contains(q, foot) {
+                continue;
+            }
+            let d = loops
+                .iter()
+                .zip(&loop_ix)
+                .map(|(l, ix)| ix.dist(q, l))
+                .fold(foot_ix.dist(q, foot), f64::min);
+            if std::f64::consts::PI * d * d > 10.0 * slack {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Number of distinct planar faces of `body` in `frame`'s plane with outward
 /// normal `frame.z` whose region overlaps the footprint polygon `outline`
 /// (world points on or near the plane, projected) with positive area, and a
@@ -197,6 +252,28 @@ pub fn planar_faces_overlapping(
     frame: &Frame,
     outline: &[[f64; 3]],
     curved: bool,
+) -> Result<(usize, Option<[f64; 3]>)> {
+    faces_overlapping(body, frame, outline, curved, true)
+}
+
+/// The count of [`planar_faces_overlapping`] alone. A face whose overlap with
+/// the footprint is shown larger than the threshold by an inscribed disk is
+/// counted without the polygon intersection (the point is not needed).
+pub fn planar_faces_overlap_count(
+    body: &Body,
+    frame: &Frame,
+    outline: &[[f64; 3]],
+    curved: bool,
+) -> Result<usize> {
+    faces_overlapping(body, frame, outline, curved, false).map(|(n, _)| n)
+}
+
+fn faces_overlapping(
+    body: &Body,
+    frame: &Frame,
+    outline: &[[f64; 3]],
+    curved: bool,
+    want_point: bool,
 ) -> Result<(usize, Option<[f64; 3]>)> {
     let z = Vector3::new(frame.z[0], frame.z[1], frame.z[2]);
     let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
@@ -285,6 +362,10 @@ pub fn planar_faces_overlapping(
             } else {
                 1.0e-9 * foot_area.max(1.0)
             };
+            if !want_point && overlap_exceeds(&foot, &loops, slack) {
+                hits += 1;
+                continue;
+            }
             let shapes =
                 vec![foot.clone()].overlay(&loops, OverlayRule::Intersect, FillRule::EvenOdd);
             let area: f64 = shapes
@@ -309,4 +390,34 @@ pub fn planar_faces_overlapping(
         }
         (hits, inside)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square(c: [f64; 2], h: f64) -> Vec<[f64; 2]> {
+        vec![
+            [c[0] - h, c[1] - h],
+            [c[0] + h, c[1] - h],
+            [c[0] + h, c[1] + h],
+            [c[0] - h, c[1] + h],
+        ]
+    }
+
+    /// The disk certificate only ever claims overlaps that exist and exceed
+    /// the threshold; the face's holes count (even-odd).
+    #[test]
+    fn overlap_certificate_is_sound() {
+        let foot = square([0.0, 0.0], 5.0);
+        assert!(overlap_exceeds(&foot, &[square([1.0, 0.0], 5.0)], 1.0));
+        // Apart, touching along an edge, or overlapping less than the threshold.
+        assert!(!overlap_exceeds(&foot, &[square([20.0, 0.0], 5.0)], 1.0));
+        assert!(!overlap_exceeds(&foot, &[square([10.0, 0.0], 5.0)], 1.0));
+        assert!(!overlap_exceeds(&foot, &[square([9.9, 0.0], 5.0)], 1.0));
+        // The footprint lies in a hole of the face.
+        let holed = vec![square([0.0, 0.0], 20.0), square([0.0, 0.0], 6.0)];
+        assert!(!overlap_exceeds(&foot, &holed, 1.0));
+        assert!(overlap_exceeds(&square([10.0, 0.0], 3.0), &holed, 1.0));
+    }
 }

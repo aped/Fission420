@@ -4211,8 +4211,8 @@ fn hole_face_side(
         z: scale(frame.z, -1.0),
         ..*frame
     };
-    let (pos, _) = k::planar_faces_overlapping(body, frame, &outline, curved)?;
-    let (neg, _) = k::planar_faces_overlapping(body, &flipped, &outline, curved)?;
+    let pos = k::planar_faces_overlap_count(body, frame, &outline, curved)?;
+    let neg = k::planar_faces_overlap_count(body, &flipped, &outline, curved)?;
     match (pos > 0, neg > 0) {
         (true, false) => Ok(Some(1.0)),
         (false, true) => Ok(Some(-1.0)),
@@ -6331,8 +6331,13 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
         let (outline, curved) = footprint(e, role, &moved_back(&moved, &frame));
         let outline: Vec<[f64; 3]> = outline.into_iter().map(|p| moved.point(p)).collect();
         if polygon_area(&outline) > 0.0 {
-            let (hits, inside) = k::planar_faces_overlapping(body, &frame, &outline, curved)
-                .map_err(kernel(from))?;
+            // The overlap point is used only to tell several faces in the plane apart.
+            let (hits, inside) = if in_plane > 1 {
+                k::planar_faces_overlapping(body, &frame, &outline, curved)
+            } else {
+                k::planar_faces_overlap_count(body, &frame, &outline, curved).map(|n| (n, None))
+            }
+            .map_err(kernel(from))?;
             n = hits;
             gone_from_footprint = hits == 0;
             if hits == 1 && in_plane > 1 {
@@ -6365,9 +6370,8 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
                     let outline: Vec<[f64; 3]> =
                         outline.into_iter().map(|p| moved.point(p)).collect();
                     if polygon_area(&outline) > 0.0 {
-                        k::planar_faces_overlapping(pb, &frame, &outline, curved)
+                        k::planar_faces_overlap_count(pb, &frame, &outline, curved)
                             .map_err(kernel(from))?
-                            .0
                     } else {
                         k::planar_faces_on(pb, &frame)
                     }
