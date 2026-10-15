@@ -40,7 +40,9 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v8: the additions listed in [`v8_feature`] (sketch ellipses and splines, extra bodies of cuts that
 /// split a body, ...). Written only when used (otherwise v7 or older as before).
 /// v9: the additions listed in [`v9_feature`] (piece identity seeds of cuts
-/// and splits that separate a body, contour flanges ordered by geometry).
+/// and splits that separate a body, prints of referenced imported faces,
+/// contour flanges ordered by geometry, driven sketch dimensions,
+/// concentric/collinear/symmetric sketch constraints).
 /// Written only when used.
 pub const FORMAT_VERSION: u32 = 9;
 /// Oldest version this build reads.
@@ -352,6 +354,23 @@ pub fn v9_feature(doc: &Document) -> Option<&'static str> {
     }
     if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
         return Some("prints of referenced imported faces");
+    }
+    // A v8 reader would take a driven (measuring) dimension as driving, and
+    // cannot parse the newer constraint kinds.
+    let sketch_text = |needle: &str| {
+        doc.features.iter().any(|f| {
+            matches!(f.kind, crate::FeatureKind::Sketch { .. })
+                && serde_json::to_string(&f.kind).is_ok_and(|t| t.contains(needle))
+        })
+    };
+    if sketch_text("\"driven\":true") {
+        return Some("driven sketch dimensions");
+    }
+    if ["{\"Concentric\":", "{\"Collinear\":", "{\"Symmetric\":"]
+        .iter()
+        .any(|n| sketch_text(n))
+    {
+        return Some("concentric, collinear or symmetric sketch constraints");
     }
     doc.features
         .iter()
