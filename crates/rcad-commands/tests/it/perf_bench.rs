@@ -103,6 +103,13 @@ fn edit_rounded_enclosure_parameter() {
     );
 }
 
+#[test]
+#[ignore = "timing report; run explicitly"]
+fn edit_rounded_enclosure_lid() {
+    // The lid thickness drives only the lid and its holes, the last features.
+    edit_parameter("rounded_enclosure.rcad.json", "lid_t", [2.6, 2.8, 2.4, 3.0]);
+}
+
 /// Open `file`, then set user parameter `name` to each of `values` (mm) in turn.
 fn edit_parameter(file: &str, name: &str, values: [f64; 4]) {
     let mut s = Session::new();
