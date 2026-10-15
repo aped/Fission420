@@ -81,3 +81,7 @@ booleans. Fixes here are kept small and self-contained so each can be offered up
   and R-CAD's kernel tessellates bodies the same way. Test:
   `fast_curve::tests::fast_curves_tessellate_identically` (positions and triangles compared bit for
   bit with the plain tessellation).
+- `Cargo.toml`: truck-meshalgo without its default `vtk` feature (`analyzers`, `filters`,
+  `tessellation` kept, which is all this crate uses). The `vtk` feature pulled in vtkio and through
+  it quick-xml 0.22 and lz4_flex 0.7 (RustSec advisories for untrusted input), xz2/lzma-sys (the
+  only C code in the build) and nom 3; none of it was used. No code change.

@@ -40,12 +40,14 @@ env:
   RUST_TOOLCHAIN: "1.99.0"
   # Pinned cargo-nextest; bump with docs/CI.md.
   NEXTEST_VERSION: "0.9.148"
-  # The Debian container's system packages. C compiler for lzma-sys (truck-meshalgo ->
-  # vtkio -> xz2); nothing else is linked at build time (wayland/x11/xkbcommon are
-  # dlopen'ed at runtime). fonts-liberation: the sketch-text tests use Liberation Sans.
+  # The Debian container's system packages. build-essential: the linker driver rustc uses;
+  # no C code is compiled and nothing else is linked at build time (wayland/x11/xkbcommon
+  # are dlopen'ed at runtime). fonts-liberation: the sketch-text tests use Liberation Sans.
   # Keep in step with tools/ci/container_check.sh.
   DEBIAN_PACKAGES: >-
-    ca-certificates curl git build-essential pkg-config liblzma-dev python3 fonts-liberation
+    ca-certificates curl git build-essential python3 fonts-liberation
+  # Pinned cargo-deny for the lint job's supply-chain check (deny.toml).
+  CARGO_DENY_VERSION: "0.20.2"
   # Caches are written by main only; other branches and PRs restore main's caches. This
   # keeps the 10 GB repository cache from thrashing with per-branch copies.
   SAVE_CACHE: ${{ github.ref == 'refs/heads/main' }}
@@ -71,6 +73,12 @@ jobs:
           save-if: ${{ env.SAVE_CACHE }}
       - name: Lockfile is current
         run: cargo fetch --locked
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+      - name: cargo deny check
+        # Advisories (RustSec, fetched now), licenses, bans and sources per deny.toml.
+        run: cargo deny --locked check
       - name: cargo xtask check --stage lint
         run: cargo xtask check --stage lint
 

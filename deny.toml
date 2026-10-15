@@ -1,0 +1,71 @@
+# cargo-deny: supply-chain gate run by `cargo deny check` (CI lint job; docs/CI.md).
+# The license policy is the one in docs/DEPENDENCIES.md; every exception below is also
+# recorded there with its reason. Do not add blanket ignores.
+
+[graph]
+# The platforms R-CAD ships for, so platform-only dependencies (Windows, macOS) are checked.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+# RustSec advisory database (fetched over the network). Vulnerabilities and unsound
+# crates fail the check; unmaintained crates are reported for direct dependencies.
+unmaintained = "workspace"
+yanked = "deny"
+# Each entry is recorded in docs/DEPENDENCIES.md ("Advisories accepted for now").
+ignore = [
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser 0.25.1 is unmaintained (no vulnerability). rcad-sketch reads installed fonts' outlines with it; moving to skrifa is a planned change, not a 1.0 blocker" },
+]
+
+[licenses]
+# docs/DEPENDENCIES.md: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those).
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "ISC",
+  "Zlib",
+]
+confidence-threshold = 0.9
+# Approved exceptions, each limited to the crate that needs it (docs/DEPENDENCIES.md,
+# "Approved license exceptions").
+exceptions = [
+  # egui's bundled UI fonts: font licences that allow embedding and redistribution with
+  # their notices (shipped in THIRD_PARTY_LICENSES.txt).
+  { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+  # Unicode character data tables (Unicode License v3, permissive with notice).
+  { crate = "unicode-ident", allow = ["Unicode-3.0"] },
+  # Windows clipboard (egui-winit -> arboard -> clipboard-win -> error-code), Windows builds
+  # only. Boost Software License 1.0: permissive, notice required in source distributions only.
+  { crate = "clipboard-win", allow = ["BSL-1.0"] },
+  { crate = "error-code", allow = ["BSL-1.0"] },
+]
+
+[licenses.private]
+# Workspace crates are MIT OR Apache-2.0 and unpublished.
+ignore = true
+
+[bans]
+# Duplicate versions are reported, not refused (the GUI stack pulls several).
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+# crates.io only; path dependencies (the workspace, third_party/truck-shapeops) are local.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -22,7 +22,7 @@ ci.yml
 
 | job | runs | `cargo xtask` | notes |
 |---|---|---|---|
-| lint | Ubuntu leg only | `check --stage lint`: layout, public text, `fmt --check`, `clippy --workspace --all-targets -D warnings` | Dev profile; fails within a few minutes. Own cache (`lint-…`). |
+| lint | Ubuntu leg only | `check --stage lint`: layout, public text, `fmt --check`, `clippy --workspace --all-targets -D warnings` | First `cargo deny --locked check` (pinned `CARGO_DENY_VERSION`; see [Supply chain](#supply-chain-cargo-deny)). Dev profile; fails within a few minutes. Own cache (`lint-…`). |
 | build | every leg | `check --stage doctest` (last) | `cargo fetch --locked`; release binaries; `cargo nextest archive --workspace --release` → artifact `tests-<leg>`; binaries plus `THIRD_PARTY_LICENSES.txt` → artifact `bin-<leg>` (tarred, so the executable bit survives). `RCAD_GIT_REV` is the short commit, so `--version` reports it. |
 | test k/N | every leg, N shards | none (nextest directly) | Downloads the archive, runs `cargo-nextest nextest run --archive-file … --workspace-remap . --profile ci --partition hash:k/N`. No Rust toolchain, no compilation. JUnit report → artifact `junit-<leg>-<k>`. |
 | acceptance + examples | every leg | `check --stage replay` with `RCAD_CLI=stage/rcad-cli` | Runs the prebuilt CLI (no release build). `rcad-cli acceptance` reads its fixtures from the source tree through compile-time paths, which match because the checkout path is the same as in the build job. First checks that `rcad --version` and `rcad-cli --version` report the version and commit. Ubuntu warns when the replays rewrite committed `examples/`. |
@@ -152,6 +152,29 @@ parallel with the replay job (about 4 min) → package 1 min: about **15–20 mi
 now bounded by the slowest tests rather than by linking. Lint reports within about 3 min.
 These are estimates until a GitHub run of this layout confirms them.
 
+## Supply chain (cargo-deny)
+
+The lint job runs `cargo deny --locked check` with `deny.toml` (cargo-deny pinned through
+`taiki-e/install-action`, `CARGO_DENY_VERSION` in `check.yml`). The graph is resolved for the
+three shipped targets (Linux, Windows, macOS), so platform-only crates are checked too.
+
+- **advisories:** the RustSec database is fetched on every run. Vulnerabilities, unsound
+  crates and yanked versions fail the job; unmaintained crates fail when they are direct
+  dependencies. Accepted advisories are listed, each with a reason, in `deny.toml` and in
+  docs/DEPENDENCIES.md (currently one: ttf-parser is unmaintained).
+- **licenses:** the policy of docs/DEPENDENCIES.md (MIT, Apache-2.0, BSD, 0BSD, ISC, Zlib).
+  Exceptions are per crate and recorded in both files (egui's fonts, Unicode tables, the
+  Windows clipboard crates under BSL-1.0).
+- **bans:** duplicate versions are warnings only (the GUI stack pulls several); wildcard
+  version requirements are refused.
+- **sources:** crates.io only, plus the workspace's path dependencies
+  (`third_party/truck-shapeops`).
+
+A new advisory can turn the job red without a code change. Resolve it (update or replace the
+crate), or record it in `deny.toml` and docs/DEPENDENCIES.md with a reason; never add a
+blanket ignore. Locally: `cargo deny check` (cargo-deny 0.20.2 release binary, checked against the
+published SHA-256).
+
 ## `cargo xtask check` stages
 
 ```bash
@@ -180,12 +203,12 @@ keeps clippy's `-D warnings` the same in CI and locally.
 
 ### Native build dependencies
 
-The only C code compiled is `lzma-sys`, pulled in by `truck-shapeops → truck-meshalgo
-(default features) → vtkio → xz2`. It is third-party and not an application-owned kernel. It
-needs a C compiler:
+No C code is compiled. (The last C dependency, `lzma-sys` through truck-meshalgo's unused `vtk`
+feature, is gone: the vendored truck-shapeops fork no longer enables that feature.) Builds need
+only the platform linker:
 
-- **Debian container:** `build-essential pkg-config liblzma-dev` (`DEBIAN_PACKAGES` in `check.yml`; keep `tools/ci/container_check.sh` in step). With these it links the system liblzma.
-- **Ubuntu, macOS and Windows:** the runner images already have what it needs. MSVC builds the bundled source.
+- **Debian container:** `build-essential` for the linker driver (`DEBIAN_PACKAGES` in `check.yml`; keep `tools/ci/container_check.sh` in step).
+- **Ubuntu, macOS and Windows:** the runner images already have it.
 
 Test-only runtime dependency: the sketch-text tests (`rcad-sketch/tests/it/text.rs`,
 `rcad-commands/tests/it/{sketch_text,text_emboss,rounded_enclosure}.rs`, `rcad/tests/it/sketch_text_ui.rs`)
@@ -251,21 +274,16 @@ crates (Truck, egui) whose packages ship none.
 
   ```bash
   rustup toolchain install 1.99.0 --profile minimal -c clippy -t aarch64-apple-darwin -t x86_64-pc-windows-msvc
-  # A stand-in C "compiler" for lzma-sys: it only creates the object and archive files.
-  printf '#!/bin/sh\nfor a; do case "$a" in -Fo*) : > "${a#-Fo}";; -out:*) : > "${a#-out:}";; esac; done\n' > target/fakecc
-  chmod +x target/fakecc
-  PATH=$(dirname "$(rustup which --toolchain 1.99.0 cargo)"):$PATH \
-    CC_x86_64_pc_windows_msvc=$PWD/target/fakecc AR_x86_64_pc_windows_msvc=$PWD/target/fakecc \
-    PKG_CONFIG_ALLOW_CROSS=1 CARGO_TARGET_DIR=$PWD/target-ci-x \
-    cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
-  # macOS: the same with --target aarch64-apple-darwin (lzma-sys then resolves the host
-  # liblzma through pkg-config; PKG_CONFIG_ALLOW_CROSS allows it).
+  for t in x86_64-pc-windows-msvc aarch64-apple-darwin; do
+    PATH=$(dirname "$(rustup which --toolchain 1.99.0 cargo)"):$PATH CARGO_TARGET_DIR=$PWD/target-ci-x \
+      cargo clippy --workspace --all-targets --target "$t" -- -D warnings
+  done
   ```
 
   The toolchain's directory comes first on `PATH` because the Homebrew `cargo`/`rustc` have
-  no cross targets. `lzma-sys` compiles C with MSVC's `cl.exe`, which Linux lacks; the stand-in
-  is enough because `clippy` never links. This catches Unix-only APIs (`std::os::unix`) and
-  `cfg` mistakes; it does not run anything.
+  no cross targets. With no C code in the build, nothing needs a cross C compiler, and
+  `clippy` never links. This catches Unix-only APIs (`std::os::unix`) and `cfg` mistakes; it
+  does not run anything.
 
 - **Workflow lint:** `actionlint` 1.7.12 with shellcheck 0.11.0 (`actionlint -shellcheck
   <path>`); neither is installed system-wide. Pinned release binaries, checked against the
@@ -288,8 +306,8 @@ test fails on that platform; **R** = runtime risk, no test failure expected; **C
 | L1 | T? | macOS, Windows | `crates/rcad-commands/tests/it/gate_fuzz.rs`; `crates/rcad-kernel/src/ops/tests.rs` | Accept/refuse counts tuned on one Linux run; Truck's circle/NURBS code uses libm `sin`/`cos`. | Did not occur on macOS. If one diverges, give the threshold a documented margin; never drop the case. |
 | L2 | R | Windows | `crates/rcad-cli/src/main.rs`; `rcad --sync` | Geometry on the main thread, which gets 1 MiB on Windows. | **applied (mitigation):** `.cargo/config.toml` links MSVC binaries with `/STACK:8388608`. Long term: run the CLI body on a thread with an explicit stack size. |
 | L3 | R | all | `xtask/src/main.rs` | The example replays write to `artifacts/` but never create it. | **applied:** `cargo xtask check --stage replay` creates `artifacts/`; release archives ship an empty one. |
-| L4 | R | Windows, macOS | `crates/rcad/src/recovery.rs` (`recovery_dirs`) | The autosave directory is `RCAD_RECOVERY_DIR`, then `XDG_STATE_HOME`, then `HOME/.local/state`. Windows usually has no `HOME`, so autosave is silently off; on macOS it lands in a Linux-style path. | Open. Fall back to `%LOCALAPPDATA%` on Windows and `~/Library/Application Support` on macOS. |
-| L5 | R | Windows | `crates/rcad-document/src/io.rs` (atomic save) | Copies the target's permissions onto the temp file before the rename; a read-only target or one held open by another process makes the rename fail (the previous file survives). | Open. Do not copy the read-only bit on Windows; retry the rename briefly on `PermissionDenied`. |
+| L4 | R | Windows, macOS | `crates/rcad/src/recovery.rs` (`recovery_dir`) | The autosave directory was `RCAD_RECOVERY_DIR`, then `XDG_STATE_HOME`, then `HOME/.local/state`. Windows usually has no `HOME`, so autosave was silently off; on macOS it landed in a Linux-style path. | **applied:** without `RCAD_RECOVERY_DIR`, `%LOCALAPPDATA%\R-CAD\recovery` on Windows and `~/Library/Application Support/R-CAD/recovery` on macOS; Linux unchanged. `recovery_dir_on` takes the platform, so `tests/it/recovery_env.rs` checks all three on every runner. |
+| L5 | R | Windows | `crates/rcad-document/src/io.rs` (`write_atomic`) | Copied the target's permissions (on Windows only the read-only attribute) onto the temp file, so one read-only save blocked the next; a target briefly held open by another process failed the rename (the previous file survived). | **applied:** permissions are copied on Unix only; the rename is retried up to five times over about 150 ms on access denied and sharing/lock violations on Windows (once elsewhere). Tests: `io::rename_tests` (bounded retry; success when the target is released mid-retry, using a handle without delete sharing on Windows) and `tests/it/atomic_save.rs` (saving over a read-only file never leaves a damaged file or a temp file). |
 | L6 | T? | slow runners | `crates/rcad/tests/it/exchange_ui.rs` (20 s), `tests/it/measure_imports.rs` (30 s), `tests/it/frame_pacing.rs` | Wall-clock limits tuned on a 9800X3D. | **CI mitigation:** one retry each in the nextest `ci` profile, reported as `FLAKY`. Still worth raising the limits to about 120 s; they guard against hangs, not performance. |
 | L7 | T (intermittent) | macOS | `crates/rcad-commands/tests/it/export_determinism.rs` (`bracket_exports_and_saves_are_byte_identical`) | Two saves of the mounting bracket differed in the cached `TessellationEstimate` volume (Actions run ID 38346875644), likely a summation order that follows allocation order. | **applied:** the saved cache volume is rounded to 1e-6 mm³ (`CACHE_VOLUME_STEPS` in `crates/rcad-document/src/io.rs`). Not failed on macOS since; the canonical-order sum is the real fix. |
 | C1 | C | Windows | `crates/rcad/src/main.rs` | The GUI binary opens a console window. | `#![cfg_attr(windows, windows_subsystem = "windows")]` once a log location exists. |
@@ -311,7 +329,7 @@ CRLF; cross-document float comparisons use tolerances apart from F3.
 | Actions run ID 38794623302 (`6e31cf2`, one test binary per crate, faster kernel) | **pass, about 11 min** (build 6, shards 4 + 2, replays 1) | pass | pass | only the path-escape test |
 | Actions run ID 38797613278 (`1882dc0`) | pass | pass | pass | **pass** (first green Windows run; now gating) |
 
-Next, in value order: fix L4 and L5; raise the L6 limits.
+Next, in value order: raise the L6 limits; replace ttf-parser (unmaintained, see Supply chain).
 
 ## Regression tests added with CI
 
