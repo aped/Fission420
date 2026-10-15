@@ -69,8 +69,14 @@ const STEP_TWO: &str = "rcad-kernel/tests/fixtures/step/two_boxes_compound_mm.st
 
 /// Queue a plate with a long hole pattern (seconds of boolean work) without
 /// waiting, so commands submitted next stay pending.
+///
+/// The new document itself is awaited first: its reply switches documents, and a
+/// switch closes any open dialog that is not a pending import. Without the wait, a
+/// slow runner delivers that reply after the test has opened the Import form, which
+/// then vanishes before its path can be typed.
 fn queue_slow_work(h: &mut Harness<'_, RcadApp>) {
     h.state_mut().request(Command::NewDocument);
+    settle(h);
     queue_slow_edits(h);
 }
 

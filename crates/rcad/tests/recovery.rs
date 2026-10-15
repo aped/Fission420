@@ -43,6 +43,9 @@ fn autosave_crash_recover_and_save() {
     let base = std::env::temp_dir().join(format!("rcad-recovery-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
+    // The app records and reopens canonical paths; the temporary directory may sit
+    // behind a symlink (macOS: /var -> /private/var), so compare canonical paths.
+    let base = base.canonicalize().unwrap();
     struct D(std::path::PathBuf);
     impl D {
         fn path(&self) -> &std::path::Path {
