@@ -175,7 +175,16 @@ impl RcadApp {
             .probe(d.label);
         let r = match &state {
             Ok(()) => r.on_hover_text(format!("{}\n{}", d.label, self.command_tooltip(d))),
-            Err(why) => r.on_disabled_hover_text(format!("{}\n{why}", d.label)),
+            // A disabled command still shows its key (learnt before it is
+            // needed).
+            Err(why) => {
+                let keys = d.key_text(self.shell.prefs.keymap);
+                r.on_disabled_hover_text(if keys.is_empty() {
+                    format!("{}\n{why}", d.label)
+                } else {
+                    format!("{} ({keys})\n{why}", d.label)
+                })
+            }
         };
         let clicked = r.clicked();
         if clicked {

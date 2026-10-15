@@ -760,15 +760,38 @@ impl RcadApp {
 
     /// A text button for `id` (label = accessible name = probe key),
     /// disabled with the reason on hover. Runs the command when clicked.
+    /// In menus the active layer's key is shown at the right of the item
+    /// (the accessible name stays the label).
     pub(crate) fn cmd_button(&mut self, ui: &mut egui::Ui, id: CmdId) -> bool {
+        self.cmd_button_keyed(ui, id, true)
+    }
+
+    /// [`Self::cmd_button`] without the key text (buttons on a bar).
+    pub(crate) fn cmd_bar_button(&mut self, ui: &mut egui::Ui, id: CmdId) -> bool {
+        self.cmd_button_keyed(ui, id, false)
+    }
+
+    fn cmd_button_keyed(&mut self, ui: &mut egui::Ui, id: CmdId, show_key: bool) -> bool {
         let d = registry::def(id);
         let state = (d.enabled)(self);
-        let r = ui
-            .add_enabled(state.is_ok(), egui::Button::new(d.label))
-            .probe(d.label);
+        let keys = d.key_text(self.shell.prefs.keymap);
+        let mut button = egui::Button::new(d.label);
+        if show_key && !keys.is_empty() {
+            button = button.shortcut_text(keys.as_str());
+        }
+        let r = ui.add_enabled(state.is_ok(), button);
+        if show_key && !keys.is_empty() {
+            // The shortcut atom would otherwise join the accessible name.
+            r.ctx.accesskit_node_builder(r.id, |n| {
+                n.set_label(d.label.to_string());
+                n.set_keyboard_shortcut(keys.clone());
+            });
+        }
+        let r = r.probe(d.label);
         let r = match &state {
             Ok(()) => r.on_hover_text(self.command_tooltip(d)),
-            Err(why) => r.on_disabled_hover_text(why),
+            Err(why) if keys.is_empty() => r.on_disabled_hover_text(why),
+            Err(why) => r.on_disabled_hover_text(format!("{why} ({keys})")),
         };
         let clicked = r.clicked();
         if clicked {

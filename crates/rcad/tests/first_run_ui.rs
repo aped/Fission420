@@ -5,7 +5,10 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::Key;
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use rcad::{ExecMode, RcadApp};
 use rcad_commands::{Command, SketchTemplate};
 use rcad_document::SketchPlane;
@@ -119,4 +122,33 @@ fn about_shows_version_license_and_source() {
     h.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
     h.get_by_label(&format!("License: {}", env!("CARGO_PKG_LICENSE")));
     assert!(h.query_by_label_contains("github.com").is_some());
+}
+
+/// Menu items show their key at the right; the item keeps the command
+/// label as its name (scripts and tests click it by label).
+#[test]
+fn menu_items_show_their_keys() {
+    let mut h = harness();
+    click(&mut h, "New");
+    click(&mut h, "File menu");
+    // The app-bar icon and the File menu item.
+    let keys: Vec<Option<String>> = h
+        .query_all_by_label("Save As…")
+        .map(|n| {
+            n.accesskit_node()
+                .data()
+                .keyboard_shortcut()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert!(keys.contains(&Some("Ctrl+Shift+S".into())), "{keys:?}");
+    // An item without a key has none; clicking an item still runs it.
+    let safe = h.get_by_label("Open (safe mode)…");
+    assert_eq!(safe.accesskit_node().data().keyboard_shortcut(), None);
+    let n = h.query_all_by_label("Save As…").count();
+    assert_eq!(n, 2);
+    h.query_all_by_label("Save As…").last().unwrap().click();
+    settle(&mut h);
+    h.get_by_label("Save document as");
 }
