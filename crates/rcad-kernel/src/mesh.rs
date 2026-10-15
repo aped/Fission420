@@ -978,6 +978,82 @@ pub fn canonical_mesh(m: &TriMesh) -> TriMesh {
     }
 }
 
+/// One B-rep edge of a body for display and picking: the faces it bounds
+/// (indices in the body's face order, the same indices as
+/// [`TriMesh::tri_face`]; equal for a seam), `component` numbering the edges
+/// that share that face pair (ordered by their rounded start point, so the
+/// numbering does not depend on the kernel's topology order), and a polyline
+/// within the chord tolerance. A provisional key for this evaluation only: the
+/// document maps it to a persistent reference (ADR 0015); it is never stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EdgePolyline {
+    pub faces: [u32; 2],
+    pub component: u32,
+    pub points: Vec<[f64; 3]>,
+}
+
+/// The edge table of `body` (see [`EdgePolyline`]), ordered by face pair and
+/// component.
+pub fn edge_polylines(body: &Body, chord: f64) -> Result<Vec<EdgePolyline>> {
+    if !(chord.is_finite() && chord > 0.0) {
+        return Err(KernelError::InvalidInput(format!(
+            "chord tolerance must be positive, got {chord}"
+        )));
+    }
+    guarded("edge polylines", || {
+        let q = |p: [f64; 3]| p.map(|c| (c * 1.0e6).round() as i64);
+        // Edge id -> position in `list`; only looked up, the list keeps the
+        // first-seen order.
+        let mut slot = HashMap::new();
+        let mut list: Vec<(Vec<u32>, truck_modeling::Edge)> = Vec::new();
+        for (fi, face) in body.solid.face_iter().enumerate() {
+            for e in face.boundaries().iter().flatten() {
+                let k = *slot.entry(e.id()).or_insert_with(|| {
+                    list.push((Vec::new(), e.clone()));
+                    list.len() - 1
+                });
+                list[k].0.push(fi as u32);
+            }
+        }
+        let mut out: Vec<EdgePolyline> = list
+            .into_iter()
+            .map(|(faces, e)| {
+                let c = e.curve();
+                let (t0, t1) = c.range_tuple();
+                let mut pts: Vec<[f64; 3]> = c
+                    .parameter_division((t0, t1), chord)
+                    .1
+                    .into_iter()
+                    .map(|p| [p.x, p.y, p.z])
+                    .collect();
+                // A canonical direction: from the smaller rounded end.
+                if let (Some(a), Some(b)) = (pts.first(), pts.last())
+                    && q(*b) < q(*a)
+                {
+                    pts.reverse();
+                }
+                let mut f = [faces[0], if faces.len() > 1 { faces[1] } else { faces[0] }];
+                f.sort_unstable();
+                EdgePolyline {
+                    faces: f,
+                    component: 0,
+                    points: pts,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            (a.faces, a.points.first().map(|p| q(*p)))
+                .cmp(&(b.faces, b.points.first().map(|p| q(*p))))
+        });
+        for i in 1..out.len() {
+            if out[i].faces == out[i - 1].faces {
+                out[i].component = out[i - 1].component + 1;
+            }
+        }
+        out
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
