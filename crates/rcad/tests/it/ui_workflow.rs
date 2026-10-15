@@ -299,13 +299,16 @@ fn threaded_worker_shows_busy_state() {
     build_plate_and_hole_sketch(&mut h);
     // Submit the cut; the boolean regenerates on the worker thread while the UI
     // keeps rendering with a busy indicator. Commands are queued (FIFO
-    // worker) instead of disabled, so New stays available while busy.
+    // worker) instead of disabled, so New stays available while busy. The
+    // worker is held so the busy state does not depend on the cut's speed.
+    h.state().hold_worker(true);
     h.get_by_label("OK").click();
     let _ = h.try_run();
     let _ = h.try_run();
     assert!(h.state().busy(), "cut should still be regenerating");
     h.get_by_label("Regenerating…");
     assert!(!h.get_by_label("New").accesskit_node().is_disabled());
+    h.state().hold_worker(false);
     settle(&mut h);
     assert!(h.query_by_label("Regenerating…").is_none());
     assert!(!h.get_by_label("New").accesskit_node().is_disabled());

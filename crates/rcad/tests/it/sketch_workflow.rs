@@ -752,8 +752,9 @@ fn queued_edits_and_document_switch_while_busy() {
     click(&mut h, "Save As…");
     type_into(&mut h, "File path", other.to_str().unwrap());
     click(&mut h, "OK");
-    // Working document: plate with a through hole (booleans make each
-    // regeneration slow enough to still be pending when we switch documents).
+    // Working document: plate with a through hole. The edits below are queued
+    // while the worker is held, so they are still pending when we switch
+    // documents however fast the regeneration is.
     click(&mut h, "New");
     click(&mut h, "Create Sketch");
     centred_rectangle(&mut h, "80", "50");
@@ -769,6 +770,7 @@ fn queued_edits_and_document_switch_while_busy() {
     assert_volume(&h, 40000.0 - 250.0 * PI);
     let ext = h.state().summary().features[1].name.clone();
     click(&mut h, &ext);
+    h.state().hold_worker(true);
     for v in ["11", "12", "13"] {
         type_into(&mut h, "distance (mm)", v);
         h.get_by_label("Apply").click();
@@ -782,6 +784,7 @@ fn queued_edits_and_document_switch_while_busy() {
     if h.state().pending_confirmation().is_some() {
         h.get_by_label("Discard changes").click();
     }
+    h.state().hold_worker(false);
     settle(&mut h);
     let s = h.state().summary();
     assert_eq!(s.path.as_deref(), Some(other.as_path()));

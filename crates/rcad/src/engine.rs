@@ -277,9 +277,25 @@ pub(crate) struct CancelTokens {
     /// Token of the command the worker runs now (0: none yet).
     running: std::sync::atomic::AtomicU64,
     cancelled: Mutex<Vec<u64>>,
+    /// Test hook ([`Engine::hold_worker`]): while true the worker starts no
+    /// new command, so a test can observe the busy state deterministically.
+    held: Mutex<bool>,
+    held_cv: Condvar,
 }
 
 impl CancelTokens {
+    fn wait_while_held(&self) {
+        let Ok(mut held) = self.held.lock() else {
+            return;
+        };
+        while *held {
+            match self.held_cv.wait(held) {
+                Ok(g) => held = g,
+                Err(_) => return,
+            }
+        }
+    }
+
     fn is_cancelled(&self, token: u64) -> bool {
         self.cancelled
             .lock()
@@ -670,6 +686,7 @@ fn worker(
         if queue.is_empty() {
             continue;
         }
+        tokens.wait_while_held();
         seq += 1;
         let cancellable = queue.front().is_some_and(|c| {
             !matches!(
@@ -795,6 +812,17 @@ impl Engine {
         match &self.backend {
             Backend::Sync { session, .. } => session.model().map(|m| m.evaluation().clone()),
             Backend::Threaded { .. } => None,
+        }
+    }
+
+    /// Pause (`true`) or resume the worker before its next command; the
+    /// command already running finishes. Tests use it to observe the busy
+    /// state without relying on how long a regeneration takes. No effect in
+    /// [`ExecMode::Sync`].
+    pub fn hold_worker(&self, hold: bool) {
+        if let Ok(mut held) = self.tokens.held.lock() {
+            *held = hold;
+            self.tokens.held_cv.notify_all();
         }
     }
 

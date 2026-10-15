@@ -664,6 +664,11 @@ impl RcadApp {
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
+    /// Pause or resume the session worker before its next command (tests:
+    /// see [`Engine::hold_worker`]).
+    pub fn hold_worker(&self, hold: bool) {
+        self.engine.hold_worker(hold);
+    }
     /// The refusal notice shown over the 3D view, if any.
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_ref().map(|(t, _)| t.as_str())
