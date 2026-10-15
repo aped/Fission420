@@ -3,7 +3,7 @@
 //! `rcad_exchange::mesh_edit` (which defines every operation exactly).
 use crate::regen::MeshBody;
 use crate::{DocError, FeatureId, Result};
-use rcad_exchange::mesh_edit::{MeshEditOp, MeshEditReport, edit};
+use rcad_exchange::mesh_edit::{IndexedMesh, MeshEditOp, MeshEditReport, edit};
 
 /// Named parameters of a mesh edit (lengths mm, angles degrees).
 pub(crate) fn parameters(op: &MeshEditOp) -> Vec<(String, f64)> {
@@ -120,10 +120,67 @@ pub fn summary(r: &MeshEditReport) -> String {
     parts.join("; ")
 }
 
+/// Result of one mesh edit (meshes and report), shared by cache hits.
+type Edited = std::sync::Arc<(Vec<IndexedMesh>, MeshEditReport)>;
+
+/// Recently computed edits, keyed by (input content hash, operation). The
+/// command that creates a mesh edit needs the report and the regeneration
+/// right after needs the meshes; a decimation of a large mesh takes seconds,
+/// so it must not run twice. A few entries cover command + regeneration and
+/// preview + commit; content keys never return a stale result.
+static CACHE: std::sync::Mutex<Vec<(u64, MeshEditOp, Edited)>> = std::sync::Mutex::new(Vec::new());
+const CACHE_ENTRIES: usize = 4;
+/// Edits actually computed (cache misses), for tests.
+static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Number of mesh edits actually computed in this process (not cache hits).
+pub fn edit_runs() -> usize {
+    RUNS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn content_hash(positions: &[[f64; 3]], triangles: &[[u32; 3]]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    positions.len().hash(&mut h);
+    for p in positions {
+        p.map(f64::to_bits).hash(&mut h);
+    }
+    triangles.hash(&mut h);
+    h.finish()
+}
+
+/// [`rcad_exchange::mesh_edit::edit`] through a small content-keyed cache
+/// (see [`CACHE`]). A refusal is not cached.
+pub fn edit_cached(
+    positions: &[[f64; 3]],
+    triangles: &[[u32; 3]],
+    op: &MeshEditOp,
+) -> std::result::Result<Edited, String> {
+    let key = content_hash(positions, triangles);
+    let hit = CACHE.lock().ok().and_then(|c| {
+        c.iter()
+            .find(|(k, o, _)| *k == key && o == op)
+            .map(|(_, _, e)| e.clone())
+    });
+    if let Some(e) = hit {
+        return Ok(e);
+    }
+    RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let e: Edited = std::sync::Arc::new(edit(positions, triangles, op)?);
+    if let Ok(mut c) = CACHE.lock() {
+        if c.len() >= CACHE_ENTRIES {
+            c.remove(0);
+        }
+        c.push((key, *op, e.clone()));
+    }
+    Ok(e)
+}
+
 /// Evaluate a mesh edit of a mesh body: the new mesh bodies and notes.
 pub(crate) fn edited(m: &MeshBody, op: &MeshEditOp) -> Result<(Vec<MeshBody>, Vec<String>)> {
-    let (meshes, rep) = edit(&m.mesh.positions, &m.mesh.triangles, op)
+    let e = edit_cached(&m.mesh.positions, &m.mesh.triangles, op)
         .map_err(|e| DocError::Validation(format!("mesh {}: {e}", op.name())))?;
+    let (meshes, rep) = (&e.0, e.1.clone());
     let mut notes = vec![format!("mesh {}", summary(&rep))];
     notes.extend(rep.notes.iter().cloned());
     let mut out = vec![];
