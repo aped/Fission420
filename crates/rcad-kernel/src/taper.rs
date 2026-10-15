@@ -15,10 +15,12 @@
 //! As a Join/Cut tool the frustum goes through Truck's boolean (the slab
 //! construction, ADR 0006/0007, only handles walls parallel to the axis), and
 //! the result must pass [`crate::verify_tapered_boolean`] against the nominal
-//! tapered tool (the ADR 0005 check with the section law applied). Truck 0.6
-//! fails on revolved cones (`validate::tests::spike_countersink_cone`), so
-//! round tapered Join/Cut is expected to be refused with Truck's error;
-//! polygons work.
+//! tapered tool (the ADR 0005 check with the section law applied). Unpatched
+//! Truck 0.6 failed on revolved cones; with the truck-shapeops fork (ADR 0013)
+//! round tapered cuts succeed and are exact
+//! (`taper::tests::round_tapered_cut_is_exact_or_refused` takes its exact
+//! branch; `validate::tests::spike_countersink_cone` removes the frustum volume
+//! to 1e-12). A failure is still refused with Truck's error, never accepted.
 use crate::build::{BOOLEAN_TOLS, check_single_closed, with_exact_edges};
 use crate::validate::{BooleanCheck, Prism, PrismOp};
 use crate::{Body, Frame, KernelError, Profile, Result, guarded, tol};
