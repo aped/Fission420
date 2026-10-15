@@ -548,7 +548,13 @@ struct RayGrid {
 }
 
 impl Winding {
+    #[cfg(test)]
     fn new(m: &crate::TriMesh) -> Self {
+        Self::with_watertight(m, crate::check_mesh(m).watertight)
+    }
+    /// Winding number of `m`, whose `check_mesh(m).watertight` is `watertight`
+    /// (the caller has checked it).
+    fn with_watertight(m: &crate::TriMesh, watertight: bool) -> Self {
         let tris: Vec<[[f64; 3]; 3]> = m
             .triangles
             .iter()
@@ -557,7 +563,7 @@ impl Winding {
         // Performance: for a watertight mesh the winding
         // number equals the signed count of +X ray crossings; a grid makes a
         // probe cost O(triangles per cell) instead of O(all triangles).
-        let closed = tris.len() >= 256 && crate::check_mesh(m).watertight;
+        let closed = tris.len() >= 256 && watertight;
         let build = |axis: usize| -> Option<RayGrid> {
             let ax = [(axis + 1) % 3, (axis + 2) % 3];
             {
@@ -882,7 +888,8 @@ fn check_faces(
         .iter()
         .map(|(p, _)| PrismTest::tapered(p, taper_tan))
         .collect();
-    let wind = Winding::new(tmesh);
+    // Both meshes passed the watertightness check in `verify_impl`.
+    let wind = Winding::with_watertight(tmesh, true);
     let planar = planar_faces(result);
     // Probe offsets: exact faces need only clear float noise; curved faces must
     // clear the chord error of both tessellations.
@@ -1032,7 +1039,7 @@ fn check_faces(
             "result check: no probe point near the tool could be classified; cannot verify".into(),
         ));
     }
-    let rwind = Winding::new(rmesh);
+    let rwind = Winding::with_watertight(rmesh, true);
     // Target faces near the tools, probed on both sides against the result's
     // own winding number: a boolean that refills an existing void (a
     // shallow pocket beside a tangent cut lost its floor and walls) or removes
@@ -1362,7 +1369,7 @@ pub fn point_membership(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Option<b
         ));
     }
     guarded("point membership", || {
-        let w = Winding::new(&mesh);
+        let w = Winding::with_watertight(&mesh, true);
         points.iter().map(|p| w.classify(*p)).collect()
     })
 }
