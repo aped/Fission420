@@ -15,7 +15,7 @@ STEP / STL / 3MF / DXF / SVG · a headless command API
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 ![Kernel](https://img.shields.io/badge/kernel-Truck%20B--rep-6f42c1)
 ![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![Status](https://img.shields.io/badge/status-prototype-yellow)
+![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)
 
 <img src="docs/screenshots/18-params.png" alt="Parametric enclosure: parameter table, feature history, lid sketch preview and inspector" width="900">
 
@@ -58,7 +58,7 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 | **Mesh** | Mesh diagnosis (boundaries, non-manifold, orientation, duplicates, components, bounded self-intersection check), repair, transform/unit conversion, plane cut with caps, decimation with measured deviation |
 | **Print export** | STL / 3MF with chord control, separate objects with their own transforms, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset, assemblies, surface bodies), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.rcad.json` (v8; older versions written when newer features are unused) with automatic migration from v1–v3 and atomic saves that never destroy the previous file |
+| **Native format** | Versioned `.rcad.json` (v9; older versions written when newer features are unused) with automatic migration from every earlier version and atomic saves that never destroy the previous file |
 
 ## Screenshots
 
@@ -167,7 +167,7 @@ in [`docs/adr/`](docs/adr); every tolerance and its rationale is in
 cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptance, example replays
 ```
 
-- **Around 580 tests.** They use analytic expected values (volumes, bounds, Pappus,
+- **About 1,300 tests.** They use analytic expected values (volumes, bounds, Pappus,
   divergence-theorem checks), not snapshots of the program's own output.
 - **Malformed input.** Truncation and byte-mutation sweeps over every importer and the
   native format must return errors, never panics.
@@ -181,8 +181,9 @@ cargo xtask check     # layout, fmt, clippy -D warnings, release tests, acceptan
 
 ## Status and limits
 
-R-CAD is a **prototype**. It is useful for prismatic, revolved and lofted parts and printable
-enclosures. Solid fillets cover straight prismatic edges and whole edge loops of a cap face
+R-CAD 1.0 is a stable, deliberately small modeler. It is useful for prismatic, revolved and
+lofted parts, printable enclosures and simple assemblies; release history is in
+[`CHANGELOG.md`](CHANGELOG.md). Solid fillets cover straight prismatic edges and whole edge loops of a cap face
 (tori, sphere corners, mitred corners, also after a shell); arbitrary corner blends and
 variable radii are not implemented. Threads are faceted (within 0.01 mm), not exact
 helicoids. Some coplanar or coincident boolean cases are still refused, and curved booleans
