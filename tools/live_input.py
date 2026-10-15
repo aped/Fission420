@@ -312,11 +312,11 @@ def run(driver, lines, probe=None):
             driver.move(x, y)
             time.sleep(0.05)
             b = "right" if op == "rclickw" else "left"
+            # A double click: both clicks well inside the 0.3 s window.
             for _ in range(2 if op == "dclickw" else 1):
                 driver.button(b, True)
                 driver.button(b, False)
-                time.sleep(0.05)
-            time.sleep(0.1)
+            time.sleep(0.15)
         elif op == "typew":
             probe.fresh(driver)
             label, text = (a[0].split("|", 1) + [""])[:2]
