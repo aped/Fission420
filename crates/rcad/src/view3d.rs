@@ -1160,7 +1160,12 @@ impl RcadApp {
     // ----- chrome: banner, hints, pending indicator -----
 
     fn paint_view_chrome(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let painter = ui.painter_at(rect);
+        // The status lines along the top end before the view cube (they wrap
+        // inside the narrower area instead of running under it).
+        let cube = crate::shell::viewcube::view_cube_rect(rect);
+        let top = egui::Rect::from_min_max(rect.min, egui::pos2(cube.min.x - 8.0, rect.max.y));
+        let painter = ui.painter_at(top);
+        let mut chips: Vec<egui::Rect> = vec![];
         let mut y = rect.min.y + 8.0;
         if let Some(s) = &self.sketch {
             let (kind, text) = s.editor.status();
@@ -1175,6 +1180,7 @@ impl RcadApp {
                 format!("{} — {}", s.title, text),
                 col,
             );
+            chips.push(r);
             y = r.max.y + 6.0;
             let hint = if s.committing {
                 "Committing sketch…".to_string()
@@ -1192,6 +1198,7 @@ impl RcadApp {
                 hint,
                 Color32::from_gray(220),
             );
+            chips.push(r);
             y = r.max.y + 6.0;
             if let Some(fb) = &s.editor.feedback {
                 let col = if fb.error {
@@ -1199,12 +1206,12 @@ impl RcadApp {
                 } else {
                     Color32::from_rgb(200, 230, 200)
                 };
-                chip(
+                chips.push(chip(
                     &painter,
                     egui::pos2(rect.min.x + 10.0, y),
                     fb.text.clone(),
                     col,
-                );
+                ));
             }
         } else if let Some(b) = self.banner.clone() {
             let text = format!("✖ [{}] {}", b.kind, b.text);
@@ -1212,7 +1219,8 @@ impl RcadApp {
                 text,
                 egui::FontId::proportional(14.0),
                 PALETTE.conflict,
-                (rect.width() - 140.0).max(200.0),
+                // Room for the Dismiss button before the view cube.
+                (top.width() - 100.0).max(200.0),
             );
             let r = egui::Rect::from_min_size(
                 egui::pos2(rect.min.x + 10.0, y),
@@ -1226,6 +1234,7 @@ impl RcadApp {
                 egui::StrokeKind::Inside,
             );
             painter.galley(r.min + egui::vec2(6.0, 5.0), galley, PALETTE.conflict);
+            chips.push(r);
             let btn = egui::Rect::from_min_size(
                 egui::pos2(r.max.x + 6.0, r.min.y),
                 egui::vec2(70.0, 22.0),
@@ -1249,13 +1258,15 @@ impl RcadApp {
             }
         }
         if self.engine.busy() {
-            chip(
+            chips.push(chip(
                 &painter,
-                egui::pos2(rect.max.x - 330.0, rect.min.y + 8.0),
+                egui::pos2((top.max.x - 330.0).max(rect.min.x + 10.0), rect.min.y + 8.0),
                 "Regenerating… showing the last valid model".into(),
                 Color32::from_rgb(255, 210, 120),
-            );
+            ));
         }
+        self.shell.top_chips = chips;
+        self.shell.view_cube = Some(cube);
         if self.sketch.is_none()
             && let Some(info) = self.selected_face()
         {
