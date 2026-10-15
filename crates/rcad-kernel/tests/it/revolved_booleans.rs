@@ -73,19 +73,38 @@ fn check(name: &str, target: &Body, tool: &Body, op: CombineOp, want: f64, shell
     );
 }
 
+/// A coaxial groove cut with the ring tool's seam at `seam` (radians).
+fn coaxial_groove(seam: f64) {
+    check(
+        &format!("groove seam {seam}"),
+        &cylinder(10.0, 30.0),
+        &ring(&rect_rz(9.0, 11.0, 10.0, 12.0), seam),
+        CombineOp::Cut,
+        3000.0 * PI - 38.0 * PI,
+        1,
+    );
+}
+
+// The same groove with the tool's seam at four angles, one test each (each is slow: the exact
+// volume and the membership check), so the test runner spreads them over its workers.
 #[test]
-fn coaxial_groove_on_every_seam() {
-    // Slow (~25 s per seam: exact volume and the membership check); four seams.
-    for seam in [0.0, PI / 4.0, PI, 1.234] {
-        check(
-            &format!("groove seam {seam}"),
-            &cylinder(10.0, 30.0),
-            &ring(&rect_rz(9.0, 11.0, 10.0, 12.0), seam),
-            CombineOp::Cut,
-            3000.0 * PI - 38.0 * PI,
-            1,
-        );
-    }
+fn coaxial_groove_seam_at_0() {
+    coaxial_groove(0.0);
+}
+
+#[test]
+fn coaxial_groove_seam_at_quarter_pi() {
+    coaxial_groove(PI / 4.0);
+}
+
+#[test]
+fn coaxial_groove_seam_at_pi() {
+    coaxial_groove(PI);
+}
+
+#[test]
+fn coaxial_groove_seam_at_1_234() {
+    coaxial_groove(1.234);
 }
 
 #[test]
