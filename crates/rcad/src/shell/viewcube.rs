@@ -1,6 +1,6 @@
 //! View cube and navigation bar, drawn in code over the 3D view (original
 //! design: a plain shaded cube with face names, small corner and edge hot
-//! spots; a row of text buttons at the bottom centre).
+//! spots; a row of text buttons at the bottom right).
 //!
 //! ViewCube: clicking a face runs the matching view command (Top, Front, …);
 //! a corner or edge looks at the model from that direction (an isometric
@@ -241,10 +241,14 @@ impl RcadApp {
         }
     }
 
-    /// The navigation bar at the bottom centre of `view`.
+    /// The navigation bar at the bottom right of `view`.
     pub(crate) fn nav_bar(&mut self, ui: &mut egui::Ui, view: Rect) {
         let w = 430.0_f32.min(view.width() - 20.0);
-        let rect = Rect::from_center_size(pos2(view.center().x, view.max.y - 20.0), vec2(w, 26.0));
+        // Bottom-right corner: the bottom centre holds the hover and status chips.
+        let rect = Rect::from_min_size(
+            pos2(view.max.x - w - 10.0, view.max.y - 36.0),
+            vec2(w, 26.0),
+        );
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
