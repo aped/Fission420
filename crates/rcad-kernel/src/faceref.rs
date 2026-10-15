@@ -83,6 +83,46 @@ fn fine_face_loops(face: &Face, frame: &Frame) -> Option<Vec<Vec<[f64; 2]>>> {
     }
     Some(loops)
 }
+/// A box in `frame` coordinates containing the whole boundary of `face`, or
+/// None when an edge has no cheap bound. Straight edges are bounded by their
+/// vertices; B-spline and NURBS edges (positive weights) by their control
+/// points (convex hull property).
+fn face_box_bound(face: &Face, frame: &Frame) -> Option<([f64; 2], [f64; 2])> {
+    let o = Point3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
+    let x = Vector3::new(frame.x[0], frame.x[1], frame.x[2]);
+    let y = Vector3::new(frame.y[0], frame.y[1], frame.y[2]);
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let mut add = |p: Point3| {
+        let q = [(p - o).dot(x), (p - o).dot(y)];
+        for i in 0..2 {
+            lo[i] = lo[i].min(q[i]);
+            hi[i] = hi[i].max(q[i]);
+        }
+    };
+    for e in face.boundaries().iter().flat_map(|w| w.edge_iter()) {
+        match e.curve() {
+            Curve::Line(_) => {
+                add(e.front().point());
+                add(e.back().point());
+            }
+            Curve::BSplineCurve(c) => c.control_points().iter().for_each(|p| add(*p)),
+            Curve::NurbsCurve(c) => {
+                for p in c.control_points() {
+                    if p.w.is_nan() || p.w <= 0.0 {
+                        return None;
+                    }
+                    add(Point3::new(p.x / p.w, p.y / p.w, p.z / p.w));
+                }
+            }
+            Curve::IntersectionCurve(_) => return None,
+        }
+    }
+    lo.iter()
+        .chain(&hi)
+        .all(|v| v.is_finite())
+        .then_some((lo, hi))
+}
+
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::float::single::SingleFloatOverlay;
@@ -207,6 +247,14 @@ pub fn planar_faces_overlapping(
                 || (pl.origin() - o).dot(z).abs() >= tol::FACE_MATCH
             {
                 continue;
+            }
+            // A face whose boundary box is apart from the footprint's cannot
+            // overlap it with positive area: skip the sampling and the overlay.
+            if let Some((flo, fhi)) = face_box_bound(f, frame) {
+                let margin = 1.0e-9 * (radius + 1.0);
+                if (0..2).any(|i| flo[i] > hi[i] + margin || fhi[i] < lo[i] - margin) {
+                    continue;
+                }
             }
             let Some(loops) = fine_face_loops(f, frame) else {
                 continue;
