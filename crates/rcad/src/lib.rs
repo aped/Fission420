@@ -25,6 +25,8 @@ pub mod messages;
 pub mod panels;
 pub mod params_ui;
 pub mod pattern_ui;
+#[cfg(test)]
+mod pick_tests;
 pub mod place;
 pub mod probe;
 pub mod reattach;

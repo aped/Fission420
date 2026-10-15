@@ -371,7 +371,7 @@ impl RcadApp {
     pub fn face_hit(&self, p: Pos2) -> Option<(u32, [f64; 3])> {
         let rect = self.view_rect?;
         let ray = self.ray_at(rect, p)?;
-        let (t, _, g) = self.scene.mesh.pick_section(&ray, self.section_plane())?;
+        let (t, _, g) = self.pick_scene_face(&ray)?;
         let q = |i: usize| f64::from(ray.origin[i] + ray.dir[i] * t);
         Some((g, [q(0), q(1), q(2)]))
     }
@@ -426,10 +426,18 @@ impl RcadApp {
     pub fn face_at(&self, p: Pos2) -> Option<u32> {
         let rect = self.view_rect?;
         let ray = self.ray_at(rect, p)?;
-        self.scene
-            .mesh
-            .pick_section(&ray, self.section_plane())
-            .map(|(_, _, g)| g)
+        self.pick_scene_face(&ray).map(|(_, _, g)| g)
+    }
+
+    /// Nearest visible display-mesh hit along `ray`: (depth, triangle, group).
+    /// Through the scene's picking hierarchy, which returns exactly
+    /// `RenderMesh::pick_section` (same hit, lowest triangle among equal
+    /// depths); the plain scan when there is no hierarchy.
+    pub(crate) fn pick_scene_face(&self, ray: &rcad_viewport::Ray) -> Option<(f32, usize, u32)> {
+        match &self.scene_picker {
+            Some(p) => p.pick_face_section(ray, self.section_plane()),
+            None => self.scene.mesh.pick_section(ray, self.section_plane()),
+        }
     }
 
     pub(crate) fn view_ui(&mut self, ui: &mut egui::Ui) {

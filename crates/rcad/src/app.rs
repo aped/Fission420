@@ -459,6 +459,9 @@ pub struct RcadApp {
     pub(crate) mesh_triangles: usize,
     /// Last display scene: all visible bodies (face analysis, picking; display only).
     pub(crate) scene: DisplayScene,
+    /// Picking hierarchy of `scene.mesh` (built with each new scene; None when
+    /// the mesh is not valid, then clicks pick by the plain scan).
+    pub(crate) scene_picker: Option<rcad_viewport::PickScene>,
     /// Display isolation (Fusion's Isolate; view state only, not in the
     /// document or undo): only this body is drawn and picked. `full_scene`
     /// keeps every visible body to restore.
@@ -588,6 +591,7 @@ impl RcadApp {
             section: None,
             mesh_triangles: 0,
             scene: DisplayScene::default(),
+            scene_picker: None,
             isolated: None,
             full_scene: None,
             selected_body: None,
@@ -1103,6 +1107,7 @@ impl RcadApp {
             Ok(()) => {
                 self.mesh_triangles = scene.mesh.triangle_count();
                 self.selected_face = None;
+                self.scene_picker = rcad_viewport::PickScene::new(&scene.mesh, &[], &[]).ok();
                 self.scene = scene;
                 true
             }
