@@ -636,6 +636,15 @@ fn poly_index_matches_the_plain_scans_exactly() {
                 dist_to_polygon(p, &poly).to_bits(),
                 "{p:?}"
             );
+            let exact = dist_to_polygon(p, &poly);
+            for limit in [0.0, 1e-3, 0.5, 2.0, 7.0] {
+                let d = ix.dist_within(p, &poly, limit);
+                if exact < limit {
+                    assert_eq!(d.to_bits(), exact.to_bits(), "{p:?} limit {limit}");
+                } else {
+                    assert!(d >= limit, "{p:?} limit {limit}: {d}");
+                }
+            }
         }
     }
 }
