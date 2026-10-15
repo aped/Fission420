@@ -1,9 +1,7 @@
 //! Versioned native file format (`.rcad.json`) with atomic save.
 //!
 //! Layout: `{ "format": "r-cad", "version": 4, "document": {...}, "cache": {...} }`.
-//! Files written before the rename (2026-10-13) say `"format": "fission420"` and are
-//! usually named `*.f420.json`; they still load. The rename changed only the format name,
-//! not the version or the document. The file extension is never checked.
+//! Any other `format` value is refused. The file extension is never checked.
 //! `document` is authoritative. `cache` is an informational summary of the geometry at
 //! save time; loaders regenerate and may compare against it, never trust it.
 use crate::{DocError, Document, Evaluation, Result};
@@ -13,9 +11,6 @@ use std::io::Write;
 use std::path::Path;
 
 pub const FORMAT_NAME: &str = "r-cad";
-/// Format names written by earlier builds (the project was called Fission420 before
-/// 2026-10-13). Accepted on load; never written.
-pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// v2: sketches may carry `origin` and `Distance` constraints, and the
 /// history may contain `Pocket` features. v1 files are a strict subset of v2.
 /// v3 (ADR 0003): bodies, blobs, extrude operations/extents, imports. v1/v2
@@ -634,13 +629,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<NativeFile> {
     }
     let h: Header = serde_json::from_slice(bytes)
         .map_err(|e| DocError::File(format!("not valid JSON: {e}")))?;
-    let known = h
-        .format
-        .as_deref()
-        .is_some_and(|f| f == FORMAT_NAME || LEGACY_FORMAT_NAMES.contains(&f));
-    if !known {
+    if h.format.as_deref() != Some(FORMAT_NAME) {
         return Err(DocError::File(format!(
-            "not an {FORMAT_NAME} document (format = {:?})",
+            "not an {FORMAT_NAME} document (format = {:?}; only \"{FORMAT_NAME}\" is supported)",
             h.format
         )));
     }

@@ -251,8 +251,7 @@ geometry changes). `DocSummary.parameters` lists user parameters with value,
 
 Current: **version 4** = v3 (ADR 0003: bodies, blobs, operations) + `parameters` and
 `features[].expressions` (docs/PARAMETERS.md). v1–v3 load; saves write v4. The format name
-is `"r-cad"`; files from before the rename (`"fission420"`, `*.f420.json`) load unchanged
-(docs/RENAME.md). History of earlier versions:
+is `"r-cad"`; files with any other format name are refused. History of earlier versions:
 
 `{"format": "r-cad", "version": 2, "document": {...}, "cache": {...}}`. Version 2 adds the
 optional sketch `origin`, the `Distance` constraint and the `Pocket` feature; later

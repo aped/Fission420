@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Hand-written from the SVG 1.1 spec (not by Fission420): 80 x 50 mm plate outline
+<!-- Hand-written from the SVG 1.1 spec (not by R-CAD): 80 x 50 mm plate outline
      with rounded right end (circular arc via path A), a Ø10 hole and a 10 x 6 slot
      inside a translated group. 1 user unit = 1 mm. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="60mm" viewBox="0 0 100 60">

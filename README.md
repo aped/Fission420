@@ -58,7 +58,7 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 | **Mesh** | Mesh diagnosis (boundaries, non-manifold, orientation, duplicates, components, bounded self-intersection check), repair, transform/unit conversion, plane cut with caps, decimation with measured deviation |
 | **Print export** | STL / 3MF with chord control, separate objects with their own transforms, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset, assemblies, surface bodies), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
-| **Native format** | Versioned `.rcad.json` (v8; older versions written when newer features are unused) with automatic migration from v1–v3 (including files saved as `.f420.json` before the rename) and atomic saves that never destroy the previous file |
+| **Native format** | Versioned `.rcad.json` (v8; older versions written when newer features are unused) with automatic migration from v1–v3 and atomic saves that never destroy the previous file |
 
 ## Screenshots
 
@@ -76,8 +76,7 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 </tr>
 </table>
 
-More in [`docs/screenshots/`](docs/screenshots). The screenshots predate the rename, so the
-title bar in them still reads *Fission420*.
+More in [`docs/screenshots/`](docs/screenshots).
 
 ## Getting it
 
@@ -219,8 +218,3 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
 R-CAD is an independent project and is not affiliated with any commercial CAD vendor.
-
-<sub>Until October 2026 the project was called Fission420. Documents (`*.f420.json`,
-`"format": "fission420"`), autosave copies and the `F420_RECOVERY_DIR` /
-`F420_AUTOSAVE_SECS` variables from that name keep working; see
-[`docs/RENAME.md`](docs/RENAME.md).</sub>
