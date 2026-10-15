@@ -1,9 +1,10 @@
 //! End-to-end timings of paths a user waits on (ignored; run explicitly):
 //! `cargo test -p rcad-commands --release --test it perf_bench:: -- --ignored --nocapture`
 //!
-//! * open: every bundled example (`examples/*.rcad.json`) opened in a new session,
-//!   then its summary (measurements) and the display tessellation of every body at
-//!   the viewport's chord, slowest first;
+//! * open: every bundled example (`examples/*.rcad.json`) opened in a new session
+//!   with measurement deferred as in the interactive client, then the deferred
+//!   measurement and the display tessellation of every body at the viewport's
+//!   chord, slowest first;
 //! * edit: a user-parameter edit on the enclosure example, regenerated, measured and
 //!   re-tessellated, repeated.
 //!
@@ -20,11 +21,26 @@ fn examples_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
 }
 
-/// Seconds to (summary with measurements, display tessellation of every B-rep body).
+/// A session like the interactive client's: B-rep measurement deferred, so a
+/// command's time is the time until the new geometry can be shown.
+fn ui_session() -> Session {
+    let mut s = Session::new();
+    s.set_defer_measurements(true);
+    s
+}
+
+/// Seconds to (measure every B-rep body: the client's deferred follow-up,
+/// display tessellation of every B-rep body).
 fn measure_and_tessellate(s: &Session) -> (f64, f64) {
+    assert!(s.summary().open);
     let t = Instant::now();
-    let summary = s.summary();
-    assert!(summary.open);
+    if let Some(m) = s.model() {
+        for b in &m.evaluation().bodies {
+            if let BodyGeometry::Brep(body) = &b.geometry {
+                rcad_kernel::measure(body).unwrap();
+            }
+        }
+    }
     let measured = t.elapsed().as_secs_f64();
     let t = Instant::now();
     if let Some(m) = s.model() {
@@ -48,7 +64,7 @@ fn open_every_example() {
     paths.sort();
     let mut rows = Vec::new();
     for p in &paths {
-        let mut s = Session::new();
+        let mut s = ui_session();
         let t = Instant::now();
         let r = s.execute(&Command::Open {
             path: p.clone(),
@@ -112,7 +128,7 @@ fn edit_rounded_enclosure_lid() {
 
 /// Open `file`, then set user parameter `name` to each of `values` (mm) in turn.
 fn edit_parameter(file: &str, name: &str, values: [f64; 4]) {
-    let mut s = Session::new();
+    let mut s = ui_session();
     let r = s.execute(&Command::Open {
         path: examples_dir().join(file),
         safe_mode: false,
