@@ -76,11 +76,15 @@ impl Sketch {
             *self = unsolved;
             return Ok(r);
         }
-        if sweep_jumps(self, &direct).is_empty() {
+        // The reference shape is the current *solved* state (stored
+        // coordinates may be an unsolved seed); without one there is no
+        // shape to keep.
+        let mut base = self.clone();
+        if !base.solve().is_success() || sweep_jumps(&base, &direct).is_empty() {
             *self = direct;
             return Ok(r);
         }
-        let mut cur = self.clone();
+        let mut cur = base.clone();
         let mut last = r;
         for k in 1..=CONTINUATION_STEPS {
             let v = old + (value - old) * k as f64 / CONTINUATION_STEPS as f64;
@@ -90,7 +94,7 @@ impl Sketch {
             let jumped = sweep_jumps(&cur, &next);
             if !last.is_success() || !jumped.is_empty() {
                 let arcs = if jumped.is_empty() {
-                    sweep_jumps(self, &direct)
+                    sweep_jumps(&base, &direct)
                 } else {
                     jumped
                 };

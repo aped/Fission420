@@ -1,0 +1,106 @@
+# keymap: fusion
+# Blank to part with real keys and clicks only: ribbon sketch on XY, R rectangle
+# dimensioned `w = 40` (a new user parameter) and `w/2`, E extrude, sketch on the
+# top cap (edges auto-projected), P two cap edges, a hole dimensioned to their
+# corner, Cut through all, Edit Feature on Extrude1 with an expression, then the
+# parameter w drives everything; save and reopen. Volumes are closed form:
+# plate w x w/2 x t minus the hole pi r^2 t.
+clickw New
+wait_idle
+clickw Planes
+clickw Sketch on XY
+wait_idle
+# Fusion R: 2-point rectangle from the origin.
+key r
+sclick 0.3 0.2
+smove 40 30
+sclick 40 30
+key d
+sclick 20 0
+type w = 40
+key Return
+sclick 40 15
+type w/2
+key Return
+expect editing.dims 2
+expect editing.status FullyConstrained
+shot
+clickw FINISH SKETCH
+wait_idle
+expect params.w 40 0
+key e
+typew Extrude distance (mm) | 10
+key Return
+wait_idle
+expect volume 8000 0.01
+# Sketch on the top cap: its edges come in projected (construction).
+wclick 10 5 10
+clickw Create Sketch
+wait_idle
+expect editing.projected 4
+expect editing.entities 0
+# P: project the right (x = 40) and the bottom (y = 0) cap edges.
+key p
+wclick 39 10 10
+wait_idle
+wclick 20 1 10
+wait_idle
+expect editing.projected 6
+# Hole Ø4, 10 mm left of and 6 mm above the projected corner (40, 0).
+key c
+sclick 30 6
+sclick 33 6
+key d
+sclick 40 0
+sclick 30 6
+type 10
+key Return
+sclick 40 0
+sclick 30 6
+type 6
+key Return
+sclick 30 9
+type 4
+key Return
+expect editing.status FullyConstrained
+shot
+clickw FINISH SKETCH
+wait_idle
+clickw Cut through all…
+key Return
+wait_idle
+# 40 x 20 x 10 - pi 2^2 10
+expect volume 7874.336294 0.01
+# Edit Feature: Extrude1's distance becomes w/2 (20 mm).
+dclickw Extrude1
+wait_idle
+typew Extrude distance (mm) | w/2
+clickw OK
+wait_idle
+# 40 x 20 x 20 - pi 2^2 20
+expect volume 15748.672588 0.01
+shot
+# w = 30: plate 30 x 15 x 15; the right edge moves to x = 30 and the hole
+# follows it (centre x = 20). A hole left at x = 30 would cut the wall open.
+# The Parameters section is open (w was created from the sketch).
+clickw param w
+typew Parameter expression | 30
+clickw Apply parameter
+wait_idle
+# 30 x 15 x 15 - pi 2^2 15
+expect volume 6561.504441 0.01
+shot
+key ctrl+shift+s
+typew File path | @OUT@/part.rcad.json
+key Return
+wait_idle
+expect dirty false
+clickw Close
+wait_idle
+expect open false
+key ctrl+o
+typew File path | @OUT@/part.rcad.json
+key Return
+wait_idle
+expect volume 6561.504441 0.01
+shot
