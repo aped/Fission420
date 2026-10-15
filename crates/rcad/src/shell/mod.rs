@@ -13,6 +13,7 @@ pub mod browser;
 pub mod icons;
 pub mod keymap;
 pub mod prefs;
+pub mod properties;
 pub mod registry;
 pub mod ribbon;
 pub mod search;
@@ -61,6 +62,8 @@ pub struct ShellState {
     pub last_pick: Option<u32>,
     /// The dialog's selection input was cleared and waits for a pick.
     pub pick_armed: bool,
+    /// Right column shows the read-only Properties (else the Inspector).
+    pub properties: bool,
     /// Command search query while the search popup is open.
     pub search: Option<String>,
     /// Feature the open dialog edits (Edit Feature), if any.
@@ -92,6 +95,7 @@ impl Default for ShellState {
             show_prefs: false,
             editing: None,
             search: None,
+            properties: false,
             last_pick: None,
             pick_revision: None,
             pick_armed: false,

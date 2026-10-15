@@ -2319,7 +2319,12 @@ impl RcadApp {
                         if self.sketch.is_some() {
                             self.sketch_inspector(ui);
                         } else {
-                            self.inspector_ui(ui, busy);
+                            self.right_tabs(ui);
+                            if self.shell.properties {
+                                self.properties_ui(ui);
+                            } else {
+                                self.inspector_ui(ui, busy);
+                            }
                         }
                     });
             });
