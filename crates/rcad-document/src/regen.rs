@@ -1274,6 +1274,10 @@ fn eval_feature(
     st: &mut Snapshot,
     r: &mut FeatureResult,
 ) -> Result<()> {
+    #[cfg(feature = "test-hooks")]
+    if f.name == "__panic__" {
+        panic!("injected test panic in {id}");
+    }
     match &f.kind {
         FeatureKind::Sketch {
             plane,

@@ -13,5 +13,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 thiserror = "2.0.21"
 
+[features]
+# Test-only fault injection (a feature named `__panic__` panics when
+# evaluated); enabled by dev-dependencies, never by shipping builds.
+test-hooks = []
+
 [dev-dependencies]
 tempfile = "3.27.0"
