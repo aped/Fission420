@@ -204,3 +204,71 @@ fn distance_expression_binds_to_a_parameter() {
         Some("boss / 2")
     );
 }
+
+/// Revolve as Cut with a target from the dialog: a ring (r 5..10, z 4..12)
+/// revolved as its own body, then Edit Feature ▸ Cut with the block as
+/// target cuts a groove into the top of the 40 × 30 × 10 block:
+/// 12000 − π(10² − 5²)·6.
+#[test]
+fn revolve_new_body_to_cut_with_a_target_from_the_dialog() {
+    let mut h = harness();
+    click(&mut h, "New");
+    let s = h.state_mut();
+    s.request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: None,
+        },
+    });
+    s.request(Command::extrude(None, FeatureId(1), 10.0));
+    s.request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXZ,
+        template: SketchTemplate::CenteredRectangle {
+            width: 5.0,
+            height: 8.0,
+            center: Some([7.5, 8.0]),
+        },
+    });
+    settle(&mut h);
+    let profile = h.state().summary().features.last().unwrap().id;
+    h.state_mut().request(Command::Revolve {
+        name: None,
+        sketch: profile,
+        angle_deg: 360.0,
+        axis: Default::default(),
+        reverse: false,
+        op: ExtrudeOp::NewBody,
+        target: None,
+    });
+    settle(&mut h);
+    assert_eq!(
+        h.state().summary().bodies.len(),
+        2,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    let block = h.state().summary().bodies[0].name.clone();
+    edit(&mut h, "Revolve1");
+    click(&mut h, "Revolve Cut");
+    h.get_by_label("Revolve target body").click();
+    settle(&mut h);
+    click(&mut h, &format!("Revolve target {block}"));
+    click(&mut h, "OK");
+    assert_eq!(
+        h.state().summary().bodies.len(),
+        1,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    assert_volume(&h, 12000.0 - PI * (100.0 - 25.0) * 6.0);
+    let f = h.state().feature_by_name("Revolve1").unwrap();
+    assert_eq!(f.kind, "revolve");
+    // Undo: the ring is its own body again.
+    h.state_mut().request(Command::Undo);
+    settle(&mut h);
+    assert_eq!(h.state().summary().bodies.len(), 2);
+}
