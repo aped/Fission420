@@ -297,3 +297,41 @@ fn a_pick_made_before_an_edit_is_refused_as_stale() {
     let last = h.state().diagnostics().last().cloned().unwrap();
     assert!(last.error, "{last:?}");
 }
+
+/// Enter = OK in the docked dialog even when it arrives with the click that
+/// opened it (scripts and fast typists): the Extrude commits.
+#[test]
+fn enter_commits_the_docked_dialog_without_focusing_a_field() {
+    let mut h = harness(1280.0, 800.0);
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: None,
+        },
+    });
+    settle(&mut h);
+    // Click and Enter in the same frame.
+    h.get_by_label("Extrude…").click();
+    h.key_press(eframe::egui::Key::Enter);
+    settle(&mut h);
+    assert!(
+        (h.state().volume().unwrap_or(0.0) - 12000.0).abs() < 1e-6,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    // And after the dialog is open, with no field focused.
+    h.state_mut().request(Command::Undo);
+    settle(&mut h);
+    click(&mut h, "Extrude…");
+    h.key_press(eframe::egui::Key::Escape);
+    settle(&mut h);
+    click(&mut h, "Extrude…");
+    h.step();
+    h.key_press(eframe::egui::Key::Enter);
+    settle(&mut h);
+    assert!((h.state().volume().unwrap_or(0.0) - 12000.0).abs() < 1e-6);
+}
