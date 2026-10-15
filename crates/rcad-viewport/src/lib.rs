@@ -99,6 +99,8 @@ pub struct Viewport {
     primary_navigates: bool,
     /// Display-only section plane (None = off).
     section: Option<SectionPlane>,
+    /// Display style: draw feature edges over the shading.
+    show_edges: bool,
 }
 
 impl Viewport {
@@ -128,6 +130,7 @@ impl Viewport {
             last_size: [0.0; 2],
             primary_navigates: true,
             section: None,
+            show_edges: true,
         };
         vp.update_grid();
         vp
@@ -384,6 +387,14 @@ impl Viewport {
         self.grid_spec = Some(spec);
     }
 
+    /// Display style: feature edges drawn (default) or hidden.
+    pub fn set_show_edges(&mut self, on: bool) {
+        if self.show_edges != on {
+            self.show_edges = on;
+            self.upload_edges();
+        }
+    }
+
     fn upload_edges(&mut self) {
         let color = if self.dimmed {
             EDGE_COLOR_DIMMED
@@ -391,6 +402,7 @@ impl Viewport {
             EDGE_COLOR
         };
         let edges: Vec<[Vec3; 2]> = match self.section {
+            _ if !self.show_edges => vec![],
             Some(s) => self
                 .edges
                 .iter()

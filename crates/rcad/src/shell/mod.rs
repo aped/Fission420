@@ -18,6 +18,7 @@ pub mod registry;
 pub mod ribbon;
 pub mod search;
 pub mod timeline;
+pub mod viewcube;
 
 pub use keymap::KeymapLayer;
 pub use registry::CmdId;
@@ -64,6 +65,10 @@ pub struct ShellState {
     pub pick_armed: bool,
     /// Right column shows the read-only Properties (else the Inspector).
     pub properties: bool,
+    /// What a left drag in the view does (navigation bar).
+    pub nav_mode: viewcube::NavMode,
+    /// Display style: edges drawn over the shading.
+    pub show_edges: bool,
     /// Command search query while the search popup is open.
     pub search: Option<String>,
     /// Feature the open dialog edits (Edit Feature), if any.
@@ -96,6 +101,8 @@ impl Default for ShellState {
             editing: None,
             search: None,
             properties: false,
+            nav_mode: Default::default(),
+            show_edges: true,
             last_pick: None,
             pick_revision: None,
             pick_armed: false,

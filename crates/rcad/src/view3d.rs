@@ -450,7 +450,9 @@ impl RcadApp {
         let resp = match self.viewport.as_mut() {
             Some(vp) => {
                 vp.set_section(section);
-                vp.set_primary_drag_navigates(!tool_active);
+                vp.set_primary_drag_navigates(
+                    !tool_active && self.shell.nav_mode == crate::shell::viewcube::NavMode::Orbit,
+                );
                 vp.set_dimmed(sketching);
                 if vp.grid_plane() != grid {
                     let _ = vp.set_grid_plane(grid);
@@ -478,6 +480,9 @@ impl RcadApp {
         };
         let rect = resp.rect;
         self.view_rect = Some(rect);
+        if !tool_active {
+            self.nav_drag(&resp);
+        }
         let painter = ui.painter_at(rect);
         if sketching {
             self.sketch_input(ui, &resp);
@@ -506,6 +511,8 @@ impl RcadApp {
             }
         }
         self.paint_view_chrome(ui, rect);
+        self.view_cube(ui, rect);
+        self.nav_bar(ui, rect);
     }
 
     // ----- normal mode -----
