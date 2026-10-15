@@ -11,6 +11,7 @@ Policy: MIT, Apache-2.0, BSD, ISC, Zlib (or dual with one of those). `Cargo.lock
 | thiserror | 2.x | MIT OR Apache-2.0 | crates.io | all |
 | rfd | 0.17.2 (features `xdg-portal`, `wayland`; no GTK) | MIT | https://github.com/PolyMeilex/rfd | rcad (Browse… file dialogs; on Linux through the XDG desktop portal over D-Bus, pure Rust) |
 | pollster | 0.4.0 | Apache-2.0 OR MIT | crates.io (via rfd) | rcad |
+| rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash (already in the tree via truck-shapeops) | rcad-kernel (Fx hashing of the tessellation's vertex-weld and edge maps) |
 
 (Updated as crates are added; see section below for the GUI stack.)
 

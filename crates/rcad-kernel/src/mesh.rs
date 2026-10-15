@@ -1,7 +1,9 @@
 //! Tessellation (derived display/export cache), mesh checks, and STL output.
 use crate::{Body, KernelError, Result, guarded};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// Fx hashing: the maps are keyed by small integer tuples and looked up per vertex and
+// edge; no output depends on their iteration order.
+use rustc_hash::FxHashMap as HashMap;
 use truck_meshalgo::prelude::*;
 
 /// Indexed triangle mesh with a per-triangle B-rep face index (display grouping only;
@@ -218,7 +220,7 @@ fn canonical_planar_diagonals(m: &mut TriMesh, planar: &[bool]) {
         ]
     };
     // Directed edge (a, b) -> triangle containing it in that winding.
-    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::default();
     for (t, tri) in m.triangles.iter().enumerate() {
         if planar.get(m.tri_face[t] as usize) == Some(&true) {
             for k in 0..3 {
@@ -324,7 +326,7 @@ fn close_t_junctions(m: &mut TriMesh, tol: f64) {
     /// Bound on boundary edges x boundary vertices compared per pass.
     const MAX_PAIRS: usize = 10_000_000;
     for _pass in 0..8 {
-        let mut uses: HashMap<(u32, u32), Vec<(usize, usize)>> = HashMap::new();
+        let mut uses: HashMap<(u32, u32), Vec<(usize, usize)>> = HashMap::default();
         for (t, tri) in m.triangles.iter().enumerate() {
             for k in 0..3 {
                 let (a, b) = (tri[k], tri[(k + 1) % 3]);
@@ -406,7 +408,7 @@ impl Welder {
     fn new(tol: f64) -> Self {
         Self {
             tol,
-            cells: HashMap::new(),
+            cells: HashMap::default(),
         }
     }
     fn cell(&self, p: [f64; 3]) -> [i64; 3] {
@@ -590,13 +592,13 @@ pub fn check_mesh(m: &TriMesh) -> MeshCheck {
     let valid = |t: &[u32; 3]| {
         t.iter().all(|&i| (i as usize) < nv) && t[0] != t[1] && t[1] != t[2] && t[0] != t[2]
     };
-    let mut edges: HashMap<(u32, u32), (i32, i32)> = HashMap::new();
+    let mut edges: HashMap<(u32, u32), (i32, i32)> = HashMap::default();
     let mut vol = 0.0;
     let (mut invalid, mut degenerate) = (0, 0);
     // (vertex, triangle, other corner, other corner) for the vertex-fan test.
     let mut corners: Vec<(u32, usize, u32, u32)> = Vec::with_capacity(3 * m.triangles.len());
     let mut parent: Vec<usize> = (0..m.triangles.len()).collect();
-    let mut edge_tri: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut edge_tri: HashMap<(u32, u32), usize> = HashMap::default();
     for (ti, t) in m.triangles.iter().enumerate() {
         if !valid(t) {
             invalid += 1;
@@ -651,7 +653,7 @@ pub fn check_mesh(m: &TriMesh) -> MeshCheck {
         let group = &corners[i..j];
         if group.len() > 1 {
             let mut local: Vec<usize> = (0..group.len()).collect();
-            let mut by_other: HashMap<u32, usize> = HashMap::new();
+            let mut by_other: HashMap<u32, usize> = HashMap::default();
             for (gi, c) in group.iter().enumerate() {
                 for w in [c.2, c.3] {
                     match by_other.get(&w) {
@@ -714,7 +716,7 @@ pub fn check_mesh(m: &TriMesh) -> MeshCheck {
 /// checking meshes stored with unshared corners (imported mesh bodies).
 pub fn weld_exact(m: &TriMesh) -> TriMesh {
     let key = |p: [f64; 3]| p.map(|c| if c == 0.0 { 0u64 } else { c.to_bits() });
-    let mut map: HashMap<[u64; 3], u32> = HashMap::new();
+    let mut map: HashMap<[u64; 3], u32> = HashMap::default();
     let mut out = TriMesh {
         chord_tolerance: m.chord_tolerance,
         ..Default::default()
@@ -752,7 +754,7 @@ pub fn max_facet_angle_deg(m: &TriMesh) -> f64 {
         let l = norm3(n);
         (l > 0.0).then(|| n.map(|c| c / l))
     };
-    let mut first: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut first: HashMap<(u32, u32), usize> = HashMap::default();
     let mut worst: f64 = 0.0;
     for (ti, t) in m.triangles.iter().enumerate() {
         if t.iter().any(|&i| i as usize >= m.positions.len()) {
@@ -1005,7 +1007,7 @@ pub fn edge_polylines(body: &Body, chord: f64) -> Result<Vec<EdgePolyline>> {
         let q = |p: [f64; 3]| p.map(|c| (c * 1.0e6).round() as i64);
         // Edge id -> position in `list`; only looked up, the list keeps the
         // first-seen order.
-        let mut slot = HashMap::new();
+        let mut slot = HashMap::default();
         let mut list: Vec<(Vec<u32>, truck_modeling::Edge)> = Vec::new();
         for (fi, face) in body.solid.face_iter().enumerate() {
             for e in face.boundaries().iter().flatten() {
@@ -1070,7 +1072,7 @@ pub fn vertex_points(body: &Body) -> Result<Vec<VertexPoint>> {
     guarded("vertex points", || {
         let q = |p: [f64; 3]| p.map(|c| (c * 1.0e6).round() as i64);
         // Vertex id -> position in `out`; only looked up.
-        let mut slot = HashMap::new();
+        let mut slot = HashMap::default();
         let mut out: Vec<VertexPoint> = Vec::new();
         for (fi, face) in body.solid.face_iter().enumerate() {
             for v in face.boundaries().iter().flat_map(|w| w.vertex_iter()) {
@@ -1190,7 +1192,7 @@ pub fn self_intersection(m: &TriMesh, eps: f64, max_tests: usize) -> SelfInterse
         let mx = [0, 1, 2].map(|k| t.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max));
         (mn, mx)
     };
-    let mut grid: HashMap<[usize; 3], Vec<u32>> = HashMap::new();
+    let mut grid: HashMap<[usize; 3], Vec<u32>> = HashMap::default();
     let boxes: Vec<_> = tris.iter().map(tbox).collect();
     for (i, (mn, mx)) in boxes.iter().enumerate() {
         let (c0, c1) = (
