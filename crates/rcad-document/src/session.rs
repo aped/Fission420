@@ -551,4 +551,44 @@ fn adopt_piece_seeds(doc: &mut Document, eval: &Evaluation) {
             f.piece_seeds = r.piece_seeds.clone();
         }
     }
+    adopt_face_prints(doc, eval);
+}
+
+/// Keep [`crate::Feature::face_prints`] of every STEP import equal to the
+/// faces the document references: a stored print stays as it was (it is
+/// what the reference meant, even if the face no longer matches), a newly
+/// referenced planar face gets the print of the face as imported now, and
+/// prints of faces nothing references any more are dropped.
+fn adopt_face_prints(doc: &mut Document, eval: &Evaluation) {
+    let imports: Vec<FeatureId> = doc
+        .features
+        .iter()
+        .filter(|f| matches!(f.kind, crate::FeatureKind::ImportStep { .. }))
+        .map(|f| f.id)
+        .collect();
+    for id in imports {
+        let refs = crate::regen::imported_face_refs(doc, id);
+        let Ok(f) = doc.feature(id) else { continue };
+        let prints: Vec<crate::ImportFacePrint> = refs
+            .iter()
+            .filter_map(|&(body, face)| {
+                f.face_prints
+                    .iter()
+                    .find(|p| p.body == body && p.face == face)
+                    .cloned()
+                    .or_else(|| {
+                        eval.import_planes
+                            .get(&(id, body))?
+                            .iter()
+                            .find(|p| p.index == face)
+                            .map(|p| crate::ImportFacePrint::of(body, p))
+                    })
+            })
+            .collect();
+        if f.face_prints != prints
+            && let Ok(f) = doc.feature_mut(id)
+        {
+            f.face_prints = prints;
+        }
+    }
 }

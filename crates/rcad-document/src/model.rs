@@ -977,6 +977,58 @@ pub struct Feature {
     /// every commit; rounded to 1e-6 mm.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub piece_seeds: std::collections::BTreeMap<BodyId, Vec<[f64; 3]>>,
+    /// STEP imports (format v9): the plane of every imported face a feature
+    /// references (`FaceRole::Imported`), as found when it was first
+    /// referenced. When a later import of the same bytes (e.g. by a newer
+    /// importer) puts another plane at that face index, references to it
+    /// are broken (ADR 0003), never bound to the other face. Maintained by
+    /// the model after every commit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face_prints: Vec<ImportFacePrint>,
+}
+
+/// Fingerprint of a referenced imported planar face (see
+/// [`Feature::face_prints`]): outward unit normal, plane offset
+/// (normal · centroid, mm) and area (mm²) right after import, rounded to
+/// 1e-9.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportFacePrint {
+    pub body: BodyId,
+    pub face: u32,
+    pub normal: [f64; 3],
+    pub offset: f64,
+    pub area: f64,
+}
+
+impl ImportFacePrint {
+    /// The print of imported planar face `p` of `body`, rounded to 1e-9.
+    pub fn of(body: BodyId, p: &rcad_kernel::ImportedPlanarFace) -> Self {
+        let round = |x: f64| (x * 1e9).round() / 1e9 + 0.0;
+        let z = p.frame.z;
+        Self {
+            body,
+            face: p.index,
+            normal: z.map(round),
+            offset: round((0..3).map(|i| z[i] * p.frame.origin[i]).sum()),
+            area: round(p.area),
+        }
+    }
+
+    /// [`ImportFacePrint::matches`] for an imported planar face.
+    pub fn matches_face(&self, p: &rcad_kernel::ImportedPlanarFace) -> bool {
+        let o = Self::of(self.body, p);
+        self.matches(o.normal, o.offset, o.area)
+    }
+
+    /// Whether `f` (a face of the same import) is the face this print
+    /// describes: same plane within 1e-9 in the normal and 1e-6 mm in
+    /// offset, and the same area within 1e-6 relative.
+    pub fn matches(&self, normal: [f64; 3], offset: f64, area: f64) -> bool {
+        let dot: f64 = (0..3).map(|i| self.normal[i] * normal[i]).sum();
+        dot > 1.0 - 1e-9
+            && (self.offset - offset).abs() <= 1e-6
+            && (self.area - area).abs() <= 1e-6 * self.area.abs().max(1.0)
+    }
 }
 
 impl Feature {
@@ -2904,6 +2956,7 @@ impl Document {
             expressions: Default::default(),
             suppressed: false,
             piece_seeds: Default::default(),
+            face_prints: Vec::new(),
         };
         // With the timeline rolled back, insert at the marker and move it.
         match self

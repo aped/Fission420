@@ -171,6 +171,9 @@ pub struct Evaluation {
     /// nothing but their import and direct edits (for picking a face to edit
     /// directly). Absent for any other body.
     pub imported_face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
+    /// Planar faces of each imported body as imported, by (import feature,
+    /// body): the source of [`crate::Feature::face_prints`].
+    pub import_planes: BTreeMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     /// Solved placements of the component occurrences (docs/ASSEMBLIES.md).
     pub occurrences: Vec<crate::assembly::EvalOccurrence>,
 }
@@ -259,6 +262,7 @@ impl Evaluation {
             body: None,
             measurements: None,
             imported_face_ids: BTreeMap::new(),
+            import_planes: BTreeMap::new(),
             occurrences: vec![],
         }
     }
@@ -403,6 +407,12 @@ struct Snapshot {
     /// Chamfer features: the chamfer face's frame (outward normal) and body.
     chamfers: HashMap<FeatureId, (Frame, BodyId)>,
     imported_faces: HashMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
+    /// Imported faces whose plane no longer matches their stored print
+    /// ([`crate::Feature::face_prints`]): (import, body, face) -> why.
+    import_moved: HashMap<(FeatureId, BodyId, u32), String>,
+    /// Planar faces of each imported body as imported (never changed by
+    /// direct edits, unlike `imported_faces`).
+    import_planes: BTreeMap<(FeatureId, BodyId), Arc<Vec<ImportedPlanarFace>>>,
     /// Face identity of imported bodies (direct edits).
     face_ids: BTreeMap<BodyId, crate::direct::ImportedFaceIds>,
     bodies: BTreeMap<BodyId, BodyState>,
@@ -454,6 +464,8 @@ impl Snapshot {
             copies: HashMap::new(),
             chamfers: HashMap::new(),
             imported_faces: HashMap::new(),
+            import_moved: HashMap::new(),
+            import_planes: BTreeMap::new(),
             face_ids: BTreeMap::new(),
             bodies: BTreeMap::new(),
             created: Vec::new(),
@@ -982,20 +994,53 @@ fn regen_impl(
         body: None,
         measurements: None,
         imported_face_ids,
+        import_planes: st.import_planes,
         occurrences: doc.assembly.evaluate()?,
     };
     eval.refresh_legacy_view();
     Ok(Regen::Done(Box::new(eval)))
 }
 
-/// Evaluate feature `f` (at evaluation index `i`) on `st`, filling `r`.
-/// On error `st` may be partially changed; the caller restores it.
 /// The message of a caught panic payload (`&str` or `String`), else a placeholder.
 pub fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
     p.downcast_ref::<&str>()
         .map(|s| s.to_string())
         .or_else(|| p.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "panic with a non-text payload".into())
+}
+
+/// Imported faces of import `import` that any feature references
+/// (`FaceRole::Imported`), found in the serialized definitions so every kind
+/// of reference counts.
+pub(crate) fn imported_face_refs(doc: &Document, import: FeatureId) -> BTreeSet<(BodyId, u32)> {
+    fn walk(v: &serde_json::Value, import: u64, out: &mut BTreeSet<(BodyId, u32)>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if m.get("feature").and_then(|f| f.as_u64()) == Some(import)
+                    && let Some(i) = m.get("role").and_then(|r| r.get("Imported"))
+                    && let (Some(b), Some(f)) = (
+                        i.get("body").and_then(|b| b.as_u64()),
+                        i.get("face").and_then(|f| f.as_u64()),
+                    )
+                    && let (Ok(b), Ok(f)) = (u32::try_from(b), u32::try_from(f))
+                {
+                    out.insert((BodyId(b), f));
+                }
+                for x in m.values() {
+                    walk(x, import, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, import, out)),
+            _ => {}
+        }
+    }
+    let mut out = BTreeSet::new();
+    for f in &doc.features {
+        if let Ok(v) = serde_json::to_value(&f.kind) {
+            walk(&v, u64::from(import.0), &mut out);
+        }
+    }
+    out
 }
 
 /// A cut's or split's piece ids: the ids the feature holds, its stored
@@ -1174,6 +1219,8 @@ fn assign_pieces(
     Ok(out)
 }
 
+/// Evaluate feature `f` (at evaluation index `i`) on `st`, filling `r`.
+/// On error `st` may be partially changed; the caller restores it.
 fn eval_feature(
     doc: &Document,
     id: FeatureId,
@@ -1427,8 +1474,23 @@ fn eval_feature(
             }
             r.notes = imp.notes.clone();
             for (solid, body) in imp.solids.into_iter().zip(bodies) {
-                st.imported_faces
-                    .insert((id, *body), Arc::new(solid.planar_faces));
+                let planes = Arc::new(solid.planar_faces);
+                for p in f.face_prints.iter().filter(|p| p.body == *body) {
+                    let now = planes.iter().find(|x| x.index == p.face);
+                    if !now.is_some_and(|x| p.matches_face(x)) {
+                        st.import_moved.insert(
+                            (id, *body, p.face),
+                            format!(
+                                "imported face {} of {body} is no longer the face that was \
+                                 referenced (the file now imports another face at that \
+                                 index); pick the face again",
+                                p.face
+                            ),
+                        );
+                    }
+                }
+                st.import_planes.insert((id, *body), planes.clone());
+                st.imported_faces.insert((id, *body), planes);
                 st.face_ids.insert(
                     *body,
                     crate::direct::ImportedFaceIds::at_import(id, k::face_count(&solid.body)),
@@ -2115,6 +2177,14 @@ fn eval_feature(
             let bid = doc.face_body(face).ok_or_else(|| {
                 DocError::Validation(format!("{id}: a direct edit needs an imported face"))
             })?;
+            if let FaceRole::Imported { body, face: index } = face.role
+                && let Some(why) = st.import_moved.get(&(face.feature, body, index))
+            {
+                return Err(DocError::BrokenReference {
+                    from: id,
+                    detail: why.clone(),
+                });
+            }
             let target = brep_target(st, id, bid)?;
             let last = st.bodies.get(&bid).map_or(id, |b| b.last_feature);
             let pivot = match face.role {
@@ -5964,6 +6034,12 @@ fn resolve_face(from: FeatureId, fr: &FaceRef, st: &Snapshot) -> Result<Resolved
     let mut tool_of: Option<(&ExtrudeOut, FaceRole)> = None;
     let (frame, owner) = match fr.role {
         FaceRole::Imported { body, face } => {
+            if let Some(why) = st.import_moved.get(&(fr.feature, body, face)) {
+                return Err(DocError::BrokenReference {
+                    from,
+                    detail: why.clone(),
+                });
+            }
             let faces =
                 st.imported_faces
                     .get(&(fr.feature, body))
