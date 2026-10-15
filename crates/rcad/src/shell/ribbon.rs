@@ -175,7 +175,16 @@ impl RcadApp {
             .probe(d.label);
         let r = match &state {
             Ok(()) => r.on_hover_text(format!("{}\n{}", d.label, self.command_tooltip(d))),
-            Err(why) => r.on_disabled_hover_text(format!("{}\n{why}", d.label)),
+            // A disabled command still shows its key (learnt before it is
+            // needed).
+            Err(why) => {
+                let keys = d.key_text(self.shell.prefs.keymap);
+                r.on_disabled_hover_text(if keys.is_empty() {
+                    format!("{}\n{why}", d.label)
+                } else {
+                    format!("{} ({keys})\n{why}", d.label)
+                })
+            }
         };
         let clicked = r.clicked();
         if clicked {
@@ -302,7 +311,7 @@ impl RcadApp {
         if self.cmd_button(ui, C::Import) {
             ui.close();
         }
-        ui.menu_button("Export ▸", |ui| {
+        ui.menu_button("Export", |ui| {
             for d in registry::at(Place::FileExport) {
                 if self.cmd_button(ui, d.id) {
                     ui.close();
@@ -314,6 +323,10 @@ impl RcadApp {
         }
         ui.separator();
         if self.cmd_button(ui, C::Close) {
+            ui.close();
+        }
+        ui.separator();
+        if self.cmd_button(ui, C::About) {
             ui.close();
         }
     }

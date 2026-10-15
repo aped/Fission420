@@ -56,6 +56,8 @@ pub struct ShellState {
     /// Active ribbon tab.
     pub tab: registry::Tab,
     pub show_prefs: bool,
+    /// The About window is open.
+    pub show_about: bool,
     /// Model revision shown when the current face was picked (commands
     /// built from the pick run only at that revision).
     pub pick_revision: Option<u64>,
@@ -102,6 +104,7 @@ impl Default for ShellState {
             focus: None,
             tab: registry::Tab::Solid,
             show_prefs: false,
+            show_about: false,
             editing: None,
             search: None,
             properties: false,

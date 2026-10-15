@@ -1,0 +1,168 @@
+//! What a first-time user meets: refusals of key presses and menu actions
+//! are shown over the view (not only in the collapsed log), the window
+//! title and status bar name the document and its unsaved state, and
+//! About shows the version, license and source.
+use std::time::{Duration, Instant};
+
+use eframe::egui::Key;
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
+use rcad::{ExecMode, RcadApp};
+use rcad_commands::{Command, SketchTemplate};
+use rcad_document::SketchPlane;
+
+fn harness() -> Harness<'static, RcadApp> {
+    Harness::builder()
+        .with_size([1280.0, 800.0])
+        .with_max_steps(64)
+        .build_ui_state(
+            |ui, app: &mut RcadApp| app.ui(ui),
+            RcadApp::new(ExecMode::Sync, None),
+        )
+}
+
+fn settle(h: &mut Harness<'_, RcadApp>) {
+    let start = Instant::now();
+    loop {
+        let _ = h.try_run();
+        if h.state().idle() {
+            let _ = h.try_run();
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(120), "not idle");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn click(h: &mut Harness<'_, RcadApp>, label: &str) {
+    h.get_by_label(label).click();
+    settle(h);
+}
+
+/// E (Extrude) in an empty document says why nothing happened, over the
+/// view; × dismisses it, and the next command clears a later one.
+#[test]
+fn refused_key_press_shows_a_dismissible_notice() {
+    let mut h = harness();
+    click(&mut h, "New");
+    assert_eq!(h.state().notice(), None);
+    h.key_press(Key::E);
+    settle(&mut h);
+    let n = h.state().notice().expect("a notice").to_string();
+    assert!(n.starts_with("Extrude: "), "{n}");
+    assert!(n.len() > "Extrude: ".len() + 10, "says why: {n}");
+    click(&mut h, "Dismiss notice");
+    assert_eq!(h.state().notice(), None);
+    assert!(h.query_by_label("Dismiss notice").is_none());
+    // Again, then a command replaces it.
+    h.key_press(Key::E);
+    settle(&mut h);
+    assert!(h.state().notice().is_some());
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 10.0,
+            height: 10.0,
+            center: None,
+        },
+    });
+    settle(&mut h);
+    assert_eq!(h.state().notice(), None);
+}
+
+fn rectangle() -> Command {
+    Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 10.0,
+            height: 10.0,
+            center: None,
+        },
+    }
+}
+
+/// The window title and the status bar agree on the document name and
+/// its save state: a new document is "Untitled" and not saved yet (never
+/// "saved … unsaved"); an edit marks it; Save names it and clears the mark.
+#[test]
+fn title_and_status_bar_show_the_name_and_unsaved_state() {
+    let mut h = harness();
+    assert_eq!(h.state().window_title(), "R-CAD");
+    click(&mut h, "New");
+    assert_eq!(h.state().window_title(), "Untitled — R-CAD");
+    h.get_by_label("not saved yet");
+    assert!(h.query_by_label("saved").is_none());
+    h.state_mut().request(rectangle());
+    settle(&mut h);
+    assert_eq!(h.state().window_title(), "● Untitled — R-CAD");
+    h.get_by_label("• unsaved changes");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bracket.rcad.json");
+    h.state_mut().request(Command::Save { path: path.clone() });
+    settle(&mut h);
+    assert_eq!(h.state().window_title(), "bracket.rcad.json — R-CAD");
+    h.get_by_label("saved");
+    h.get_by_label(&path.display().to_string());
+    // The next edit marks it again.
+    h.state_mut().request(rectangle());
+    settle(&mut h);
+    assert!(h.state().window_title().starts_with("● "));
+}
+
+/// The start card offers a template as well as a first sketch: a
+/// first-time user gets an editable part in one pick.
+#[test]
+fn start_card_offers_a_template() {
+    let mut h = harness();
+    h.get_by_label("No document open");
+    click(&mut h, "Start from a template");
+    click(&mut h, "Mounting bracket");
+    assert!(h.state().summary().open);
+    assert!(!h.state().summary().bodies.is_empty());
+    assert!(h.query_by_label("No document open").is_none());
+    assert!(h.query_by_label("Empty document").is_none());
+}
+
+/// File ▸ About R-CAD shows this build's version, license and source.
+#[test]
+fn about_shows_version_license_and_source() {
+    let mut h = harness();
+    click(&mut h, "File menu");
+    click(&mut h, "About R-CAD");
+    h.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+    h.get_by_label(&format!("License: {}", env!("CARGO_PKG_LICENSE")));
+    assert!(h.query_by_label_contains("github.com").is_some());
+}
+
+/// Menu items show their key at the right; the item keeps the command
+/// label as its name (scripts and tests click it by label).
+#[test]
+fn menu_items_show_their_keys() {
+    let mut h = harness();
+    click(&mut h, "New");
+    click(&mut h, "File menu");
+    // The app-bar icon and the File menu item.
+    let keys: Vec<Option<String>> = h
+        .query_all_by_label("Save As…")
+        .map(|n| {
+            n.accesskit_node()
+                .data()
+                .keyboard_shortcut()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert!(keys.contains(&Some("Ctrl+Shift+S".into())), "{keys:?}");
+    // An item without a key has none; clicking an item still runs it.
+    let safe = h.get_by_label("Open (safe mode)…");
+    assert_eq!(safe.accesskit_node().data().keyboard_shortcut(), None);
+    let n = h.query_all_by_label("Save As…").count();
+    assert_eq!(n, 2);
+    h.query_all_by_label("Save As…").last().unwrap().click();
+    settle(&mut h);
+    h.get_by_label("Save document as");
+}

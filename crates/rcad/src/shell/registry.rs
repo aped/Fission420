@@ -33,6 +33,7 @@ pub enum CmdId {
     Undo,
     Redo,
     Help,
+    About,
     // View
     Fit,
     Section,
@@ -422,6 +423,10 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [k(Key::F1)], classic: [k(Key::F1)],
         places: [Place::AppBar], mm: None,
         enabled: always, run: |a| a.show_help = !a.show_help),
+    def!(About, "About R-CAD", Help, "Version, license and source of this build",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: always, run: |a| a.shell.show_about = true),
     def!(CommandSearch, "Command search", Select,
         "Find any command by name and run it",
         fusion: [k(Key::S)], classic: [],
@@ -827,10 +832,10 @@ pub fn shortcut_line(layer: KeymapLayer, pick: fn(&CommandDef) -> bool) -> Strin
 pub fn placement_text(d: &CommandDef) -> String {
     match d.places.first() {
         Some(Place::File) => "File".into(),
-        Some(Place::FileExport) => "File ▸ Export".into(),
+        Some(Place::FileExport) => "File › Export".into(),
         Some(Place::AppBar) => "Application bar".into(),
         Some(Place::View) => "View".into(),
-        Some(Place::Ribbon { tab, group, .. }) => format!("{} ▸ {}", tab.label(), group.label()),
+        Some(Place::Ribbon { tab, group, .. }) => format!("{} › {}", tab.label(), group.label()),
         None => String::new(),
     }
 }
@@ -855,6 +860,7 @@ mod tests {
         CmdId::Undo,
         CmdId::Redo,
         CmdId::Help,
+        CmdId::About,
         CmdId::Fit,
         CmdId::Section,
         CmdId::ViewTop,

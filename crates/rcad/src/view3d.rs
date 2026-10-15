@@ -1214,14 +1214,26 @@ impl RcadApp {
                 ));
             }
         } else if let Some(b) = self.banner.clone() {
-            let text = format!("✖ [{}] {}", b.kind, b.text);
-            let galley = painter.layout(
-                text,
-                egui::FontId::proportional(14.0),
-                PALETTE.conflict,
-                // Room for the Dismiss button before the view cube.
-                (top.width() - 100.0).max(200.0),
+            // What did not happen, in plain words, then the reason and the
+            // next step (the log keeps the technical text and kind).
+            let (heading, body) = crate::messages::banner_text(&b);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &format!("✖ {heading}\n"),
+                0.0,
+                egui::TextFormat::simple(egui::FontId::proportional(14.5), PALETTE.conflict),
             );
+            job.append(
+                &body,
+                0.0,
+                egui::TextFormat::simple(
+                    egui::FontId::proportional(13.0),
+                    Color32::from_rgb(240, 205, 205),
+                ),
+            );
+            // Room for the Dismiss button before the view cube.
+            job.wrap.max_width = (top.width() - 100.0).max(200.0);
+            let galley = painter.layout_job(job);
             let r = egui::Rect::from_min_size(
                 egui::pos2(rect.min.x + 10.0, y),
                 galley.size() + egui::vec2(12.0, 10.0),
@@ -1282,10 +1294,64 @@ impl RcadApp {
                 Color32::from_gray(225),
             );
         }
+        self.paint_notice(ui, rect);
+    }
+
+    /// Why the last key press or menu action did nothing, above the face
+    /// line at the bottom of the view; it goes with ×, the next command,
+    /// or after a few seconds.
+    fn paint_notice(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|(_, t)| t.elapsed().as_secs() >= crate::app::NOTICE_SECS)
+        {
+            self.notice = None;
+        }
+        let Some((text, since)) = self.notice.clone() else {
+            return;
+        };
+        // One repaint when it is due to go (an idle UI otherwise sleeps).
+        ui.ctx().request_repaint_after(
+            std::time::Duration::from_secs(crate::app::NOTICE_SECS).saturating_sub(since.elapsed()),
+        );
+        let painter = ui.painter_at(rect);
+        let color = Color32::from_rgb(255, 210, 120);
+        // Wrapped to the view (room for ×); the bottom edge stays above the
+        // selected-face line however many lines it takes.
+        let galley = painter.layout(
+            text,
+            egui::FontId::proportional(13.5),
+            color,
+            (rect.width() - 150.0).max(160.0),
+        );
+        let size = galley.size() + egui::vec2(10.0, 6.0);
+        let r = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x + 110.0, rect.max.y - 40.0 - size.y),
+            size,
+        );
+        painter.rect_filled(r, 4.0, Color32::from_black_alpha(200));
+        painter.galley(r.min + egui::vec2(5.0, 3.0), galley, color);
+        let btn = egui::Rect::from_min_size(
+            egui::pos2(r.max.x + 4.0, r.min.y),
+            egui::vec2(22.0, r.height()),
+        );
+        if ui
+            .put(btn, egui::Button::new("×"))
+            .on_hover_text("Dismiss")
+            .named("Dismiss notice")
+            .probe("Dismiss notice")
+            .clicked()
+        {
+            self.notice = None;
+        }
     }
 
     fn empty_state(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let size = egui::vec2(360.0, 150.0);
+        // Sized to its content (last frame's height), narrower than the view.
+        let id = egui::Id::new("rcad_empty_state_height");
+        let h = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(170.0);
+        let size = egui::vec2(470.0_f32.min(rect.width() - 40.0).max(260.0), h);
         let card = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 40.0), size);
         ui.painter()
             .rect_filled(card, 8.0, Color32::from_black_alpha(190));
@@ -1296,9 +1362,14 @@ impl RcadApp {
             } else {
                 "No document open"
             });
-            ui.label("Start by sketching a profile on the XY plane, then extrude it.");
+            ui.label("Sketch a closed profile, then extrude it into a solid.");
             ui.add_space(8.0);
+            // One centred row (its width is known from the last frame).
+            let row = id.with("row");
+            let row_w = ui.ctx().data(|d| d.get_temp::<f32>(row)).unwrap_or(0.0);
             ui.horizontal(|ui| {
+                ui.add_space(((ui.available_width() - row_w) / 2.0).max(0.0));
+                let x0 = ui.cursor().min.x;
                 if ui
                     .button("New Sketch on XY")
                     .probe("New Sketch on XY")
@@ -1320,9 +1391,29 @@ impl RcadApp {
                 {
                     self.open_dialog(false);
                 }
+                // A ready-made parametric part (opens as a new document).
+                let t = ui
+                    .button("Start from a template ⏷")
+                    .named("Start from a template");
+                egui::Popup::menu(&t).show(|ui| self.templates_menu(ui));
+                let w = t.rect.max.x - x0;
+                if (w - row_w).abs() > 0.5 {
+                    ui.ctx().data_mut(|d| d.insert_temp(row, w));
+                    ui.ctx().request_repaint();
+                }
             });
-            ui.weak("Help: F1 · Navigate: MMB orbit, RMB pan, wheel zoom");
+            ui.add_space(6.0);
+            ui.weak(
+                "Other planes: CONSTRUCT › Planes, or select a face of a body and press \
+                 Create Sketch.",
+            );
+            ui.weak("F1 help · drag to orbit · right-drag to pan · scroll to zoom");
         });
+        let used = child.min_rect().height() + 32.0;
+        if (used - h).abs() > 0.5 {
+            ui.ctx().data_mut(|d| d.insert_temp(id, used));
+            ui.ctx().request_repaint();
+        }
     }
 }
 

@@ -114,3 +114,33 @@ be interrupted and still completes, and Undo removes it in one step.
   *Circular*, *Instances*, *Step x/y (mm)* (+ *Second direction*), or *Angle between (°)* and
   *Centre x/y*; *Apply pattern* / *Cancel pattern*. Copies are constrained to their sources and
   the spacing/angle become dimensions. UI test `crates/rcad/tests/sketch_pattern_ui.rs`.
+
+## Edit Feature, messages and first run
+
+* **Edit Feature** (History double-click or right-click ▸ Edit Feature) reopens the feature's
+  dialog prefilled for Extrude, Revolve, Hole, Fillet / Chamfer (edge and loop), Shell (face and
+  scoped), Linear / Circular pattern, Mirror, Loft, Sweep, Thread and Align. A bound value shows its
+  expression; OK is one `RedefineFeature` (same id and history position, one undo step), and values
+  the dialog does not show (created bodies, a nut's clearance, a mirror plane's tilt, an align
+  offset) are kept. The pattern type is fixed while editing. A definition a dialog cannot show (a
+  pattern along a slanted direction, a loft with several middle sections) and the remaining kinds
+  say to use the Inspector. Code `dialogs/edit_feature.rs`; tests `edit_feature_ui.rs` and the
+  module's round-trip unit tests (an unchanged dialog gives back the stored definition).
+* **Refusal notice:** a key press or menu action that cannot run (E with no sketch) shows why above
+  the bottom of the view, with × to dismiss; the next command or 8 s clear it. The Messages log
+  keeps every message.
+* **Error banner:** leads with what did not happen in plain words ("Shell face was not applied: not
+  supported yet"), then the reason and next step; the log keeps the technical text and error kind
+  (`messages.rs`).
+* **Save state:** the window title is `Name — R-CAD` with `● ` while there are unsaved changes (an
+  open sketch with edits counts); the status bar shows the name (Untitled until saved) and one
+  state: not saved yet, unsaved changes, or saved.
+* **Shortcuts:** menu items show the active key layer's shortcut at the right (also exposed as the
+  accessible keyboard shortcut); hovering a disabled ribbon button shows its key and why it is
+  disabled. F1 lists every command and key.
+* **Start card** (empty view): New Sketch on XY, Open Document…, Start from a template (the
+  printable-part templates), how to sketch on another plane or a face, and the navigation keys.
+* **File ▸ About R-CAD:** package version, license and source repository.
+* **Glyphs:** `tests/glyphs.rs` fails on any character in the app's string literals that the UI
+  font cannot draw (it would show as an empty box).
+UI tests: `crates/rcad/tests/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`.

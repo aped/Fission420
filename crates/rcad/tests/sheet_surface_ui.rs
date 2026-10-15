@@ -108,7 +108,7 @@ fn sheet_base_flange_flat_and_rule_from_the_inspector() {
     h.get_by_role_and_label(Role::ComboBox, "Flange edge")
         .click();
     settle(&mut h);
-    let label = "(0.0, 40.0) → (0.0, 0.0)"; // the left edge
+    let label = "(0.0, 40.0) to (0.0, 0.0)"; // the left edge
     h.query_all_by_label_contains(label).last().unwrap().click();
     settle(&mut h);
     type_into(&mut h, "Length beyond bend (mm)", "20");

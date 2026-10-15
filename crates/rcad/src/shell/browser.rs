@@ -129,7 +129,7 @@ impl RcadApp {
                     ui.label(what);
                 }
                 if construction.is_empty() {
-                    ui.weak("No construction planes (CONSTRUCT ▸ Offset Plane)");
+                    ui.weak("No construction planes (CONSTRUCT › Offset Plane)");
                 }
             });
         header

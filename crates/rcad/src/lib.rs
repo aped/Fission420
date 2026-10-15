@@ -21,6 +21,7 @@ pub mod file_pick;
 pub mod joint_ui;
 pub mod mesh_edit_ui;
 pub mod mesh_repair_ui;
+pub mod messages;
 pub mod panels;
 pub mod params_ui;
 pub mod pattern_ui;

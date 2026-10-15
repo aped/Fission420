@@ -267,8 +267,8 @@ impl RcadApp {
             }
         }
         ui.separator();
-        self.cmd_button(ui, CmdId::Fit);
-        self.cmd_button(ui, CmdId::LookAt);
+        self.cmd_bar_button(ui, CmdId::Fit);
+        self.cmd_bar_button(ui, CmdId::LookAt);
         ui.separator();
         let edges = self.shell.show_edges;
         let r = ui.menu_button("Display style", |ui| {

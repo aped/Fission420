@@ -288,8 +288,8 @@ pub(crate) fn joint_dialog(
             JointKind::PinSlot | JointKind::Planar | JointKind::Ball
         ) {
             ui.small(match d.kind {
-                JointKind::PinSlot => "Slot direction (⊥ axis; blank = default):",
-                _ => "In-plane u direction (⊥ axis; blank = default):",
+                JointKind::PinSlot => "Slot direction (perpendicular to the axis; blank = default):",
+                _ => "In-plane u direction (perpendicular to the axis; blank = default):",
             });
             ui.horizontal(|ui| {
                 for (i, l) in ["Dir X", "Dir Y", "Dir Z"].iter().enumerate() {
