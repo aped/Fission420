@@ -297,3 +297,61 @@ fn a_pick_made_before_an_edit_is_refused_as_stale() {
     let last = h.state().diagnostics().last().cloned().unwrap();
     assert!(last.error, "{last:?}");
 }
+
+/// Enter = OK in the docked dialog even when it arrives with the click that
+/// opened it (scripts and fast typists): the Extrude commits.
+#[test]
+fn enter_commits_the_docked_dialog_without_focusing_a_field() {
+    let mut h = harness(1280.0, 800.0);
+    click(&mut h, "New");
+    h.state_mut().request(Command::CreateSketch {
+        name: None,
+        plane: SketchPlane::WorldXY,
+        template: SketchTemplate::CenteredRectangle {
+            width: 40.0,
+            height: 30.0,
+            center: None,
+        },
+    });
+    settle(&mut h);
+    // Click and Enter in the same frame (a loaded machine delivers them
+    // together): one step processes press, release and Enter.
+    let at = h.get_by_label("Extrude…").rect().center();
+    h.event(eframe::egui::Event::PointerMoved(at));
+    h.step();
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::PointerButton {
+            pos: at,
+            button: eframe::egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+    }
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::Key {
+            key: eframe::egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        });
+    }
+    h.step();
+    settle(&mut h);
+    assert!(
+        (h.state().volume().unwrap_or(0.0) - 12000.0).abs() < 1e-6,
+        "{:?}",
+        h.state().diagnostics().last()
+    );
+    // And after the dialog is open, with no field focused.
+    h.state_mut().request(Command::Undo);
+    settle(&mut h);
+    click(&mut h, "Extrude…");
+    h.key_press(eframe::egui::Key::Escape);
+    settle(&mut h);
+    click(&mut h, "Extrude…");
+    h.step();
+    h.key_press(eframe::egui::Key::Enter);
+    settle(&mut h);
+    assert!((h.state().volume().unwrap_or(0.0) - 12000.0).abs() < 1e-6);
+}
