@@ -420,6 +420,32 @@ pub struct Body {
     pub(crate) solid: Solid,
 }
 
+/// Whether `a` and `b` are the same shape: the same shells, faces, edges and
+/// vertices (Truck handles, compared by identity) in the same order and
+/// orientation. Clones of one body are; separately built bodies never are
+/// while both are alive. Used to keep derived data (a check tessellation)
+/// only for the very body it was computed from.
+pub fn same_shape(a: &Body, b: &Body) -> bool {
+    let (sa, sb) = (a.solid.boundaries(), b.solid.boundaries());
+    sa.len() == sb.len()
+        && sa.iter().zip(sb).all(|(x, y)| {
+            x.len() == y.len()
+                && x.iter().zip(y.iter()).all(|(f, g)| {
+                    f.id() == g.id()
+                        && f.orientation() == g.orientation()
+                        && f.boundaries().len() == g.boundaries().len()
+                        && f.boundaries().iter().zip(g.boundaries()).all(|(w, v)| {
+                            w.len() == v.len()
+                                && w.edge_iter().zip(v.edge_iter()).all(|(e, d)| {
+                                    e.id() == d.id()
+                                        && e.orientation() == d.orientation()
+                                        && e.front().id() == d.front().id()
+                                })
+                        })
+                })
+        })
+}
+
 impl Body {
     /// Independent copy sharing no geometry with `self` (Truck compress →
     /// extract allocates fresh topology and geometry), safe to evaluate on
@@ -455,4 +481,23 @@ pub(crate) fn guarded<T>(what: &str, f: impl FnOnce() -> T) -> Result<T> {
                  caught; nothing was changed). Try a slightly different size or position"
         ))
     })
+}
+
+#[cfg(test)]
+mod same_shape_tests {
+    use super::*;
+
+    #[test]
+    fn same_shape_is_identity_not_equality() {
+        let p = Profile::Polygon(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]]);
+        let a = extrude(&p, &Frame::XY, 4.0).unwrap();
+        assert!(same_shape(&a, &a.clone()));
+        // Equal geometry, separate handles.
+        assert!(!same_shape(&a, &a.deep_copy().unwrap()));
+        assert!(!same_shape(&a, &extrude(&p, &Frame::XY, 4.0).unwrap()));
+        // Same handles, inverted orientation.
+        let mut inv = a.clone();
+        inv.solid.not();
+        assert!(!same_shape(&a, &inv));
+    }
 }

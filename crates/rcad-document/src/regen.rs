@@ -10,6 +10,7 @@ use crate::{LinkedCurve, ProjectSource, ProjectionLink};
 use rcad_kernel::{self as k, Body, Frame, Measurements};
 use rcad_sketch::{EntityId, Profile as SketchProfile, SolveReport};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -2723,11 +2724,12 @@ fn extrude_feature(
                     });
                 }
             }
-            let (mut joined, used) = if opts.taper != 0.0 {
+            let target_mesh = st.bodies.get(&target).and_then(|b| b.check_mesh.clone());
+            let (mut joined, used, mut mesh) = if opts.taper != 0.0 {
                 let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Join)?;
-                (r, (a, b))
+                (r, (a, b), None)
             } else {
-                apply_tool(&t, &out, &frame, None, id, None)?
+                apply_tool_reusing(&t, target_mesh.as_ref(), &out, &frame, id)?
             };
             (a, b) = used;
             for (i, (p, ents, h)) in extra.iter().enumerate() {
@@ -2739,8 +2741,9 @@ fn extrude_feature(
                 };
                 let w = format!("region {}", i + 2);
                 joined = apply_tool(&joined, &o, &frame, Some(&w), id, None)?.0;
+                mesh = None;
             }
-            replace_body(st, id, target, joined);
+            replace_body_checked(st, id, target, joined, mesh);
             out.body = target;
             out.multi = !extra.is_empty();
         }
@@ -2759,15 +2762,16 @@ fn extrude_feature(
             // One region, straight walls: a cut that separates the target
             // into pieces makes one body per piece (as Fusion does).
             let split = opts.taper == 0.0 && extra.is_empty();
-            let (mut cut, used) = if opts.taper != 0.0 {
+            let target_mesh = st.bodies.get(&target).and_then(|b| b.check_mesh.clone());
+            let (mut cut, used, mut mesh) = if opts.taper != 0.0 {
                 let r = tapered_apply(id, &t, &out, (a, b), dir, opts.taper, k::PrismOp::Cut)?;
-                (r, (a, b))
+                (r, (a, b), None)
             } else {
                 let tool = ExtrudeOut {
                     pieces: split,
                     ..out.clone()
                 };
-                apply_tool(&t, &tool, &frame, None, id, None)?
+                apply_tool_reusing(&t, target_mesh.as_ref(), &tool, &frame, id)?
             };
             trace_regen(id, "apply_tool", t_apply);
             (a, b) = used;
@@ -2780,6 +2784,7 @@ fn extrude_feature(
                 };
                 let w = format!("region {}", i + 2);
                 cut = apply_tool(&cut, &o, &frame, Some(&w), id, None)?.0;
+                mesh = None;
             }
             let parts = k::split_pieces(&cut).map_err(kernel(id))?;
             if parts.is_empty() {
@@ -2791,7 +2796,9 @@ fn extrude_feature(
             let mut assigned =
                 assign_pieces(id, parts, &[target], piece_ids, seeds, seeds_out)?.into_iter();
             if let Some((_, first)) = assigned.next() {
-                replace_body(st, id, target, first);
+                // The check tessellation is valid only for the very body it was made of.
+                let mesh = mesh.filter(|_| k::same_shape(&first, &cut));
+                replace_body_checked(st, id, target, first, mesh);
             }
             for (body, piece) in assigned {
                 create_body(st, id, body, BodyGeometry::Brep(piece), BodySource::Modeled)?;
@@ -3498,23 +3505,51 @@ fn verify_applied(
         .collect();
     k::verify_prisms_boolean(target, result, op, &tools)
         .map(|_| ())
-        .map_err(|x| DocError::GeometryCheck {
-            feature: id,
-            detail: format!(
-                "{prefix}{}; refused (the model is unchanged). {}",
-                x.to_string()
-                    .trim_start_matches("result is not a valid solid: "),
-                match op {
-                    k::PrismOp::Cut => {
-                        "Known Truck 0.6 causes: a cut that fully contains an existing hole or \
-                         pocket (enlarge that feature by editing its dimension instead), or a cut \
-                         whose walls meet existing ones only along an edge or at a point \
-                         (non-manifold; move it slightly)"
-                    }
-                    k::PrismOp::Join => "Change the profile or the support face",
+        .map_err(|x| check_refusal(id, prefix, op, x))
+}
+
+/// [`verify_applied`] for one tool, reusing `target_mesh` (the check
+/// tessellation of exactly `target`) and returning the result's.
+fn verify_applied_reusing(
+    id: FeatureId,
+    prefix: &str,
+    target: &Body,
+    target_mesh: Option<&k::CheckMesh>,
+    result: &Body,
+    a: &Applied,
+) -> Result<k::CheckMesh> {
+    let start = a.frame.offset(a.nominal.0);
+    let prism = k::Prism {
+        profile: &a.profile,
+        holes: &a.holes,
+        start: &start,
+        length: a.nominal.1 - a.nominal.0,
+    };
+    let used = (a.used.0 - a.nominal.0, a.used.1 - a.nominal.0);
+    k::verify_prism_boolean_reusing(target, target_mesh, result, a.op, &prism, used)
+        .map(|(_, mesh)| mesh)
+        .map_err(|x| check_refusal(id, prefix, a.op, x))
+}
+
+/// The `GeometryCheck` refusal of a failed result check.
+fn check_refusal(id: FeatureId, prefix: &str, op: k::PrismOp, x: k::KernelError) -> DocError {
+    DocError::GeometryCheck {
+        feature: id,
+        detail: format!(
+            "{prefix}{}; refused (the model is unchanged). {}",
+            x.to_string()
+                .trim_start_matches("result is not a valid solid: "),
+            match op {
+                k::PrismOp::Cut => {
+                    "Known Truck 0.6 causes: a cut that fully contains an existing hole or \
+                     pocket (enlarge that feature by editing its dimension instead), or a cut \
+                     whose walls meet existing ones only along an edge or at a point \
+                     (non-manifold; move it slightly)"
                 }
-            ),
-        })
+                k::PrismOp::Join => "Change the profile or the support face",
+            }
+        ),
+    }
 }
 
 /// Apply extrusion `e`'s tool, placed on `frame` (its sketch frame for the
@@ -3551,6 +3586,43 @@ fn apply_tool(
     id: FeatureId,
     defer: Option<&mut Vec<Applied>>,
 ) -> Result<(Body, (f64, f64))> {
+    apply_tool_with(body, None, e, frame, what, id, defer, &RefCell::new(None))
+}
+
+/// [`apply_tool`] whose result check reuses `body_mesh`, the check
+/// tessellation of exactly `body` (from the check that produced it), and
+/// returns the result's check tessellation when the returned body is the one
+/// that check passed (same topology and geometry handles), for the next
+/// feature's check. Same verdicts as [`apply_tool`]: the tessellation is a
+/// deterministic function of the body and the chord.
+fn apply_tool_reusing(
+    body: &Body,
+    body_mesh: Option<&k::CheckMesh>,
+    e: &ExtrudeOut,
+    frame: &Frame,
+    id: FeatureId,
+) -> Result<(Body, (f64, f64), Option<k::CheckMesh>)> {
+    let checked = RefCell::new(None);
+    let (out, span) = apply_tool_with(body, body_mesh, e, frame, None, id, None, &checked)?;
+    let mesh = checked
+        .into_inner()
+        .and_then(|(b, m): (Body, k::CheckMesh)| k::same_shape(&b, &out).then_some(m));
+    Ok((out, span, mesh))
+}
+
+/// [`apply_tool`]; `checked` receives each result that passed its check, with
+/// that check's result tessellation (single tool, not deferred).
+#[allow(clippy::too_many_arguments)]
+fn apply_tool_with(
+    body: &Body,
+    body_mesh: Option<&k::CheckMesh>,
+    e: &ExtrudeOut,
+    frame: &Frame,
+    what: Option<&str>,
+    id: FeatureId,
+    defer: Option<&mut Vec<Applied>>,
+    checked: &RefCell<Option<(Body, k::CheckMesh)>>,
+) -> Result<(Body, (f64, f64))> {
     let kp = to_kernel(&e.profile);
     let khole: Vec<k::Profile> = e.holes.iter().map(|(p, _)| to_kernel(p)).collect();
     let prefix = what.map(|w| format!("{w}: ")).unwrap_or_default();
@@ -3577,9 +3649,11 @@ fn apply_tool(
             }
             None => {
                 let t = std::time::Instant::now();
-                let r = verify_applied(id, &prefix, body, result, std::slice::from_ref(&a));
+                let r = verify_applied_reusing(id, &prefix, body, body_mesh, result, &a);
                 trace_regen(id, "verify_applied", t);
-                r
+                r.map(|mesh| {
+                    *checked.borrow_mut() = Some((result.clone(), mesh));
+                })
             }
         }
     };
