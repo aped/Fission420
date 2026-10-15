@@ -178,7 +178,10 @@ fn damaged_files_are_refused_without_replacing_the_open_document() {
             .path()
             .join(format!("{}.rcad.json", what.replace(' ', "_")));
         std::fs::write(&p, body).unwrap();
-        let r = s.execute(&Command::Open { path: p });
+        let r = s.execute(&Command::Open {
+            path: p,
+            safe_mode: false,
+        });
         assert!(!r.ok, "{what}: opened");
         assert!(r.error.is_some(), "{what}");
         assert_eq!(
@@ -207,12 +210,24 @@ fn stale_temporary_files_do_not_matter() {
     let stale = dir.path().join(".part.rcad.json.tmp-1-2-3");
     std::fs::write(&stale, b"{\"format\": \"r-cad\", \"vers").unwrap();
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path: path.clone() });
+    ok(
+        &mut t,
+        Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     ok(&mut t, Command::Save { path: path.clone() });
     // The stale file is not ours to delete; the save still works.
     assert!(stale.exists());
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
 }
 
 #[test]

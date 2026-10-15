@@ -247,7 +247,10 @@ pub fn scenario_a_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         }),
         ok(Command::Save { path: doc.into() }),
         ok(Command::Close),
-        ok(Command::Open { path: doc.into() }),
+        ok(Command::Open {
+            path: doc.into(),
+            safe_mode: false,
+        }),
         ok(Command::ExportStl {
             path: portable(out, "scenario_a.stl"),
             chord: Some(0.01),
@@ -299,7 +302,10 @@ pub fn scenario_b_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         }),
         ok(Command::Save { path: doc.into() }),
         ok(Command::Close),
-        ok(Command::Open { path: doc.into() }),
+        ok(Command::Open {
+            path: doc.into(),
+            safe_mode: false,
+        }),
         ok(Command::ExportStl {
             path: portable(out, "scenario_b.stl"),
             chord: Some(0.01),
@@ -421,7 +427,10 @@ pub fn scenario_r_workflow(doc: &Path, out: &Path) -> Result<Vec<Step>, Scenario
         ok(Command::Undo),
         ok(Command::Save { path: doc.into() }),
         ok(Command::Close),
-        ok(Command::Open { path: doc.into() }),
+        ok(Command::Open {
+            path: doc.into(),
+            safe_mode: false,
+        }),
         ok(Command::ExportStl {
             path: portable(out, "scenario_r.stl"),
             chord: Some(0.01),

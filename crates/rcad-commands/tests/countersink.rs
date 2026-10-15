@@ -134,7 +134,13 @@ fn countersink_parameters_undo_and_reopen() {
             .contains("\"version\": 6")
     );
     let mut s2 = Session::new();
-    ok(&mut s2, Command::Open { path });
+    ok(
+        &mut s2,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert_volume(&s2, v8);
     if let Ok(evidence) = std::env::var("RCAD_EVIDENCE_DIR") {
         std::fs::create_dir_all(&evidence).unwrap();

@@ -461,6 +461,7 @@ mod tests {
             region: None,
             suppressed: false,
             rolled_back: false,
+            health: Default::default(),
             projections: vec![],
             sheet_relief: None,
         };

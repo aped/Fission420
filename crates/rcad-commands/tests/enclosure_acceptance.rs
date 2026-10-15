@@ -246,7 +246,13 @@ fn baseline_then_variant_with_undo_redo_and_reopen() {
     let path = dir.path().join("variant.rcad.json");
     ok(&mut s, Command::Save { path: path.clone() });
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path: path.clone() });
+    ok(
+        &mut t,
+        Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert_eq!(t.summary().parameters, s.summary().parameters);
     check(&t, &VAR);

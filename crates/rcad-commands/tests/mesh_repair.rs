@@ -162,7 +162,13 @@ fn diagnose_preview_apply_undo_reopen() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(v["version"], 7);
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert!(t.summary().bodies[1].mesh.as_ref().unwrap().closed);
     assert!((mesh_volume(&mut t, 2) - 8000.0).abs() < 1e-9);
 }

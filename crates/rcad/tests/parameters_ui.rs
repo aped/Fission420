@@ -163,7 +163,10 @@ fn parameters_panel_and_expression_bindings() {
 fn enclosure_fit_clearance_from_the_panel() {
     let mut h = harness();
     let doc = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.rcad.json");
-    h.state_mut().request(Command::Open { path: doc });
+    h.state_mut().request(Command::Open {
+        path: doc,
+        safe_mode: false,
+    });
     settle(&mut h);
     let lid = |h: &Harness<'_, RcadApp>| {
         let b = h.state().summary().bodies[1].clone();
@@ -193,7 +196,10 @@ fn enclosure_fit_clearance_from_the_panel() {
 fn measure_wall_and_lip_clearance_between_faces() {
     let mut h = harness();
     let doc = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.rcad.json");
-    h.state_mut().request(Command::Open { path: doc });
+    h.state_mut().request(Command::Open {
+        path: doc,
+        safe_mode: false,
+    });
     settle(&mut h);
     let find = |h: &Harness<'_, RcadApp>, body: u32, nx: f64, x: f64| {
         h.state()

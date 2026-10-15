@@ -77,7 +77,13 @@ fn bolt_circle_pattern_extrudes_saves_and_edits() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(j["version"], 6, "sketch patterns need format v6");
     let mut s2 = Session::new();
-    ok(&mut s2, Command::Open { path });
+    ok(
+        &mut s2,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert!((volume(&s2) - expect).abs() < 1e-6 * expect);
 
     // The shared angle is one parameter: 45° moves the holes, same volume.

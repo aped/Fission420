@@ -223,7 +223,10 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
     let path = r.out_dir.join("bodies_a.rcad.json");
     let x = r.exec(Command::Save { path: path.clone() });
     r.ok("save", &x);
-    let x = r.exec(Command::Open { path: path.clone() });
+    let x = r.exec(Command::Open {
+        path: path.clone(),
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let bodies = r.s.summary().bodies;
     r.check(
@@ -986,7 +989,10 @@ pub(super) fn scenario_pattern(r: &mut Run<'_>) {
     let path = r.out_dir.join("pattern.rcad.json");
     let x = r.exec(Command::Save { path: path.clone() });
     r.ok("save", &x);
-    let x = r.exec(Command::Open { path });
+    let x = r.exec(Command::Open {
+        path,
+        safe_mode: false,
+    });
     r.ok("reopen", &x);
     r.check_body_solid("reopened", b, v(3.0), [0.0, 0.0, 0.0], [80.0, 20.0, 5.0]);
 }

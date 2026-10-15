@@ -224,7 +224,13 @@ fn recessed_text_cuts_and_reloads_without_the_font() {
     let moved = dir.path().join("moved.rcad.json");
     std::fs::write(&moved, raw.replace(FAMILY, "Font Not Installed Here")).unwrap();
     let mut s2 = Session::new();
-    ok(&mut s2, Command::Open { path: moved });
+    ok(
+        &mut s2,
+        Command::Open {
+            path: moved,
+            safe_mode: false,
+        },
+    );
     let v2 = volume(&s2);
     assert!((v2 - expect).abs() < 1e-6 * expect, "{v2}");
     // Placement edits still work; string edits are refused with the reason.
@@ -253,7 +259,10 @@ fn recessed_text_cuts_and_reloads_without_the_font() {
     // A file claiming v5 cannot hold sketch text.
     let v5 = dir.path().join("v5.rcad.json");
     std::fs::write(&v5, raw.replace("\"version\": 6", "\"version\": 5")).unwrap();
-    let r = Session::new().execute(&Command::Open { path: v5 });
+    let r = Session::new().execute(&Command::Open {
+        path: v5,
+        safe_mode: false,
+    });
     assert!(
         !r.ok && format!("{:?}", r.error).contains("v6 feature"),
         "{r:?}"

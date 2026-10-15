@@ -260,6 +260,7 @@ impl Run<'_> {
         self.ok("close", &x);
         let x = self.exec(Command::Open {
             path: path.to_path_buf(),
+            safe_mode: false,
         });
         self.ok("open", &x).is_some() || x.ok
     }
@@ -408,6 +409,7 @@ fn c_box_hole(r: &mut Run<'_>) {
     r.ok("close", &x);
     let x = r.exec(Command::Open {
         path: native.clone(),
+        safe_mode: false,
     });
     r.ok("open without the source file", &x);
     let after_doc = r.s.model().map(|m| m.document().clone());
@@ -924,7 +926,10 @@ fn d_stl(r: &mut Run<'_>) {
     r.check("STL sources deleted", "ok", format!("{rm:?}"), rm.is_ok());
     let x = r.exec(Command::Close);
     r.ok("close", &x);
-    let x = r.exec(Command::Open { path: native });
+    let x = r.exec(Command::Open {
+        path: native,
+        safe_mode: false,
+    });
     r.ok("open without the source files", &x);
     let after_doc = r.s.model().map(|m| m.document().clone());
     r.check(

@@ -232,14 +232,23 @@ fn offset_resize_remove_with_parameters_undo_and_reopen() {
     // A file labelled v5 holding a direct edit is refused, not misread.
     let v5 = dir.join("direct_edit_as_v5.rcad.json");
     std::fs::write(&v5, text.replace("\"version\": 6", "\"version\": 5")).unwrap();
-    let r = Session::new().execute(&Command::Open { path: v5 });
+    let r = Session::new().execute(&Command::Open {
+        path: v5,
+        safe_mode: false,
+    });
     assert!(
         !r.ok && format!("{:?}", r.error).contains("v6 feature"),
         "{:?}",
         r.error
     );
     let mut s2 = Session::new();
-    ok(&mut s2, Command::Open { path: path.clone() });
+    ok(
+        &mut s2,
+        Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        },
+    );
     assert_volume(&s2, body, lifted);
 
     // STEP export of the edited body.

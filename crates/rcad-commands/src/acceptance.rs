@@ -393,7 +393,10 @@ fn workflow(r: &mut Run<'_>) {
         format!("open={}", r.s.model().is_some()),
         r.s.model().is_none(),
     );
-    let x = r.exec(Command::Open { path: path.clone() });
+    let x = r.exec(Command::Open {
+        path: path.clone(),
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let after = r.s.model().map(|m| m.document().clone());
     r.check(

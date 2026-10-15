@@ -89,12 +89,14 @@ fn tray(finished: bool) -> SceneStep {
         } else {
             "../../examples/organizer_tray.rcad.json"
         }),
+        safe_mode: false,
     })
 }
 
 fn enclosure() -> SceneStep {
     SceneStep::Cmd(Command::Open {
         path: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/enclosure.rcad.json"),
+        safe_mode: false,
     })
 }
 
@@ -174,6 +176,7 @@ impl RcadApp {
                     Cmd(Command::Open {
                         path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                             .join(format!("../../examples/{file}.rcad.json")),
+                        safe_mode: false,
                     }),
                     Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
                 ]
@@ -230,6 +233,7 @@ impl RcadApp {
                 Cmd(Command::Open {
                     path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join("../../examples/rounded_enclosure.rcad.json"),
+                    safe_mode: false,
                 }),
                 Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
             ],

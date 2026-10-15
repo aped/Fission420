@@ -208,7 +208,10 @@ pub(super) fn scenario_r(r: &mut Run<'_>) {
     r.ok("save", &x);
     let x = r.exec(Command::Close);
     r.ok("close", &x);
-    let x = r.exec(Command::Open { path });
+    let x = r.exec(Command::Open {
+        path,
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let after = r.s.model().map(|m| m.document().clone());
     r.check(

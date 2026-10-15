@@ -312,7 +312,10 @@ pub(super) fn scenario_a(r: &mut Run<'_>) {
     r.ok("save", &x);
     let x = r.exec(Command::Close);
     r.ok("close", &x);
-    let x = r.exec(Command::Open { path });
+    let x = r.exec(Command::Open {
+        path,
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let after = r.s.model().map(|m| m.document().clone());
     r.check(
@@ -503,7 +506,10 @@ pub(super) fn scenario_b(r: &mut Run<'_>) {
     r.ok("save", &x);
     let x = r.exec(Command::Close);
     r.ok("close", &x);
-    let x = r.exec(Command::Open { path });
+    let x = r.exec(Command::Open {
+        path,
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let after_doc = r.s.model().map(|m| m.document().clone());
     r.check(
@@ -750,7 +756,10 @@ pub(super) fn scenario_pocket(r: &mut Run<'_>) {
     r.ok("save", &x);
     let x = r.exec(Command::Close);
     r.ok("close", &x);
-    let x = r.exec(Command::Open { path });
+    let x = r.exec(Command::Open {
+        path,
+        safe_mode: false,
+    });
     r.ok("open", &x);
     let after = r.s.model().map(|m| m.document().clone());
     r.check(

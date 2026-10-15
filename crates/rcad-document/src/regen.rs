@@ -59,6 +59,9 @@ pub struct FeatureResult {
     /// Import features: human-readable notes (units, counts, warnings).
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Health after this regeneration (never persisted in documents).
+    #[serde(default)]
+    pub health: crate::FeatureHealth,
 }
 
 /// A triangle-mesh body (STL import). Never treated as an exact solid.
@@ -685,6 +688,7 @@ fn regen_impl(
             profile_error: None,
             body: None,
             notes: vec![],
+            health: crate::FeatureHealth::healthy(),
         };
         if f.suppressed || doc.is_rolled_back(id) {
             // Not evaluated (no dependent is evaluated: `check_suppression`).

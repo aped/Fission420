@@ -41,6 +41,7 @@ fn commands_without_document_fail_cleanly() {
     }
     let r = s.execute(&Command::Open {
         path: "/nonexistent/x.rcad.json".into(),
+        safe_mode: false,
     });
     assert!(!r.ok);
 }

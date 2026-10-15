@@ -75,6 +75,7 @@ fn toolbar_rows_and_viewport_at_1280() {
     h.state_mut().request(Command::Open {
         path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/drawing_set.rcad.json"),
+        safe_mode: false,
     });
     settle(&mut h);
     click(&mut h, "Configuration table");

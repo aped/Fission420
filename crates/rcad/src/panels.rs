@@ -2381,7 +2381,10 @@ impl RcadApp {
         if ok {
             self.last_dialog = None;
             match build_command(&dlg) {
-                Ok(Command::Open { path }) => {
+                Ok(Command::Open {
+                    path,
+                    safe_mode: false,
+                }) => {
                     self.guarded(Guarded::Open(path));
                     return;
                 }

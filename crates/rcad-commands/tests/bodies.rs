@@ -194,7 +194,13 @@ fn imported_step_survives_moving_the_source() {
     ok(&mut s, Command::Save { path: doc.clone() });
     std::fs::remove_file(&src).unwrap();
     ok(&mut s, Command::Close);
-    ok(&mut s, Command::Open { path: doc });
+    ok(
+        &mut s,
+        Command::Open {
+            path: doc,
+            safe_mode: false,
+        },
+    );
     let b2 = s.summary().bodies[0].clone();
     assert_eq!((b2.id, b2.name), (b.id, b.name));
     assert!((body_volume(&s, b2.id) - v0).abs() < 1e-9);
@@ -399,7 +405,13 @@ fn dxf_import_notes_persist_on_the_sketch_feature() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("d.rcad.json");
     ok(&mut s, Command::Save { path: p.clone() });
-    ok(&mut s, Command::Open { path: p });
+    ok(
+        &mut s,
+        Command::Open {
+            path: p,
+            safe_mode: false,
+        },
+    );
     assert!(notes(&s).iter().any(|n| n.starts_with("units:")));
 }
 

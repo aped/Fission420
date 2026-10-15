@@ -637,7 +637,10 @@ fn rounded_labelled_enclosure_from_new() {
     let path = dir.path().join("enclosure.rcad.json");
     b.json(json!({"cmd": "save", "path": path}));
     let mut t = Session::new();
-    let r = t.execute(&Command::Open { path: path.clone() });
+    let r = t.execute(&Command::Open {
+        path: path.clone(),
+        safe_mode: false,
+    });
     assert!(r.ok, "{:?}", r.error);
     assert_eq!(
         t.model().unwrap().document(),

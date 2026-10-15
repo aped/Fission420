@@ -181,7 +181,13 @@ fn offset_from_the_cavity_floor_bound_to_a_parameter() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("\"Offset\""));
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.summary().features, s.summary().features);
     assert!(near(z_range(&t, 2), (13.0, 17.0)));
 }

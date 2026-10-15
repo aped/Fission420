@@ -385,7 +385,13 @@ fn toleranced_dimensions_follow_the_model_and_dangle_when_invalid() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(v["version"], 7);
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     let (r2, _) = export(&mut t, d, "dims_reopened.svg");
     // Same texts and values (to 1e-9 mm: a fresh regeneration may differ
     // from the undo-restored geometry in the last bits).
@@ -625,7 +631,13 @@ fn assembly_drawing_bom_balloons_and_notes() {
     let path = out_dir().join("assembly_drawing.rcad.json");
     ok(&mut s, Command::Save { path: path.clone() });
     let mut u = Session::new();
-    ok(&mut u, Command::Open { path });
+    ok(
+        &mut u,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     let (r2, _) = export(&mut u, d, "assembly_reopened.svg");
     assert_eq!(
         r.drawing_report.as_ref().unwrap().bom,
@@ -777,7 +789,10 @@ fn invalid_drawings_are_refused_on_load() {
     v["version"] = serde_json::json!(7);
     std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
     let mut t = Session::new();
-    let r = t.execute(&Command::Open { path });
+    let r = t.execute(&Command::Open {
+        path,
+        safe_mode: false,
+    });
     assert!(!r.ok, "cyclic detail views loaded");
     assert!(
         format!("{:?}", r.error).contains("drawing"),

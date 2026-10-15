@@ -46,7 +46,10 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
         assert_eq!(version(&path), v, "{rel}");
     }
     let mut s = Session::new();
-    let r = s.execute(&Command::Open { path: path.clone() });
+    let r = s.execute(&Command::Open {
+        path: path.clone(),
+        safe_mode: false,
+    });
     assert!(r.ok, "{rel}: {:?}", r.error);
     let v = total_volume(&s);
     assert!(
@@ -59,7 +62,13 @@ fn check(rel: &str, want_version: Option<u64>, expected: f64) {
     // No v5 features: written as v4 (readable by v4 readers).
     assert_eq!(version(&out), 4);
     let mut t = Session::new();
-    assert!(t.execute(&Command::Open { path: out }).ok);
+    assert!(
+        t.execute(&Command::Open {
+            path: out,
+            safe_mode: false
+        })
+        .ok
+    );
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert_eq!(total_volume(&t), v);
 }
@@ -160,7 +169,10 @@ fn check_estimate(rel: &str, want_version: Option<u64>, expected: f64) {
         assert_eq!(version(&path), v, "{rel}");
     }
     let mut s = Session::new();
-    let r = s.execute(&Command::Open { path });
+    let r = s.execute(&Command::Open {
+        path,
+        safe_mode: false,
+    });
     assert!(r.ok, "{rel}: {:?}", r.error);
     let bodies = s.summary().bodies;
     assert_eq!(bodies.len(), 1, "{rel}");
@@ -209,7 +221,13 @@ fn v4_printable_documents() {
 fn v4_parameters_drive_a_loaded_document() {
     let path = repo().join("crates/rcad-commands/tests/fixtures/native_v4/enclosure.rcad.json");
     let mut s = Session::new();
-    assert!(s.execute(&Command::Open { path }).ok);
+    assert!(
+        s.execute(&Command::Open {
+            path,
+            safe_mode: false
+        })
+        .ok
+    );
     for c in ENCLOSURE_VARIANT.set_parameters() {
         let r = s.execute(&c);
         assert!(r.ok, "{c:?}: {:?}", r.error);
@@ -246,7 +264,10 @@ fn v5_documents() {
         let path = d.join(format!("{name}.rcad.json"));
         assert_eq!(version(&path), 5, "{name}");
         let mut s = Session::new();
-        let r = s.execute(&Command::Open { path: path.clone() });
+        let r = s.execute(&Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        });
         assert!(r.ok, "{name}: {:?}", r.error);
         let v = total_volume(&s);
         assert!((v - want).abs() <= 1e-6, "{name}: {v} vs {want}");
@@ -255,7 +276,13 @@ fn v5_documents() {
         assert!(s.execute(&Command::Save { path: out.clone() }).ok);
         assert_eq!(version(&out), 5, "{name}");
         let mut t = Session::new();
-        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert!(
+            t.execute(&Command::Open {
+                path: out,
+                safe_mode: false
+            })
+            .ok
+        );
         assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     }
 }
@@ -273,21 +300,31 @@ fn v6_documents() {
         let path = d.join(format!("{name}.rcad.json"));
         assert_eq!(version(&path), 6, "{name}");
         let mut s = Session::new();
-        let r = s.execute(&Command::Open { path: path.clone() });
+        let r = s.execute(&Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        });
         assert!(r.ok, "{name}: {:?}", r.error);
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("resaved.rcad.json");
         assert!(s.execute(&Command::Save { path: out.clone() }).ok);
         assert_eq!(version(&out), 6, "{name}");
         let mut t = Session::new();
-        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert!(
+            t.execute(&Command::Open {
+                path: out,
+                safe_mode: false
+            })
+            .ok
+        );
         assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     }
     // Assembly content survives: 5 occurrences, joint value 30°, 3 components.
     let mut s = Session::new();
     assert!(
         s.execute(&Command::Open {
-            path: d.join("assembly.rcad.json")
+            path: d.join("assembly.rcad.json"),
+            safe_mode: false,
         })
         .ok
     );
@@ -317,14 +354,23 @@ fn v7_documents() {
         let path = d.join(format!("{name}.rcad.json"));
         assert_eq!(version(&path), 7, "{name}");
         let mut s = Session::new();
-        let r = s.execute(&Command::Open { path: path.clone() });
+        let r = s.execute(&Command::Open {
+            path: path.clone(),
+            safe_mode: false,
+        });
         assert!(r.ok, "{name}: {:?}", r.error);
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("resaved.rcad.json");
         assert!(s.execute(&Command::Save { path: out.clone() }).ok);
         assert_eq!(version(&out), 7, "{name}");
         let mut t = Session::new();
-        assert!(t.execute(&Command::Open { path: out }).ok);
+        assert!(
+            t.execute(&Command::Open {
+                path: out,
+                safe_mode: false
+            })
+            .ok
+        );
         assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     }
 }

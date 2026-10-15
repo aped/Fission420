@@ -111,6 +111,7 @@ fn autosave_crash_recover_and_save() {
         let mut h = harness();
         h.state_mut().request(Command::Open {
             path: saved.clone(),
+            safe_mode: false,
         });
         settle(&mut h);
         h.state_mut().request(Command::SetParameter {

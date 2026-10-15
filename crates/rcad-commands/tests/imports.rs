@@ -498,6 +498,7 @@ fn open_example(file: &str) -> Session {
         &mut e,
         Command::Open {
             path: repo().join("examples").join(file),
+            safe_mode: false,
         },
     );
     e

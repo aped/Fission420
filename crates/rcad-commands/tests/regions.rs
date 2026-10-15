@@ -266,7 +266,13 @@ fn region_survives_save_and_reopen_and_json_is_additive() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("\"region\""), "region stored");
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.summary().features[1].region.as_ref(), Some(&rs[0]));
     assert!((volume(&t, 0) - 16000.0).abs() < TOL);
     // Command JSON: absent region = previous shape; present = {"outer":[..],"holes":[[..]]}.

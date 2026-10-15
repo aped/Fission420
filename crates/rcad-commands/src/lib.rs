@@ -26,6 +26,7 @@ pub mod print;
 pub mod printables;
 pub mod scenarios;
 pub mod sheet_surface;
+pub mod sketch_ops;
 pub mod sketches;
 
 use rcad_document::{
@@ -1062,8 +1063,32 @@ pub enum Command {
     Save {
         path: PathBuf,
     },
+    /// Open a native document. A document whose history no longer fully
+    /// regenerates still opens: failed features (and their dependents) are
+    /// flagged in the summary's health and unrelated bodies are evaluated.
+    /// `safe_mode` opens it rolled back to just before the first failure.
     Open {
         path: PathBuf,
+        #[serde(default)]
+        safe_mode: bool,
+    },
+    /// Replace the definition of feature `feature` (Edit Feature): same id
+    /// and history position, one undoable step. `kind` must be the same
+    /// feature type; a body id 0 in a New Body operation means "the body the
+    /// feature created before, or a new one". References are re-validated;
+    /// the edit is refused when the feature itself fails, while dependents
+    /// that break are committed flagged in health (as in Fusion).
+    RedefineFeature {
+        feature: FeatureId,
+        kind: FeatureKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// One granular sketch edit (trim, extend, break, ...); see
+    /// [`sketch_ops::SketchOp`].
+    SketchOp {
+        feature: FeatureId,
+        op: sketch_ops::SketchOp,
     },
     /// Write the document to `path` (atomic) without changing the session's
     /// path or dirty state: autosave / recovery copies. Deferred measurements
@@ -1377,6 +1402,8 @@ impl Command {
             Command::Redo => "redo",
             Command::Save { .. } => "save",
             Command::Open { .. } => "open",
+            Command::RedefineFeature { .. } => "redefine_feature",
+            Command::SketchOp { .. } => "sketch_op",
             Command::Close => "close",
             Command::SaveCopy { .. } => "save_copy",
             Command::OpenCopy { .. } => "open_copy",
@@ -1544,6 +1571,9 @@ pub struct FeatureSummary {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projections: Vec<rcad_document::ProjectSource>,
+    /// Health after the last regeneration (Healthy/Warning/Error/...).
+    #[serde(default)]
+    pub health: rcad_document::FeatureHealth,
     /// Sheet bases: the rule's relief shape (the numeric
     /// rule values are in `parameters`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4163,7 +4193,27 @@ impl Session {
                 msg += &load_notes(&report);
                 r.message = Some(msg);
             }
-            Command::Open { path } => {
+            Command::RedefineFeature {
+                feature,
+                kind,
+                name,
+            } => {
+                let _ = (feature, kind, name);
+                return Err(DocError::ProductLimit(
+                    "redefining a feature is not implemented yet".into(),
+                ));
+            }
+            Command::SketchOp { feature, op } => {
+                let m = self.model_mut()?;
+                let out = sketch_ops::apply(m, *feature, op)?;
+                r.feature = Some(*feature);
+                r.message = Some(format!(
+                    "sketch op: created {:?}, removed {:?}",
+                    out.created, out.removed
+                ));
+            }
+            Command::Open { path, safe_mode } => {
+                let _ = safe_mode;
                 let nf = load_file(path)?;
                 let (model, report) = Model::from_document_reporting(nf.document)?;
                 let mut msg = format!("opened {}", path.display());
@@ -4521,6 +4571,7 @@ fn summarize(doc: &Document, m: &Model) -> Vec<FeatureSummary> {
                 expressions: f.expressions.clone(),
                 suppressed: f.suppressed,
                 rolled_back: doc.is_rolled_back(f.id),
+                health: res.map(|r| r.health.clone()).unwrap_or_default(),
                 projections: match &f.kind {
                     FeatureKind::Sketch { links, .. } => links.iter().map(|l| l.source).collect(),
                     _ => vec![],

@@ -788,7 +788,10 @@ impl RcadApp {
             Cmd(Command::Redo),
             Cmd(Command::Save { path: doc.clone() }),
             Cmd(Command::Close),
-            Cmd(Command::Open { path: doc }),
+            Cmd(Command::Open {
+                path: doc,
+                safe_mode: false,
+            }),
             Cmd(Command::ExportStl {
                 path: stl,
                 chord: Some(0.01),
@@ -1671,7 +1674,10 @@ impl RcadApp {
                     self.request(c);
                 }
             }
-            Guarded::Open(path) => self.request(Command::Open { path }),
+            Guarded::Open(path) => self.request(Command::Open {
+                path,
+                safe_mode: false,
+            }),
             Guarded::OpenCopy(path) => {
                 self.autosave.opening = Some(path.clone());
                 self.request(Command::OpenCopy { path })
@@ -2648,6 +2654,7 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         },
         Dialog::Open { path } => Command::Open {
             path: nonempty_path(path)?,
+            safe_mode: false,
         },
         Dialog::ExportStl(f) | Dialog::Export3mf(f) => f.command()?,
         Dialog::ExportStep { path, scope } => Command::ExportStep {

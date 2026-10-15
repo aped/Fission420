@@ -387,7 +387,13 @@ fn parameters_drive_a_cut_in_an_imported_step_body_and_survive_reopen() {
     let src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/imported_step_hole.rcad.json");
     let mut s = Session::new();
-    ok(&mut s, Command::Open { path: src });
+    ok(
+        &mut s,
+        Command::Open {
+            path: src,
+            safe_mode: false,
+        },
+    );
     let hole = s.summary().features[1].id;
     ok(
         &mut s,
@@ -424,7 +430,13 @@ fn parameters_drive_a_cut_in_an_imported_step_body_and_survive_reopen() {
     let out = dir.path().join("imported_param.rcad.json");
     ok(&mut s, Command::Save { path: out.clone() });
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path: out });
+    ok(
+        &mut t,
+        Command::Open {
+            path: out,
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.model().unwrap().document(), s.model().unwrap().document());
     assert!((vol(&t, BodyId(1)) - want).abs() < 1e-3);
     ok(

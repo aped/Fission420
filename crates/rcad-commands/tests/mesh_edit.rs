@@ -193,7 +193,13 @@ fn inspect_transform_cut_decimate_undo_reopen() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(v["version"], 8);
     let mut t = Session::new();
-    ok(&mut t, Command::Open { path });
+    ok(
+        &mut t,
+        Command::Open {
+            path,
+            safe_mode: false,
+        },
+    );
     assert_eq!(t.summary().bodies.len(), 5);
     assert!((volume(&mut t, 2) - want).abs() < 1e-6 * want);
     assert!((volume(&mut t, 3) - 24000.0).abs() < 1e-6);

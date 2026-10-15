@@ -530,7 +530,13 @@ fn block_with_hole_views_dimensions_and_both_formats() {
     let raw = std::fs::read_to_string(&file).unwrap();
     assert!(raw.contains("\"version\": 6") && raw.contains("\"drawings\""));
     let mut s2 = Session::new();
-    ok(&mut s2, Command::Open { path: file });
+    ok(
+        &mut s2,
+        Command::Open {
+            path: file,
+            safe_mode: false,
+        },
+    );
     assert_eq!(export(&mut s2, d, "block_reopened.svg").1, svg);
     assert_eq!(export(&mut s2, d, "block_reopened.pdf").1, pdf);
 }
