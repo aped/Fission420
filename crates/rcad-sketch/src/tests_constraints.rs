@@ -2,6 +2,7 @@
 //! the construction (reflection about a line through (5, 0) at 30°, shared
 //! centres, a common line), DOF counts from equations per constraint.
 use super::*;
+use std::f64::consts::FRAC_PI_2;
 
 const SOLVED: f64 = 1e-8;
 
@@ -111,7 +112,12 @@ fn symmetric_points_reflect_about_an_oblique_line() {
     let b = s.add_point(0.0, 0.0);
     s.fix_points(&[l0, l1, a]);
     assert_eq!(dof(&s), 2);
-    s.constraints.push(Constraint::Symmetric { a, b, line });
+    s.constraints.push(Constraint::Symmetric {
+        a,
+        b,
+        line,
+        perpendicular_only: false,
+    });
     let r = s.solve();
     assert_eq!((r.status, r.dof), (SolveStatus::FullyConstrained, 0));
     // Reflection of (10, 6) about the line: c + R(2t)(a − c).
@@ -217,5 +223,87 @@ fn symmetric_entities_refuse_arcs_mixed_kinds_and_the_mirror_itself() {
         end: e0,
     });
     let err = s.symmetric_entities(arc, k, line).unwrap_err();
-    assert!(err.to_string().contains("arcs"), "{err}");
+    assert!(err.to_string().contains("arc mirrors only"), "{err}");
+}
+
+/// Vertical mirror line x = 0, fixed.
+fn y_axis_mirror() -> (Sketch, EntityId) {
+    let mut s = Sketch::default();
+    let m0 = s.add_point(0.0, -20.0);
+    let m1 = s.add_point(0.0, 20.0);
+    let line = s.add_line(m0, m1);
+    s.fix_points(&[m0, m1]);
+    (s, line)
+}
+
+fn arc(s: &mut Sketch, c: [f64; 2], a: [f64; 2], b: [f64; 2]) -> (EntityId, [PointId; 3]) {
+    let p = [
+        s.add_point(c[0], c[1]),
+        s.add_point(a[0], a[1]),
+        s.add_point(b[0], b[1]),
+    ];
+    let id = s.next_entity_id();
+    s.entities.push(Entity::Arc {
+        id,
+        center: p[0],
+        start: p[1],
+        end: p[2],
+    });
+    (id, p)
+}
+
+/// Arc a: centre (10, 0) from (15, 0) CCW to (10, 5), fixed. Its image
+/// about x = 0 runs CCW from (−10, 5) to (−15, 0) about (−10, 0): b's start
+/// is the image of a's end and b's end of a's start. Exactly determined.
+#[test]
+fn symmetric_arcs_mirror_with_swapped_ends_and_stay_square() {
+    let (mut s, line) = y_axis_mirror();
+    let (a, pa) = arc(&mut s, [10.0, 0.0], [15.0, 0.0], [10.0, 5.0]);
+    // Centre and start fixed; the end by its x (its own row gives the rest).
+    s.fix_points(&pa[..2]);
+    s.constraints.push(Constraint::FixedX { p: pa[2], x: 10.0 });
+    let (b, pb) = arc(&mut s, [-9.0, 1.0], [-10.5, 4.0], [-14.5, 0.5]);
+    assert_eq!(s.clone().solve().dof, 5, "a free arc has 5 DOF");
+    let cs = s.symmetric_entities(a, b, line).unwrap();
+    s.constraints.extend(cs);
+    let r = s.solve();
+    assert_eq!(
+        (r.status, r.dof),
+        (SolveStatus::FullyConstrained, 0),
+        "{r:?}"
+    );
+    at(&s, pb[0], [-10.0, 0.0]);
+    at(&s, pb[1], [-10.0, 5.0]);
+    at(&s, pb[2], [-15.0, 0.0]);
+    let g = s.arc_geometry(b).unwrap();
+    assert!((g.radius - 5.0).abs() <= SOLVED && (g.sweep - FRAC_PI_2).abs() < 1e-9);
+}
+
+/// Two arcs meeting on the mirror line at both ends (a lens): one row
+/// (equal radii) puts b's centre at the image of a's.
+#[test]
+fn symmetric_arcs_sharing_their_ends_mirror_only_the_centres() {
+    let (mut s, line) = y_axis_mirror();
+    let (a, pa) = arc(&mut s, [3.0, 0.0], [0.0, -4.0], [0.0, 4.0]);
+    // Ends fixed on the mirror line; the centre by its x.
+    s.fix_points(&pa[1..]);
+    s.constraints.push(Constraint::FixedX { p: pa[0], x: 3.0 });
+    let cb = s.add_point(-2.0, 0.5);
+    let b = s.next_entity_id();
+    s.entities.push(Entity::Arc {
+        id: b,
+        center: cb,
+        start: pa[2],
+        end: pa[1],
+    });
+    let cs = s.symmetric_entities(a, b, line).unwrap();
+    assert_eq!(cs.len(), 1);
+    s.constraints.extend(cs);
+    let r = s.solve();
+    assert_eq!(
+        (r.status, r.dof),
+        (SolveStatus::FullyConstrained, 0),
+        "{r:?}"
+    );
+    at(&s, cb, [-3.0, 0.0]);
 }

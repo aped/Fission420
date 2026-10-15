@@ -2767,7 +2767,12 @@ impl SketchEditor {
             return;
         };
         self.try_change(true, |sk| {
-            sk.constraints.push(Constraint::Symmetric { a, b, line });
+            sk.constraints.push(Constraint::Symmetric {
+                a,
+                b,
+                line,
+                perpendicular_only: false,
+            });
             sk.validate().map_err(|e| e.to_string())
         });
     }

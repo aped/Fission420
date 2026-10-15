@@ -319,11 +319,15 @@ pub enum Constraint {
     Collinear { a: EntityId, b: EntityId },
     /// Points `a` and `b` are mirror images about the infinite line through
     /// `line`: their midpoint lies on it and `b − a` is perpendicular to it.
-    /// 2 equations (serde-additive).
+    /// 2 equations (serde-additive). With `perpendicular_only` only the
+    /// second equation (1 row): used for the last end point of a mirrored
+    /// arc, whose other condition already follows from its circle.
     Symmetric {
         a: PointId,
         b: PointId,
         line: EntityId,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        perpendicular_only: bool,
     },
     /// Circular sketch pattern copy: `to = c + R(k θ) (from − c)`, θ =
     /// `dim.value` degrees counter-clockwise (0 < θ < 360). 2 equations, or 1
@@ -1088,7 +1092,7 @@ impl Sketch {
                         )));
                     }
                 }
-                Constraint::Symmetric { a, b, line } => {
+                Constraint::Symmetric { a, b, line, .. } => {
                     need_point(a)?;
                     need_point(b)?;
                     need_entity(i, line, "line")?;

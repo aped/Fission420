@@ -59,7 +59,10 @@ lines joined end to end use Parallel; `Col`), **Symmetric** (two points and a li
 mirror each other about the line's infinite extension, 2 equations, `Sym`; or two lines, or two
 circles, then the mirror line, in that selection order: lines get their ends mirrored pairwise
 as drawn, an end they share is held on the mirror line; circles get mirrored centres and equal
-radii; arcs are refused by name; two points that are
+radii; two arcs get mirrored centres, b's start on the image of a's end and b's end on the
+image of a's start (reflection reverses orientation), using only the rows that keep the system
+square: the last end gets only its perpendicular row, a shared end gets none, two arcs sharing
+both ends (a lens) get equal radii only; mixed kinds are refused by name; two points that are
 close to each other and near the line can solve onto the line itself, which the zero-size guard
 refuses), and **Driven / Driving** (selected dimension, see Driven dimensions). **Construction** (X) toggles selected curves to reference
 geometry: drawn dashed, still solved and dimensionable, ignored by profiles. Features are deleted from the browser context menu, the inspector or
