@@ -237,3 +237,39 @@ impl RcadApp {
         }
     }
 }
+
+/// Kind of the imported face shown as display group `group` (None: not a
+/// face of an imported body changed only by direct edits).
+pub(crate) fn imported_face_kind(app: &RcadApp, group: u32) -> Option<DirectFace> {
+    imported_face(app, group).map(|f| f.kind)
+}
+
+/// The default direct edit of the face shown as `group`: Offset for a
+/// plane, Resize for a cylindrical hole or boss.
+pub(crate) fn default_direct_dialog(app: &RcadApp, group: u32) -> Option<Dialog> {
+    let f = imported_face(app, group)?;
+    let (kind, value, description) = match f.kind {
+        DirectFace::Plane { .. } => (
+            DirectKind::Offset,
+            "1".to_string(),
+            format!("Planar {}", crate::face_role_label(&f.face.role)),
+        ),
+        DirectFace::Cylinder { radius, hole, .. } => {
+            let d = crate::params_ui::fmt_value(2.0 * radius);
+            let what = if hole { "hole" } else { "boss" };
+            (
+                DirectKind::Resize,
+                d.clone(),
+                format!("{what} Ø{d} mm ({})", crate::face_role_label(&f.face.role)),
+            )
+        }
+        DirectFace::Other => return None,
+    };
+    Some(Dialog::DirectEdit(DirectForm {
+        face: f.face,
+        kind,
+        value,
+        description,
+        angle: String::new(),
+    }))
+}

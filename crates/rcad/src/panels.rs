@@ -7,7 +7,7 @@
 
 use crate::file_pick::{self, PickMode};
 use eframe::egui::{self, Color32, RichText};
-use rcad_commands::{Command, ExtrudeOp, FeatureSummary};
+use rcad_commands::{Command, FeatureSummary};
 use rcad_document::{BodyId, FeatureId, SketchPlane};
 use rcad_kernel::VolumeResult;
 use rcad_sketch::SolveStatus;
@@ -51,286 +51,116 @@ impl RcadApp {
     // ----- command bars -----
 
     pub(crate) fn toolbar(&mut self, ui: &mut egui::Ui, busy: bool) {
-        let open = self.summary.open;
+        use crate::shell::CmdId as C;
         ui.horizontal_wrapped(|ui| {
             ui.strong("R-CAD");
             ui.separator();
-            if ui
-                .button("New")
-                .probe("New")
-                .on_hover_text("New document (Ctrl+N)")
-                .clicked()
-            {
-                self.guarded(Guarded::New);
-            }
-            if ui
-                .button("Open…")
-                .probe("Open…")
-                .on_hover_text("Open (Ctrl+O)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Open {
-                    path: self.default_path("rcad.json"),
-                });
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Save"))
-                .probe("Save")
-                .on_hover_text("Save (Ctrl+S)")
-                .clicked()
-            {
-                self.save();
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Save As…"))
-                .probe("Save As…")
-                .on_hover_text("Save as (Ctrl+Shift+S)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::SaveAs {
-                    path: self.default_path("rcad.json"),
-                });
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Import…"))
-                .probe("Import…")
-                .on_hover_text("Import STEP / STL / DXF into this document (one undoable step)")
-                .on_disabled_hover_text("Open or create a document first")
-                .clicked()
-            {
-                self.open_import_dialog();
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Close"))
-                .probe("Close")
-                .clicked()
-            {
-                self.guarded(Guarded::Close);
+            for id in [C::New, C::Open, C::Save, C::SaveAs, C::Import, C::Close] {
+                self.cmd_button(ui, id);
             }
             let export = ui.menu_button("Export", |ui| {
-                if ui
-                    .add_enabled(open, egui::Button::new("Export STL…"))
-                    .probe("Export STL…")
-                    .clicked()
-                {
-                    self.open_print_export_dialog(true);
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(open, egui::Button::new("Export STEP…"))
-                    .probe("Export STEP…")
-                    .clicked()
-                {
-                    self.dialog = Some(Dialog::ExportStep {
-                        path: self.default_path("step"),
-                        scope: self.default_export_scope(),
-                    });
-                    ui.close();
-                }
-                let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
-                if ui
-                    .add_enabled(
-                        open && has_sketch,
-                        egui::Button::new("Export DXF (sketch)…"),
-                    )
-                    .probe("Export DXF (sketch)…")
-                    .on_disabled_hover_text("Needs a sketch")
-                    .clicked()
-                {
-                    let sketch = self
-                        .selected
-                        .filter(|id| {
-                            self.summary
-                                .features
-                                .iter()
-                                .any(|f| f.id == *id && f.kind == "sketch")
-                        })
-                        .or_else(|| self.unused_sketch());
-                    self.dialog = Some(Dialog::ExportDxf {
-                        path: self.default_path("dxf"),
-                        sketch,
-                        svg: false,
-                    });
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        open && has_sketch,
-                        egui::Button::new("Export SVG (sketch)…"),
-                    )
-                    .probe("Export SVG (sketch)…")
-                    .on_disabled_hover_text("Needs a sketch")
-                    .clicked()
-                {
-                    let sketch = self
-                        .selected
-                        .filter(|id| {
-                            self.summary
-                                .features
-                                .iter()
-                                .any(|f| f.id == *id && f.kind == "sketch")
-                        })
-                        .or_else(|| self.unused_sketch());
-                    self.dialog = Some(Dialog::ExportDxf {
-                        path: self.default_path("svg"),
-                        sketch,
-                        svg: true,
-                    });
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(open, egui::Button::new("Export 3MF…"))
-                    .probe("Export 3MF…")
-                    .clicked()
-                {
-                    self.open_print_export_dialog(false);
-                    ui.close();
+                for id in [C::ExportStl, C::ExportStep, C::ExportDxf, C::ExportSvg, C::Export3mf] {
+                    if self.cmd_button(ui, id) {
+                        ui.close();
+                    }
                 }
             });
             crate::probe::note("Export", export.response.rect);
             ui.separator();
-            // Fixed labels so the bar never shifts; the action is in the tooltip.
-            let undo_tip = match &self.summary.can_undo {
-                Some(l) => format!("Undo: {l} (Ctrl+Z)"),
-                None => "Nothing to undo".into(),
-            };
-            if ui
-                .add_enabled(self.summary.can_undo.is_some(), egui::Button::new("Undo"))
-                .probe("Undo")
-                .on_hover_text(&undo_tip)
-                .on_disabled_hover_text(&undo_tip)
-                .clicked()
-            {
-                self.request(Command::Undo);
-            }
-            let redo_tip = match &self.summary.can_redo {
-                Some(l) => format!("Redo: {l} (Ctrl+Shift+Z)"),
-                None => "Nothing to redo".into(),
-            };
-            if ui
-                .add_enabled(self.summary.can_redo.is_some(), egui::Button::new("Redo"))
-                .probe("Redo")
-                .on_hover_text(&redo_tip)
-                .on_disabled_hover_text(&redo_tip)
-                .clicked()
-            {
-                self.request(Command::Redo);
-            }
+            self.cmd_button(ui, C::Undo);
+            self.cmd_button(ui, C::Redo);
             ui.separator();
-            self.modeling_buttons(ui, busy);
+            self.modeling_buttons(ui);
             ui.separator();
-            ui.menu_button("View", |ui| {
-                if ui.button("Fit (F)").probe("Fit (F)").clicked() {
-                    self.fit_view();
-                    ui.close();
-                }
-                let label = if self.section.is_some() {
-                    "Section view off"
-                } else {
-                    "Section view…"
-                };
-                if ui
-                    .button(label)
-                    .probe("Section view…")
-                    .on_hover_text("Display-only clipping plane (not capped); the model and exports are unchanged")
-                    .clicked()
-                {
-                    self.toggle_section();
-                    ui.close();
-                }
-                for (key, preset) in crate::view3d::VIEW_KEYS {
-                    if ui
-                        .button(format!("{} ({})", preset.label(), key.name()))
-                        .clicked()
-                    {
-                        self.set_view(*preset);
-                        ui.close();
-                    }
-                }
-            })
-            .response
-            .probe("View");
-            if ui
-                .button("Fit view")
-                .probe("Fit view")
-                .on_hover_text("F")
-                .clicked()
-            {
-                self.fit_view();
-            }
-            if ui
-                .button("Help")
-                .probe("Help")
-                .on_hover_text("F1")
-                .clicked()
-            {
-                self.show_help = !self.show_help;
-            }
+            self.view_menu(ui);
+            self.cmd_button(ui, C::Fit);
+            self.cmd_button(ui, C::Help);
             if busy {
-                ui.separator();
-                ui.spinner();
-                ui.label("Regenerating…");
-                // Stops the running regeneration at the next feature; the
-                // edit is then not committed (the model keeps its last state).
-                if ui
-                    .small_button("Cancel")
-                    .named("Cancel regeneration")
-                    .on_hover_text(
-                        "Stop this regeneration at the next feature: the edit is not applied \
-                         and the model stays as it was (a kernel operation already running \
-                         finishes first)",
-                    )
-                    .clicked()
-                {
-                    self.engine.cancel_running();
-                }
+                self.regenerating_chip(ui);
             }
         });
     }
 
-    fn modeling_buttons(&mut self, ui: &mut egui::Ui, _busy: bool) {
-        let open = self.summary.open;
-        // Create Sketch: on the selected supported face, otherwise world XY.
-        let face = self.selected_face().cloned();
-        let (plane, blocker): (Option<SketchPlane>, Option<String>) = if !open {
-            (None, Some("Open or create a document first".into()))
-        } else {
-            match &face {
-                Some(f) => match (f.reference, f.sketch_blocker()) {
-                    (Some(r), _) => (Some(SketchPlane::Face(r)), None),
-                    (None, Some(why)) => (None, Some(format!("Selected face: {why}"))),
-                    (None, None) => (None, None),
-                },
-                None => (Some(SketchPlane::WorldXY), None),
+    /// The View menu: fit, section view, standard views.
+    pub(crate) fn view_menu(&mut self, ui: &mut egui::Ui) {
+        use crate::shell::{CmdId as C, registry};
+        ui.menu_button("View", |ui| {
+            let fit = registry::def(C::Fit);
+            if ui
+                .button(format!("Fit ({})", fit.key_text(self.shell.keymap)))
+                .probe("Fit (F)")
+                .clicked()
+            {
+                self.fit_view();
+                ui.close();
             }
-        };
-        let hover = match &plane {
-            Some(SketchPlane::Face(_)) => "Sketch on the selected face",
-            _ => "Sketch on the world XY plane (select a cap face first to sketch on it)",
-        };
-        let r = ui
-            .add_enabled(blocker.is_none(), egui::Button::new("Create Sketch"))
-            .probe("Create Sketch");
-        let r = match &blocker {
-            Some(b) => r.on_disabled_hover_text(b),
-            None => r.on_hover_text(hover),
-        };
-        if r.clicked()
-            && let Some(plane) = plane
+            let label = if self.section.is_some() {
+                "Section view off"
+            } else {
+                "Section view…"
+            };
+            if ui
+                .button(label)
+                .probe("Section view…")
+                .on_hover_text(registry::def(C::Section).tooltip)
+                .clicked()
+            {
+                self.toggle_section();
+                ui.close();
+            }
+            for id in [
+                C::ViewTop,
+                C::ViewFront,
+                C::ViewRight,
+                C::ViewLeft,
+                C::ViewBack,
+                C::ViewIso,
+            ] {
+                let d = registry::def(id);
+                if ui
+                    .button(format!("{} ({})", d.label, d.key_text(self.shell.keymap)))
+                    .clicked()
+                {
+                    (d.run)(self);
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .probe("View");
+    }
+
+    /// Spinner + Cancel while a regeneration runs.
+    pub(crate) fn regenerating_chip(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.spinner();
+        ui.label("Regenerating…");
+        // Stops the running regeneration at the next feature; the
+        // edit is then not committed (the model keeps its last state).
+        if ui
+            .small_button("Cancel")
+            .named("Cancel regeneration")
+            .on_hover_text(
+                "Stop this regeneration at the next feature: the edit is not applied \
+                 and the model stays as it was (a kernel operation already running \
+                 finishes first)",
+            )
+            .clicked()
         {
-            self.begin_sketch(SketchTarget::New { plane });
+            self.engine.cancel_running();
         }
+    }
+
+    fn modeling_buttons(&mut self, ui: &mut egui::Ui) {
+        use crate::shell::CmdId as C;
+        let open = self.summary.open;
+        self.cmd_button(ui, C::CreateSketch);
         // The world origin planes, whatever is selected (Fusion's Create
         // Sketch offers the origin planes too).
         let planes = ui.add_enabled_ui(open, |ui| {
             ui.menu_button("Planes", |ui| {
-                for (label, plane) in [
-                    ("Sketch on XY", SketchPlane::WorldXY),
-                    ("Sketch on XZ", SketchPlane::WorldXZ),
-                    ("Sketch on YZ", SketchPlane::WorldYZ),
-                ] {
-                    if ui.button(label).probe(label).clicked() {
-                        self.begin_sketch(SketchTarget::New { plane });
+                for id in [C::SketchXY, C::SketchXZ, C::SketchYZ] {
+                    if self.cmd_button(ui, id) {
                         ui.close();
                     }
                 }
@@ -341,235 +171,62 @@ impl RcadApp {
             .response
             .named("Sketch plane menu")
             .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)");
-        if action(
-            ui,
-            "Sketch on offset plane…",
-            (!open).then_some("Open or create a document first"),
-        ) {
-            self.open_offset_plane_dialog();
-        }
-        let sketch_sel = self
-            .selected
-            .and_then(|id| self.summary.features.iter().find(|f| f.id == id))
-            .filter(|f| f.kind == "sketch")
-            .cloned();
-        let has_sketch = self.summary.features.iter().any(|f| f.kind == "sketch");
-        let extrude_block = if !has_sketch {
-            Some("Create a sketch with a closed profile first".to_string())
-        } else {
-            sketch_sel.as_ref().and_then(|s| self.extrude_blocker(s))
-        };
-        if action(ui, "Extrude…", extrude_block.as_deref()) {
-            let sketch = sketch_sel
-                .as_ref()
-                .map(|s| s.id)
-                .or_else(|| self.unused_sketch());
-            self.dialog = Some(Dialog::Extrude(crate::extrude::ExtrudeForm::new(
-                self, sketch,
-            )));
-        }
-        // Circles keep the hole-style Cut dialog (through all or blind
-        // pocket); any other closed profile opens Extrude preset to Cut,
-        // Through All (the general cut).
-        let circle_block = sketch_sel.as_ref().and_then(|s| self.cut_blocker(s));
-        let general = circle_block.is_some()
-            && extrude_block.is_none()
-            && sketch_sel
-                .as_ref()
-                .is_some_and(|s| s.profile_error.is_none() && self.consumer_of(s.id).is_none());
-        let cut_block = if !has_sketch {
-            Some("Create a closed sketch profile first".to_string())
-        } else if !self.has_body() {
-            Some("Create a body first (Extrude)".to_string())
-        } else if general {
-            None
-        } else {
-            circle_block
-        };
-        if action(ui, "Cut through all…", cut_block.as_deref()) {
-            let sketch = sketch_sel
-                .as_ref()
-                .map(|s| s.id)
-                .or_else(|| self.unused_sketch());
-            if general {
-                let mut form = crate::extrude::ExtrudeForm::new(self, sketch);
-                form.op = ExtrudeOp::Cut;
-                form.through_all = true;
-                self.dialog = Some(Dialog::Extrude(form));
-            } else {
-                self.dialog = Some(Dialog::Cut {
-                    sketch,
-                    blind: false,
-                    depth: "5".into(),
-                });
-            }
-        }
-        let revolve_block = if !has_sketch {
-            Some("Create a sketch on XZ first (Templates > Rectangle on XZ…)".to_string())
-        } else {
-            sketch_sel
-                .as_ref()
-                .and_then(|s| s.profile_error.as_ref())
-                .map(|e| format!("Profile is not usable: {e}"))
-        };
-        if action(ui, "Revolve…", revolve_block.as_deref()) {
-            self.dialog = Some(Dialog::Revolve {
-                sketch: self.unused_sketch(),
-                angle: "360".into(),
-                axis: Default::default(),
-                reverse: false,
-            });
-        }
-        if ui
-            .add_enabled(self.summary.open, egui::Button::new("Thread…"))
-            .probe("Thread…")
-            .on_hover_text("Modeled thread (faceted solid, stated 60° V test profile): a rod or a square nut on World XY")
-            .clicked()
-        {
-            self.dialog = Some(Dialog::Thread {
-                diameter: "20".into(),
-                pitch: "2".into(),
-                length: "12".into(),
-                nut: false,
-                nut_width: "30".into(),
-                left_hand: false,
-            });
+        for id in [
+            C::OffsetPlane,
+            C::Extrude,
+            C::CutThroughAll,
+            C::Revolve,
+            C::Thread,
+        ] {
+            self.cmd_button(ui, id);
         }
         // Exact loft / sweep (new bodies from two sketches).
         ui.menu_button("Loft / Sweep", |ui| {
-            if ui
-                .add_enabled(has_sketch, egui::Button::new("Loft…"))
-                .probe("Loft…")
-                .on_hover_text("New body between two closed profiles on parallel planes (exact; same-count polygons with parallel edges, or coaxial circles)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::LoftSweep {
-                    a: None,
-                    b: None,
-                    sweep: false,
-                    via: None,
-                });
-                ui.close();
-            }
-            if ui
-                .add_enabled(has_sketch, egui::Button::new("Sweep…"))
-                .probe("Sweep…")
-                .on_hover_text("New body: a closed profile swept along a line/arc path sketch starting at the profile sketch's origin (exact)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::LoftSweep {
-                    a: None,
-                    b: None,
-                    sweep: true,
-                    via: None,
-                });
-                ui.close();
+            for id in [C::Loft, C::Sweep] {
+                if self.cmd_button(ui, id) {
+                    ui.close();
+                }
             }
         })
         .response
         .probe("Loft / Sweep");
-        let has_extrude = self.summary.features.iter().any(|f| f.kind == "extrude");
-        let templates = ui.menu_button("Templates", |ui| {
-            ui.weak("Printable parts (new document with editable parameters)");
-            for t in [
-                crate::app::PrintTemplate::Enclosure,
-                crate::app::PrintTemplate::Coupon,
-                crate::app::PrintTemplate::Bracket,
-                crate::app::PrintTemplate::Tray,
-            ] {
-                if ui
-                    .button(t.label())
-                    .probe(t.label())
-                    .on_hover_text(
-                        "Starts a new document; change its sizes in the Parameters panel",
-                    )
-                    .clicked()
-                {
-                    self.guarded(Guarded::NewTemplate(t));
-                    ui.close();
-                }
-            }
-            ui.separator();
-            ui.weak("Dimensioned sketch templates (dialogs)");
-            if ui
-                .add_enabled(open, egui::Button::new("Rectangle on XY…"))
-                .probe("Rectangle on XY…")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::Rectangle {
-                    width: "80".into(),
-                    height: "50".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
-                ui.close();
-            }
-            if ui
-                .add_enabled(open, egui::Button::new("Rectangle on XZ…"))
-                .probe("Rectangle on XZ…")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::RectangleXz {
-                    width: "20".into(),
-                    height: "10".into(),
-                    cx: "30".into(),
-                    cz: "5".into(),
-                });
-                ui.close();
-            }
-            if ui
-                .add_enabled(has_extrude, egui::Button::new("Circle on face…"))
-                .probe("Circle on face…")
-                .on_disabled_hover_text("Needs an extrusion")
-                .clicked()
-            {
-                let last = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude");
-                self.dialog = Some(Dialog::CircleOnFace {
-                    extrude: last.map(|f| f.id),
-                    diameter: "10".into(),
-                    cx: "0".into(),
-                    cy: "0".into(),
-                });
-                ui.close();
-            }
-            ui.separator();
-            ui.weak("Drag to place");
-            let current = self.placement.as_ref().map(|p| p.tool);
-            if ui
-                .add_enabled(
-                    open,
-                    egui::Button::new("Place rectangle").selected(current == Some(Tool::Rectangle)),
-                )
-                .clicked()
-            {
-                self.start_tool(Tool::Rectangle);
-                ui.close();
-            }
-            if ui
-                .add_enabled(has_extrude, egui::Button::new("Place hole"))
-                .probe("Place hole")
-                .on_disabled_hover_text("Needs an extrusion")
-                .clicked()
-            {
-                if let Some(e) = self
-                    .summary
-                    .features
-                    .iter()
-                    .rev()
-                    .find(|f| f.kind == "extrude")
-                {
-                    let extrude = e.id;
-                    self.start_tool(Tool::Hole { extrude });
-                }
-                ui.close();
-            }
-        });
+        let templates = ui.menu_button("Templates", |ui| self.templates_menu(ui));
         crate::probe::note("Templates", templates.response.rect);
+        self.placement_controls(ui);
+    }
+
+    /// Templates: printable parts, dimensioned sketch templates, placement tools.
+    pub(crate) fn templates_menu(&mut self, ui: &mut egui::Ui) {
+        use crate::shell::CmdId as C;
+        ui.weak("Printable parts (new document with editable parameters)");
+        for id in [
+            C::TemplateEnclosure,
+            C::TemplateCoupon,
+            C::TemplateBracket,
+            C::TemplateTray,
+        ] {
+            if self.cmd_button(ui, id) {
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.weak("Dimensioned sketch templates (dialogs)");
+        for id in [C::RectangleXY, C::RectangleXZ, C::CircleOnFace] {
+            if self.cmd_button(ui, id) {
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.weak("Drag to place");
+        for id in [C::PlaceRectangle, C::PlaceHole] {
+            if self.cmd_button(ui, id) {
+                ui.close();
+            }
+        }
+    }
+
+    /// While a placement tool runs: its target and a cancel button.
+    pub(crate) fn placement_controls(&mut self, ui: &mut egui::Ui) {
         if let Some(Tool::Hole { extrude }) = self.placement.as_ref().map(|p| p.tool) {
             let extrudes: Vec<FeatureSummary> = self
                 .summary
@@ -1967,7 +1624,28 @@ impl RcadApp {
                         nut,
                         nut_width,
                         left_hand,
+                        plane,
+                        cx,
+                        cy,
                     } => {
+                        let place = match plane {
+                            SketchPlane::Face(r) => format!(
+                                "On {} {}",
+                                self.feature_name(r.feature),
+                                crate::face_role_label(&r.role)
+                            ),
+                            _ => "On world XY".to_string(),
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(place);
+                            if matches!(plane, SketchPlane::Face(_))
+                                && ui.small_button("Use world XY").probe("Thread on world XY").clicked()
+                            {
+                                *plane = SketchPlane::WorldXY;
+                            }
+                        });
+                        num_field(ui, "Thread axis X (mm)", cx);
+                        num_field(ui, "Thread axis Y (mm)", cy);
                         num_field(ui, "Thread diameter (mm)", diameter);
                         num_field(ui, "Thread pitch (mm)", pitch);
                         num_field(ui, "Thread length (mm)", length);
@@ -1984,8 +1662,12 @@ impl RcadApp {
                         angle,
                         axis,
                         reverse,
+                        op,
+                        target,
                     } => {
                         feature_combo(ui, "Revolve profile sketch", sketch, &sketches);
+                        let bodies = self.summary.bodies.clone();
+                        ok_allowed &= crate::dialogs::operation_ui(ui, "Revolve", op, target, &bodies);
                         num_field(ui, "Revolve angle (deg)", angle);
                         // Lines of the chosen sketch can be the axis.
                         let lines: Vec<rcad_sketch::EntityId> = sketch
@@ -2071,8 +1753,73 @@ impl RcadApp {
                     Dialog::SaveAs { path } => {
                         path_field(ui, "File path", path, PickMode::Save, file_pick::DOCUMENT);
                     }
-                    Dialog::Open { path } => {
+                    Dialog::Open { path, safe_mode } => {
                         path_field(ui, "File path", path, PickMode::Open, file_pick::DOCUMENT);
+                        ui.checkbox(safe_mode, "Safe mode (roll back before the first failing feature)")
+                            .probe("Safe mode");
+                    }
+                    Dialog::ExportAssembly { path } => {
+                        path_field(ui, "STEP path", path, PickMode::Save, file_pick::STEP);
+                        ui.small("One STEP product per component (reused definitions written once), occurrences with their placements.");
+                    }
+                    Dialog::ShellFace { face, thickness } => {
+                        ui.label(format!(
+                            "Open face: {} {}",
+                            self.feature_name(face.feature),
+                            crate::face_role_label(&face.role)
+                        ));
+                        num_field(ui, "Shell thickness (mm)", thickness);
+                        ui.small("Hollows the body under this face (left open) to walls and floor of this thickness; bodies prismatic along the face normal.");
+                    }
+                    Dialog::Align { from, to } => {
+                        ui.label(format!(
+                            "Move the body of {} {}",
+                            self.feature_name(from.feature),
+                            crate::face_role_label(&from.role)
+                        ));
+                        let mine = self.selected_face().and_then(|f| f.body);
+                        let targets: Vec<(String, rcad_document::FaceRef)> = self
+                            .summary
+                            .features
+                            .iter()
+                            .flat_map(|g| {
+                                g.faces
+                                    .iter()
+                                    .filter(|fc| Some(fc.body) != mine)
+                                    .map(move |fc| {
+                                        (format!("{} {}", g.name, crate::face_role_label(&fc.reference.role)), fc.reference)
+                                    })
+                            })
+                            .collect();
+                        let current = targets
+                            .iter()
+                            .find(|(_, r)| Some(*r) == *to)
+                            .map_or("(choose)".to_string(), |(l, _)| l.clone());
+                        egui::ComboBox::from_label("Align onto face")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                for (l, r) in &targets {
+                                    ui.selectable_value(to, Some(*r), l).probe(&format!("Align onto {l}"));
+                                }
+                            })
+                            .response
+                            .probe("Align onto face");
+                        ok_allowed &= to.is_some();
+                    }
+                    Dialog::RigidGroup { occurrences } => {
+                        ui.label("Occurrences to lock together:");
+                        for (_, name, on) in occurrences.iter_mut() {
+                            ui.checkbox(on, name.as_str()).probe(&format!("Rigid {name}"));
+                        }
+                        ok_allowed &= occurrences.iter().filter(|o| o.2).count() >= 2;
+                    }
+                    Dialog::DriveJoints { joints } => {
+                        for (_, name, values) in joints.iter_mut() {
+                            for (i, v) in values.iter_mut().enumerate() {
+                                num_field(ui, &format!("{name} value {}", i + 1), v);
+                            }
+                        }
+                        ui.small("Degrees for rotations, mm for slides; each joint is one undo step.");
                     }
                     Dialog::ExportStl(form) | Dialog::Export3mf(form) => {
                         ok_allowed &= self.print_export_ui(ui, form);
@@ -2378,14 +2125,37 @@ impl RcadApp {
                 }
             }
         }
-        if ok {
+        if ok && let Dialog::DriveJoints { joints } = &dlg {
+            let mut cmds = vec![];
+            for (joint, name, values) in joints {
+                let v: Result<Vec<f64>, String> = values
+                    .iter()
+                    .map(|t| crate::app::parse_num(name, t))
+                    .collect();
+                match v {
+                    Ok(values) => cmds.push(Command::SetJointValues {
+                        joint: *joint,
+                        values,
+                    }),
+                    Err(e) => error = Some(e),
+                }
+            }
+            if error.is_none() {
+                self.last_dialog = None;
+                for c in cmds {
+                    self.request(c);
+                }
+                return;
+            }
+        } else if ok {
             self.last_dialog = None;
             match build_command(&dlg) {
-                Ok(Command::Open {
-                    path,
-                    safe_mode: false,
-                }) => {
-                    self.guarded(Guarded::Open(path));
+                Ok(Command::Open { path, safe_mode }) => {
+                    self.guarded(if safe_mode {
+                        Guarded::OpenSafe(path)
+                    } else {
+                        Guarded::Open(path)
+                    });
                     return;
                 }
                 Ok(cmd) => {
@@ -2424,7 +2194,7 @@ impl RcadApp {
             Guarded::New | Guarded::NewAndSketch | Guarded::NewTemplate(_) => {
                 "creating a new document"
             }
-            Guarded::Open(_) | Guarded::OpenCopy(_) => "opening another document",
+            Guarded::Open(_) | Guarded::OpenSafe(_) | Guarded::OpenCopy(_) => "opening another document",
             Guarded::Close => "closing",
             Guarded::Exit => "quitting",
         };

@@ -456,6 +456,9 @@ fn main() -> ExitCode {
                 rcad::probe::enable();
             }
             app.viewport = Viewport::new(cc);
+            if let Some(layer) = rcad::shell::KeymapLayer::from_env() {
+                app.set_keymap(layer);
+            }
             // Autosave/recovery for interactive use; scripted runs never touch
             // the recovery directory.
             if args.scene.is_none() && !args.demo && args.demo_place.is_none() {

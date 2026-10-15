@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use rcad_commands::{Command, DocSummary, FeatureSummary, SketchTemplate, end_cap_of};
+use rcad_commands::{Command, DocSummary, ExtrudeOp, FeatureSummary, SketchTemplate, end_cap_of};
 use rcad_document::{BodyId, DocError, FaceRole, FeatureId, SketchPlane};
 use rcad_kernel::{Measurements, MeshCheck, VolumeResult};
 use rcad_viewport::{Camera, Viewport};
@@ -57,6 +57,11 @@ pub(crate) enum Dialog {
         nut: bool,
         nut_width: String,
         left_hand: bool,
+        /// Placement: the plane (world XY or a picked planar face) and the
+        /// axis point in its frame (mm).
+        plane: SketchPlane,
+        cx: String,
+        cy: String,
     },
     Revolve {
         sketch: Option<FeatureId>,
@@ -65,6 +70,9 @@ pub(crate) enum Dialog {
         /// direction.
         axis: rcad_document::RevolveAxis,
         reverse: bool,
+        /// New Body, or Join / Cut / Intersect with `target`.
+        op: ExtrudeOp,
+        target: Option<BodyId>,
     },
     /// Exact loft between two sketches (`sweep == false`) or sweep of
     /// sketch `a`'s profile along sketch `b`'s path (`sweep == true`).
@@ -99,6 +107,30 @@ pub(crate) enum Dialog {
     },
     Open {
         path: String,
+        /// Open rolled back to just before the first failing feature.
+        safe_mode: bool,
+    },
+    /// STEP with the component structure kept.
+    ExportAssembly {
+        path: String,
+    },
+    /// Shell the body under `face`, leaving that face open.
+    ShellFace {
+        face: rcad_document::FaceRef,
+        thickness: String,
+    },
+    /// Align the body of face `from` flush onto face `to` of another body.
+    Align {
+        from: rcad_document::FaceRef,
+        to: Option<rcad_document::FaceRef>,
+    },
+    /// Rigid group of the checked occurrences.
+    RigidGroup {
+        occurrences: Vec<(rcad_document::assembly::OccurrenceId, String, bool)>,
+    },
+    /// Values of every joint with free degrees of freedom.
+    DriveJoints {
+        joints: Vec<(rcad_document::assembly::JointId, String, Vec<String>)>,
     },
     /// Print export (STL): selection, tessellation, placement, bed, report.
     ExportStl(crate::exchange::PrintForm),
@@ -214,7 +246,15 @@ impl Dialog {
             Dialog::CircleOnFace { .. } => "New circle sketch on face",
             Dialog::Cut { .. } => "New cut",
             Dialog::SaveAs { .. } => "Save document as",
+            Dialog::Open {
+                safe_mode: true, ..
+            } => "Open document (safe mode)",
             Dialog::Open { .. } => "Open document",
+            Dialog::ExportAssembly { .. } => "Export STEP assembly",
+            Dialog::ShellFace { .. } => "Shell",
+            Dialog::Align { .. } => "Align",
+            Dialog::RigidGroup { .. } => "Rigid group",
+            Dialog::DriveJoints { .. } => "Drive joints",
             Dialog::ExportStl(_) => "Export STL",
             Dialog::ExportStep { .. } => "Export STEP",
             Dialog::ExportDxf { svg: false, .. } => "Export DXF",
@@ -284,6 +324,8 @@ pub enum Guarded {
     /// Open a recovery copy as an unsaved document.
     OpenCopy(PathBuf),
     Open(PathBuf),
+    /// Open rolled back to just before the first failing feature.
+    OpenSafe(PathBuf),
     Close,
     Exit,
 }
@@ -300,7 +342,7 @@ pub enum PrintTemplate {
 }
 
 impl PrintTemplate {
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             PrintTemplate::Enclosure => "Parametric enclosure + lid",
             PrintTemplate::Coupon => "Clearance test coupon",
@@ -496,6 +538,8 @@ pub struct RcadApp {
     pub(crate) frame_ema: Option<Duration>,
     /// Sketch to start once the requested new document exists.
     pending_new_sketch: bool,
+    /// Shell view state (keymap layer, section focus requests).
+    pub(crate) shell: crate::shell::ShellState,
 }
 
 impl RcadApp {
@@ -588,6 +632,7 @@ impl RcadApp {
             latencies: VecDeque::new(),
             frame_ema: None,
             pending_new_sketch: false,
+            shell: Default::default(),
         }
     }
 
@@ -1431,9 +1476,19 @@ impl RcadApp {
             Dialog::ExportStep { scope: s, .. } => (vec![], scope(s)),
             Dialog::ExportStl(f) | Dialog::Export3mf(f) => (f.face_features(), scope(&f.scope)),
             Dialog::Import(f) => (f.face.iter().map(|(r, _)| r.feature).collect(), vec![]),
+            Dialog::ShellFace { face, .. } => (vec![face.feature], vec![]),
+            Dialog::Align { from, to } => (
+                std::iter::once(from.feature)
+                    .chain(to.map(|t| t.feature))
+                    .collect(),
+                vec![],
+            ),
             Dialog::Rectangle { .. }
             | Dialog::RectangleXz { .. }
             | Dialog::SaveAs { .. }
+            | Dialog::ExportAssembly { .. }
+            | Dialog::RigidGroup { .. }
+            | Dialog::DriveJoints { .. }
             | Dialog::Open { .. } => (vec![], vec![]),
         }
     }
@@ -1677,6 +1732,10 @@ impl RcadApp {
             Guarded::Open(path) => self.request(Command::Open {
                 path,
                 safe_mode: false,
+            }),
+            Guarded::OpenSafe(path) => self.request(Command::Open {
+                path,
+                safe_mode: true,
             }),
             Guarded::OpenCopy(path) => {
                 self.autosave.opening = Some(path.clone());
@@ -2266,8 +2325,9 @@ impl RcadApp {
         });
     }
 
-    /// Keyboard shortcuts. Ignored while a text field has focus so typing
-    /// never triggers modelling commands.
+    /// Keyboard shortcuts (the active keymap layer; see [`crate::shell::keymap`]).
+    /// Ignored while a text field has focus so typing never triggers
+    /// modelling commands.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
         if ctx.egui_wants_keyboard_input()
@@ -2277,56 +2337,14 @@ impl RcadApp {
         {
             return;
         }
-        let sc = |m: Modifiers, k: Key| {
-            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
-        };
-        if sc(Modifiers::NONE, Key::F1) {
-            self.show_help = !self.show_help;
-        }
         if self.sketch.is_some() {
+            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1))) {
+                self.show_help = !self.show_help;
+            }
             self.sketch_shortcuts(ctx);
             return;
         }
-        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
-        // Order matters: shifted variants first.
-        if sc(cmd_shift, Key::S) {
-            if self.summary.open {
-                self.dialog = Some(Dialog::SaveAs {
-                    path: self.default_path("rcad.json"),
-                });
-            }
-        } else if sc(Modifiers::COMMAND, Key::S) {
-            self.save();
-        } else if sc(Modifiers::COMMAND, Key::O) {
-            self.dialog = Some(Dialog::Open {
-                path: self.default_path("rcad.json"),
-            });
-        } else if sc(Modifiers::COMMAND, Key::N) {
-            self.guarded(Guarded::New);
-        } else if sc(cmd_shift, Key::Z) || sc(Modifiers::COMMAND, Key::Y) {
-            if self.summary.can_redo.is_some() {
-                self.request(Command::Redo);
-            }
-        } else if sc(Modifiers::COMMAND, Key::Z) {
-            if self.summary.can_undo.is_some() {
-                self.request(Command::Undo);
-            }
-        } else if sc(Modifiers::NONE, Key::F) {
-            self.fit_view();
-        } else if sc(Modifiers::NONE, Key::Delete) {
-            if self.selected_face.is_some() {
-                // A picked face selects its owner too; deleting the whole feature
-                // from a face pick would be surprising.
-                self.diag(
-                    false,
-                    "info",
-                    "faces cannot be deleted; select the feature in the browser to delete it"
-                        .into(),
-                );
-            } else {
-                self.delete_selected_feature();
-            }
-        } else if sc(Modifiers::NONE, Key::Escape) {
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::Escape))) {
             if self.placement.is_some() {
                 self.cancel_tool();
             } else if self.dialog.is_some() {
@@ -2336,20 +2354,14 @@ impl RcadApp {
             } else {
                 self.select(None);
             }
+            return;
         }
-        for (k, preset) in crate::view3d::VIEW_KEYS {
-            if sc(Modifiers::NONE, *k) {
-                self.set_view(*preset);
-            }
-        }
+        self.command_shortcuts(ctx);
     }
 
     fn sketch_shortcuts(&mut self, ctx: &egui::Context) {
-        use crate::sketch_edit::SketchTool as T;
-        use egui::{Key, KeyboardShortcut, Modifiers};
-        let sc = |m: Modifiers, k: Key| {
-            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
-        };
+        use crate::shell::keymap::{SketchKey, k};
+        let layer = self.shell.keymap;
         let Some(s) = &mut self.sketch else { return };
         if s.committing {
             return;
@@ -2357,45 +2369,41 @@ impl RcadApp {
         let ed = &mut s.editor;
         if ed.dragging() {
             // Mid-drag only Escape (restore) is meaningful.
-            if sc(Modifiers::NONE, Key::Escape) {
+            if ctx.input_mut(|i| i.consume_shortcut(&k(egui::Key::Escape).shortcut())) {
                 ed.escape();
             }
             return;
         }
-        if sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || sc(Modifiers::COMMAND, Key::Y) {
-            ed.redo();
-        } else if sc(Modifiers::COMMAND, Key::Z) {
-            ed.undo();
-        } else if sc(Modifiers::SHIFT, Key::R) {
-            ed.set_tool(T::CornerRectangle);
-        } else if sc(Modifiers::NONE, Key::R) {
-            ed.set_tool(T::CenterRectangle);
-        } else if sc(Modifiers::NONE, Key::L) {
-            ed.set_tool(T::Line);
-        } else if sc(Modifiers::NONE, Key::C) {
-            ed.set_tool(T::Circle);
-        } else if sc(Modifiers::NONE, Key::A) {
-            ed.set_tool(T::Arc);
-        } else if sc(Modifiers::NONE, Key::X) {
-            ed.toggle_construction();
-        } else if sc(Modifiers::NONE, Key::D) {
-            ed.set_tool(T::Dimension);
-        } else if sc(Modifiers::NONE, Key::T) {
-            ed.set_tool(T::Trim);
-        } else if sc(Modifiers::NONE, Key::E) {
-            ed.set_tool(T::Extend);
-        } else if sc(Modifiers::NONE, Key::O) {
-            ed.set_tool(T::Offset);
-        } else if sc(Modifiers::NONE, Key::S) {
-            ed.set_tool(T::Select);
-        } else if sc(Modifiers::NONE, Key::Delete) || sc(Modifiers::NONE, Key::Backspace) {
-            ed.delete_selection();
-        } else if sc(Modifiers::NONE, Key::Enter) {
-            ed.finish_chain();
-        } else if sc(Modifiers::NONE, Key::Escape) {
-            ed.escape();
-        } else if sc(Modifiers::NONE, Key::F) {
-            self.orient_to_sketch();
+        let Some(action) = crate::shell::keymap::sketch_bindings(layer)
+            .into_iter()
+            .find(|(c, _)| ctx.input_mut(|i| i.consume_shortcut(&c.shortcut())))
+            .map(|(_, a)| a)
+        else {
+            return;
+        };
+        match action {
+            SketchKey::Tool(t) => {
+                ed.set_tool(t);
+            }
+            SketchKey::Construction => {
+                ed.toggle_construction();
+            }
+            SketchKey::Undo => {
+                ed.undo();
+            }
+            SketchKey::Redo => {
+                ed.redo();
+            }
+            SketchKey::Delete => {
+                ed.delete_selection();
+            }
+            SketchKey::FinishChain => {
+                ed.finish_chain();
+            }
+            SketchKey::Escape => {
+                ed.escape();
+            }
+            SketchKey::LookAt => self.orient_to_sketch(),
         }
     }
 
@@ -2495,10 +2503,13 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             nut,
             nut_width,
             left_hand,
+            plane,
+            cx,
+            cy,
         } => Command::Thread {
             name: None,
-            plane: rcad_document::SketchPlane::WorldXY,
-            center: [0.0, 0.0],
+            plane: *plane,
+            center: [parse_num("centre X", cx)?, parse_num("centre Y", cy)?],
             diameter: parse_num("diameter", diameter)?,
             pitch: parse_num("pitch", pitch)?,
             length: parse_num("length", length)?,
@@ -2517,14 +2528,19 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
             angle,
             axis,
             reverse,
+            op,
+            target,
         } => Command::Revolve {
             name: None,
             sketch: need(sketch, "profile sketch")?,
             angle_deg: parse_num("angle", angle)?,
             axis: *axis,
             reverse: *reverse,
-            op: Default::default(),
-            target: None,
+            op: *op,
+            target: match op {
+                ExtrudeOp::NewBody => None,
+                _ => Some(target.ok_or("choose the target body")?),
+            },
         },
         Dialog::Extrude(form) => form.command()?,
         Dialog::Hole {
@@ -2652,10 +2668,39 @@ pub(crate) fn build_command(d: &Dialog) -> Result<Command, String> {
         Dialog::SaveAs { path } => Command::Save {
             path: nonempty_path(path)?,
         },
-        Dialog::Open { path } => Command::Open {
+        Dialog::Open { path, safe_mode } => Command::Open {
             path: nonempty_path(path)?,
-            safe_mode: false,
+            safe_mode: *safe_mode,
         },
+        Dialog::ExportAssembly { path } => Command::ExportAssembly {
+            path: nonempty_path(path)?,
+            format: rcad_commands::assembly::AssemblyFormat::StepAssembly,
+        },
+        Dialog::ShellFace { face, thickness } => Command::ShellFace {
+            name: None,
+            face: *face,
+            thickness: parse_num("thickness", thickness)?,
+        },
+        Dialog::Align { from, to } => Command::AlignBody {
+            name: None,
+            from: *from,
+            to: to.ok_or("choose the face to align onto")?,
+            offset: 0.0,
+        },
+        Dialog::RigidGroup { occurrences } => {
+            let occ: Vec<_> = occurrences
+                .iter()
+                .filter(|(_, _, on)| *on)
+                .map(|(id, _, _)| *id)
+                .collect();
+            if occ.len() < 2 {
+                return Err("check at least two occurrences".into());
+            }
+            Command::CreateRigidGroup { occurrences: occ }
+        }
+        Dialog::DriveJoints { .. } => {
+            return Err("drive joints sends one command per joint".into());
+        }
         Dialog::ExportStl(f) | Dialog::Export3mf(f) => f.command()?,
         Dialog::ExportStep { path, scope } => Command::ExportStep {
             path: nonempty_path(path)?,
