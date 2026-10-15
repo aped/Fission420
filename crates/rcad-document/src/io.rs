@@ -43,7 +43,7 @@ pub const LEGACY_FORMAT_NAMES: &[&str] = &["fission420"];
 /// and splits that separate a body, prints of referenced imported faces,
 /// contour flanges ordered by geometry, driven sketch dimensions,
 /// concentric/collinear/symmetric sketch constraints, expressions on
-/// sheet-metal rules and flanges).
+/// sheet-metal rules and flanges, regions of crossing sketch curves).
 /// Written only when used.
 pub const FORMAT_VERSION: u32 = 9;
 /// Oldest version this build reads.
@@ -363,6 +363,15 @@ pub fn v9_feature(doc: &Document) -> Option<&'static str> {
             if links.iter().flat_map(|l| l.loops.iter().flatten()).any(|c| c.from_tool.is_some()))
     }) {
         return Some("projected edges bound to the tool feature that made them");
+    }
+    // A region of a crossing-curve arrangement is told apart from its
+    // neighbours by `RegionRef::outside` (v8 readers refuse crossing
+    // sketches anyway; the version makes the requirement explicit).
+    if doc.features.iter().any(|f| {
+        !matches!(f.kind, crate::FeatureKind::Sketch { .. })
+            && serde_json::to_string(&f.kind).is_ok_and(|t| t.contains("\"outside\":["))
+    }) {
+        return Some("regions of crossing sketch curves");
     }
     if doc.features.iter().any(|f| !f.face_prints.is_empty()) {
         return Some("prints of referenced imported faces");
