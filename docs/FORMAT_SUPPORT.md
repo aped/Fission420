@@ -142,7 +142,12 @@ Tested fixtures (all FreeCAD 1.1.4 / OpenCascade 7.8.1 generated, provenance in
 "Rendering" is not claimed by these checks; the kernel tests tessellate the cylinder,
 sphere, torus and the imported box with hole watertight (`step_import.rs`).
 
-**Export**: AP214 (`AUTOMOTIVE_DESIGN`) via the Truck writer with exact-edge replacement;
+**Export**: AP214 (`AUTOMOTIVE_DESIGN`) via the Truck writer with exact-edge replacement. The
+header's `FILE_SCHEMA` is `AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }`, matching the data's
+`APPLICATION_PROTOCOL_DEFINITION` (the Truck writer's own `ISO-10303-042` is replaced; test
+`step::tests::exported_header_declares_the_ap214_schema`). Faces are written as `FACE_SURFACE`,
+not the `ADVANCED_FACE` subtype that AP214's advanced B-rep rules ask for; FreeCAD/OCC import
+them, a strict schema checker would flag them;
 cylinders and other curved faces are written as rational B-spline surfaces (the analytic
 surface type is lost). One `MANIFOLD_SOLID_BREP` per selected body, one PRODUCT.
 

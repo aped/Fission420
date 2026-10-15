@@ -24,7 +24,7 @@ pub fn export_step(body: &Body, organization_system: &str) -> Result<String> {
                 .to_string()
         };
         check_unique_ids(&text)?;
-        Ok(round_reals(&fix_file_name(&text)))
+        Ok(round_reals(&fix_header(&text)))
     })?
 }
 
@@ -84,7 +84,7 @@ pub fn export_step_bodies(bodies: &[(&str, &Body)], organization_system: &str) -
         };
         check_unique_ids(&text)?;
         let names: Vec<&str> = bodies.iter().map(|(n, _)| *n).collect();
-        label_solids(&round_reals(&fix_file_name(&text)), &names)
+        label_solids(&round_reals(&fix_header(&text)), &names)
     })?
 }
 
@@ -279,6 +279,30 @@ fn header(organization_system: &str) -> out::StepHeaderDescriptor {
 /// `('')`. OCCT (FreeCAD 1.1.4) reports the nested form as "StepReaderData:
 /// Unresolved Reference: Fails Count: 2". Only the header line is rewritten;
 /// a header that already has flat lists is left unchanged.
+/// The schema the written entities belong to: AP214 (`automotive_design`), the
+/// same protocol the file's `APPLICATION_PROTOCOL_DEFINITION` names. The Truck
+/// writer declares `ISO-10303-042` (the integrated resource, not an
+/// application protocol), which importers that check the schema reject or
+/// warn about. Every entity written (advanced B-rep and shell-based surface
+/// models, B-spline geometry, product and assembly structure) is in AP214.
+pub(crate) const FILE_SCHEMA_AP214: &str =
+    "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));";
+
+/// Header fixes of the Truck writer's output: flat `FILE_NAME` lists and the
+/// AP214 `FILE_SCHEMA`.
+fn fix_header(text: &str) -> String {
+    let text = fix_file_name(text);
+    match text.find("FILE_SCHEMA(") {
+        Some(start) if text[..start].contains("HEADER;") => {
+            let end = text[start..]
+                .find(";\n")
+                .map_or(text.len(), |e| start + e + 1);
+            format!("{}{}{}", &text[..start], FILE_SCHEMA_AP214, &text[end..])
+        }
+        _ => text,
+    }
+}
+
 fn fix_file_name(text: &str) -> String {
     let Some(start) = text.find("FILE_NAME(") else {
         return text.to_string();
@@ -1077,6 +1101,54 @@ mod tests {
             "{r}"
         );
         assert!(r.contains("FILE_NAME('a 1.25', '')"));
+    }
+
+    /// The header's FILE_SCHEMA names the application protocol of the data
+    /// (AP214, as APPLICATION_PROTOCOL_DEFINITION says), for single bodies,
+    /// several bodies and assemblies. Parsed from the written header section.
+    #[test]
+    fn exported_header_declares_the_ap214_schema() {
+        let b = crate::extrude(
+            &crate::Profile::Polygon(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]),
+            &crate::Frame::XY,
+            2.0,
+        )
+        .unwrap();
+        let assembly = export_step_assembly(
+            &[StepProduct {
+                name: "p".into(),
+                solids: vec![("s".into(), &b)],
+                children: Vec::new(),
+            }],
+            0,
+            "test",
+        )
+        .unwrap();
+        for text in [
+            export_step(&b, "test").unwrap(),
+            export_step_bodies(&[("a", &b), ("b", &b)], "test").unwrap(),
+            assembly,
+        ] {
+            let header = &text[text.find("HEADER;").unwrap()..text.find("ENDSEC;").unwrap()];
+            let schemas: Vec<&str> = header
+                .lines()
+                .filter(|l| l.starts_with("FILE_SCHEMA("))
+                .collect();
+            assert_eq!(schemas.len(), 1, "{header}");
+            let inner = schemas[0]
+                .trim_start_matches("FILE_SCHEMA((")
+                .trim_end_matches("));");
+            let name = inner.trim_matches('\'').split_whitespace().next().unwrap();
+            assert_eq!(name, "AUTOMOTIVE_DESIGN", "{header}");
+            assert!(inner.contains("{ 1 0 10303 214 1 1 1 1 }"), "{header}");
+            assert!(
+                text.contains(
+                    "APPLICATION_PROTOCOL_DEFINITION('international standard', 'automotive_design'"
+                ),
+                "data names the same protocol"
+            );
+            assert!(!text.contains("ISO-10303-042"));
+        }
     }
 
     #[test]
