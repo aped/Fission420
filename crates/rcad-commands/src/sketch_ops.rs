@@ -74,6 +74,16 @@ pub enum SketchOp {
     /// Break `entity` at the intersections either side of `at`: the span
     /// under `at` becomes its own curve, nothing is removed.
     BreakAt { entity: u32, at: [f64; 2] },
+    /// Fix (`fix: true`) the points where they are, or remove their fixes
+    /// (the origin's fix stays; projected points are refused).
+    Fix {
+        points: Vec<u32>,
+        #[serde(default = "yes")]
+        fix: bool,
+    },
+    /// Make dimension `name` driven (it measures) or driving (refused while
+    /// it is redundant).
+    SetDriven { name: String, driven: bool },
     /// Replace the whole sketch definition, creating or redefining the user
     /// `parameters` and setting dimension `expressions` (dimension name ->
     /// expression; an empty expression unbinds) in the same step: the sketch
@@ -87,6 +97,10 @@ pub enum SketchOp {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         expressions: BTreeMap<String, String>,
     },
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// A user parameter created (or redefined) by [`SketchOp::Replace`].
@@ -343,6 +357,48 @@ fn edit(
             let r = sk.break_at(id, *at);
             curve(sk, r, "Broken", out)
         }
+        SketchOp::Fix { points, fix } => {
+            let pts: Vec<PointId> = points.iter().map(|p| PointId(*p)).collect();
+            for p in &pts {
+                if sk.point(*p).is_none() {
+                    return Err(refused(format!("the sketch has no point P{}", p.0)));
+                }
+                if locked
+                    .iter()
+                    .any(|e| sk.entity(*e).is_some_and(|x| x.points().contains(p)))
+                {
+                    return Err(refused(format!(
+                        "P{} belongs to projected geometry (held by its link)",
+                        p.0
+                    )));
+                }
+            }
+            let n = if *fix {
+                sk.fix_points(&pts)
+            } else {
+                sk.unfix_points(&pts)
+            };
+            out.note = format!("{} {n} point(s)", if *fix { "fixed" } else { "unfixed" });
+            Ok(*fix)
+        }
+        SketchOp::SetDriven { name, driven } => {
+            let mut found = false;
+            for c in &mut sk.constraints {
+                if let Some(d) = c.dimension_mut()
+                    && d.name == *name
+                {
+                    d.driven = *driven;
+                    if !*driven {
+                        d.value = d.value.abs();
+                    }
+                    found = true;
+                }
+            }
+            if !found {
+                return Err(refused(format!("the sketch has no dimension '{name}'")));
+            }
+            Ok(!*driven)
+        }
         SketchOp::Replace { sketch, .. } => {
             // Projected curves keep their definition (their link drives them).
             for e in locked {
@@ -549,5 +605,8 @@ fn op_label(op: &SketchOp) -> &'static str {
         SketchOp::Extend { .. } => "Extend",
         SketchOp::BreakAt { .. } => "Break",
         SketchOp::Replace { .. } => "Edit sketch",
+        SketchOp::Fix { fix: true, .. } => "Fix",
+        SketchOp::Fix { .. } => "Unfix",
+        SketchOp::SetDriven { .. } => "Driven / driving",
     }
 }

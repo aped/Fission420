@@ -328,3 +328,72 @@ fn replace_commits_sketch_parameters_and_bindings_in_one_step() {
     assert!(s.execute(&Command::Undo).ok);
     assert!(s.summary().parameters.is_empty());
 }
+
+#[test]
+fn fix_and_driven_dimensions_through_ops() {
+    let mut s = Session::new();
+    let f = empty_sketch(&mut s);
+    assert!(op(&mut s, f, r#"{"op":"add_line","a":[0,0],"b":[30,0]}"#).ok);
+    let sk = stored(&s, f);
+    let Some(Entity::Line { id, a, b }) = sk.entities.first().cloned() else {
+        panic!()
+    };
+    // Fix both ends: fully constrained.
+    let r = op(
+        &mut s,
+        f,
+        &format!(r#"{{"op":"fix","points":[{},{}]}}"#, a.0, b.0),
+    );
+    assert!(
+        r.ok && r.message.as_deref().unwrap().contains(" 0 DOF"),
+        "{r:?}"
+    );
+    // A length dimension is now redundant: added driven, measuring 30.
+    let r = op(
+        &mut s,
+        f,
+        &format!(
+            r#"{{"op":"add_dimension","constraint":{{"Distance":{{"a":{},"b":{},"dim":{{"name":"len","value":30}}}}}}}}"#,
+            a.0, b.0
+        ),
+    );
+    assert!(
+        r.ok && r.message.as_deref().unwrap().contains("driven"),
+        "{r:?}"
+    );
+    let d = stored(&s, f)
+        .constraints
+        .iter()
+        .filter_map(|c| c.dimension().cloned())
+        .find(|d| d.name == "len")
+        .unwrap();
+    assert!(d.driven && (d.value - 30.0).abs() < 1e-9);
+    // Driving while redundant: refused; after unfixing b: allowed.
+    let rev = revision(&s);
+    assert!(
+        !op(
+            &mut s,
+            f,
+            r#"{"op":"set_driven","name":"len","driven":false}"#
+        )
+        .ok
+    );
+    assert_eq!(revision(&s), rev);
+    assert!(
+        op(
+            &mut s,
+            f,
+            &format!(r#"{{"op":"fix","points":[{}],"fix":false}}"#, b.0)
+        )
+        .ok
+    );
+    assert!(
+        op(
+            &mut s,
+            f,
+            r#"{"op":"set_driven","name":"len","driven":false}"#
+        )
+        .ok
+    );
+    let _ = id;
+}
