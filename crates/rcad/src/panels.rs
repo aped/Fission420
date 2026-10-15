@@ -20,6 +20,23 @@ use crate::sketch_edit::{Item, SketchTool};
 const OK_COLOR: Color32 = Color32::from_rgb(120, 220, 120);
 const UNDER_COLOR: Color32 = Color32::from_rgb(120, 190, 255);
 const BAD_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
+const WARN_COLOR: Color32 = Color32::from_rgb(240, 190, 80);
+
+/// Hover text of a feature's health: message, cause and repair hint.
+fn health_text(f: &FeatureSummary) -> String {
+    let h = &f.health;
+    let mut t = h
+        .message
+        .clone()
+        .unwrap_or_else(|| format!("{:?}", h.state));
+    if let Some(up) = h.upstream {
+        t.push_str(&format!("\nCaused by the failure of feature {}", up.0));
+    }
+    if let Some(hint) = &h.hint {
+        t.push_str(&format!("\nTo repair: {hint}"));
+    }
+    t
+}
 
 /// Button that is disabled with a visible reason on hover.
 fn action(ui: &mut egui::Ui, label: &str, blocker: Option<&str>) -> bool {
@@ -337,6 +354,7 @@ impl RcadApp {
         ui.add_space(4.0);
         ui.separator();
         ui.label(RichText::new("History").strong());
+        self.health_banner(ui);
         if self.summary.features.is_empty() {
             ui.weak("Empty document. Use Create Sketch to start.");
         }
@@ -393,18 +411,37 @@ impl RcadApp {
                         .weak()
                         .small(),
                 );
+                use rcad_document::HealthState as H;
                 let label = if f.suppressed {
                     RichText::new(&f.name).weak().strikethrough()
                 } else if f.rolled_back {
                     RichText::new(&f.name).weak().italics()
                 } else {
-                    RichText::new(&f.name)
+                    match f.health.state {
+                        H::Error => RichText::new(&f.name).color(BAD_COLOR),
+                        H::Warning => RichText::new(&f.name).color(WARN_COLOR),
+                        _ => RichText::new(&f.name),
+                    }
                 };
                 let r = ui.selectable_label(sel, label).probe(&f.name);
                 if f.suppressed {
                     ui.label(RichText::new("suppressed").weak().small());
                 } else if f.rolled_back {
                     ui.label(RichText::new("rolled back").weak().small());
+                } else if matches!(f.health.state, H::Error | H::Warning) {
+                    let (sym, c) = if f.health.state == H::Error {
+                        ("⚠ error", BAD_COLOR)
+                    } else {
+                        ("⚠ warning", WARN_COLOR)
+                    };
+                    if ui
+                        .add(egui::Button::new(RichText::new(sym).color(c).small()).frame(false))
+                        .named(&format!("Health {}", f.name))
+                        .on_hover_text(health_text(f))
+                        .clicked()
+                    {
+                        clicked = Some(f.id);
+                    }
                 }
                 if r.clicked() {
                     clicked = Some(f.id);
@@ -489,6 +526,63 @@ impl RcadApp {
                 self.delete_selected_feature();
             }
         }
+    }
+
+    /// "Opened with errors" banner above History: how many features fail,
+    /// the first one's reason, and Roll back before it (safe mode in place).
+    fn health_banner(&mut self, ui: &mut egui::Ui) {
+        use rcad_document::HealthState as H;
+        let failed: Vec<FeatureSummary> = self
+            .summary
+            .features
+            .iter()
+            .filter(|f| f.health.state == H::Error)
+            .cloned()
+            .collect();
+        let Some(first) = failed.first() else {
+            return;
+        };
+        egui::Frame::group(ui.style())
+            .fill(Color32::from_rgb(70, 30, 30))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "⚠ {} feature{} with errors: not evaluated",
+                        failed.len(),
+                        if failed.len() == 1 { "" } else { "s" }
+                    ))
+                    .color(BAD_COLOR)
+                    .strong(),
+                )
+                .named("Document has errors");
+                ui.label(RichText::new(format!("{}: {}", first.name, health_text(first))).small());
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button("Review")
+                        .named("Review first error")
+                        .on_hover_text("Select the first failing feature")
+                        .clicked()
+                    {
+                        self.select(Some(first.id));
+                    }
+                    let before = self
+                        .summary
+                        .features
+                        .iter()
+                        .position(|f| f.id == first.id)
+                        .and_then(|i| i.checked_sub(1))
+                        .map(|i| self.summary.features[i].id);
+                    if let Some(at) = before
+                        && ui
+                            .small_button("Roll back before it")
+                            .named("Roll back before the first error")
+                            .on_hover_text("Move the timeline marker before the first failing feature (one undo step)")
+                            .clicked()
+                    {
+                        self.request(Command::SetRollback { at: Some(at) });
+                    }
+                });
+            });
     }
 
     // ----- inspector -----
