@@ -5,6 +5,16 @@ the native document format has its own version number (`"version"` in `*.rcad.js
 which format versions a build reads and writes is listed in
 [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md).
 
+## [Unreleased]
+
+- **Light theme** is complete: the 3D view, grid, sketch geometry, overlay labels and status
+  colours follow the Light/Dark/Follow system preference (status text meets 4.5:1 contrast
+  on the light panel). `RCAD_THEME=light|dark|system` overrides it for one run.
+- **Alignment:** every menu uses one right-aligned shortcut column and a common minimum
+  width (the View menu no longer puts keys in the labels); ribbon group titles sit
+  horizontally under their buttons and captions are no longer cut off; docked dialogs use
+  a two-column form (labels left, OK/Cancel right); History names line up in one column.
+
 ## [1.0.0] - 2026-10-15
 
 First stable release. From 1.0 on, the command API (`docs/COMMANDS.md`), the CLI and the
