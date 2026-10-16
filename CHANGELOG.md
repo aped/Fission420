@@ -5,16 +5,6 @@ the native document format has its own version number (`"version"` in `*.rcad.js
 which format versions a build reads and writes is listed in
 [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md).
 
-## [Unreleased]
-
-- **Light theme** is complete: the 3D view, grid, sketch geometry, overlay labels and status
-  colours follow the Light/Dark/Follow system preference (status text meets 4.5:1 contrast
-  on the light panel). `RCAD_THEME=light|dark|system` overrides it for one run.
-- **Alignment:** every menu uses one right-aligned shortcut column and a common minimum
-  width (the View menu no longer puts keys in the labels); ribbon group titles sit
-  horizontally under their buttons and captions are no longer cut off; docked dialogs use
-  a two-column form (labels left, OK/Cancel right); History names line up in one column.
-
 ## [1.0.0] - 2026-10-15
 
 First stable release. From 1.0 on, the command API (`docs/COMMANDS.md`), the CLI and the
@@ -63,6 +53,17 @@ build, and breaking changes to commands or files wait for 2.0.
   Preferences first; every dialog value shows its unit; faces and sketch planes have plain
   names ("Extrude1 end cap"); dragged panel widths are remembered.
 - Icons the UI font could not draw (shown as empty boxes) are replaced.
+- **Light theme** is complete: the 3D view, grid, sketch geometry, overlay labels and status
+  colours follow the Light/Dark/Follow system preference (status text meets 4.5:1 contrast
+  on the light panel). `RCAD_THEME=light|dark|system` overrides it for one run.
+- **Alignment:** every menu uses one right-aligned shortcut column and a common minimum
+  width; ribbon group titles sit horizontally under their buttons and captions are no
+  longer cut off; docked dialogs use a two-column form (labels left, OK/Cancel right);
+  History names line up in one column.
+- **Packages for each platform:** an application icon; a universal macOS `R-CAD.app`
+  (Apple silicon and Intel) in a `.dmg`; a Windows `rcad.exe` that opens no console window
+  and carries its icon and version information; Linux archives for x86_64 and ARM64 with a
+  desktop entry and `install.sh`. `rcad <document>` opens a document at startup.
 - **CI:** a fast lint job, one test binary per crate (test build about 4x faster, test
   archive 10x smaller), sharded nextest runs, Linux, Windows and macOS all test-gated,
   and release archives with SHA-256 checksums. A Linux leg takes about 11 minutes, down

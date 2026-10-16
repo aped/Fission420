@@ -82,13 +82,15 @@ More in [`docs/screenshots/`](docs/screenshots).
 
 ### Prebuilt binaries
 
-Each tagged version (`v*`) gets a GitHub release with unsigned archives for **Linux x86_64**,
-**Windows x64** and **macOS ARM64**, built with the whole-program-optimised `dist` profile,
-with a `.sha256` per archive and a `SHA256SUMS` for all of them. CI also publishes the same
-archives (release profile) from `main`, pull requests into `main` and manual runs (Actions →
-CI → a run → *Artifacts*; kept 7 days). Each archive holds `rcad`, `rcad-cli`, the README,
-changelog and licences, the example documents and a `BUILD_INFO.txt` (version, commit,
-toolchain, CI run). See [`docs/INSTALL.md`](docs/INSTALL.md).
+Each tagged version (`v*`) gets a GitHub release with packages for **Linux x86_64** and
+**Linux ARM64** (archive with a desktop entry and `install.sh`), **macOS** (universal
+`R-CAD.app` for Apple silicon and Intel, in a `.dmg`) and **Windows x64** (zip; `rcad.exe`
+with its icon), built with the whole-program-optimised `dist` profile, with a `.sha256` per
+file and a `SHA256SUMS` for all of them. They are not signed with a publisher certificate.
+CI also publishes the same packages (release profile) from `main`, pull requests into `main`
+and manual runs (Actions → CI → a run → *Artifacts*; kept 7 days). Each holds `rcad`,
+`rcad-cli`, the README, changelog and licences, the example documents and a `BUILD_INFO.txt`
+(version, commit, toolchain, CI run). See [`docs/INSTALL.md`](docs/INSTALL.md).
 
 > Linux, Windows and macOS builds are all test-gated: an archive is published only after
 > that platform's full test suite and example replays passed; see [`docs/CI.md`](docs/CI.md).
@@ -178,7 +180,8 @@ cargo xtask check     # layout, public text, fmt, clippy -D warnings, release an
 - **UI.** Real widgets are driven headlessly with `egui_kittest` (no GPU or display needed).
 - **Independent validation.** FreeCAD and an independent mesh checker validate the STEP/STL
   output (`tools/external_validation.sh`), and Bambu Studio slices the print examples.
-- **CI** runs the same gate on Ubuntu 24.04, Debian 13, Windows x64 and macOS ARM64
+- **CI** runs the same gate on Ubuntu 24.04 (x86_64 and ARM64), Debian 13, Windows x64 and
+  macOS ARM64
   ([`docs/CI.md`](docs/CI.md)). `tools/ci/container_check.sh debian:trixie` reproduces a
   Linux leg locally with podman.
 

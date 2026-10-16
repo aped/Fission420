@@ -8,6 +8,14 @@
 //!   synthetic pointer events through the placement tool, commit, and cut.
 //! - `--demo-place-preview`: as above but stop mid-drag (preview visible).
 //! - `--sync`: execute commands on the UI thread (debugging; UI blocks).
+//! - `<document>`: a native document to open at startup.
+//!
+//! On Windows this is a GUI-subsystem program, so no console window opens with it. Its
+//! output still reaches a pipe or redirect (`rcad --version > v.txt`), but not an
+//! interactive console; use `rcad-cli` there. A startup failure is also shown in a
+//! message box.
+
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,6 +41,8 @@ struct Args {
     /// Start maximized (window coordinates = monitor coordinates in a headless compositor).
     maximized: bool,
     scene: Option<String>,
+    /// A document to open at startup (file managers' "Open with").
+    document: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -45,6 +55,7 @@ fn parse_args() -> Result<Args, String> {
         shot_dir: None,
         maximized: false,
         scene: None,
+        document: None,
     };
     while let Some(a) = args.next() {
         match a.to_str() {
@@ -77,11 +88,14 @@ fn parse_args() -> Result<Args, String> {
             }
             Some("-h" | "--help") => {
                 return Err(
-                    "usage: rcad [--version] [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
+                    "usage: rcad [document.rcad.json] [--version] [--demo | --demo-place | --demo-place-preview] [--sync] [--maximized] \
                      [--screenshot <path.png>] [--shot-dir <dir> (F12 saves a screenshot)] \
                      [--scene multibody|extrude|step|sideface|import|export]"
                         .to_string(),
                 );
+            }
+            _ if out.document.is_none() && !a.to_string_lossy().starts_with('-') => {
+                out.document = Some(PathBuf::from(a));
             }
             _ => return Err(format!("unknown argument: {}", a.to_string_lossy())),
         }
@@ -421,6 +435,13 @@ impl eframe::App for Shell {
     }
 }
 
+/// The application icon (`assets/icon`), shown by the window manager and taskbar.
+fn app_icon() -> Option<Arc<egui::IconData>> {
+    eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon/r-cad-256.png"))
+        .ok()
+        .map(Arc::new)
+}
+
 fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
@@ -435,6 +456,7 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("R-CAD")
             .with_app_id("r-cad")
+            .with_icon(app_icon().unwrap_or_default())
             .with_inner_size([1400.0, 860.0])
             .with_maximized(args.maximized),
         // The viewport renders to its own offscreen depth buffer.
@@ -485,6 +507,12 @@ fn main() -> ExitCode {
             {
                 eprintln!("unknown scene '{s}'; known: {:?}", rcad::scenes::SCENES);
             }
+            if let Some(path) = args.document.clone() {
+                app.request(rcad_commands::Command::Open {
+                    path,
+                    safe_mode: false,
+                });
+            }
             Ok(Box::new(Shell {
                 app,
                 shot: args.screenshot.map(|path| Shot {
@@ -507,6 +535,16 @@ fn main() -> ExitCode {
     );
     if let Err(e) = run {
         eprintln!("eframe error: {e}");
+        // No console to read stderr from on Windows (GUI subsystem).
+        #[cfg(windows)]
+        let _ = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("R-CAD could not start")
+            .set_description(format!(
+                "The window could not be created: {e}\n\nR-CAD needs a GPU driver with \
+                 DirectX 12, Vulkan or OpenGL support."
+            ))
+            .show();
         return ExitCode::FAILURE;
     }
     match result.lock().map(|g| g.clone()) {

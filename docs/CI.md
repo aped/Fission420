@@ -17,6 +17,7 @@ ci.yml
 │                                    └─ acceptance+examples
 ├─ macos-arm64 ─── same as Ubuntu without lint   (main, v* tags, PRs into main, manual)
 ├─ windows-x64 ─── same as Ubuntu without lint   (same)
+├─ linux-arm64 ─── same as Ubuntu without lint   (same)
 └─ release (v* tags): needs every leg; draft GitHub release with SHA256SUMS
 ```
 
@@ -26,7 +27,7 @@ ci.yml
 | build | every leg | `check --stage doctest` (last) | `cargo fetch --locked`; release binaries; `cargo nextest archive --workspace --release` → artifact `tests-<leg>`; binaries plus `THIRD_PARTY_LICENSES.txt` → artifact `bin-<leg>` (tarred, so the executable bit survives). `RCAD_GIT_REV` is the short commit, so `--version` reports it. |
 | test k/N | every leg, N shards | none (nextest directly) | Downloads the archive, runs `cargo-nextest nextest run --archive-file … --workspace-remap . --profile ci --partition hash:k/N`. No Rust toolchain, no compilation. JUnit report → artifact `junit-<leg>-<k>`. |
 | acceptance + examples | every leg | `check --stage replay` with `RCAD_CLI=stage/rcad-cli` | Runs the prebuilt CLI (no release build). `rcad-cli acceptance` reads its fixtures from the source tree through compile-time paths, which match because the checkout path is the same as in the build job. First checks that `rcad --version` and `rcad-cli --version` report the version and commit. Ubuntu warns when the replays rewrite committed `examples/`. |
-| package | publishing legs | none | Ubuntu runner for every platform; assembles `r-cad-<version>-<platform>.tar.gz` (`.zip` for Windows) and its `.sha256`. |
+| package | publishing legs | none | `tools/package.sh <platform>`: smoke-tests the binaries, then assembles `r-cad-<version>-<platform>.tar.gz` (`.zip` for Windows), on macOS also `R-CAD.app` in a `.dmg`, each with its `.sha256`. Runs on macOS for the macOS packages (lipo, iconutil, codesign, hdiutil), on the ARM runner for Linux ARM64, on Ubuntu otherwise. |
 | release | `v*` tags | none | Checks every `.sha256`, writes `SHA256SUMS`, creates a **draft** release titled `R-CAD <version>` with all archives and checksums. Publishing the draft is a manual step. |
 
 Each job fails on the first failing command; nothing is retried or masked except the
@@ -54,8 +55,9 @@ nextest retries listed under [Tests](#tests-nextest).
 |---|---|---|---|
 | ubuntu-24.04 | `ubuntu-24.04` | yes | `r-cad-<version>-linux-x86_64.tar.gz` (glibc 2.39 baseline, so it also runs on Debian 13 and current Fedora) |
 | debian-13 | `ubuntu-24.04` + container `debian:trixie` | yes | none (it would need a newer glibc than the Ubuntu build; this leg only gates) |
-| macos-arm64 | `macos-15` (Apple silicon) | yes | `r-cad-<version>-macos-arm64.tar.gz` |
-| windows-x64 | `windows-2025` (MSVC) | yes | `r-cad-<version>-windows-x86_64.zip` |
+| macos-arm64 | `macos-15` (Apple silicon) | yes | `r-cad-<version>-macos-universal.dmg` (`R-CAD.app`) and `.tar.gz`: universal arm64 + x86_64 binaries, macOS 11 or newer. Tests run on the arm64 slice; the package job runs the x86_64 slice under Rosetta (version, byte-identical plate example). |
+| windows-x64 | `windows-2025` (MSVC) | yes | `r-cad-<version>-windows-x86_64.zip`; `rcad.exe` is a GUI-subsystem program with the icon and version resource embedded (`crates/rcad/build.rs`) |
+| linux-arm64 | `ubuntu-24.04-arm` | yes | `r-cad-<version>-linux-aarch64.tar.gz` (main, tags, PRs into main, manual runs only) |
 
 A **non-gating** leg runs everything and shows red when it fails, but its jobs carry
 `continue-on-error`, so the workflow still succeeds. It packages whenever its build
@@ -231,15 +233,20 @@ so they are pure CPU: no display, no GPU, no `WAYLAND_DISPLAY`/`DISPLAY`. The on
 `rcad-viewport/src/gpu_tests.rs`, is `#[ignore]` and skips when no adapter is present. Never
 set `RCAD_WRITE_EXAMPLES` in CI, because it overwrites `examples/`.
 
-### Release archives
+### Release packages
 
 Each archive `r-cad-<version>-<platform>` holds `rcad` and `rcad-cli`, `README.md`,
 `CHANGELOG.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_LICENSES.txt`, the committed
 `examples/`, an empty `artifacts/` (the example workflows export into it) and
 `BUILD_INFO.txt` (version, commit, platform, toolchain, whether the checks gated it, the CI
 run). Next to each archive is `<archive>.sha256`; a tagged release adds `SHA256SUMS` for all
-of them. Builds are unsigned and there are no installers, by design. `tools/release.sh`
-builds the Linux archive locally with the same naming and checksums.
+of them. Linux archives add `share/applications/r-cad.desktop`, the icon and `install.sh`
+(per-user install into `~/.local`). The macOS `.dmg` holds `R-CAD.app` (ad-hoc signed, not
+notarized), a link to `/Applications`, the licences and the examples. Builds are not signed
+with a publisher certificate. `tools/package.sh` makes the same packages from built binaries
+(the `.dmg` only on macOS); `tools/release.sh` builds and smoke-tests the Linux archive
+locally. An AppImage is not built: its runtime statically links libfuse (LGPL-2.1), which
+needs a licence decision first (docs/DEPENDENCIES.md).
 
 R-CAD is MIT OR Apache-2.0. The binaries also embed about 250 third-party crates, all
 permissive or used under a permissive option (docs/DEPENDENCIES.md). Among them are Truck,

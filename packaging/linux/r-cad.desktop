@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=R-CAD
+GenericName=Parametric CAD
+Comment=Local-first parametric mechanical CAD
+Exec=rcad %f
+Icon=r-cad
+Terminal=false
+Categories=Graphics;Engineering;3DGraphics;
+Keywords=CAD;3D;sketch;parametric;STEP;STL;
+StartupWMClass=r-cad

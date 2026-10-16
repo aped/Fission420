@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- R-CAD application icon (original artwork; MIT OR Apache-2.0 like the code). -->
+  <rect x="64" y="64" width="896" height="896" rx="200" ry="200" fill="#2a66c4"/>
+  <!-- Isometric block: top, left and right faces. -->
+  <polygon points="512,232 776,384 512,536 248,384" fill="#f4f8ff" stroke="#0f2f63" stroke-width="10" stroke-linejoin="round"/>
+  <polygon points="248,384 512,536 512,808 248,656" fill="#c9daf6" stroke="#0f2f63" stroke-width="10" stroke-linejoin="round"/>
+  <polygon points="776,384 512,536 512,808 776,656" fill="#97b6e8" stroke="#0f2f63" stroke-width="10" stroke-linejoin="round"/>
+  <!-- Through-hole in the top face (an ellipse in isometric view). -->
+  <ellipse cx="512" cy="384" rx="92" ry="53" fill="#1d4f9e" stroke="#0f2f63" stroke-width="10"/>
+  <!-- Dimension line along the right edge. -->
+  <line x1="826" y1="413" x2="826" y2="685" stroke="#ffb547" stroke-width="16" stroke-linecap="round"/>
+  <line x1="800" y1="398" x2="852" y2="428" stroke="#ffb547" stroke-width="16" stroke-linecap="round"/>
+  <line x1="800" y1="670" x2="852" y2="700" stroke="#ffb547" stroke-width="16" stroke-linecap="round"/>
+</svg>

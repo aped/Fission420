@@ -1,27 +1,64 @@
 # Installing and running R-CAD
 
-Prebuilt archives for Linux x86_64, Windows x64 and macOS ARM64 are attached to each tagged
-GitHub release (`v1.0.0` and later), with SHA-256 checksums. They are built with the `dist`
-profile (fat LTO, one codegen unit) after that platform's tests and example replays passed. To build from source you need a
-stable Rust toolchain, 1.95 or newer (edition 2024; CI pins 1.99.0). Primary target: Linux
-x86_64 on Wayland or X11 with a Vulkan/GL driver (wgpu).
+Prebuilt packages are attached to each tagged GitHub release (`v1.0.0` and later), with
+SHA-256 checksums (`SHA256SUMS`, plus a `.sha256` next to each file). They are built with the
+`dist` profile (fat LTO, one codegen unit) after that platform's tests and example replays
+passed. To build from source you need a stable Rust toolchain, 1.95 or newer (edition 2024;
+CI pins 1.99.0). Primary target: Linux x86_64 on Wayland or X11 with a Vulkan/GL driver
+(wgpu).
 
-## From a GitHub release
+| platform | download | contents |
+|---|---|---|
+| Linux x86_64 | `r-cad-<version>-linux-x86_64.tar.gz` | `rcad`, `rcad-cli`, desktop entry, icon, `install.sh` (glibc 2.39 or newer) |
+| Linux ARM64 | `r-cad-<version>-linux-aarch64.tar.gz` | the same, for 64-bit ARM |
+| macOS 11+ (Apple silicon and Intel) | `r-cad-<version>-macos-universal.dmg` | `R-CAD.app` (universal binary); the `.tar.gz` holds the bare binaries for terminal use |
+| Windows 10/11 x64 | `r-cad-<version>-windows-x86_64.zip` | `rcad.exe` (GUI, with icon), `rcad-cli.exe` |
+
+Every package also carries `README.md`, `CHANGELOG.md`, the licences,
+`THIRD_PARTY_LICENSES.txt`, the example documents and workflows in `examples/`, an empty
+`artifacts/` for the workflows' exports, and `BUILD_INFO.txt` (version, commit, platform,
+toolchain, the CI run). The same packages, built with the ordinary release profile, are also
+kept for 7 days as artifacts of CI runs on `main`.
+
+The packages are not signed with a publisher certificate. Each platform's first-run prompt
+and how to get past it is below.
+
+### Linux
 
 ```bash
 sha256sum -c r-cad-<version>-linux-x86_64.tar.gz.sha256    # or: sha256sum -c SHA256SUMS
 tar xzf r-cad-<version>-linux-x86_64.tar.gz
 cd r-cad-<version>-linux-x86_64
 ./rcad --version
-./rcad                           # GUI
-./rcad-cli run examples/plate_workflow.json     # writes into artifacts/
+./install.sh                     # optional: ~/.local/bin + application menu entry
+rcad                             # GUI (or ./rcad without installing)
+rcad-cli run examples/plate_workflow.json     # writes into artifacts/
 ```
 
-A release archive (`.zip` on Windows) holds `rcad` and `rcad-cli`, `README.md`,
-`CHANGELOG.md`, the licences and `THIRD_PARTY_LICENSES.txt`, the example documents and
-workflows in `examples/`, an empty `artifacts/` for the workflows' exports, and
-`BUILD_INFO.txt` (version, commit, platform, toolchain, the CI run). The same archives, built
-with the ordinary release profile, are also kept for 7 days as artifacts of CI runs on `main`.
+`./install.sh --uninstall` removes it again; `PREFIX=/usr/local ./install.sh` (as root)
+installs system-wide. Runtime libraries come from the system (Wayland or X11, xkbcommon,
+Vulkan or GL); nothing else is needed.
+
+### macOS
+
+Open the `.dmg` and drag **R-CAD** to **Applications**. The app is ad-hoc signed but not
+notarized, so the first launch is blocked: Control-click (or right-click) R-CAD in
+Applications, choose **Open**, then **Open** again; or on macOS 15 allow it under **System
+Settings → Privacy & Security**. From a terminal, `xattr -dr com.apple.quarantine
+/Applications/R-CAD.app` does the same. The command-line tool is inside the bundle:
+`/Applications/R-CAD.app/Contents/MacOS/rcad-cli`.
+
+### Windows
+
+Unzip anywhere and run `rcad.exe`. SmartScreen may show "Windows protected your PC" for an
+unsigned download: choose **More info → Run anyway**. `rcad.exe` is a windowed program and
+prints nothing to an interactive console; use `rcad-cli.exe` in a terminal
+(`rcad-cli.exe --version`, `rcad-cli.exe run examples\plate_workflow.json`).
+
+### Opening a document
+
+`rcad <file.rcad.json>` opens that document at startup, so "Open with R-CAD" works from
+Linux file managers and Windows Explorer.
 
 ## From a locally built archive
 

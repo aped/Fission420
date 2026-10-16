@@ -1,9 +1,10 @@
 # Cross-platform CI: the local gate (`cargo xtask check`: layout, public text, fmt,
 # clippy -D warnings, release tests, doc tests, headless acceptance, example replays) split
-# into parallel jobs per platform (check.yml), plus release archives.
+# into parallel jobs per platform (check.yml), plus release packages.
 #
-# Linux legs run on every push and PR. Windows and macOS, and archive publishing, run on main,
-# v* tags, PRs into main and manual runs. Docs-only changes do not trigger CI.
+# Linux x86_64 legs run on every push and PR. Windows, macOS and Linux ARM64, and package
+# publishing, run on main, v* tags, PRs into main and manual runs. Docs-only changes do not
+# trigger CI.
 # Pipeline shape, platform notes and how to change gating: docs/CI.md.
 name: CI
 
@@ -72,7 +73,12 @@ jobs:
             gate: true
           - name: macos-arm64
             os: macos-15
-            artifact: macos-arm64
+            # Universal binary (arm64 + x86_64) in a .dmg and a .tar.gz.
+            artifact: macos-universal
+            gate: true
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            artifact: linux-aarch64
             gate: true
     uses: ./.github/workflows/check.yml
     with:
@@ -104,7 +110,7 @@ jobs:
           shopt -s nullglob
           # Every archive carries its own .sha256; check them, then list all in SHA256SUMS.
           sha256sum -c -- *.sha256
-          sha256sum -- *.tar.gz *.zip > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip *.dmg > SHA256SUMS
           cat SHA256SUMS
           gh release create "${GITHUB_REF_NAME}" ./* \
             --repo "${GITHUB_REPOSITORY}" --draft --generate-notes \

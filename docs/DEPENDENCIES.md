@@ -19,6 +19,12 @@ Each is limited to the named crate in `deny.toml`.
 | unicode-ident | (MIT OR Apache-2.0) AND Unicode-3.0 | Unicode character tables; the Unicode License v3 is permissive with a notice. |
 | clipboard-win, error-code | BSL-1.0 | Windows clipboard (egui-winit → arboard), Windows builds only. The Boost Software License is permissive; its notice is only required in source distributions. |
 
+### Pending decision: AppImage runtime
+
+An AppImage would embed the AppImage type 2 runtime (MIT), which statically links libfuse
+(LGPL-2.1). That is outside the default licence policy, so Linux releases ship as a tar.gz
+with a desktop entry and `install.sh` instead, until the project decides on it.
+
 ### Advisories accepted for now
 
 | advisory | crate | why it is accepted |
@@ -36,6 +42,7 @@ Each is limited to the named crate in `deny.toml`.
 | rfd | 0.17.2 (features `xdg-portal`, `wayland`; no GTK) | MIT | https://github.com/PolyMeilex/rfd | rcad (Browse… file dialogs; on Linux through the XDG desktop portal over D-Bus, pure Rust) |
 | pollster | 0.4.0 (transitive) | Apache-2.0 OR MIT | crates.io (via rfd) | rcad |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash (already in the tree via truck-shapeops) | rcad-kernel (Fx hashing of the tessellation's vertex-weld and edge maps) |
+| winresource | 0.1.34 (build-only, Windows hosts; default-features off, no dependencies) | MIT | https://github.com/BenjaminRi/winresource | rcad (embeds the application icon and version information in `rcad.exe` with the Windows SDK resource compiler) |
 
 (Updated as crates are added; see section below for the GUI stack.)
 

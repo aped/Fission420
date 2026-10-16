@@ -46,6 +46,9 @@ env:
   # Keep in step with tools/ci/container_check.sh.
   DEBIAN_PACKAGES: >-
     ca-certificates curl git build-essential python3 fonts-liberation
+  # Oldest macOS the binaries support (both slices of the universal build); matches
+  # LSMinimumSystemVersion in packaging/macos/Info.plist.
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
   # Pinned cargo-deny for the lint job's supply-chain check (deny.toml).
   CARGO_DENY_VERSION: "0.20.2"
   # Caches are written by main only; other branches and PRs restore main's caches. This
@@ -107,6 +110,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # macOS packages are universal (arm64 + x86_64).
+          targets: ${{ startsWith(inputs.os, 'macos') && inputs.publish && 'x86_64-apple-darwin' || '' }}
 
       - uses: taiki-e/install-action@v2.87.28
         with:
@@ -154,12 +159,29 @@ jobs:
           retention-days: 1
           compression-level: 0 # zstd already
 
+      - name: Build the Intel macOS slice
+        # Published macOS packages are universal binaries. Built after the test archive is
+        # uploaded, so the shards start first; tests run on the arm64 slice and the package
+        # job smoke-tests the x86_64 slice under Rosetta.
+        if: startsWith(inputs.os, 'macos') && inputs.publish
+        run: |
+          cargo build --profile "$BIN_PROFILE" --locked --target x86_64-apple-darwin -p rcad -p rcad-cli
+          echo "MAC_UNIVERSAL=1" >> "$GITHUB_ENV"
+
       - name: Stage the binaries
         run: |
           mkdir -p stage
           exe=""
           if [ "$RUNNER_OS" = "Windows" ]; then exe=".exe"; fi
-          cp "target/$BIN_PROFILE/rcad$exe" "target/$BIN_PROFILE/rcad-cli$exe" stage/
+          for b in rcad rcad-cli; do
+            if [ "${MAC_UNIVERSAL:-}" = 1 ]; then
+              lipo -create -output "stage/$b" "target/$BIN_PROFILE/$b" \
+                "target/x86_64-apple-darwin/$BIN_PROFILE/$b"
+              lipo -info "stage/$b"
+            else
+              cp "target/$BIN_PROFILE/$b$exe" stage/
+            fi
+          done
           py=python3; command -v python3 >/dev/null || py=python
           "$py" tools/ci/third_party_licenses.py "$(rustc -vV | sed -n 's/^host: //p')" \
             stage/THIRD_PARTY_LICENSES.txt
@@ -310,8 +332,10 @@ jobs:
       !cancelled() && inputs.publish && inputs.artifact != ''
       && needs.build.result == 'success'
       && (!inputs.gate || (needs.test.result == 'success' && needs.replay.result == 'success'))
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # macOS packages need macOS tools (lipo, iconutil, codesign, hdiutil); the others are
+    # archives, made on Linux (an ARM runner for the ARM binaries, to smoke-test them).
+    runs-on: ${{ (startsWith(inputs.os, 'macos') || inputs.os == 'ubuntu-24.04-arm') && inputs.os || 'ubuntu-24.04' }}
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -320,27 +344,37 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: bin-${{ inputs.name }}
+      - name: Smoke-test the binaries
+        run: |
+          tar -xf bin.tar
+          case "${{ inputs.artifact }}" in
+            windows-*) exit 0 ;; # packaged on Linux; tested by the replay job
+            macos-*)
+              lipo -info stage/rcad
+              ./stage/rcad-cli --version
+              # The x86_64 slice, under Rosetta when the runner has it.
+              if arch -x86_64 /usr/bin/true 2>/dev/null; then
+                arch -x86_64 ./stage/rcad-cli --version
+                mkdir -p smoke/artifacts && cp -r examples smoke/
+                (cd smoke && arch -x86_64 ../stage/rcad-cli run examples/plate_workflow.json >/dev/null)
+                cmp smoke/examples/plate.rcad.json examples/plate.rcad.json
+                echo "x86_64 slice: plate example byte-identical under Rosetta"
+              else
+                echo "::warning::no Rosetta on this runner; the x86_64 slice was not run"
+              fi ;;
+            *) ./stage/rcad-cli --version ;;
+          esac
       - name: Package
         env:
           VERSION: ${{ needs.build.outputs.version }}
           REV: ${{ needs.build.outputs.rev }}
-          PLATFORM: ${{ inputs.artifact }}
-          WINDOWS: ${{ startsWith(inputs.os, 'windows') }}
           GATE: ${{ inputs.gate }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          name="r-cad-$VERSION-$PLATFORM"
-          tar -xf bin.tar
-          mkdir -p "dist/$name"
-          mv stage/* "dist/$name/"
-          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          cp -r examples "dist/$name/examples"
-          # The example workflows export into artifacts/, which the CLI does not create.
-          mkdir -p "dist/$name/artifacts" && touch "dist/$name/artifacts/.keep"
           {
             echo "R-CAD $VERSION ($REV)"
             echo "commit: ${GITHUB_SHA}"
-            echo "platform: ${{ inputs.name }}"
+            echo "platform: ${{ inputs.name }} (${{ inputs.artifact }})"
             echo "toolchain: ${RUST_TOOLCHAIN}"
             if [ "$GATE" = "true" ]; then
               echo "checks: passed (tests, acceptance, example replays)"
@@ -348,18 +382,9 @@ jobs:
               echo "checks: not required for this platform; results in the CI run"
             fi
             echo "CI run: $RUN_URL"
-            echo "Unsigned build, not an installer. See docs/INSTALL.md in the repository."
-          } > "dist/$name/BUILD_INFO.txt"
-          cd dist
-          if [ "$WINDOWS" = "true" ]; then
-            archive="$name.zip"
-            zip -qr "$archive" "$name"
-          else
-            archive="$name.tar.gz"
-            tar czf "$archive" "$name"
-          fi
-          sha256sum "$archive" > "$archive.sha256"
-          cat "$archive.sha256"
+            echo "Unsigned build (macOS: ad-hoc signed). See docs/INSTALL.md in the repository."
+          } > "$RUNNER_TEMP/BUILD_INFO.txt"
+          BUILD_INFO="$RUNNER_TEMP/BUILD_INFO.txt" tools/package.sh "${{ inputs.artifact }}" stage dist
 
       - uses: actions/upload-artifact@v7
         with:
@@ -367,6 +392,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.dmg
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
