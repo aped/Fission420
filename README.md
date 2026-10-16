@@ -86,7 +86,9 @@ Each tagged version (`v*`) gets a GitHub release with packages for **Linux x86_6
 **Linux ARM64** (archive with a desktop entry and `install.sh`, or an AppImage), **macOS** (universal
 `R-CAD.app` for Apple silicon and Intel, in a `.dmg`) and **Windows x64** (zip; `rcad.exe`
 with its icon), built with the whole-program-optimised `dist` profile, with a `.sha256` per
-file and a `SHA256SUMS` for all of them. They are not signed with a publisher certificate.
+file, a `SHA256SUMS` for all of them and a Sigstore-signed build provenance attestation per
+file (`gh attestation verify <file> -R aped/R-CAD`). They are not yet signed with a
+publisher certificate.
 CI also publishes the same packages (release profile) from `main`, pull requests into `main`
 and manual runs (Actions → CI → a run → *Artifacts*; kept 7 days). Each holds `rcad`,
 `rcad-cli`, the README, changelog and licences, the example documents and a `BUILD_INFO.txt`

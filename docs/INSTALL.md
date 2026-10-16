@@ -24,6 +24,18 @@ kept for 7 days as artifacts of CI runs on `main`.
 The packages are not signed with a publisher certificate. Each platform's first-run prompt
 and how to get past it is below.
 
+### Verifying a download
+
+Every package of a tagged release has a build provenance attestation, signed through
+Sigstore by the release workflow: it ties the file's SHA-256 to this repository, the tag and
+the CI run that built it. With the GitHub CLI:
+
+```bash
+gh attestation verify r-cad-<version>-linux-x86_64.tar.gz -R aped/R-CAD
+```
+
+The checksums alone (`sha256sum -c SHA256SUMS`) only show that the download is intact.
+
 ### Linux
 
 ```bash
