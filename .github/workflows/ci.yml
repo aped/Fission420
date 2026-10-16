@@ -110,7 +110,7 @@ jobs:
           shopt -s nullglob
           # Every archive carries its own .sha256; check them, then list all in SHA256SUMS.
           sha256sum -c -- *.sha256
-          sha256sum -- *.tar.gz *.zip *.dmg > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip *.dmg *.AppImage > SHA256SUMS
           cat SHA256SUMS
           gh release create "${GITHUB_REF_NAME}" ./* \
             --repo "${GITHUB_REPOSITORY}" --draft --generate-notes \

@@ -63,7 +63,7 @@ build, and breaking changes to commands or files wait for 2.0.
 - **Packages for each platform:** an application icon; a universal macOS `R-CAD.app`
   (Apple silicon and Intel) in a `.dmg`; a Windows `rcad.exe` that opens no console window
   and carries its icon and version information; Linux archives for x86_64 and ARM64 with a
-  desktop entry and `install.sh`. `rcad <document>` opens a document at startup.
+  desktop entry and `install.sh`, and an AppImage for each. `rcad <document>` opens a document at startup.
 - **CI:** a fast lint job, one test binary per crate (test build about 4x faster, test
   archive 10x smaller), sharded nextest runs, Linux, Windows and macOS all test-gated,
   and release archives with SHA-256 checksums. A Linux leg takes about 11 minutes, down

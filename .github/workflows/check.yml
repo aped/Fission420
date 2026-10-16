@@ -393,6 +393,7 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.dmg
+            dist/*.AppImage
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7

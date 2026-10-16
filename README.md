@@ -83,7 +83,7 @@ More in [`docs/screenshots/`](docs/screenshots).
 ### Prebuilt binaries
 
 Each tagged version (`v*`) gets a GitHub release with packages for **Linux x86_64** and
-**Linux ARM64** (archive with a desktop entry and `install.sh`), **macOS** (universal
+**Linux ARM64** (archive with a desktop entry and `install.sh`, or an AppImage), **macOS** (universal
 `R-CAD.app` for Apple silicon and Intel, in a `.dmg`) and **Windows x64** (zip; `rcad.exe`
 with its icon), built with the whole-program-optimised `dist` profile, with a `.sha256` per
 file and a `SHA256SUMS` for all of them. They are not signed with a publisher certificate.

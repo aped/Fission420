@@ -19,11 +19,17 @@ Each is limited to the named crate in `deny.toml`.
 | unicode-ident | (MIT OR Apache-2.0) AND Unicode-3.0 | Unicode character tables; the Unicode License v3 is permissive with a notice. |
 | clipboard-win, error-code | BSL-1.0 | Windows clipboard (egui-winit → arboard), Windows builds only. The Boost Software License is permissive; its notice is only required in source distributions. |
 
-### Pending decision: AppImage runtime
+### Distributed with the Linux AppImage: the AppImage runtime
 
-An AppImage would embed the AppImage type 2 runtime (MIT), which statically links libfuse
-(LGPL-2.1). That is outside the default licence policy, so Linux releases ship as a tar.gz
-with a desktop entry and `install.sh` instead, until the project decides on it.
+The `.AppImage` packages start with the AppImage type 2 runtime
+(https://github.com/AppImage/type2-runtime, release 20251108, pinned by checksum in
+`tools/package.sh`), an MIT-licensed launcher that mounts the image. The runtime statically
+links libfuse (LGPL-2.1), musl, squashfuse, zstd and zlib. It is a separate program
+aggregated in the same file: R-CAD does not link those libraries and its licence is
+unaffected. Accepted as an exception to the permissive-only policy, for this file only, with
+the LGPL obligations met: the LGPL-2.1 text, the runtime's licence file and a notice with the
+source link ship in `usr/share/doc/r-cad` inside the image, and **About R-CAD** shows the
+notice and links when running from an AppImage.
 
 ### Advisories accepted for now
 

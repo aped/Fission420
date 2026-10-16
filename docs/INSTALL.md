@@ -11,6 +11,7 @@ CI pins 1.99.0). Primary target: Linux x86_64 on Wayland or X11 with a Vulkan/GL
 |---|---|---|
 | Linux x86_64 | `r-cad-<version>-linux-x86_64.tar.gz` | `rcad`, `rcad-cli`, desktop entry, icon, `install.sh` (glibc 2.39 or newer) |
 | Linux ARM64 | `r-cad-<version>-linux-aarch64.tar.gz` | the same, for 64-bit ARM |
+| Linux (single file) | `r-cad-<version>-linux-x86_64.AppImage`, `…-linux-aarch64.AppImage` | the GUI as one executable file; no installation |
 | macOS 11+ (Apple silicon and Intel) | `r-cad-<version>-macos-universal.dmg` | `R-CAD.app` (universal binary); the `.tar.gz` holds the bare binaries for terminal use |
 | Windows 10/11 x64 | `r-cad-<version>-windows-x86_64.zip` | `rcad.exe` (GUI, with icon), `rcad-cli.exe` |
 
@@ -34,6 +35,11 @@ cd r-cad-<version>-linux-x86_64
 rcad                             # GUI (or ./rcad without installing)
 rcad-cli run examples/plate_workflow.json     # writes into artifacts/
 ```
+
+Or the AppImage: `chmod +x r-cad-<version>-linux-x86_64.AppImage` and run it. It needs FUSE
+(present on most desktops; otherwise run it with `APPIMAGE_EXTRACT_AND_RUN=1`). Its launcher,
+the AppImage runtime, contains LGPL-2.1 code (libfuse); the notice is in About R-CAD and in
+`usr/share/doc/r-cad` inside the image.
 
 `./install.sh --uninstall` removes it again; `PREFIX=/usr/local ./install.sh` (as root)
 installs system-wide. Runtime libraries come from the system (Wayland or X11, xkbcommon,

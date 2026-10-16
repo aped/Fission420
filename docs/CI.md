@@ -27,7 +27,7 @@ ci.yml
 | build | every leg | `check --stage doctest` (last) | `cargo fetch --locked`; release binaries; `cargo nextest archive --workspace --release` → artifact `tests-<leg>`; binaries plus `THIRD_PARTY_LICENSES.txt` → artifact `bin-<leg>` (tarred, so the executable bit survives). `RCAD_GIT_REV` is the short commit, so `--version` reports it. |
 | test k/N | every leg, N shards | none (nextest directly) | Downloads the archive, runs `cargo-nextest nextest run --archive-file … --workspace-remap . --profile ci --partition hash:k/N`. No Rust toolchain, no compilation. JUnit report → artifact `junit-<leg>-<k>`. |
 | acceptance + examples | every leg | `check --stage replay` with `RCAD_CLI=stage/rcad-cli` | Runs the prebuilt CLI (no release build). `rcad-cli acceptance` reads its fixtures from the source tree through compile-time paths, which match because the checkout path is the same as in the build job. First checks that `rcad --version` and `rcad-cli --version` report the version and commit. Ubuntu warns when the replays rewrite committed `examples/`. |
-| package | publishing legs | none | `tools/package.sh <platform>`: smoke-tests the binaries, then assembles `r-cad-<version>-<platform>.tar.gz` (`.zip` for Windows), on macOS also `R-CAD.app` in a `.dmg`, each with its `.sha256`. Runs on macOS for the macOS packages (lipo, iconutil, codesign, hdiutil), on the ARM runner for Linux ARM64, on Ubuntu otherwise. |
+| package | publishing legs | none | `tools/package.sh <platform>`: smoke-tests the binaries, then assembles `r-cad-<version>-<platform>.tar.gz` (`.zip` for Windows), on macOS also `R-CAD.app` in a `.dmg`, on Linux also an `.AppImage`, each with its `.sha256`. Runs on macOS for the macOS packages (lipo, iconutil, codesign, hdiutil), on the ARM runner for Linux ARM64, on Ubuntu otherwise. |
 | release | `v*` tags | none | Checks every `.sha256`, writes `SHA256SUMS`, creates a **draft** release titled `R-CAD <version>` with all archives and checksums. Publishing the draft is a manual step. |
 
 Each job fails on the first failing command; nothing is retried or masked except the
@@ -245,8 +245,9 @@ of them. Linux archives add `share/applications/r-cad.desktop`, the icon and `in
 notarized), a link to `/Applications`, the licences and the examples. Builds are not signed
 with a publisher certificate. `tools/package.sh` makes the same packages from built binaries
 (the `.dmg` only on macOS); `tools/release.sh` builds and smoke-tests the Linux archive
-locally. An AppImage is not built: its runtime statically links libfuse (LGPL-2.1), which
-needs a licence decision first (docs/DEPENDENCIES.md).
+locally. Linux legs also build `r-cad-<version>-<platform>.AppImage` with the pinned
+appimagetool and runtime (checksums in `tools/package.sh`); the runtime's LGPL-2.1 notice is
+covered in docs/DEPENDENCIES.md.
 
 R-CAD is MIT OR Apache-2.0. The binaries also embed about 250 third-party crates, all
 permissive or used under a permissive option (docs/DEPENDENCIES.md). Among them are Truck,

@@ -2643,6 +2643,17 @@ impl RcadApp {
                      derived from it. Third-party components and their licenses are \
                      listed in docs/DEPENDENCIES.md.",
                 );
+                // The AppImage runtime sets $APPIMAGE for the program it starts.
+                if std::env::var_os("APPIMAGE").is_some() {
+                    ui.separator();
+                    ui.small(about::APPIMAGE_NOTICE);
+                    crate::form::row(ui, "Runtime source:", |ui| {
+                        ui.hyperlink(about::APPIMAGE_RUNTIME_SOURCE);
+                    });
+                    crate::form::row(ui, "libfuse license:", |ui| {
+                        ui.hyperlink(about::LGPL_URL);
+                    });
+                }
             });
         self.shell.show_about = open;
     }
@@ -2658,6 +2669,16 @@ mod about {
         [] => "https://github.com/aped/R-CAD",
         _ => env!("CARGO_PKG_REPOSITORY"),
     };
+    /// Shown when running from the AppImage: its launcher is a separate program that
+    /// mounts the image; R-CAD itself links none of these libraries.
+    pub const APPIMAGE_NOTICE: &str = "This AppImage starts R-CAD through the AppImage \
+        runtime (MIT), a separate launcher that statically links libfuse (LGPL-2.1), musl, \
+        squashfuse, zstd and zlib. R-CAD does not link these libraries. The license texts \
+        are in usr/share/doc/r-cad inside the AppImage.";
+    /// The exact runtime release tools/package.sh embeds.
+    pub const APPIMAGE_RUNTIME_SOURCE: &str =
+        "https://github.com/AppImage/type2-runtime/tree/20251108";
+    pub const LGPL_URL: &str = "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html";
 }
 
 thread_local! {
