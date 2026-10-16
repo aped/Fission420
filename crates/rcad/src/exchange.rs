@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::print::{
     BedPreset, BedSpec, BodyPlacement, ExportReport, Layout, Orient, Placement, PrintOptions,
 };
@@ -332,7 +332,7 @@ impl RcadApp {
             }
             None => {
                 ui.colored_label(
-                    Color32::from_rgb(255, 200, 120),
+                    crate::theme::of(ui).warn,
                     "Unsupported extension: import supports .step / .stp, .stl, .3mf, .dxf and .svg",
                 );
             }
@@ -395,7 +395,7 @@ impl RcadApp {
         }
         if let Some(e) = &form.error {
             ui.colored_label(
-                Color32::from_rgb(255, 110, 110),
+                crate::theme::of(ui).bad,
                 format!("Import failed, the document is unchanged: {e}"),
             );
         }
@@ -503,7 +503,7 @@ impl RcadApp {
                 .join(", ")
         ));
         if let Some(b) = &blocker {
-            ui.colored_label(Color32::from_rgb(255, 200, 120), b);
+            ui.colored_label(crate::theme::of(ui).warn, b);
         }
         blocker
     }
@@ -542,7 +542,7 @@ impl RcadApp {
                 {
                     let warn = n.starts_with("warning") || n.starts_with("skipped");
                     if warn {
-                        ui.colored_label(Color32::from_rgb(255, 200, 120), n);
+                        ui.colored_label(crate::theme::of(ui).warn, n);
                     } else {
                         ui.small(n);
                     }
@@ -827,7 +827,7 @@ impl RcadApp {
     /// Body of the Export STL / Export 3MF dialog. Returns true when OK may be pressed.
     pub(crate) fn print_export_ui(&self, ui: &mut egui::Ui, form: &mut PrintForm) -> bool {
         use rcad_exchange::threemf::ThreeMfUnit as U;
-        let warn = Color32::from_rgb(255, 200, 120);
+        let warn = crate::theme::of(ui).warn;
         let mut ok = true;
         if form.stl {
             crate::panels::path_field(
@@ -1040,7 +1040,7 @@ impl RcadApp {
         }
         if let Some(e) = &form.error {
             ui.colored_label(
-                Color32::from_rgb(255, 110, 110),
+                crate::theme::of(ui).bad,
                 format!("Export failed, nothing written: {e}"),
             );
         }
@@ -1098,7 +1098,7 @@ fn print_report_ui(ui: &mut egui::Ui, r: &ExportReport) {
         ui.small(format!("{} ({} bytes)", f.path.display(), f.bytes));
     }
     for w in &r.warnings {
-        ui.colored_label(Color32::from_rgb(255, 200, 120), w);
+        ui.colored_label(crate::theme::of(ui).warn, w);
     }
 }
 

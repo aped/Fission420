@@ -7,7 +7,7 @@
 //! document unchanged and the error is shown here with the failing name.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::Command;
 use rcad_document::ParamUnit;
 
@@ -288,7 +288,7 @@ impl RcadApp {
         if let Some(e) = &self.params.error {
             ui.label(
                 RichText::new(format!("Refused, the model is unchanged: {e}"))
-                    .color(Color32::from_rgb(255, 110, 110))
+                    .color(crate::theme::of(ui).bad)
                     .small(),
             );
         }

@@ -35,7 +35,7 @@ pub use overlay::{
     Overlay, OverlayLabel, OverlayPolyline, overlay_shapes, paint_overlay, ray_plane,
 };
 pub use pick::{Pick, PickEdge, PickScene, PickVertex, PixelTolerance};
-pub use triad::{axis_triad_origin, axis_triad_shapes};
+pub use triad::{axis_triad_origin, axis_triad_shapes, axis_triad_shapes_on};
 
 /// Tint palette index of highlighted assembly occurrences.
 pub const TINT_HIGHLIGHT: u8 = 8;
@@ -62,8 +62,10 @@ const EDGE_COLOR: [f32; 4] = [0.03, 0.035, 0.05, 0.9];
 const EDGE_COLOR_DIMMED: [f32; 4] = [0.03, 0.035, 0.05, 0.25];
 /// How far a dimmed body is blended toward the background.
 const DIM_AMOUNT: f32 = 0.55;
-/// Gamma-encoded clear colour.
+/// Gamma-encoded clear colour (dark backdrop).
 const CLEAR_COLOR: [f64; 3] = [0.15, 0.16, 0.18];
+/// Gamma-encoded clear colour of the light backdrop.
+const CLEAR_COLOR_LIGHT: [f64; 3] = [0.87, 0.88, 0.90];
 const DEFAULT_ASPECT: f32 = 1.5;
 /// Assumed viewport height (points) before the first frame.
 const DEFAULT_HEIGHT: f32 = 600.0;
@@ -103,6 +105,8 @@ pub struct Viewport {
     section: Option<SectionPlane>,
     /// Display style: draw feature edges over the shading.
     show_edges: bool,
+    /// Light backdrop (light background, darker grid) for the light UI theme.
+    light: bool,
 }
 
 impl Viewport {
@@ -134,6 +138,7 @@ impl Viewport {
             primary_navigates: true,
             section: None,
             show_edges: true,
+            light: false,
         };
         vp.update_grid();
         vp
@@ -326,7 +331,7 @@ impl Viewport {
         let size = [px(rect.width()), px(rect.height())];
         let uniforms = self.uniforms(self.last_aspect);
         let painter = ui.painter().with_clip_rect(rect);
-        if let Some(tex) = self.gpu.render(size, &uniforms, CLEAR_COLOR) {
+        if let Some(tex) = self.gpu.render(size, &uniforms, self.clear_color()) {
             painter.image(
                 tex,
                 rect,
@@ -334,7 +339,7 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
-        painter.extend(axis_triad_shapes(&self.camera, rect));
+        painter.extend(axis_triad_shapes_on(&self.camera, rect, self.light));
         response
     }
 
@@ -371,12 +376,39 @@ impl Viewport {
     }
 
     fn current_grid_spec(&self) -> GridSpec {
-        GridSpec::new(
-            self.grid_plane,
-            &self.camera,
-            self.view_height(),
-            self.last_aspect,
-        )
+        GridSpec {
+            light: self.light,
+            ..GridSpec::new(
+                self.grid_plane,
+                &self.camera,
+                self.view_height(),
+                self.last_aspect,
+            )
+        }
+    }
+
+    /// Light backdrop (light grey background, darker grid lines and axes) to
+    /// match a light UI theme; the dark one is the default. Dimmed bodies fade
+    /// toward whichever background is shown.
+    pub fn set_light_backdrop(&mut self, light: bool) {
+        if self.light != light {
+            self.light = light;
+            self.update_grid();
+        }
+    }
+
+    /// Whether the light backdrop is shown.
+    pub fn light_backdrop(&self) -> bool {
+        self.light
+    }
+
+    /// Gamma-encoded background colour of the current backdrop.
+    pub fn clear_color(&self) -> [f64; 3] {
+        if self.light {
+            CLEAR_COLOR_LIGHT
+        } else {
+            CLEAR_COLOR
+        }
     }
 
     /// Rebuild grid lines if spacing, plane, centre or extent changed.
@@ -463,7 +495,7 @@ impl Viewport {
         let eye = self.camera.eye();
         let hl = self.highlight;
         let (near, far) = self.clip_range();
-        let bg = CLEAR_COLOR.map(|c| (c as f32).powf(2.2));
+        let bg = self.clear_color().map(|c| (c as f32).powf(2.2));
         Uniforms {
             view_proj: self.camera.view_proj_near_far(aspect, near, far),
             eye: [eye[0], eye[1], eye[2], 1.0],

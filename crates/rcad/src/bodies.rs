@@ -287,9 +287,9 @@ impl RcadApp {
                     });
                 }
                 let (badge, col) = match (&b.source, b.kind.as_str()) {
-                    (_, "mesh") => ("mesh", Color32::from_rgb(220, 190, 120)),
-                    (_, "surface") => ("open surface", Color32::from_rgb(255, 200, 120)),
-                    (BodySource::ImportedStep { .. }, _) => ("STEP", Color32::from_rgb(150, 200, 255)),
+                    (_, "mesh") => ("mesh", crate::theme::of(ui).warn),
+                    (_, "surface") => ("open surface", crate::theme::of(ui).warn),
+                    (BodySource::ImportedStep { .. }, _) => ("STEP", crate::theme::of(ui).info),
                     _ => ("solid", Color32::GRAY),
                 };
                 ui.label(RichText::new(badge).small().color(col))
@@ -382,7 +382,7 @@ impl RcadApp {
             self.mesh_repair_ui(ui, b.id);
             self.mesh_edit_ui(ui, b.id);
             ui.colored_label(
-                Color32::from_rgb(255, 200, 120),
+                crate::theme::of(ui).warn,
                 "mesh: exact operations unavailable (no sketching on its faces, no join/cut, no STEP export). Display, hide/show, mesh repair/edit, save and STL/3MF export only.",
             );
         } else if !matches!(b.source, BodySource::Modeled) {
@@ -471,7 +471,7 @@ impl RcadApp {
             }
             (None, None) if b.measure_error.is_some() => {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 170, 90),
+                    crate::theme::of(ui).caution,
                     format!(
                         "Measurement failed for this geometry (not retried until the body changes): {}",
                         b.measure_error.as_deref().unwrap_or_default()
@@ -604,7 +604,7 @@ impl RcadApp {
         };
         let Some(p) = &bm.properties else {
             ui.colored_label(
-                Color32::from_rgb(255, 170, 90),
+                crate::theme::of(ui).caution,
                 format!(
                     "Mass properties unavailable: {}",
                     bm.error.as_deref().unwrap_or("unknown")
@@ -617,7 +617,7 @@ impl RcadApp {
             ui.small(format!("Exact boundary integral ({:?})", p.method));
         } else {
             ui.colored_label(
-                Color32::from_rgb(255, 200, 120),
+                crate::theme::of(ui).warn,
                 format!(
                     "Estimate ({:?}): volume ±{} mm³, centre ±{} mm",
                     p.method,

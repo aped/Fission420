@@ -120,13 +120,20 @@ pub fn paint_overlay(
     let painter = painter.with_clip_rect(rect);
     painter.extend(overlay_shapes(camera, rect, overlay));
     let (w, h) = (rect.width(), rect.height());
+    // Label chips follow the UI theme (dark chip on the dark backdrop, light
+    // chip on the light one); callers pick label colours to match.
+    let chip = if painter.ctx().theme() == egui::Theme::Dark {
+        egui::Color32::from_black_alpha(170)
+    } else {
+        egui::Color32::from_white_alpha(225)
+    };
     for l in &overlay.labels {
         if let Some([x, y]) = camera.project(l.at, w, h) {
             let pos = rect.min + egui::vec2(x + 10.0, y + 6.0);
             let galley =
                 painter.layout_no_wrap(l.text.clone(), egui::FontId::proportional(14.0), l.color);
             let bg = egui::Rect::from_min_size(pos, galley.size()).expand(3.0);
-            painter.rect_filled(bg, 3.0, egui::Color32::from_black_alpha(170));
+            painter.rect_filled(bg, 3.0, chip);
             painter.galley(pos, galley, l.color);
         }
     }

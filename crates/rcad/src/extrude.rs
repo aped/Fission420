@@ -630,15 +630,10 @@ impl RcadApp {
         ) else {
             return;
         };
+        let pal = crate::theme::of_ctx(painter.ctx());
         let (fill, line) = match pv.op {
-            ExtrudeOp::Cut => (
-                Color32::from_rgba_unmultiplied(255, 90, 90, 55),
-                Color32::from_rgb(255, 120, 120),
-            ),
-            _ => (
-                Color32::from_rgba_unmultiplied(110, 220, 140, 55),
-                Color32::from_rgb(130, 230, 160),
-            ),
+            ExtrudeOp::Cut => (pal.cut_fill, pal.cut_stroke),
+            _ => (pal.join_fill, pal.join_stroke),
         };
         let n = a.len();
         let mut mesh = egui::Mesh::default();
@@ -695,7 +690,7 @@ impl RcadApp {
                     &pv.loops_2d,
                     &frame,
                     &proj_fn(self, rect),
-                    Color32::from_rgba_unmultiplied(255, 200, 60, 90),
+                    pal.pick_fill,
                 );
             }
         }
@@ -818,13 +813,13 @@ impl RcadApp {
             ui.small("Or click inside a region on the sketch plane in the 3D view. The picked region is shaded; it is stored by its bounding entities and survives dimension edits.");
             if form.region.is_none() && !whole_ok {
                 ui.colored_label(
-                    Color32::from_rgb(255, 200, 120),
+                    crate::theme::of(ui).warn,
                     "This sketch has several separate or nested loops: pick the region to extrude.",
                 );
             }
         } else if let Some(e) = s.and_then(|s| s.profile_error.clone()) {
             ui.colored_label(
-                Color32::from_rgb(255, 110, 110),
+                crate::theme::of(ui).bad,
                 format!("This sketch's profile is not usable: {e}"),
             );
         }
@@ -864,7 +859,7 @@ impl RcadApp {
                 });
             if form.target.is_none() {
                 ui.colored_label(
-                    Color32::from_rgb(255, 200, 120),
+                    crate::theme::of(ui).warn,
                     if breps.is_empty() {
                         "There is no solid body to join to or cut (mesh bodies cannot take part)."
                     } else {

@@ -9,7 +9,7 @@
 //! chosen frame, and commits one `SetSketchPlane` (one undo step). The sketch's
 //! local geometry is kept. The refused edit can then be repeated.
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::Command;
 use rcad_document::{FeatureId, SketchPlane};
 
@@ -121,7 +121,7 @@ impl RcadApp {
                         ));
                     }
                     Some(Err(e)) => {
-                        ui.colored_label(Color32::from_rgb(255, 110, 110), e);
+                        ui.colored_label(crate::theme::of(ui).bad, e);
                     }
                     None => {}
                 }
@@ -172,20 +172,21 @@ impl RcadApp {
             return;
         };
         let mut ov = rcad_viewport::Overlay::default();
+        let color = crate::sketch_view::palette_of(painter).preview;
         ov.polylines.push(rcad_viewport::OverlayPolyline {
             points: outline
                 .iter()
                 .map(|p| fr.to_world(*p).map(|v| v as f32))
                 .collect(),
             closed: true,
-            color: Color32::from_rgb(255, 200, 90),
+            color,
             width: 2.0,
             dashed: true,
         });
         ov.labels.push(rcad_viewport::OverlayLabel {
             at: fr.origin.map(|v| v as f32),
             text: "re-attach preview".into(),
-            color: Color32::from_rgb(255, 200, 90),
+            color,
         });
         let (cam, _) = self.view_camera();
         rcad_viewport::paint_overlay(painter, &cam, rect, &ov);

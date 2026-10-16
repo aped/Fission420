@@ -18,6 +18,12 @@ const GLYPH: f32 = 4.5;
 pub const AXIS_X_COLOR: Color32 = Color32::from_rgb(230, 70, 70);
 pub const AXIS_Y_COLOR: Color32 = Color32::from_rgb(80, 210, 80);
 pub const AXIS_Z_COLOR: Color32 = Color32::from_rgb(80, 130, 245);
+/// Axis colours on the light backdrop (darker, for contrast on light grey).
+const AXIS_COLORS_LIGHT: [Color32; 3] = [
+    Color32::from_rgb(200, 40, 40),
+    Color32::from_rgb(30, 135, 45),
+    Color32::from_rgb(40, 90, 210),
+];
 
 /// Screen-space centre of the triad for `rect`.
 pub fn axis_triad_origin(rect: egui::Rect) -> Pos2 {
@@ -28,12 +34,22 @@ pub fn axis_triad_origin(rect: egui::Rect) -> Pos2 {
 /// oriented by `camera`, anchored at the bottom-left of `rect`. Axes are
 /// ordered back to front so the nearest axis is drawn last.
 pub fn axis_triad_shapes(camera: &Camera, rect: egui::Rect) -> Vec<Shape> {
+    axis_triad_shapes_on(camera, rect, false)
+}
+
+/// [`axis_triad_shapes`] for a dark (`light == false`) or light backdrop.
+pub fn axis_triad_shapes_on(camera: &Camera, rect: egui::Rect, light: bool) -> Vec<Shape> {
     let (r, u, f) = camera.basis();
     let o = axis_triad_origin(rect);
+    let [cx, cy, cz] = if light {
+        AXIS_COLORS_LIGHT
+    } else {
+        [AXIS_X_COLOR, AXIS_Y_COLOR, AXIS_Z_COLOR]
+    };
     let axes: [(Vec3, Color32, char); 3] = [
-        ([1.0, 0.0, 0.0], AXIS_X_COLOR, 'X'),
-        ([0.0, 1.0, 0.0], AXIS_Y_COLOR, 'Y'),
-        ([0.0, 0.0, 1.0], AXIS_Z_COLOR, 'Z'),
+        ([1.0, 0.0, 0.0], cx, 'X'),
+        ([0.0, 1.0, 0.0], cy, 'Y'),
+        ([0.0, 0.0, 1.0], cz, 'Z'),
     ];
     let mut order: Vec<(f32, Vec3, Color32, char)> = axes
         .iter()
@@ -45,7 +61,11 @@ pub fn axis_triad_shapes(camera: &Camera, rect: egui::Rect) -> Vec<Shape> {
     let mut shapes = vec![Shape::circle_filled(
         o,
         AXIS_LEN + 12.0,
-        Color32::from_black_alpha(70),
+        if light {
+            Color32::from_white_alpha(50)
+        } else {
+            Color32::from_black_alpha(70)
+        },
     )];
     for (depth, a, color, letter) in order {
         let dir = vec2(math::dot(a, r), -math::dot(a, u));

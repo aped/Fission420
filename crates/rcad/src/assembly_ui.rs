@@ -342,7 +342,7 @@ impl RcadApp {
                     .map_or(c.to_string(), |x| x.name.clone());
                 ui.horizontal(|ui| {
                     ui.colored_label(
-                        Color32::from_rgb(120, 200, 255),
+                        crate::theme::of(ui).info,
                         format!("Editing component {n} (others dimmed)"),
                     );
                     if ui
@@ -554,7 +554,7 @@ impl RcadApp {
                     if x.status == "up_to_date" || x.status == "embedded" {
                         ui.small(t);
                     } else {
-                        ui.colored_label(Color32::from_rgb(255, 190, 90), t);
+                        ui.colored_label(crate::theme::of(ui).warn, t);
                     }
                 }
             }
@@ -1223,7 +1223,7 @@ impl RcadApp {
                         ui.horizontal(|ui| {
                             ui.add_enabled(false, egui::Button::new("Set axis").small());
                             ui.colored_label(
-                                Color32::from_rgb(255, 190, 90),
+                                crate::theme::of(ui).warn,
                                 format!("Not a number: {}", bad.join(", ")),
                             );
                         });
@@ -1385,7 +1385,7 @@ impl RcadApp {
                 if hits.is_empty() {
                     Color32::GRAY
                 } else {
-                    Color32::from_rgb(255, 150, 120)
+                    crate::theme::of(ui).caution
                 },
                 t,
             );
@@ -1470,7 +1470,7 @@ impl RcadApp {
                 }
                 None => {
                     ui.colored_label(
-                        Color32::from_rgb(255, 190, 90),
+                        crate::theme::of(ui).warn,
                         format!("No assembly total: {}", rep.total_missing.join("; ")),
                     );
                 }
@@ -1587,7 +1587,7 @@ impl RcadApp {
                 };
                 let sel = self.assembly_ui.interference_pick == Some(k);
                 if ui
-                    .selectable_label(sel, RichText::new(&t).color(Color32::from_rgb(255, 150, 120)))
+                    .selectable_label(sel, RichText::new(&t).color(crate::theme::of(ui).caution))
                     .on_hover_text(format!(
                         "{scope}. Touching contact (coincident faces) is not reported; no contact tolerance is applied."
                     ))

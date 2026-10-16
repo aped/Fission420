@@ -13,7 +13,7 @@
 use crate::app::RcadApp;
 use crate::panels::num_field;
 use crate::probe::Probe;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::sheet_surface::{
     AnalyzeSurfaceArgs, SheetBaseArgs, SheetFlangeArgs, SheetFlatArgs, SheetRuleArgs,
     SurfaceFromSketchArgs, SurfaceRepairArgs, ThickenArgs,
@@ -273,7 +273,7 @@ impl RcadApp {
             }
         });
         if folded.is_none() {
-            ui.colored_label(Color32::from_rgb(255, 160, 120), "Sheet body not created");
+            ui.colored_label(crate::theme::of(ui).caution, "Sheet body not created");
         }
         // Rule editor (loaded from the base parameters).
         let rev = self.summary.revision;
@@ -467,12 +467,12 @@ impl RcadApp {
         let closed = b.measurements.as_ref().map(|m| m.all_shells_closed);
         match closed {
             Some(true) => {
-                ui.label(RichText::new("Closed solid").color(Color32::from_rgb(120, 200, 120)));
+                ui.label(RichText::new("Closed solid").color(crate::theme::of(ui).ok));
             }
             Some(false) => {
                 ui.label(
                     RichText::new("Open shell (surface body): no volume")
-                        .color(Color32::from_rgb(255, 200, 120)),
+                        .color(crate::theme::of(ui).warn),
                 );
             }
             None => {
@@ -501,7 +501,7 @@ impl RcadApp {
         });
         if parse(&form.search).is_none_or(|v| !(0.0..=10.0).contains(&v)) {
             ui.colored_label(
-                Color32::from_rgb(255, 160, 120),
+                crate::theme::of(ui).caution,
                 "Gap search must be a number in [0, 10] mm",
             );
         }

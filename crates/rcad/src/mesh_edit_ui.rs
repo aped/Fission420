@@ -12,7 +12,7 @@
 //!   **Preview** the bounds of each result are drawn as boxes.
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::mesh_edit::{EditMeshArgs, InspectMeshArgs, MeshInspection};
 use rcad_commands::{Command, DocSummary, Response};
 use rcad_document::BodyId;
@@ -232,9 +232,9 @@ impl RcadApp {
                 {
                     let si = &ins.self_intersection;
                     let colour = if si.intersecting_pairs == 0 && si.complete {
-                        Color32::from_rgb(120, 200, 120)
+                        crate::theme::of(ui).ok
                     } else {
-                        Color32::from_rgb(255, 200, 120)
+                        crate::theme::of(ui).warn
                     };
                     ui.label(
                         RichText::new(rcad_commands::mesh_edit::inspection_summary(si))
@@ -351,7 +351,7 @@ impl RcadApp {
                 }
                 let op = st.op();
                 if let Err(e) = &op {
-                    ui.colored_label(Color32::from_rgb(255, 160, 120), e);
+                    ui.colored_label(crate::theme::of(ui).caution, e);
                 }
                 ui.horizontal_wrapped(|ui| {
                     for (label, preview) in [("Preview edit", true), ("Apply as new body", false)] {
@@ -383,9 +383,9 @@ impl RcadApp {
                     let t = rcad_document::mesh_edit::summary(rep);
                     let closed = rep.after.iter().all(|a| a.closed);
                     let colour = if closed {
-                        Color32::from_rgb(120, 200, 120)
+                        crate::theme::of(ui).ok
                     } else {
-                        Color32::from_rgb(255, 200, 120)
+                        crate::theme::of(ui).warn
                     };
                     ui.label(
                         RichText::new(format!("{}{t}", if *preview { "preview: " } else { "" }))
@@ -479,13 +479,14 @@ impl RcadApp {
             return;
         };
         let to = |p: [f64; 3]| self.world_to_screen(p);
+        let pal = crate::theme::of_ctx(painter.ctx());
         if let Some(q) = pv.plane
             && let Some(pts) = q.iter().map(|p| to(*p)).collect::<Option<Vec<_>>>()
         {
             painter.add(egui::Shape::convex_polygon(
                 pts.clone(),
-                Color32::from_rgba_unmultiplied(255, 170, 60, 50),
-                egui::Stroke::new(1.5, Color32::from_rgb(255, 170, 60)),
+                pal.pick_stroke.linear_multiply(0.2),
+                egui::Stroke::new(1.5, pal.pick_stroke),
             ));
             if let Some(dir) = pv.keep_dir {
                 // Arrow from the plane centre towards the kept side.
@@ -496,11 +497,7 @@ impl RcadApp {
                     .fold(0.0, f64::max);
                 let tip: [f64; 3] = std::array::from_fn(|i| c[i] + dir[i] * 0.25 * span);
                 if let (Some(a), Some(b)) = (to(c), to(tip)) {
-                    painter.arrow(
-                        a,
-                        b - a,
-                        egui::Stroke::new(2.0, Color32::from_rgb(255, 170, 60)),
-                    );
+                    painter.arrow(a, b - a, egui::Stroke::new(2.0, pal.pick_stroke));
                 }
             }
             let r = egui::Rect::from_points(&pts);
@@ -529,10 +526,7 @@ impl RcadApp {
                 (3, 7),
             ] {
                 if let (Some(p), Some(q)) = (to(c(a)), to(c(b))) {
-                    painter.line_segment(
-                        [p, q],
-                        egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)),
-                    );
+                    painter.line_segment([p, q], egui::Stroke::new(1.5, pal.edge_pick));
                 }
             }
         }

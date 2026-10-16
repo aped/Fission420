@@ -372,7 +372,7 @@ impl RcadApp {
                         if origin_is_newer(&p, &origin) {
                             ui.horizontal_wrapped(|ui| {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 200, 120),
+                                    crate::theme::of(ui).warn,
                                     format!(
                                         "Newer save: {} was saved after this copy; the copy holds older work.",
                                         origin.display()

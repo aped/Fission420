@@ -4,7 +4,7 @@
 //! **Repair as new body** (one undo step; the source is kept, hidden).
 use crate::app::RcadApp;
 use crate::probe::Probe as _;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use rcad_commands::mesh_repair::RepairMeshArgs;
 use rcad_commands::{Command, DocSummary, Response};
 use rcad_document::BodyId;
@@ -134,9 +134,9 @@ impl RcadApp {
                 {
                     let t = rcad_commands::mesh_repair::summary(rep, *preview);
                     let colour = if rep.after.closed {
-                        Color32::from_rgb(120, 200, 120)
+                        crate::theme::of(ui).ok
                     } else {
-                        Color32::from_rgb(255, 200, 120)
+                        crate::theme::of(ui).warn
                     };
                     ui.label(RichText::new(t).small().color(colour))
                         .probe("Mesh repair report");
