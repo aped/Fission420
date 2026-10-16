@@ -19,6 +19,7 @@ impl RcadApp {
     pub(crate) fn browser_top_nodes(&mut self, ui: &mut egui::Ui) {
         {
             ui.menu_button("⚙ Settings", |ui| {
+                crate::shell::ribbon::menu_min_width(ui);
                 ui.label(RichText::new("Units").strong());
                 ui.label("Length: millimetre (mm)").on_hover_text(
                     "Model units are millimetres and degrees; parameters may use mm, cm, m or in",
@@ -29,6 +30,7 @@ impl RcadApp {
             .named("Document Settings");
             ui.menu_button("Views", |ui| {
                 use crate::shell::{CmdId as C, registry};
+                crate::shell::ribbon::menu_min_width(ui);
                 for id in [
                     C::ViewTop,
                     C::ViewFront,
@@ -38,8 +40,9 @@ impl RcadApp {
                     C::ViewIso,
                 ] {
                     let d = registry::def(id);
+                    let keys = d.key_text(self.shell.prefs.keymap);
                     if ui
-                        .button(d.label)
+                        .add(egui::Button::new(d.label).shortcut_text(keys.as_str()))
                         .named(&format!("Named view {}", d.label))
                         .clicked()
                     {
@@ -52,6 +55,7 @@ impl RcadApp {
             .named("Named Views");
             let open = self.summary.open;
             ui.menu_button("Origin", |ui| {
+                crate::shell::ribbon::menu_min_width(ui);
                 for (label, plane) in [
                     ("XY Plane", SketchPlane::WorldXY),
                     ("XZ Plane", SketchPlane::WorldXZ),

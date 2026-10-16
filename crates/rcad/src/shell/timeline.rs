@@ -108,6 +108,7 @@ impl RcadApp {
                             select = Some(f.id);
                         }
                         r.context_menu(|ui| {
+                            crate::shell::ribbon::menu_min_width(ui);
                             let label = if f.kind == "sketch" {
                                 "Edit Sketch"
                             } else {

@@ -18,8 +18,7 @@ pub fn operation_ui(
     target: &mut Option<BodyId>,
     bodies: &[BodySummary],
 ) -> bool {
-    ui.horizontal(|ui| {
-        ui.label("Operation");
+    crate::form::row(ui, "Operation", |ui| {
         for (o, l) in [
             (ExtrudeOp::NewBody, "New Body"),
             (ExtrudeOp::Join, "Join"),
@@ -40,16 +39,14 @@ pub fn operation_ui(
         id.and_then(|i| solids.iter().find(|b| b.id == i))
             .map_or("(none)".to_string(), |b| b.name.clone())
     };
-    egui::ComboBox::from_label(format!("{what} target body"))
-        .selected_text(name(*target))
-        .show_ui(ui, |ui| {
-            for b in &solids {
-                ui.selectable_value(target, Some(b.id), &b.name)
-                    .named(&format!("{what} target {}", b.name));
-            }
-        })
-        .response
-        .probe(&format!("{what} target body"));
+    crate::form::combo(ui, &format!("{what} target body"), name(*target), |ui| {
+        for b in &solids {
+            ui.selectable_value(target, Some(b.id), &b.name)
+                .named(&format!("{what} target {}", b.name));
+        }
+    })
+    .response
+    .probe(&format!("{what} target body"));
     if solids.is_empty() {
         ui.colored_label(
             egui::Color32::from_rgb(255, 110, 110),

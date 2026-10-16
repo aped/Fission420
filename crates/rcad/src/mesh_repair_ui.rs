@@ -72,8 +72,7 @@ impl RcadApp {
                     st.tolerance = "0".into();
                     st.max_edges = "0".into();
                 }
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Weld tolerance (mm)");
+                crate::form::row(ui, "Weld tolerance (mm)", |ui| {
                     ui.add(egui::TextEdit::singleline(&mut st.tolerance).desired_width(60.0))
                         .named("Mesh weld tolerance")
                         .on_hover_text(
@@ -81,8 +80,7 @@ impl RcadApp {
                              Changes geometry by up to this amount.",
                         );
                 });
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Fill holes up to (edges)");
+                crate::form::row(ui, "Fill holes up to (edges)", |ui| {
                     ui.add(egui::TextEdit::singleline(&mut st.max_edges).desired_width(60.0))
                         .named("Mesh hole fill limit")
                         .on_hover_text("Planar boundary loops only; 0 = do not fill");

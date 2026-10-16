@@ -779,19 +779,17 @@ impl RcadApp {
                         label(r, i)
                     }),
             };
-            egui::ComboBox::from_label("Region")
-                .selected_text(current.clone())
-                .show_ui(ui, |ui| {
-                    if whole_ok {
-                        ui.selectable_value(&mut form.region, None, "Whole profile");
-                    }
-                    for (i, r) in regions.iter().enumerate() {
-                        ui.selectable_value(&mut form.region, Some(r.id.clone()), label(r, i))
-                            .probe(&format!("Region {}", i + 1));
-                    }
-                })
-                .response
-                .probe("Region");
+            crate::form::combo(ui, "Region", current.clone(), |ui| {
+                if whole_ok {
+                    ui.selectable_value(&mut form.region, None, "Whole profile");
+                }
+                for (i, r) in regions.iter().enumerate() {
+                    ui.selectable_value(&mut form.region, Some(r.id.clone()), label(r, i))
+                        .probe(&format!("Region {}", i + 1));
+                }
+            })
+            .response
+            .probe("Region");
             let outer: Vec<RegionRef> = regions
                 .iter()
                 .filter(|r| r.depth == 0)
@@ -799,14 +797,16 @@ impl RcadApp {
                 .collect();
             if outer.len() > 1 {
                 let mut all = form.more.all_outer.is_some();
-                ui.checkbox(
-                    &mut all,
-                    format!(
-                        "All {} outermost regions (e.g. text glyphs), one feature",
-                        outer.len()
-                    ),
-                )
-                .named("All outermost regions");
+                crate::form::unlabelled(ui, |ui| {
+                    ui.checkbox(
+                        &mut all,
+                        format!(
+                            "All {} outermost regions (e.g. text glyphs), one feature",
+                            outer.len()
+                        ),
+                    )
+                    .named("All outermost regions")
+                });
                 form.more.all_outer = all.then_some(outer);
                 if all {
                     ui.small("Join or Cut only. The preview shows the first region.");
@@ -828,8 +828,7 @@ impl RcadApp {
                 format!("This sketch's profile is not usable: {e}"),
             );
         }
-        ui.horizontal(|ui| {
-            ui.label("Operation");
+        crate::form::row(ui, "Operation", |ui| {
             ui.radio_value(&mut form.op, ExtrudeOp::NewBody, "New Body")
                 .probe("New Body");
             ui.radio_value(&mut form.op, ExtrudeOp::Join, "Join")
@@ -850,18 +849,16 @@ impl RcadApp {
                 .target
                 .and_then(|id| breps.iter().find(|b| b.id == id))
                 .map_or("(choose)".to_string(), |b| format!("{} ({})", b.name, b.id));
-            egui::ComboBox::from_label("Target body")
-                .selected_text(text)
-                .show_ui(ui, |ui| {
-                    for b in &breps {
-                        let label = if b.visible {
-                            format!("{} ({})", b.name, b.id)
-                        } else {
-                            format!("{} ({}, hidden)", b.name, b.id)
-                        };
-                        ui.selectable_value(&mut form.target, Some(b.id), label);
-                    }
-                });
+            crate::form::combo(ui, "Target body", text, |ui| {
+                for b in &breps {
+                    let label = if b.visible {
+                        format!("{} ({})", b.name, b.id)
+                    } else {
+                        format!("{} ({}, hidden)", b.name, b.id)
+                    };
+                    ui.selectable_value(&mut form.target, Some(b.id), label);
+                }
+            });
             if form.target.is_none() {
                 ui.colored_label(
                     Color32::from_rgb(255, 200, 120),
@@ -877,8 +874,10 @@ impl RcadApp {
             }
         }
         if form.op == ExtrudeOp::Cut {
-            ui.checkbox(&mut form.through_all, "Through All")
-                .probe("Through All");
+            crate::form::unlabelled(ui, |ui| {
+                ui.checkbox(&mut form.through_all, "Through All")
+                    .probe("Through All")
+            });
         } else {
             form.through_all = false;
         }
@@ -901,9 +900,11 @@ impl RcadApp {
             // material: the regenerator refuses it, so it is not offered.
             form.reverse = false;
         }
-        ui.add_enabled(!on_face, egui::Checkbox::new(&mut form.reverse, "Reverse direction"))
-            .probe("Reverse direction")
-            .on_disabled_hover_text("The sketch is on a face of the target: the direction is set by the face (Cut into the material, Join away from it)");
+        crate::form::unlabelled(ui, |ui| {
+            ui.add_enabled(!on_face, egui::Checkbox::new(&mut form.reverse, "Reverse direction"))
+                .probe("Reverse direction")
+                .on_disabled_hover_text("The sketch is on a face of the target: the direction is set by the face (Cut into the material, Join away from it)")
+        });
         if !form.through_all {
             let dir = form.direction(features, &self.summary.bodies);
             let base = match (form.op, on_face) {
@@ -932,8 +933,7 @@ impl RcadApp {
     fn extent_ui(&self, ui: &mut egui::Ui, form: &mut ExtrudeForm) {
         use rcad_document::PlaneBase as B;
         let m = &mut form.more;
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Extent");
+        crate::form::row(ui, "Extent", |ui| {
             ui.radio_value(&mut m.mode, ExtentMode::OneSide, "One side")
                 .probe("One side");
             ui.radio_value(&mut m.mode, ExtentMode::Symmetric, "Symmetric")
@@ -945,8 +945,7 @@ impl RcadApp {
         });
         match m.mode {
             ExtentMode::ToPlane => {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Up to");
+                crate::form::row(ui, "Up to", |ui| {
                     ui.radio_value(&mut m.to_base, B::WorldXY, "World XY");
                     ui.radio_value(&mut m.to_base, B::WorldXZ, "World XZ");
                     ui.radio_value(&mut m.to_base, B::WorldYZ, "World YZ");
@@ -985,12 +984,10 @@ impl RcadApp {
             }
         }
         crate::panels::num_field(ui, "Start offset (mm)", &mut m.start_offset);
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut m.thin, "Thin").probe("Thin");
-            if m.thin {
-                crate::panels::num_field(ui, "Wall (mm)", &mut m.thin_t);
-            }
-        });
+        crate::form::unlabelled(ui, |ui| ui.checkbox(&mut m.thin, "Thin").probe("Thin"));
+        if m.thin {
+            crate::panels::num_field(ui, "Wall (mm)", &mut m.thin_t);
+        }
         crate::panels::num_field(ui, "Taper (deg)", &mut m.taper_deg);
         ui.small(
             "Thin: walls of that thickness inside the closed profile. Taper (New Body, \
@@ -1028,8 +1025,7 @@ impl RcadApp {
         distance: &mut String,
     ) {
         use rcad_document::PlaneBase as B;
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Base plane");
+        crate::form::row(ui, "Base plane", |ui| {
             ui.radio_value(base, B::WorldXY, "World XY")
                 .probe("Base World XY");
             ui.radio_value(base, B::WorldXZ, "World XZ")
@@ -1067,8 +1063,7 @@ impl RcadApp {
         thickness: &mut String,
     ) {
         ui.label(format!("Hollow {}", self.feature_name(extrude)));
-        ui.horizontal(|ui| {
-            ui.label("Open face");
+        crate::form::row(ui, "Open face", |ui| {
             ui.radio_value(open_end, true, "End cap").probe("End cap");
             ui.radio_value(open_end, false, "Start cap")
                 .probe("Start cap");

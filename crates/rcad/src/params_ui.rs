@@ -11,6 +11,9 @@ use eframe::egui::{self, Color32, RichText};
 use rcad_commands::Command;
 use rcad_document::ParamUnit;
 
+/// Widest the Parameters table's expression column gets (points).
+const PARAM_EXPR_W: f32 = 100.0;
+
 /// Panel state (UI-local edit buffers; the document is authoritative).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParamsPanel {
@@ -167,8 +170,15 @@ impl RcadApp {
                             t + "\nClick to edit"
                         };
                         let r = r.on_hover_text(&hover);
-                        ui.label(RichText::new(&p.expression).small())
-                            .on_hover_text(&hover);
+                        // A long expression is elided (full text on hover) so
+                        // it never widens the Browser column.
+                        ui.scope(|ui| {
+                            ui.set_max_width(PARAM_EXPR_W);
+                            ui.add(
+                                egui::Label::new(RichText::new(&p.expression).small()).truncate(),
+                            )
+                            .on_hover_text(format!("{}\n{hover}", p.expression));
+                        });
                         let value = match p.value {
                             Some(v) => format!("= {} {}", fmt_value(v), p.unit.symbol()),
                             None => "= ?".into(),

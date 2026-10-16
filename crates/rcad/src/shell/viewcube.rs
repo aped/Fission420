@@ -272,6 +272,7 @@ impl RcadApp {
         ui.separator();
         let edges = self.shell.show_edges;
         let r = ui.menu_button("Display style", |ui| {
+            crate::shell::ribbon::menu_min_width(ui);
             for (id, on) in [(CmdId::StyleEdges, true), (CmdId::StyleShaded, false)] {
                 let d = registry::def(id);
                 if ui
