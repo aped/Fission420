@@ -468,6 +468,9 @@ fn main() -> ExitCode {
             if let Some(layer) = rcad::shell::KeymapLayer::from_env() {
                 app.set_keymap(layer);
             }
+            if let Some(theme) = rcad::shell::prefs::Theme::from_env() {
+                app.set_theme(theme);
+            }
             // Autosave/recovery for interactive use; scripted runs never touch
             // the recovery directory.
             if args.scene.is_none() && !args.demo && args.demo_place.is_none() {

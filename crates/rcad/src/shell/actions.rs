@@ -681,6 +681,11 @@ impl RcadApp {
         self.shell.prefs.keymap = layer;
     }
 
+    /// Use `theme` (applied on the next frame); not saved until a preference changes.
+    pub fn set_theme(&mut self, theme: super::prefs::Theme) {
+        self.shell.prefs.theme = theme;
+    }
+
     /// Load preferences from `path` (and save changes there from now on).
     pub fn load_prefs(&mut self, path: std::path::PathBuf) {
         let (p, why) = super::prefs::Prefs::load(&path);

@@ -35,6 +35,17 @@ impl Theme {
             Theme::Dark => "Dark",
         }
     }
+
+    /// `RCAD_THEME=light|dark|system` overrides the saved theme for this run (scripted
+    /// screenshots of either theme).
+    pub fn from_env() -> Option<Self> {
+        match std::env::var("RCAD_THEME").ok()?.trim() {
+            "light" => Some(Theme::Light),
+            "dark" => Some(Theme::Dark),
+            "system" => Some(Theme::FollowOs),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
