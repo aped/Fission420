@@ -250,8 +250,7 @@ impl RcadApp {
         let flat_shown = flat
             .and_then(|b| self.summary.bodies.iter().find(|x| x.id == b))
             .is_some_and(|b| b.visible);
-        ui.horizontal(|ui| {
-            ui.label("Display:");
+        crate::form::row(ui, "Display:", |ui| {
             if ui
                 .selectable_label(!flat_shown, "Folded")
                 .probe("Sheet folded")
@@ -396,9 +395,7 @@ impl RcadApp {
                     .edge
                     .and_then(|e| lines.iter().find(|l| l.0 == e))
                     .map_or("Pick an edge".to_string(), |l| l.1.clone());
-                egui::ComboBox::from_label("Flange edge")
-                    .selected_text(cur)
-                    .show_ui(ui, |ui| {
+                crate::form::combo(ui, "Flange edge", cur, |ui| {
                         for (id, label) in &lines {
                             ui.selectable_value(&mut form.edge, Some(*id), label);
                         }

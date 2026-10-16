@@ -186,9 +186,7 @@ pub(crate) fn joint_dialog(
                 .map_or("—".to_string(), |x| x.name.clone())
         };
         ui.horizontal(|ui| {
-            let r = egui::ComboBox::from_label("Joint type")
-                .selected_text(kind_label(d.kind))
-                .show_ui(ui, |ui| {
+            let r = crate::form::combo(ui, "Joint type", kind_label(d.kind), |ui| {
                     for k in JointKind::ALL {
                         let l = format!("Joint type option {}", kind_label(k));
                         ui.selectable_value(&mut d.kind, k, kind_label(k)).probe(&l);
@@ -206,9 +204,7 @@ pub(crate) fn joint_dialog(
             ("Joint child", &mut d.child, true),
         ] {
             ui.horizontal(|ui| {
-                let r = egui::ComboBox::from_label(label)
-                    .selected_text(name_of(*slot))
-                    .show_ui(ui, |ui| {
+                let r = crate::form::combo(ui, label, name_of(*slot), |ui| {
                         for o in asm
                             .occurrences
                             .iter()
@@ -221,8 +217,7 @@ pub(crate) fn joint_dialog(
                 r.response.probe(label);
             });
         }
-        ui.horizontal(|ui| {
-            ui.label("Axis");
+        crate::form::row(ui, "Axis", |ui| {
             ui.radio_value(&mut d.source, AxisSource::Explicit, "Explicit");
             ui.radio_value(&mut d.source, AxisSource::Cylinder, "Cylinder face");
             ui.radio_value(&mut d.source, AxisSource::Edge, "Edge of two faces");

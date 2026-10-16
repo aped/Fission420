@@ -142,8 +142,7 @@ impl RcadApp {
                         assembly: true,
                     });
                 }
-                ui.horizontal(|ui| {
-                    ui.label("Export to");
+                crate::form::row(ui, "Export to", |ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.drawing_ui.path).desired_width(132.0),
                     )
@@ -402,50 +401,48 @@ impl RcadApp {
                 if st.dim_view.is_none_or(|v| !views.contains(&v)) {
                     st.dim_view = views.first().copied();
                 }
-                egui::ComboBox::from_label("Dimension view")
-                    .selected_text(st.dim_view.map(|v| v.to_string()).unwrap_or_default())
-                    .show_ui(ui, |ui| {
+                crate::form::combo(
+                    ui,
+                    "Dimension view",
+                    st.dim_view.map(|v| v.to_string()).unwrap_or_default(),
+                    |ui| {
                         for v in &views {
                             ui.selectable_value(&mut st.dim_view, Some(*v), v.to_string())
                                 .probe(&format!("Dimension view option {v}"));
                         }
-                    })
-                    .response
-                    .probe("Dimension view");
+                    },
+                )
+                .response
+                .probe("Dimension view");
                 let name = |r: &Option<DimRef>| {
                     r.and_then(|r| refs.iter().find(|(x, _)| *x == r))
                         .map(|(_, n)| n.clone())
                         .unwrap_or_else(|| "(choose)".into())
                 };
-                egui::ComboBox::from_label("Dimension from")
-                    .selected_text(name(&st.dim_a))
-                    .show_ui(ui, |ui| {
-                        for (r, n) in &refs {
-                            ui.selectable_value(&mut st.dim_a, Some(*r), n)
-                                .probe(&format!("Dimension from option {n}"));
-                        }
-                    })
-                    .response
-                    .probe("Dimension from");
+                crate::form::combo(ui, "Dimension from", name(&st.dim_a), |ui| {
+                    for (r, n) in &refs {
+                        ui.selectable_value(&mut st.dim_a, Some(*r), n)
+                            .probe(&format!("Dimension from option {n}"));
+                    }
+                })
+                .response
+                .probe("Dimension from");
                 let b_text = if st.dim_b.is_none() {
                     "(none: hole diameter)".to_string()
                 } else {
                     name(&st.dim_b)
                 };
-                egui::ComboBox::from_label("Dimension to")
-                    .selected_text(b_text)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut st.dim_b, None, "(none: hole diameter)")
-                            .probe("Dimension to option none");
-                        for (r, n) in &refs {
-                            ui.selectable_value(&mut st.dim_b, Some(*r), n)
-                                .probe(&format!("Dimension to option {n}"));
-                        }
-                    })
-                    .response
-                    .probe("Dimension to");
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Tolerance");
+                crate::form::combo(ui, "Dimension to", b_text, |ui| {
+                    ui.selectable_value(&mut st.dim_b, None, "(none: hole diameter)")
+                        .probe("Dimension to option none");
+                    for (r, n) in &refs {
+                        ui.selectable_value(&mut st.dim_b, Some(*r), n)
+                            .probe(&format!("Dimension to option {n}"));
+                    }
+                })
+                .response
+                .probe("Dimension to");
+                crate::form::row(ui, "Tolerance", |ui| {
                     for (i, k) in TOL_KINDS.iter().enumerate() {
                         ui.selectable_value(&mut st.tol_kind, i, *k)
                             .named(&format!("Tolerance {k}"));

@@ -62,6 +62,23 @@ pub(crate) fn state_text(
     })
 }
 
+/// Width of the History rows' kind column ("Sketch", "Extrude", …).
+const HISTORY_TAG_W: f32 = 38.0;
+
+/// A History row's kind tag in a fixed-width column, so every name starts at
+/// the same x.
+fn history_tag(ui: &mut egui::Ui, kind: &str) {
+    let h = ui.spacing().interact_size.y;
+    ui.allocate_ui_with_layout(
+        egui::vec2(HISTORY_TAG_W, h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(HISTORY_TAG_W);
+            ui.add(egui::Label::new(RichText::new(kind).weak().small()).truncate());
+        },
+    );
+}
+
 impl RcadApp {
     // ----- command bars -----
 
@@ -69,13 +86,8 @@ impl RcadApp {
     pub(crate) fn view_menu(&mut self, ui: &mut egui::Ui) {
         use crate::shell::{CmdId as C, registry};
         ui.menu_button("View", |ui| {
-            let fit = registry::def(C::Fit);
-            if ui
-                .button(format!("Fit ({})", fit.key_text(self.shell.prefs.keymap)))
-                .probe("Fit (F)")
-                .clicked()
-            {
-                self.fit_view();
+            crate::shell::ribbon::menu_min_width(ui);
+            if self.cmd_button(ui, C::Fit) {
                 ui.close();
             }
             let label = if self.section.is_some() {
@@ -92,6 +104,7 @@ impl RcadApp {
                 self.toggle_section();
                 ui.close();
             }
+            ui.separator();
             for id in [
                 C::ViewTop,
                 C::ViewFront,
@@ -100,16 +113,7 @@ impl RcadApp {
                 C::ViewBack,
                 C::ViewIso,
             ] {
-                let d = registry::def(id);
-                if ui
-                    .button(format!(
-                        "{} ({})",
-                        d.label,
-                        d.key_text(self.shell.prefs.keymap)
-                    ))
-                    .clicked()
-                {
-                    (d.run)(self);
+                if self.cmd_button(ui, id) {
                     ui.close();
                 }
             }
@@ -415,12 +419,7 @@ impl RcadApp {
                 k => k,
             };
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("{kind:<7}"))
-                        .monospace()
-                        .weak()
-                        .small(),
-                );
+                history_tag(ui, kind);
                 use rcad_document::HealthState as H;
                 let label = if f.suppressed {
                     RichText::new(&f.name).weak().strikethrough()
@@ -434,89 +433,98 @@ impl RcadApp {
                     }
                 };
                 let r = ui.selectable_label(sel, label).probe(&f.name);
-                if f.suppressed {
-                    ui.label(RichText::new("suppressed").weak().small());
-                } else if f.rolled_back {
-                    ui.label(RichText::new("rolled back").weak().small());
-                } else if matches!(f.health.state, H::Error | H::Warning) {
-                    let (sym, c) = if f.health.state == H::Error {
-                        ("⚠ error", crate::theme::of(ui).bad)
-                    } else {
-                        ("⚠ warning", crate::theme::of(ui).warn)
-                    };
-                    if ui
-                        .add(egui::Button::new(RichText::new(sym).color(c).small()).frame(false))
-                        .named(&format!("Health {}", f.name))
-                        .on_hover_text(health_text(f))
-                        .clicked()
-                    {
+                // Status marks in one right-aligned column (first = rightmost).
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if f.suppressed {
+                        ui.label(RichText::new("suppressed").weak().small());
+                    } else if f.rolled_back {
+                        ui.label(RichText::new("rolled back").weak().small());
+                    } else if matches!(f.health.state, H::Error | H::Warning) {
+                        let (sym, c) = if f.health.state == H::Error {
+                            ("⚠ error", crate::theme::of(ui).bad)
+                        } else {
+                            ("⚠ warning", crate::theme::of(ui).warn)
+                        };
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new(sym).color(c).small()).frame(false),
+                            )
+                            .named(&format!("Health {}", f.name))
+                            .on_hover_text(health_text(f))
+                            .clicked()
+                        {
+                            clicked = Some(f.id);
+                        }
+                    }
+                    if r.clicked() {
                         clicked = Some(f.id);
                     }
-                }
-                if r.clicked() {
-                    clicked = Some(f.id);
-                }
-                if r.double_clicked() {
-                    if f.kind == "sketch" {
-                        edit = Some(f.id);
-                    } else {
-                        edit_feature = Some(f.id);
+                    if r.double_clicked() {
+                        if f.kind == "sketch" {
+                            edit = Some(f.id);
+                        } else {
+                            edit_feature = Some(f.id);
+                        }
                     }
-                }
-                r.context_menu(|ui| {
-                    if f.kind == "sketch" && ui.button("Edit Sketch").probe("Edit Sketch").clicked()
-                    {
-                        edit = Some(f.id);
-                        ui.close();
+                    r.context_menu(|ui| {
+                        crate::shell::ribbon::menu_min_width(ui);
+                        if f.kind == "sketch"
+                            && ui.button("Edit Sketch").probe("Edit Sketch").clicked()
+                        {
+                            edit = Some(f.id);
+                            ui.close();
+                        }
+                        if f.kind != "sketch"
+                            && ui
+                                .button("Edit Feature")
+                                .named(&format!("Edit Feature {}", f.name))
+                                .clicked()
+                        {
+                            edit_feature = Some(f.id);
+                            ui.close();
+                        }
+                        if ui.button("Rename…").probe("Rename…").clicked() {
+                            rename = Some(f.id);
+                            ui.close();
+                        }
+                        if ui.button("Delete feature").clicked() {
+                            delete = Some(f.id);
+                            ui.close();
+                        }
+                    });
+                    if editing == Some(f.id) {
+                        ui.label(RichText::new("editing").color(crate::theme::of(ui).active));
+                    } else if let Some((t, c)) = state_text(f, crate::theme::of(ui)) {
+                        let sym: String = t.chars().take(1).collect();
+                        ui.label(RichText::new(sym).color(c)).on_hover_text(t);
                     }
-                    if f.kind != "sketch"
-                        && ui
-                            .button("Edit Feature")
-                            .named(&format!("Edit Feature {}", f.name))
-                            .clicked()
-                    {
-                        edit_feature = Some(f.id);
-                        ui.close();
-                    }
-                    if ui.button("Rename…").probe("Rename…").clicked() {
-                        rename = Some(f.id);
-                        ui.close();
-                    }
-                    if ui.button("Delete feature").clicked() {
-                        delete = Some(f.id);
-                        ui.close();
+                    if f.profile_error.is_some() {
+                        // Several loops (e.g. text): regions are extrudable one by
+                        // one or all together; only a sketch with none is "open".
+                        let n = crate::extrude::sketch_regions(f).len();
+                        if n > 0 {
+                            ui.label(RichText::new(format!("{n} regions")).weak().small())
+                                .on_hover_text(
+                                    "No single profile: extrude picks a region (or all \
+                                 outermost regions)",
+                                );
+                        } else {
+                            ui.label(
+                                RichText::new("open")
+                                    .color(crate::theme::of(ui).bad)
+                                    .small(),
+                            )
+                            .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                        }
                     }
                 });
-                if editing == Some(f.id) {
-                    ui.label(RichText::new("editing").color(crate::theme::of(ui).active));
-                } else if let Some((t, c)) = state_text(f, crate::theme::of(ui)) {
-                    let sym: String = t.chars().take(1).collect();
-                    ui.label(RichText::new(sym).color(c)).on_hover_text(t);
-                }
-                if f.profile_error.is_some() {
-                    // Several loops (e.g. text): regions are extrudable one by
-                    // one or all together; only a sketch with none is "open".
-                    let n = crate::extrude::sketch_regions(f).len();
-                    if n > 0 {
-                        ui.label(RichText::new(format!("{n} regions")).weak().small())
-                            .on_hover_text(
-                                "No single profile: extrude picks a region (or all \
-                                 outermost regions)",
-                            );
-                    } else {
-                        ui.label(
-                            RichText::new("open")
-                                .color(crate::theme::of(ui).bad)
-                                .small(),
-                        )
-                        .on_hover_text(f.profile_error.clone().unwrap_or_default());
-                    }
-                }
             });
             if let Some(p) = &f.plane
                 && matches!(p, SketchPlane::Face(_))
             {
-                ui.indent(("feat", f.id.0), |ui| {
+                // Under the name, past the kind column.
+                ui.horizontal(|ui| {
+                    ui.add_space(HISTORY_TAG_W + ui.spacing().item_spacing.x + 4.0);
                     ui.small(self.plane_text(p));
                 });
             }
@@ -854,14 +862,14 @@ impl RcadApp {
                     .strong()
                     .size(16.0),
             );
-            if ui.small_button("Rename…").probe("Rename…").clicked() {
+            if ui.button("Rename…").probe("Rename…").clicked() {
                 self.rename = Some((f.id, f.name.clone()));
             }
             let users = self.dependents_of(f.id);
             let why = (!users.is_empty())
                 .then(|| format!("Used by {}; delete those first", users.join(", ")));
             let r = ui
-                .add_enabled(why.is_none(), egui::Button::new("Delete").small())
+                .add_enabled(why.is_none(), egui::Button::new("Delete"))
                 .probe("Delete feature");
             let r = match &why {
                 Some(w) => r.on_disabled_hover_text(w),
@@ -878,7 +886,7 @@ impl RcadApp {
             if f.suppressed {
                 ui.label(RichText::new("Suppressed: not evaluated").weak());
                 if ui
-                    .small_button("Restore")
+                    .button("Restore")
                     .probe("Restore feature")
                     .on_hover_text("Evaluate this feature again (refused while something it uses is suppressed)")
                     .clicked()
@@ -890,7 +898,7 @@ impl RcadApp {
                     });
                 }
                 if ui
-                    .small_button("Restore with dependents")
+                    .button("Restore with dependents")
                     .probe("Restore with dependents")
                     .clicked()
                 {
@@ -908,7 +916,7 @@ impl RcadApp {
                     )
                 });
                 let r = ui
-                    .add_enabled(why.is_none(), egui::Button::new("Suppress").small())
+                    .add_enabled(why.is_none(), egui::Button::new("Suppress"))
                     .probe("Suppress feature");
                 let r = match &why {
                     Some(w) => r.on_disabled_hover_text(w),
@@ -923,7 +931,7 @@ impl RcadApp {
                 }
                 if !users.is_empty()
                     && ui
-                        .small_button("Suppress with dependents")
+                        .button("Suppress with dependents")
                         .probe("Suppress with dependents")
                         .on_hover_text(format!("Also suppresses {}", users.join(", ")))
                         .clicked()
@@ -942,7 +950,7 @@ impl RcadApp {
             let ids: Vec<FeatureId> = self.summary.features.iter().map(|x| x.id).collect();
             let pos = ids.iter().position(|x| *x == f.id);
             if ui
-                .small_button("Roll back here")
+                .button("Roll back here")
                 .probe("Roll back here")
                 .on_hover_text(
                     "Evaluate history up to this feature; later ones are kept but not \
@@ -953,13 +961,13 @@ impl RcadApp {
                 self.request(Command::SetRollback { at: Some(f.id) });
             }
             if let Some(p) = pos {
-                if p > 0 && ui.small_button("Move up").probe("Move up").clicked() {
+                if p > 0 && ui.button("Move up").probe("Move up").clicked() {
                     self.request(Command::MoveFeature {
                         feature: f.id,
                         before: Some(ids[p - 1]),
                     });
                 }
-                if p + 1 < ids.len() && ui.small_button("Move down").probe("Move down").clicked() {
+                if p + 1 < ids.len() && ui.button("Move down").probe("Move down").clicked() {
                     self.request(Command::MoveFeature {
                         feature: f.id,
                         before: ids.get(p + 2).copied(),
@@ -1763,6 +1771,7 @@ impl RcadApp {
             )
         });
         let width = self.shell.prefs.dialog_width.unwrap_or(360.0);
+        let form_id = dlg.title();
         let title = match self.shell.editing {
             Some(f) => format!("Edit {}", self.feature_name(f)),
             None => dlg.title().to_string(),
@@ -1788,7 +1797,7 @@ impl RcadApp {
                 egui::ScrollArea::vertical()
                     .id_salt("dialog_scroll")
                     .max_height(max_h)
-                    .show(ui, |ui| {
+                    .show(ui, |ui| crate::form::form(ui, form_id, |ui| {
                 match &mut dlg {
                     Dialog::Rectangle {
                         width,
@@ -1850,8 +1859,8 @@ impl RcadApp {
                         num_field(ui, "Thread diameter (mm)", diameter);
                         num_field(ui, "Thread pitch (mm)", pitch);
                         num_field(ui, "Thread length (mm)", length);
-                        ui.checkbox(left_hand, "Left hand").probe("Left hand");
-                        ui.checkbox(nut, "Square nut (internal thread, 0.1 mm radial clearance)")
+                        crate::form::check(ui, left_hand, "Left hand").probe("Left hand");
+                        crate::form::check(ui, nut, "Square nut (internal thread, 0.1 mm radial clearance)")
                             .probe("Square nut");
                         if *nut {
                             num_field(ui, "Nut width (mm)", nut_width);
@@ -1887,9 +1896,7 @@ impl RcadApp {
                             rcad_document::RevolveAxis::SketchX => "Sketch X axis".to_string(),
                             rcad_document::RevolveAxis::Line(e) => format!("Sketch line L{}", e.0),
                         };
-                        egui::ComboBox::from_label("Revolve axis")
-                            .selected_text(label(axis))
-                            .show_ui(ui, |ui| {
+                        crate::form::combo(ui, "Revolve axis", label(axis), |ui| {
                                 for a in [
                                     rcad_document::RevolveAxis::SketchY,
                                     rcad_document::RevolveAxis::SketchX,
@@ -1902,7 +1909,7 @@ impl RcadApp {
                             })
                             .response
                             .probe("Revolve axis");
-                        ui.checkbox(reverse, "Reverse direction").probe("Revolve reverse");
+                        crate::form::check(ui, reverse, "Reverse direction").probe("Revolve reverse");
                         ui.small("The profile must lie on one side of the axis (either side). Partial angles sweep toward −normal, or +normal with Reverse. A construction line is the usual axis.");
                     }
                     Dialog::LoftSweep { a, b, sweep, via } => {
@@ -1956,7 +1963,7 @@ impl RcadApp {
                     }
                     Dialog::Open { path, safe_mode } => {
                         path_field(ui, "File path", path, PickMode::Open, file_pick::DOCUMENT);
-                        ui.checkbox(safe_mode, "Safe mode (roll back before the first failing feature)")
+                        crate::form::check(ui, safe_mode, "Safe mode (roll back before the first failing feature)")
                             .probe("Safe mode");
                     }
                     Dialog::ExportAssembly { path } => {
@@ -1998,9 +2005,7 @@ impl RcadApp {
                             .iter()
                             .find(|(_, r)| Some(*r) == *to)
                             .map_or("(choose)".to_string(), |(l, _)| l.clone());
-                        egui::ComboBox::from_label("Align onto face")
-                            .selected_text(current)
-                            .show_ui(ui, |ui| {
+                        crate::form::combo(ui, "Align onto face", current, |ui| {
                                 for (l, r) in &targets {
                                     ui.selectable_value(to, Some(*r), l).probe(&format!("Align onto {l}"));
                                 }
@@ -2012,7 +2017,7 @@ impl RcadApp {
                     Dialog::RigidGroup { occurrences } => {
                         ui.label("Occurrences to lock together:");
                         for (_, name, on) in occurrences.iter_mut() {
-                            ui.checkbox(on, name.as_str()).probe(&format!("Rigid {name}"));
+                            crate::form::check(ui, on, name.as_str()).probe(&format!("Rigid {name}"));
                         }
                         ok_allowed &= occurrences.iter().filter(|o| o.2).count() >= 2;
                     }
@@ -2057,11 +2062,11 @@ impl RcadApp {
                         num_field(ui, "Hole centre Y (face mm)", cy);
                         ui.small("Face coordinates: origin and axes of the face's frame (for a face of an XY-sketched extrusion: world X/Y).");
                         num_field(ui, "Hole diameter (mm)", diameter);
-                        ui.checkbox(through, "Through all").probe("Hole through all");
+                        crate::form::check(ui, through, "Through all").probe("Hole through all");
                         if !*through {
                             num_field(ui, "Hole depth (mm)", depth);
                         }
-                        ui.checkbox(counterbore, "Counterbore").probe("Counterbore");
+                        crate::form::check(ui, counterbore, "Counterbore").probe("Counterbore");
                         if *counterbore {
                             num_field(ui, "Counterbore diameter (mm)", cb_diameter);
                             num_field(ui, "Counterbore depth (mm)", cb_depth);
@@ -2130,9 +2135,7 @@ impl RcadApp {
                                 let current = b
                                     .and_then(|r| others.iter().find(|f| f.reference == r))
                                     .map_or("choose…".to_string(), |f| label(f));
-                                egui::ComboBox::from_label("Second face")
-                                    .selected_text(current)
-                                    .show_ui(ui, |ui| {
+                                crate::form::combo(ui, "Second face", current, |ui| {
                                         for f in &others {
                                             ui.selectable_value(b, Some(f.reference), label(f))
                                                 .probe(&label(f));
@@ -2160,13 +2163,13 @@ impl RcadApp {
                         ..
                     } => {
                         num_field(ui, "Chamfer distance (mm)", radius);
-                        ui.checkbox(holes, "Include hole edges")
+                        crate::form::check(ui, holes, "Include hole edges")
                             .probe("Include hole edges");
                         ui.small("Equal-distance chamfer of every edge of this face's outer boundary: 45° planes along straight edges, cones along arcs, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (distance not smaller than a rounded corner's radius, a hole within reach, the loop already finished).");
                     }
                     Dialog::FilletLoop { radius, holes, .. } => {
                         num_field(ui, "Fillet radius (mm)", radius);
-                        ui.checkbox(holes, "Include hole edges")
+                        crate::form::check(ui, holes, "Include hole edges")
                             .probe("Include hole edges");
                         ui.small("Exact solid fillet of every edge of this face's outer boundary: cylinders along straight edges, tori along arcs, a sphere corner where a rounded corner's radius equals this radius, mitered sharp corners. The body must be a straight prism under the face; refused otherwise with the reason (radius larger than a rounded corner, a hole within reach, the loop already filleted).");
                     }
@@ -2204,8 +2207,7 @@ impl RcadApp {
                             PatternKind::Linear => {
                                 num_field(ui, "Pattern count", count);
                                 num_field(ui, "Pattern spacing (mm)", spacing);
-                                ui.horizontal(|ui| {
-                                    ui.label("Direction");
+                                crate::form::row(ui, "Direction", |ui| {
                                     ui.radio_value(along_y, false, "Sketch X");
                                     ui.radio_value(along_y, true, "Sketch Y");
                                     ui.checkbox(reverse, "Reverse");
@@ -2222,8 +2224,7 @@ impl RcadApp {
                                 ui.small("Counter-clockwise about the seed sketch's normal through the centre (seed sketch coordinates). Count includes the seed; instances may not wrap past a full turn.");
                             }
                             PatternKind::Mirror => {
-                                ui.horizontal(|ui| {
-                                    ui.label("Mirror plane");
+                                crate::form::row(ui, "Mirror plane", |ui| {
                                     ui.radio_value(mirror, SketchPlane::WorldYZ, "World YZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXZ, "World XZ");
                                     ui.radio_value(mirror, SketchPlane::WorldXY, "World XY");
@@ -2246,9 +2247,7 @@ impl RcadApp {
                                     SketchPlane::Face(r) => label(r),
                                     _ => "world plane (above)".to_string(),
                                 };
-                                egui::ComboBox::from_label("Mirror face")
-                                    .selected_text(current)
-                                    .show_ui(ui, |ui| {
+                                crate::form::combo(ui, "Mirror face", current, |ui| {
                                         for f in &faces {
                                             if ui
                                                 .selectable_label(
@@ -2277,21 +2276,31 @@ impl RcadApp {
                         }
                     }
                 }
-                    });
+                    }));
                 let invalid = crate::dialogs::invalid_fields();
                 if let Some(why) = &invalid {
                     ui.colored_label(crate::theme::of(ui).bad, why);
                 }
                 ok_allowed &= invalid.is_none();
                 ui.separator();
+                // Key hint on the left, OK / Cancel at the right edge.
                 ui.horizontal(|ui| {
-                    ok = ui
-                        .add_enabled(ok_allowed && !busy_blocks(&dlg, busy), egui::Button::new("OK"))
-                        .probe("OK")
-                        .clicked();
-                    cancel = ui.button("Cancel").probe("Cancel").clicked();
+                    ui.weak("Enter = OK · Esc = Cancel");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let min = egui::vec2(64.0, 0.0);
+                        cancel = ui
+                            .add(egui::Button::new("Cancel").min_size(min))
+                            .probe("Cancel")
+                            .clicked();
+                        ok = ui
+                            .add_enabled(
+                                ok_allowed && !busy_blocks(&dlg, busy),
+                                egui::Button::new("OK").min_size(min),
+                            )
+                            .probe("OK")
+                            .clicked();
+                    });
                 });
-                ui.weak("Enter = OK · Esc = Cancel");
             });
         // Remember a width the user dragged (not every layout jitter).
         let w = dock.map_or(width, |d| d.response.rect.width());
@@ -2544,8 +2553,7 @@ impl RcadApp {
             .collapsible(false)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Keyboard layer:");
+                crate::form::row(ui, "Keyboard layer:", |ui| {
                     for l in [KeymapLayer::Fusion, KeymapLayer::Classic] {
                         if ui
                             .selectable_label(layer == l, l.label())
@@ -2627,8 +2635,7 @@ impl RcadApp {
                     .probe("About version");
                 ui.label("Local-first parametric mechanical CAD in Rust.");
                 ui.label(format!("License: {}", about::LICENSE));
-                ui.horizontal(|ui| {
-                    ui.label("Source:");
+                crate::form::row(ui, "Source:", |ui| {
                     ui.hyperlink(about::REPOSITORY);
                 });
                 ui.small(
@@ -2673,7 +2680,7 @@ fn field_checked(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32, n
         None
     };
     ui.horizontal(|ui| {
-        let l = ui.label(label);
+        let l = crate::form::label(ui, label);
         let mut edit = egui::TextEdit::singleline(buf).desired_width(width);
         if err.is_some() {
             edit = edit.text_color(crate::theme::of(ui).bad);
@@ -2804,13 +2811,11 @@ pub(crate) fn feature_combo(
     let text = sel
         .and_then(|id| options.iter().find(|f| f.id == id))
         .map_or("(choose)".to_string(), |f| format!("{} {}", f.id, f.name));
-    egui::ComboBox::from_label(label)
-        .selected_text(text)
-        .show_ui(ui, |ui| {
-            for f in options {
-                ui.selectable_value(sel, Some(f.id), format!("{}: {}", f.id, f.name));
-            }
-        });
+    crate::form::combo(ui, label, text, |ui| {
+        for f in options {
+            ui.selectable_value(sel, Some(f.id), format!("{}: {}", f.id, f.name));
+        }
+    });
 }
 
 impl RcadApp {

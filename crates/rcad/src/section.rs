@@ -113,8 +113,7 @@ impl App {
                 r.right_top() + egui::vec2(-270.0, 40.0)
             }))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Plane");
+                crate::form::row(ui, "Plane", |ui| {
                     ui.radio_value(&mut st.axis, SectionAxis::X, "YZ (X)")
                         .probe("Section X");
                     ui.radio_value(&mut st.axis, SectionAxis::Y, "XZ (Y)")

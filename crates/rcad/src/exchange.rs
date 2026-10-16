@@ -340,13 +340,11 @@ impl RcadApp {
         let show_units = fmt == Some(Format::Stl) || form.needs_units;
         if show_units {
             let current = UNITS.get(form.unit).map_or("mm", |u| u.0);
-            egui::ComboBox::from_label("File units")
-                .selected_text(current)
-                .show_ui(ui, |ui| {
-                    for (i, (n, _)) in UNITS.iter().enumerate() {
-                        ui.selectable_value(&mut form.unit, i, *n);
-                    }
-                });
+            crate::form::combo(ui, "File units", current, |ui| {
+                for (i, (n, _)) in UNITS.iter().enumerate() {
+                    ui.selectable_value(&mut form.unit, i, *n);
+                }
+            });
             if fmt == Some(Format::Stl) {
                 let (n, f) = UNITS.get(form.unit).copied().unwrap_or(("mm", 1.0));
                 ui.label(format!("Interpreted as {n}: 1 file unit = {f} mm"))
@@ -359,8 +357,7 @@ impl RcadApp {
             });
         }
         if matches!(fmt, Some(Format::Dxf | Format::Svg)) {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Sketch plane");
+            crate::form::row(ui, "Sketch plane", |ui| {
                 ui.radio_value(&mut form.plane, DxfPlane::WorldXY, "World XY");
                 ui.radio_value(&mut form.plane, DxfPlane::WorldXZ, "World XZ");
                 ui.radio_value(&mut form.plane, DxfPlane::WorldYZ, "World YZ");
@@ -846,20 +843,18 @@ impl RcadApp {
                 crate::file_pick::PickMode::Save,
                 crate::file_pick::THREEMF,
             );
-            egui::ComboBox::from_label("3MF file unit")
-                .selected_text(format!("{:?}", form.unit))
-                .show_ui(ui, |ui| {
-                    for u in [
-                        U::Millimeter,
-                        U::Centimeter,
-                        U::Meter,
-                        U::Inch,
-                        U::Foot,
-                        U::Micron,
-                    ] {
-                        ui.selectable_value(&mut form.unit, u, format!("{u:?}"));
-                    }
-                });
+            crate::form::combo(ui, "3MF file unit", format!("{:?}", form.unit), |ui| {
+                for u in [
+                    U::Millimeter,
+                    U::Centimeter,
+                    U::Meter,
+                    U::Inch,
+                    U::Foot,
+                    U::Micron,
+                ] {
+                    ui.selectable_value(&mut form.unit, u, format!("{u:?}"));
+                }
+            });
             ui.small(format!(
                 "Units: declared in the file as {}; sizes below are mm. Geometry only: one named object per body, no printer, process or filament settings.",
                 form.unit.name()
@@ -982,8 +977,7 @@ impl RcadApp {
         } else {
             ui.small("Coordinates are written as modeled (document coordinates).");
         }
-        ui.horizontal(|ui| {
-            ui.label("Bed");
+        crate::form::row(ui, "Bed", |ui| {
             ui.radio_value(&mut form.bed, BedChoice::Off, "None")
                 .probe("Bed none");
             ui.radio_value(&mut form.bed, BedChoice::P1s, "Bambu Lab P1S")

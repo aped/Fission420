@@ -278,8 +278,7 @@ impl RcadApp {
                 }
                 ui.separator();
                 ui.label(RichText::new("Variant export").strong());
-                ui.horizontal(|ui| {
-                    ui.label("Folder");
+                crate::form::row(ui, "Folder", |ui| {
                     ui.add(egui::TextEdit::singleline(&mut st.export_dir).desired_width(112.0))
                         .named("Variant export folder");
                     crate::panels::browse_button_compact(

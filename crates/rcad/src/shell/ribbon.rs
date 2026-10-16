@@ -16,8 +16,19 @@ use crate::probe::Probe as _;
 
 const BTN_H: f32 = 36.0;
 const BTN_MIN_W: f32 = 40.0;
-const BTN_MAX_W: f32 = 66.0;
+const BTN_MAX_W: f32 = 76.0;
 const ICON: f32 = 18.0;
+/// Height of the group-title row under the ribbon buttons.
+const TITLE_H: f32 = 14.0;
+const TITLE_FONT: f32 = 9.0;
+/// Every dropdown menu is at least this wide, so labels and the shortcut
+/// column never crowd each other and sibling menus line up.
+pub const MENU_MIN_W: f32 = 190.0;
+
+/// Start a menu body: the common minimum width.
+pub(crate) fn menu_min_width(ui: &mut Ui) {
+    ui.set_min_width(MENU_MIN_W);
+}
 
 /// Short visible captions for long labels (the accessible name stays the
 /// full label).
@@ -48,11 +59,14 @@ pub struct IconButton<'a> {
 impl Widget for IconButton<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let font = egui::FontId::proportional(if self.small { 13.0 } else { 10.0 });
-        let galley = ui.painter().layout_no_wrap(
-            self.caption.to_string(),
-            font.clone(),
-            Color32::PLACEHOLDER,
-        );
+        // The dropdown mark is part of the caption's width (no truncation).
+        let mut text = self.caption.to_string();
+        if self.dropdown && !self.small {
+            text.push_str(" ⏷");
+        }
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.clone(), font.clone(), Color32::PLACEHOLDER);
         let size = if self.small {
             let w = if self.icon.is_some() {
                 26.0
@@ -88,10 +102,6 @@ impl Widget for IconButton<'_> {
                         Vec2::splat(ICON),
                     );
                     icons::paint(icon, ui.painter(), r, color);
-                    let mut text = self.caption.to_string();
-                    if self.dropdown {
-                        text.push_str(" ⏷");
-                    }
                     let job = egui::text::LayoutJob {
                         wrap: egui::text::TextWrapping::truncate_at_width(rect.width() - 2.0),
                         ..egui::text::LayoutJob::simple_singleline(text, font, color)
@@ -121,39 +131,62 @@ impl Widget for IconButton<'_> {
     }
 }
 
-/// A group title drawn vertically beside the group's buttons; clicking it
-/// opens the group dropdown. Accessible name: the group label.
-pub struct GroupTitle<'a>(pub &'a str);
+/// A group title centred in a row under the group's buttons (Fusion's
+/// ribbon); clicking it opens the group dropdown. Accessible name: the group
+/// label.
+pub struct GroupTitle<'a> {
+    pub label: &'a str,
+    pub width: f32,
+}
+
+impl GroupTitle<'_> {
+    /// Width the title text needs (with its dropdown mark and margins).
+    fn text_width(ui: &Ui, label: &str) -> f32 {
+        ui.painter()
+            .layout_no_wrap(
+                format!("{label} ⏷"),
+                egui::FontId::proportional(TITLE_FONT),
+                Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+            + 8.0
+    }
+}
 
 impl Widget for GroupTitle<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let (rect, resp) = ui.allocate_exact_size(vec2(15.0, BTN_H), Sense::click());
-        let name = self.0.to_string();
+        let (rect, resp) = ui.allocate_exact_size(vec2(self.width, TITLE_H), Sense::click());
+        let name = self.label.to_string();
         resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
         if ui.is_rect_visible(rect) {
             let vis = ui.style().interact(&resp);
-            if resp.hovered() {
+            if resp.hovered() || resp.has_focus() {
                 ui.painter().rect_filled(rect, 2.0, vis.weak_bg_fill);
             }
-            let color = ui.visuals().weak_text_color();
-            let galley = ui.painter().layout_no_wrap(
-                format!("{} ⏷", self.0),
-                egui::FontId::proportional(8.5),
+            let color = if resp.hovered() {
+                vis.fg_stroke.color
+            } else {
+                ui.visuals().weak_text_color()
+            };
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{} ⏷", self.label),
+                egui::FontId::proportional(TITLE_FONT),
                 color,
-            );
-            // Rotated a quarter turn: reads bottom to top.
-            let w = galley.size().x.min(BTN_H);
-            let pos = egui::pos2(
-                rect.center().x - galley.size().y / 2.0,
-                rect.center().y + w / 2.0,
-            );
-            ui.painter().add(
-                egui::epaint::TextShape::new(pos, galley, color)
-                    .with_angle(-std::f32::consts::FRAC_PI_2),
             );
         }
         resp
     }
+}
+
+/// A vertical rule between ribbon groups, spanning buttons and titles.
+fn group_rule(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(9.0, BTN_H + TITLE_H), Sense::hover());
+    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.painter()
+        .vline(rect.center().x, rect.y_range().shrink(3.0), stroke);
 }
 
 impl RcadApp {
@@ -197,6 +230,9 @@ impl RcadApp {
     pub(crate) fn app_bar(&mut self, ui: &mut Ui, busy: bool) {
         use CmdId as C;
         ui.horizontal(|ui| {
+            // One height for menus, tabs and icon buttons, so every control on
+            // the bar shares a centre line.
+            ui.spacing_mut().interact_size.y = 24.0;
             ui.strong("R-CAD");
             let file = ui.menu_button("File", |ui| self.file_menu(ui));
             file.response.named("File menu");
@@ -249,6 +285,7 @@ impl RcadApp {
                 }
                 self.view_menu(ui);
                 let export = ui.menu_button("Export", |ui| {
+                    menu_min_width(ui);
                     for d in registry::at(Place::FileExport) {
                         if self.cmd_button(ui, d.id) {
                             ui.close();
@@ -266,6 +303,7 @@ impl RcadApp {
 
     fn file_menu(&mut self, ui: &mut Ui) {
         use CmdId as C;
+        menu_min_width(ui);
         for id in [C::New, C::Open, C::OpenSafe] {
             if self.cmd_button(ui, id) {
                 ui.close();
@@ -273,6 +311,7 @@ impl RcadApp {
         }
         let recent = self.shell.prefs.recent.clone();
         ui.menu_button("Open Recent", |ui| {
+            menu_min_width(ui);
             if recent.is_empty() {
                 ui.weak("No recent documents");
             }
@@ -312,6 +351,7 @@ impl RcadApp {
             ui.close();
         }
         ui.menu_button("Export", |ui| {
+            menu_min_width(ui);
             for d in registry::at(Place::FileExport) {
                 if self.cmd_button(ui, d.id) {
                     ui.close();
@@ -381,36 +421,55 @@ impl RcadApp {
         }
     }
 
-    /// The active tab's groups: promoted buttons over a group dropdown.
+    /// The active tab's groups: promoted buttons over a centred group title
+    /// (the title opens the group's full command list).
     pub(crate) fn ribbon(&mut self, ui: &mut Ui) {
         let tab = self.shell.tab;
-        {
-            {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
-                    ui.spacing_mut().button_padding.y = 0.0;
-                    // One row: each group's promoted buttons, then its title
-                    // as a narrow dropdown (the group's full command list).
-                    for g in registry::groups(tab) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+            ui.spacing_mut().button_padding.y = 0.0;
+            let groups = registry::groups(tab);
+            let last = groups.len().saturating_sub(1);
+            for (i, g) in groups.into_iter().enumerate() {
+                let title_w = GroupTitle::text_width(ui, g.label());
+                // Last frame's width of the button row, to centre a row that
+                // is narrower than its title.
+                let key = egui::Id::new(("ribbon_row_w", tab.label(), g.label()));
+                let prev = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(title_w);
+                ui.vertical(|ui| {
+                    let row = ui.horizontal(|ui| {
+                        if prev < title_w {
+                            ui.add_space(((title_w - prev) / 2.0).floor());
+                        }
+                        let x0 = ui.cursor().min.x;
                         for d in registry::in_group(tab, g, true) {
                             self.cmd_icon_button(ui, d.id, false);
                         }
                         self.ribbon_extras(ui, tab, g);
-                        let title = ui
-                            .add(GroupTitle(g.label()))
-                            .on_hover_text(format!("{} commands", g.label()));
-                        egui::Popup::menu(&title).show(|ui| {
-                            for d in registry::in_group(tab, g, false) {
-                                if self.cmd_button(ui, d.id) {
-                                    ui.close();
-                                }
+                        ui.min_rect().max.x - x0
+                    });
+                    ui.data_mut(|d| d.insert_temp(key, row.inner));
+                    let width = row.response.rect.width().max(title_w);
+                    let title = ui
+                        .add(GroupTitle {
+                            label: g.label(),
+                            width,
+                        })
+                        .on_hover_text(format!("All {} commands", g.label().to_lowercase()));
+                    egui::Popup::menu(&title).show(|ui| {
+                        menu_min_width(ui);
+                        for d in registry::in_group(tab, g, false) {
+                            if self.cmd_button(ui, d.id) {
+                                ui.close();
                             }
-                        });
-                        ui.separator();
-                    }
+                        }
+                    });
                 });
+                if i < last {
+                    group_rule(ui);
+                }
             }
-        }
+        });
     }
 
     /// Dropdown buttons that sit on the ribbon face (they keep the menus
@@ -433,6 +492,7 @@ impl RcadApp {
                     "Loft between two profile sketches, or sweep a profile along a path",
                 );
                 egui::Popup::menu(&r).show(|ui| {
+                    menu_min_width(ui);
                     for id in [C::Loft, C::Sweep] {
                         if self.cmd_button(ui, id) {
                             ui.close();
@@ -457,6 +517,7 @@ impl RcadApp {
                     .on_hover_text("Create a sketch on a world origin plane (XY, XZ or YZ)")
                     .on_disabled_hover_text("Create or open a document first");
                 egui::Popup::menu(&r).show(|ui| {
+                    menu_min_width(ui);
                     for id in [C::SketchXY, C::SketchXZ, C::SketchYZ] {
                         if self.cmd_button(ui, id) {
                             ui.close();
@@ -478,7 +539,10 @@ impl RcadApp {
                         "Printable parametric parts (new document), dimensioned sketch \
                          templates and drag-to-place tools",
                     );
-                egui::Popup::menu(&r).show(|ui| self.templates_menu(ui));
+                egui::Popup::menu(&r).show(|ui| {
+                    menu_min_width(ui);
+                    self.templates_menu(ui);
+                });
                 self.placement_controls(ui);
             }
             _ => {}

@@ -291,8 +291,7 @@ impl RcadApp {
                 };
                 match st.kind {
                     EditKind::Transform => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Unit presets:");
+                        crate::form::row(ui, "Unit presets:", |ui| {
                             for (label, s) in [("inch to mm (×25.4)", "25.4"), ("m to mm (×1000)", "1000")] {
                                 if ui.button(label).named(label).clicked() {
                                     for k in 0..3 {
@@ -322,15 +321,13 @@ impl RcadApp {
                         ui.small("Order: scale, rotate about the origin, then move (mm). Scale factors must be > 0 (no mirroring).");
                     }
                     EditKind::PlaneCut => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Plane normal");
+                        crate::form::row(ui, "Plane normal", |ui| {
                             for (k, a) in AXES.iter().enumerate() {
                                 ui.radio_value(&mut st.cut_axis, k, *a);
                             }
                             field(ui, "at (mm)", &mut st.cut_offset);
                         });
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Keep");
+                        crate::form::row(ui, "Keep", |ui| {
                             ui.radio_value(&mut st.keep, CutKeep::Below, "below").named("Keep below");
                             ui.radio_value(&mut st.keep, CutKeep::Above, "above").named("Keep above");
                             ui.radio_value(&mut st.keep, CutKeep::Both, "both (two bodies)").named("Keep both");

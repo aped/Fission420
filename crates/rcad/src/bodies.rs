@@ -265,6 +265,7 @@ impl RcadApp {
                         start_rename = Some(b.id);
                     }
                     r.context_menu(|ui| {
+                        crate::shell::ribbon::menu_min_width(ui);
                         if ui.button("Rename body").probe("Rename body").clicked() {
                             start_rename = Some(b.id);
                             ui.close();
@@ -534,15 +535,13 @@ impl RcadApp {
         let mut send = None;
         ui.collapsing("Set material", |ui| {
             let f = &mut self.body_props;
-            egui::ComboBox::from_label("Material")
-                .selected_text(choice_text(&f.choice))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut f.choice, NONE.to_string(), choice_text(NONE));
-                    ui.selectable_value(&mut f.choice, CUSTOM.to_string(), choice_text(CUSTOM));
-                    for e in CATALOG {
-                        ui.selectable_value(&mut f.choice, e.key.to_string(), choice_text(e.key));
-                    }
-                });
+            crate::form::combo(ui, "Material", choice_text(&f.choice), |ui| {
+                ui.selectable_value(&mut f.choice, NONE.to_string(), choice_text(NONE));
+                ui.selectable_value(&mut f.choice, CUSTOM.to_string(), choice_text(CUSTOM));
+                for e in CATALOG {
+                    ui.selectable_value(&mut f.choice, e.key.to_string(), choice_text(e.key));
+                }
+            });
             let custom = f.choice == CUSTOM;
             if custom {
                 crate::panels::text_field(ui, "Material name", &mut f.name);
@@ -683,13 +682,11 @@ impl RcadApp {
                         .find(|o| Some(o.0) == id)
                         .map_or(String::new(), |o| o.1.clone())
                 };
-                egui::ComboBox::from_label("Tool body")
-                    .selected_text(name(f.combine_tool))
-                    .show_ui(ui, |ui| {
-                        for (id, n) in &others {
-                            ui.selectable_value(&mut f.combine_tool, Some(*id), n);
-                        }
-                    });
+                crate::form::combo(ui, "Tool body", name(f.combine_tool), |ui| {
+                    for (id, n) in &others {
+                        ui.selectable_value(&mut f.combine_tool, Some(*id), n);
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut f.combine_op, 0, "Join");
                     ui.radio_value(&mut f.combine_op, 1, "Cut");
