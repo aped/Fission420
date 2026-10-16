@@ -19,7 +19,7 @@
 //! Truck 0.6 failed on revolved cones; with the truck-shapeops fork (ADR 0013)
 //! round tapered cuts succeed and are exact
 //! (`taper::tests::round_tapered_cut_is_exact_or_refused` takes its exact
-//! branch; `validate::tests::spike_countersink_cone` removes the frustum volume
+//! branch; `validate::tests::probe_countersink_cone` removes the frustum volume
 //! to 1e-12). A failure is still refused with Truck's error, never accepted.
 use crate::build::{BOOLEAN_TOLS, check_single_closed, with_exact_edges};
 use crate::validate::{BooleanCheck, Prism, PrismOp};

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-exclude = ["spikes", "third_party"]
+exclude = ["third_party"]
 
 [workspace.package]
 edition = "2024"

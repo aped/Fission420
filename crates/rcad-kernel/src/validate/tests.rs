@@ -167,13 +167,13 @@ fn clear_depth_cases() {
     assert_eq!(d, 0.5);
 }
 
-/// Feasibility spike: a 90° countersink as a revolved annular cone cut
+/// Kernel probe: a 90° countersink as a revolved annular cone cut
 /// from a plate with a Ø5.5 hole, and from a plain plate. Observed with Truck
 /// 0.6: `and` returns None at every tolerance (holed plate) and panics (plain
 /// plate), so the Hole feature offers no countersink. Prints, asserts nothing.
 #[test]
-#[ignore = "feasibility spike: countersink via a revolved cone tool"]
-fn spike_countersink_cone() {
+#[ignore = "kernel probe: countersink via a revolved cone tool"]
+fn probe_countersink_cone() {
     use std::f64::consts::PI;
     let p = plate();
     let start = down(12.0);

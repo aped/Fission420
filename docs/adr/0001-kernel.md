@@ -6,7 +6,7 @@ Status: accepted (2026-10-10)
 Use the Truck crates from crates.io (Apache-2.0): truck-modeling 0.6.0, truck-shapeops 0.4.0,
 truck-meshalgo 0.4.0 (plus their truck-* deps). All Truck types stay behind `crates/rcad-kernel`.
 
-## Evidence (spike: `spikes/truck_spike`, `cargo run --release` there)
+## Evidence (a standalone Truck evaluation program, not kept in the repository)
 Box built by `tsweep` of a vertex/edge/face; cutter = `rsweep` circle -> `try_attach_plane` -> `tsweep`;
 cut = `truck_shapeops::and(plate, !cutter, 0.05)`.
 
@@ -40,7 +40,7 @@ volume only from f32 tessellation; the `vcad` facade fails to compile with `step
   the second surface at the first surface's entity index** (`out/geometry.rs`, `DisplayByStep for
   IntersectionCurve`: `self.surface1().fmt(surface0_idx, f)`), giving duplicate ids. Observed: the
   cut plate exported as-is imports in FreeCAD with volume 39194.58 (expected 39214.60) and z bounds
-  [-1, 11] (`spikes/truck_spike/src/bin/step.rs`, artifacts/step_probe_cut.step).
+  [-1, 11] (a standalone Truck STEP probe during the kernel evaluation, not kept).
   Mitigation in `rcad-kernel/src/step.rs`: before writing, every plane ∩ Z-extruded-NURBS intersection
   edge is rebuilt as the exact rational B-spline generating curve at the plane's z, trimmed between
   the edge vertices, and verified to lie on both surfaces (1e-7 mm) and on the same branch as Truck's

@@ -78,8 +78,8 @@ Edge ordering therefore never flips axes.
   `reverse` (into the material it would add nothing); documents saved before this rule set
   `reverse` exactly where it pointed away, so they regenerate unchanged. The UI disables
   Reverse for a blind Cut or Join from a face.
-* Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured,
-  spike 2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2, depth/2)` *into* the
+* Join from a face sketch: Truck 0.6 booleans return nothing for coplanar contact (measured
+  2026-10-10), so the tool is extended `δ = min(0.5 mm, distance/2, depth/2)` *into* the
   support side, where `depth` is the target's extent below the face (so the overlap cannot
   poke out of a plate thinner than 0.5 mm). This is only correct when the profile lies inside
   the support face; the regenerator checks the profile against the face region and refuses

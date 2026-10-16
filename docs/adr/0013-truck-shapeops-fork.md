@@ -10,7 +10,7 @@ is from 2024-09. Upstream master (88ed0052, checked 2026-10-13) was evaluated an
 - It panics in `IntersectionCurve::subs` on plain cylinder cuts that 0.4.0 handles.
 - It changes `rsweep`'s signature.
 
-Evidence is in a local spike that compares 0.6/0.4 with master on 8 cases and 2 controls.
+Evidence is a local comparison program (not kept in the repository) that compares 0.6/0.4 with master on 8 cases and 2 controls.
 
 ## Decision
 Vendor truck-shapeops 0.4.0 (Apache-2.0, source commit c23d2c25) in

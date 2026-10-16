@@ -4,7 +4,7 @@
 //! of the parent module: exact faces and edges, no boolean intersection curves
 //! to rebuild and no tolerance retries. (Unpatched Truck 0.6 could not cut a
 //! revolved cone at all; with the truck-shapeops fork it can, see
-//! `validate::tests::spike_countersink_cone`, but the direct construction stays
+//! `validate::tests::probe_countersink_cone`, but the direct construction stays
 //! the simpler exact path.) Precondition: a cylindrical hole of radius `r` whose entry loop is a
 //! whole inner loop of a planar entry face perpendicular to the hole axis, the
 //! hole wall reaching deeper than the countersink. Construction with

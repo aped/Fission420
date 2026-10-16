@@ -196,8 +196,8 @@ fn chamfer_box_edge_and_refusals() {
 }
 
 #[test]
-#[ignore = "feasibility spike: fillet via a tangent-arc tool"]
-fn spike_fillet_tangent_arc_tool() {
+#[ignore = "kernel probe: fillet via a tangent-arc tool"]
+fn probe_fillet_tangent_arc_tool() {
     use crate::LoopSegment;
     // Block 40x30x10, top-front edge along x at y=0, z=10. Frame: origin on the
     // edge before x=0, z = +X (edge direction), x = +Y, y = +Z (local (y, z)
@@ -229,12 +229,12 @@ fn spike_fillet_tangent_arc_tool() {
     let res = crate::build::subtract_prism(&b, &p, &frame, 40.0 + 2.0 * m, "fillet");
     match &res {
         Ok(f) => eprintln!(
-            "fillet spike: volume {} (expected {})",
+            "fillet probe: volume {} (expected {})",
             volume(f),
             12000.0 - (r * r - std::f64::consts::PI * r * r / 4.0) * 40.0
         ),
         Err(e) => eprintln!(
-            "fillet spike failed: {}",
+            "fillet probe failed: {}",
             e.to_string().chars().take(300).collect::<String>()
         ),
     }
