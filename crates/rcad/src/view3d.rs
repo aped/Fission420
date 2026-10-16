@@ -29,7 +29,7 @@ use crate::app::{DocDimEdit, RcadApp, SketchTarget};
 use crate::place::{Phase, PlaneFrame};
 use crate::probe::Probe as _;
 use crate::sketch_edit::{Item, SketchTool, StateKind, View};
-use crate::sketch_view::{self, PALETTE, Projector, SketchStyle};
+use crate::sketch_view::{self, Projector, SketchStyle};
 
 /// Press-to-release movement (points) below which a press is a click.
 const CLICK_SLOP_PX: f32 = 6.0;
@@ -459,6 +459,7 @@ impl RcadApp {
                     !tool_active && self.shell.nav_mode == crate::shell::viewcube::NavMode::Orbit,
                 );
                 vp.set_dimmed(sketching);
+                vp.set_light_backdrop(!ui.visuals().dark_mode);
                 if vp.grid_plane() != grid {
                     let _ = vp.set_grid_plane(grid);
                 }
@@ -671,7 +672,7 @@ impl RcadApp {
                         egui::Align2::LEFT_TOP,
                         text,
                         egui::FontId::proportional(12.5),
-                        PALETTE.dim,
+                        sketch_view::palette_of(painter).dim,
                     );
                 }
             }
@@ -686,7 +687,7 @@ impl RcadApp {
                 painter,
                 rect.min + egui::vec2(10.0, 10.0),
                 hint,
-                PALETTE.preview,
+                sketch_view::palette_of(painter).preview,
             );
         }
     }
@@ -716,10 +717,11 @@ impl RcadApp {
         let Some(pv) = p.preview() else {
             return ov;
         };
+        let pal = sketch_view::palette(!self.viewport.as_ref().is_some_and(|v| v.light_backdrop()));
         let color = if pv.plausible {
-            PALETTE.preview
+            pal.preview
         } else {
-            PALETTE.conflict
+            pal.conflict
         };
         let f = |q: [f64; 3]| q.map(|v| v as f32);
         ov.polylines.push(OverlayPolyline {
@@ -1170,14 +1172,16 @@ impl RcadApp {
         let cube = crate::shell::viewcube::view_cube_rect(rect);
         let top = egui::Rect::from_min_max(rect.min, egui::pos2(cube.min.x - 8.0, rect.max.y));
         let painter = ui.painter_at(top);
+        let pal = crate::theme::of(ui);
+        let sk = sketch_view::palette(ui.visuals().dark_mode);
         let mut chips: Vec<egui::Rect> = vec![];
         let mut y = rect.min.y + 8.0;
         if let Some(s) = &self.sketch {
             let (kind, text) = s.editor.status();
             let col = match kind {
-                StateKind::Full => Color32::from_rgb(120, 220, 120),
-                StateKind::Under => Color32::from_rgb(120, 190, 255),
-                StateKind::Conflict => PALETTE.conflict,
+                StateKind::Full => pal.chip_ok,
+                StateKind::Under => pal.chip_info,
+                StateKind::Conflict => sk.conflict,
             };
             let r = chip(
                 &painter,
@@ -1201,16 +1205,12 @@ impl RcadApp {
                 &painter,
                 egui::pos2(rect.min.x + 10.0, y),
                 hint,
-                Color32::from_gray(220),
+                pal.chip_hint,
             );
             chips.push(r);
             y = r.max.y + 6.0;
             if let Some(fb) = &s.editor.feedback {
-                let col = if fb.error {
-                    PALETTE.conflict
-                } else {
-                    Color32::from_rgb(200, 230, 200)
-                };
+                let col = if fb.error { sk.conflict } else { pal.chip_ok };
                 chips.push(chip(
                     &painter,
                     egui::pos2(rect.min.x + 10.0, y),
@@ -1226,15 +1226,12 @@ impl RcadApp {
             job.append(
                 &format!("✖ {heading}\n"),
                 0.0,
-                egui::TextFormat::simple(egui::FontId::proportional(14.5), PALETTE.conflict),
+                egui::TextFormat::simple(egui::FontId::proportional(14.5), pal.chip_bad),
             );
             job.append(
                 &body,
                 0.0,
-                egui::TextFormat::simple(
-                    egui::FontId::proportional(13.0),
-                    Color32::from_rgb(240, 205, 205),
-                ),
+                egui::TextFormat::simple(egui::FontId::proportional(13.0), pal.banner_text),
             );
             // Room for the Dismiss button before the view cube.
             job.wrap.max_width = (top.width() - 100.0).max(200.0);
@@ -1243,14 +1240,14 @@ impl RcadApp {
                 egui::pos2(rect.min.x + 10.0, y),
                 galley.size() + egui::vec2(12.0, 10.0),
             );
-            painter.rect_filled(r, 4.0, Color32::from_rgba_unmultiplied(40, 10, 10, 235));
+            painter.rect_filled(r, 4.0, pal.banner_bg);
             painter.rect_stroke(
                 r,
                 4.0,
-                Stroke::new(1.0, PALETTE.conflict),
+                Stroke::new(1.0, pal.chip_bad),
                 egui::StrokeKind::Inside,
             );
-            painter.galley(r.min + egui::vec2(6.0, 5.0), galley, PALETTE.conflict);
+            painter.galley(r.min + egui::vec2(6.0, 5.0), galley, pal.chip_bad);
             chips.push(r);
             let btn = egui::Rect::from_min_size(
                 egui::pos2(r.max.x + 6.0, r.min.y),
@@ -1279,7 +1276,7 @@ impl RcadApp {
                 &painter,
                 egui::pos2((top.max.x - 330.0).max(rect.min.x + 10.0), rect.min.y + 8.0),
                 "Regenerating… showing the last valid model".into(),
-                Color32::from_rgb(255, 210, 120),
+                pal.chip_warn,
             ));
         }
         self.shell.top_chips = chips;
@@ -1296,7 +1293,7 @@ impl RcadApp {
                 &painter,
                 egui::pos2(rect.min.x + 110.0, rect.max.y - 34.0),
                 text,
-                Color32::from_gray(225),
+                pal.chip_text,
             );
         }
         self.paint_notice(ui, rect);
@@ -1321,7 +1318,8 @@ impl RcadApp {
             std::time::Duration::from_secs(crate::app::NOTICE_SECS).saturating_sub(since.elapsed()),
         );
         let painter = ui.painter_at(rect);
-        let color = Color32::from_rgb(255, 210, 120);
+        let pal = crate::theme::of(ui);
+        let color = pal.chip_warn;
         // Wrapped to the view (room for ×); the bottom edge stays above the
         // selected-face line however many lines it takes.
         let galley = painter.layout(
@@ -1335,7 +1333,7 @@ impl RcadApp {
             egui::pos2(rect.min.x + 110.0, rect.max.y - 40.0 - size.y),
             size,
         );
-        painter.rect_filled(r, 4.0, Color32::from_black_alpha(200));
+        painter.rect_filled(r, 4.0, pal.chip_bg);
         painter.galley(r.min + egui::vec2(5.0, 3.0), galley, color);
         let btn = egui::Rect::from_min_size(
             egui::pos2(r.max.x + 4.0, r.min.y),
@@ -1358,8 +1356,13 @@ impl RcadApp {
         let h = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(170.0);
         let size = egui::vec2(470.0_f32.min(rect.width() - 40.0).max(260.0), h);
         let card = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 40.0), size);
-        ui.painter()
-            .rect_filled(card, 8.0, Color32::from_black_alpha(190));
+        // Opaque enough that the theme's own text colours read on it.
+        let fill = if ui.visuals().dark_mode {
+            Color32::from_black_alpha(190)
+        } else {
+            Color32::from_white_alpha(235)
+        };
+        ui.painter().rect_filled(card, 8.0, fill);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(16.0)));
         child.vertical_centered(|ui| {
             ui.heading(if self.summary.open {
@@ -1485,12 +1488,13 @@ fn inline_number_editor(
     (apply, cancel)
 }
 
-/// A rounded label with a dark background at `at` (top-left); returns its rect.
+/// A rounded label at `at` (top-left) on the theme's chip background
+/// (dark or light); returns its rect.
 pub fn chip(painter: &egui::Painter, at: Pos2, text: String, color: Color32) -> egui::Rect {
     let wrap = (painter.clip_rect().max.x - at.x - 20.0).max(120.0);
     let galley = painter.layout(text, egui::FontId::proportional(13.5), color, wrap);
     let r = egui::Rect::from_min_size(at, galley.size() + egui::vec2(10.0, 6.0));
-    painter.rect_filled(r, 4.0, Color32::from_black_alpha(185));
+    painter.rect_filled(r, 4.0, crate::theme::of_ctx(painter.ctx()).chip_bg);
     painter.galley(r.min + egui::vec2(5.0, 3.0), galley, color);
     r
 }

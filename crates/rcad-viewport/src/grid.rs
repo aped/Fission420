@@ -149,6 +149,8 @@ pub struct GridSpec {
     pub center: [i64; 2],
     /// Lines on each side of the centre (per direction).
     pub half_lines: i32,
+    /// Colours for a light backdrop (darker lines) instead of the dark one.
+    pub light: bool,
 }
 
 impl GridSpec {
@@ -185,6 +187,7 @@ impl GridSpec {
             spacing,
             center: [snap(math::dot(rel, p.x)), snap(math::dot(rel, p.y))],
             half_lines: half_lines.max(1),
+            light: false,
         }
     }
 
@@ -201,10 +204,11 @@ impl GridSpec {
         let (umin, umax) = ((cu - n) as f32 * s, (cu + n) as f32 * s);
         let (vmin, vmax) = ((cv - n) as f32 * s, (cv + n) as f32 * s);
 
-        let (minor, major) = if world {
-            ([0.55, 0.57, 0.60, 0.22], [0.65, 0.67, 0.70, 0.42])
-        } else {
-            ([0.60, 0.64, 0.70, 0.30], [0.70, 0.74, 0.80, 0.55])
+        let (minor, major) = match (world, self.light) {
+            (true, false) => ([0.55, 0.57, 0.60, 0.22], [0.65, 0.67, 0.70, 0.42]),
+            (false, false) => ([0.60, 0.64, 0.70, 0.30], [0.70, 0.74, 0.80, 0.55]),
+            (true, true) => ([0.30, 0.32, 0.36, 0.16], [0.22, 0.24, 0.28, 0.32]),
+            (false, true) => ([0.20, 0.30, 0.45, 0.22], [0.12, 0.22, 0.38, 0.42]),
         };
         let mut v = Vec::with_capacity((4 * (2 * n + 1) + 10) as usize);
         for i in -n..=n {
@@ -224,10 +228,21 @@ impl GridSpec {
             }
         }
 
-        let red = [0.90, 0.25, 0.25, 1.0];
-        let green = [0.30, 0.85, 0.30, 1.0];
-        let blue = [0.30, 0.50, 0.95, 1.0];
-        let grey = [0.55, 0.57, 0.60, 0.35];
+        let (red, green, blue, grey) = if self.light {
+            (
+                [0.82, 0.12, 0.12, 1.0],
+                [0.08, 0.55, 0.12, 1.0],
+                [0.12, 0.32, 0.85, 1.0],
+                [0.30, 0.32, 0.36, 0.40],
+            )
+        } else {
+            (
+                [0.90, 0.25, 0.25, 1.0],
+                [0.30, 0.85, 0.30, 1.0],
+                [0.30, 0.50, 0.95, 1.0],
+                [0.55, 0.57, 0.60, 0.35],
+            )
+        };
         let u_axis_visible = vmin <= 0.0 && vmax >= 0.0;
         let v_axis_visible = umin <= 0.0 && umax >= 0.0;
         let half = n as f32 * s;
@@ -332,6 +347,30 @@ mod tests {
         assert_eq!(next_spacing(1.0), 2.0);
         assert_eq!(next_spacing(2.0), 5.0);
         assert_eq!(next_spacing(5.0), 10.0);
+    }
+
+    /// The light backdrop draws the same lines, each darker than on the dark
+    /// backdrop (lines must contrast with a light background).
+    #[test]
+    fn light_backdrop_grid_has_same_lines_in_darker_colours() {
+        let dark = GridSpec::new(None, &Camera::default(), 800.0, 1.5);
+        let light = GridSpec {
+            light: true,
+            ..dark
+        };
+        let ((dv, db), (lv, lb)) = (dark.build(), light.build());
+        assert_eq!(db, lb);
+        assert_eq!(dv.len(), lv.len());
+        let luma = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        for (d, l) in dv.iter().zip(&lv) {
+            assert_eq!(d.pos, l.pos);
+            assert!(
+                luma(l.color) < luma(d.color),
+                "{:?} vs {:?}",
+                l.color,
+                d.color
+            );
+        }
     }
 
     #[test]

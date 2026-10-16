@@ -52,7 +52,7 @@ pub fn operation_ui(
         .probe(&format!("{what} target body"));
     if solids.is_empty() {
         ui.colored_label(
-            egui::Color32::from_rgb(255, 110, 110),
+            crate::theme::of(ui).bad,
             "No solid body to combine with: use New Body",
         );
         return false;

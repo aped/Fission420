@@ -170,7 +170,7 @@ impl RcadApp {
     /// The draggable history marker.
     fn marker(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let (rect, r) = ui.allocate_exact_size(vec2(8.0, CHIP), Sense::drag());
-        let c = Color32::from_rgb(255, 200, 90);
+        let c = crate::theme::of(ui).active;
         ui.painter()
             .rect_filled(rect.shrink2(vec2(2.0, 0.0)), 1.0, c);
         if r.dragged()

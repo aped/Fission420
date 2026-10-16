@@ -17,11 +17,6 @@ use crate::place::Tool;
 use crate::probe::Probe as _;
 use crate::sketch_edit::{Item, SketchTool};
 
-const OK_COLOR: Color32 = Color32::from_rgb(120, 220, 120);
-const UNDER_COLOR: Color32 = Color32::from_rgb(120, 190, 255);
-const BAD_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
-const WARN_COLOR: Color32 = Color32::from_rgb(240, 190, 80);
-
 /// Hover text of a feature's health: message, cause and repair hint.
 fn health_text(f: &FeatureSummary) -> String {
     let h = &f.health;
@@ -51,16 +46,19 @@ fn action(ui: &mut egui::Ui, label: &str, blocker: Option<&str>) -> bool {
 }
 
 /// Constraint state as symbol + words (never colour alone).
-pub(crate) fn state_text(f: &FeatureSummary) -> Option<(String, Color32)> {
+pub(crate) fn state_text(
+    f: &FeatureSummary,
+    pal: &crate::theme::Palette,
+) -> Option<(String, Color32)> {
     let st = f.solve_status?;
     Some(match st {
-        SolveStatus::FullyConstrained => ("✔ Fully constrained".into(), OK_COLOR),
+        SolveStatus::FullyConstrained => ("✔ Fully constrained".into(), pal.ok),
         SolveStatus::UnderConstrained => (
             format!("~ Under-constrained ({} DOF)", f.solve_dof.unwrap_or(0)),
-            UNDER_COLOR,
+            pal.info,
         ),
-        SolveStatus::OverConstrained => ("✖ Over-constrained (redundant)".into(), BAD_COLOR),
-        _ => (format!("✖ {st:?}"), BAD_COLOR),
+        SolveStatus::OverConstrained => ("✖ Over-constrained (redundant)".into(), pal.bad),
+        _ => (format!("✖ {st:?}"), pal.bad),
     })
 }
 
@@ -265,7 +263,7 @@ impl RcadApp {
                 .add_enabled(
                     !committing,
                     egui::Button::new(RichText::new("Finish Sketch").strong())
-                        .fill(Color32::from_rgb(40, 90, 50)),
+                        .fill(crate::theme::of(ui).go_fill),
                 )
                 .probe("Finish Sketch")
                 .on_hover_text("Commit the sketch as one undoable document step")
@@ -386,7 +384,7 @@ impl RcadApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new("▶ timeline marker (later features rolled back)")
-                            .color(Color32::from_rgb(255, 200, 90))
+                            .color(crate::theme::of(ui).active)
                             .small(),
                     );
                     if ui
@@ -430,8 +428,8 @@ impl RcadApp {
                     RichText::new(&f.name).weak().italics()
                 } else {
                     match f.health.state {
-                        H::Error => RichText::new(&f.name).color(BAD_COLOR),
-                        H::Warning => RichText::new(&f.name).color(WARN_COLOR),
+                        H::Error => RichText::new(&f.name).color(crate::theme::of(ui).bad),
+                        H::Warning => RichText::new(&f.name).color(crate::theme::of(ui).warn),
                         _ => RichText::new(&f.name),
                     }
                 };
@@ -442,9 +440,9 @@ impl RcadApp {
                     ui.label(RichText::new("rolled back").weak().small());
                 } else if matches!(f.health.state, H::Error | H::Warning) {
                     let (sym, c) = if f.health.state == H::Error {
-                        ("⚠ error", BAD_COLOR)
+                        ("⚠ error", crate::theme::of(ui).bad)
                     } else {
-                        ("⚠ warning", WARN_COLOR)
+                        ("⚠ warning", crate::theme::of(ui).warn)
                     };
                     if ui
                         .add(egui::Button::new(RichText::new(sym).color(c).small()).frame(false))
@@ -490,8 +488,8 @@ impl RcadApp {
                     }
                 });
                 if editing == Some(f.id) {
-                    ui.label(RichText::new("editing").color(Color32::from_rgb(255, 200, 90)));
-                } else if let Some((t, c)) = state_text(f) {
+                    ui.label(RichText::new("editing").color(crate::theme::of(ui).active));
+                } else if let Some((t, c)) = state_text(f, crate::theme::of(ui)) {
                     let sym: String = t.chars().take(1).collect();
                     ui.label(RichText::new(sym).color(c)).on_hover_text(t);
                 }
@@ -506,8 +504,12 @@ impl RcadApp {
                                  outermost regions)",
                             );
                     } else {
-                        ui.label(RichText::new("open").color(BAD_COLOR).small())
-                            .on_hover_text(f.profile_error.clone().unwrap_or_default());
+                        ui.label(
+                            RichText::new("open")
+                                .color(crate::theme::of(ui).bad)
+                                .small(),
+                        )
+                        .on_hover_text(f.profile_error.clone().unwrap_or_default());
                     }
                 }
             });
@@ -555,7 +557,7 @@ impl RcadApp {
             return;
         };
         egui::Frame::group(ui.style())
-            .fill(Color32::from_rgb(70, 30, 30))
+            .fill(crate::theme::of(ui).danger_fill)
             .show(ui, |ui| {
                 ui.label(
                     RichText::new(format!(
@@ -563,7 +565,7 @@ impl RcadApp {
                         failed.len(),
                         if failed.len() == 1 { "" } else { "s" }
                     ))
-                    .color(BAD_COLOR)
+                    .color(crate::theme::of(ui).bad)
                     .strong(),
                 )
                 .named("Document has errors");
@@ -637,7 +639,7 @@ impl RcadApp {
         ui.horizontal(|ui| {
             ui.label(format!("{what}:"));
             if armed {
-                ui.colored_label(UNDER_COLOR, "Select a face in the view");
+                ui.colored_label(crate::theme::of(ui).info, "Select a face in the view");
             } else {
                 ui.label(RichText::new("1 selected").strong())
                     .on_hover_text(item);
@@ -965,7 +967,7 @@ impl RcadApp {
                 }
             }
         });
-        if let Some((t, c)) = state_text(&f) {
+        if let Some((t, c)) = state_text(&f, crate::theme::of(ui)) {
             ui.label(RichText::new(t).color(c));
         }
         // Contextual actions.
@@ -1005,12 +1007,16 @@ impl RcadApp {
                 self.surface_sketch_ui(ui, &f);
                 match &f.profile_error {
                     None => {
-                        ui.label(RichText::new("Profile: closed").color(OK_COLOR).small());
+                        ui.label(
+                            RichText::new("Profile: closed")
+                                .color(crate::theme::of(ui).ok)
+                                .small(),
+                        );
                     }
                     Some(e) => {
                         ui.label(
                             RichText::new(format!("Profile not usable: {e}"))
-                                .color(BAD_COLOR)
+                                .color(crate::theme::of(ui).bad)
                                 .small(),
                         );
                     }
@@ -1124,7 +1130,7 @@ impl RcadApp {
                 ui.small(format!("{st:?} · DOF {dof} · residual {res}"));
             }
             for c in &f.solve_conflicts {
-                ui.small(RichText::new(format!("conflict: {c}")).color(BAD_COLOR));
+                ui.small(RichText::new(format!("conflict: {c}")).color(crate::theme::of(ui).bad));
             }
             if let Some(fr) = f.frame {
                 ui.small(format!(
@@ -1312,7 +1318,7 @@ impl RcadApp {
     pub(crate) fn sketch_inspector(&mut self, ui: &mut egui::Ui) {
         if let Some(b) = self.broken_sketch {
             ui.colored_label(
-                BAD_COLOR,
+                crate::theme::of(ui).bad,
                 format!(
                     "{} lost its support face (edit refused). Re-attach it, then Finish again.",
                     self.feature_name(b)
@@ -1334,9 +1340,9 @@ impl RcadApp {
         ui.label(&s.title);
         let (_, status) = s.editor.status();
         let col = match s.editor.status().0 {
-            crate::sketch_edit::StateKind::Full => OK_COLOR,
-            crate::sketch_edit::StateKind::Under => UNDER_COLOR,
-            crate::sketch_edit::StateKind::Conflict => BAD_COLOR,
+            crate::sketch_edit::StateKind::Full => crate::theme::of(ui).ok,
+            crate::sketch_edit::StateKind::Under => crate::theme::of(ui).info,
+            crate::sketch_edit::StateKind::Conflict => crate::theme::of(ui).bad,
         };
         ui.label(RichText::new(status).color(col));
         match s.editor.profile_state() {
@@ -1344,7 +1350,7 @@ impl RcadApp {
             Err(e) => ui.label(
                 RichText::new(format!("Profile not extrudable yet: {e}"))
                     .small()
-                    .color(Color32::from_rgb(255, 200, 120)),
+                    .color(crate::theme::of(ui).warn),
             ),
         };
         ui.separator();
@@ -1684,7 +1690,7 @@ impl RcadApp {
                     .as_ref()
                     .map_or("Untitled".into(), |p| p.display().to_string());
                 let state = if self.has_unsaved_changes() {
-                    RichText::new("• unsaved changes").color(Color32::from_rgb(255, 200, 90))
+                    RichText::new("• unsaved changes").color(crate::theme::of(ui).active)
                 } else if self.summary.path.is_none() {
                     RichText::new("not saved yet").weak()
                 } else {
@@ -2274,7 +2280,7 @@ impl RcadApp {
                     });
                 let invalid = crate::dialogs::invalid_fields();
                 if let Some(why) = &invalid {
-                    ui.colored_label(BAD_COLOR, why);
+                    ui.colored_label(crate::theme::of(ui).bad, why);
                 }
                 ok_allowed &= invalid.is_none();
                 ui.separator();
@@ -2670,7 +2676,7 @@ fn field_checked(ui: &mut egui::Ui, label: &str, buf: &mut String, width: f32, n
         let l = ui.label(label);
         let mut edit = egui::TextEdit::singleline(buf).desired_width(width);
         if err.is_some() {
-            edit = edit.text_color(BAD_COLOR);
+            edit = edit.text_color(crate::theme::of(ui).bad);
         }
         let r = ui.add(edit).labelled_by(l.id).probe(label);
         if AUTOFOCUS.with(|a| a.replace(false)) {

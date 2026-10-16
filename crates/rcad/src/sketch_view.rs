@@ -32,8 +32,18 @@ pub struct Palette {
     pub plane: Color32,
     /// Projected (linked, read-only) geometry.
     pub projected: Color32,
+    /// The sketch origin point.
+    pub origin: Color32,
+    /// Background of dimension labels and constraint glyphs.
+    pub label_bg: Color32,
+    /// Outline of the sketch-plane patch.
+    pub plane_edge: Color32,
+    /// Sketch-plane X and Y axes.
+    pub axis_x: Color32,
+    pub axis_y: Color32,
 }
 
+/// Sketch colours over the dark 3D backdrop.
 pub const PALETTE: Palette = Palette {
     curve: Color32::from_rgb(110, 185, 255),
     curve_full: Color32::from_rgb(235, 235, 235),
@@ -45,7 +55,42 @@ pub const PALETTE: Palette = Palette {
     preview: Color32::from_rgb(255, 205, 60),
     plane: Color32::from_rgba_premultiplied(8, 16, 30, 30),
     projected: Color32::from_rgb(190, 120, 255),
+    origin: Color32::WHITE,
+    label_bg: Color32::from_black_alpha(190),
+    plane_edge: Color32::from_rgba_premultiplied(50, 80, 115, 110),
+    axis_x: Color32::from_rgb(220, 70, 70),
+    axis_y: Color32::from_rgb(80, 200, 80),
 };
+
+/// Sketch colours over the light 3D backdrop: the same roles, darker and
+/// more saturated so they read on light grey and on white label chips.
+pub const PALETTE_LIGHT: Palette = Palette {
+    curve: Color32::from_rgb(20, 95, 200),
+    curve_full: Color32::from_rgb(25, 28, 34),
+    selected: Color32::from_rgb(220, 105, 0),
+    hover: Color32::from_rgb(190, 140, 0),
+    dim: Color32::from_rgb(20, 120, 45),
+    glyph: Color32::from_rgb(60, 62, 75),
+    conflict: Color32::from_rgb(205, 30, 40),
+    preview: Color32::from_rgb(185, 120, 0),
+    plane: Color32::from_rgba_premultiplied(10, 30, 60, 28),
+    projected: Color32::from_rgb(125, 55, 200),
+    origin: Color32::from_rgb(25, 28, 34),
+    label_bg: Color32::from_rgba_premultiplied(225, 225, 225, 225),
+    plane_edge: Color32::from_rgba_premultiplied(30, 60, 100, 140),
+    axis_x: Color32::from_rgb(200, 40, 40),
+    axis_y: Color32::from_rgb(30, 135, 45),
+};
+
+/// The sketch palette for dark (`true`) or light visuals.
+pub fn palette(dark: bool) -> &'static Palette {
+    if dark { &PALETTE } else { &PALETTE_LIGHT }
+}
+
+/// The sketch palette of the theme `painter` draws with.
+pub fn palette_of(painter: &egui::Painter) -> &'static Palette {
+    palette(painter.ctx().theme() == egui::Theme::Dark)
+}
 
 /// Projection of sketch-plane points to absolute screen positions.
 #[derive(Clone)]
@@ -194,11 +239,8 @@ fn label(
     let font = egui::FontId::proportional(if strong { 15.0 } else { 13.5 });
     let galley = painter.layout_no_wrap(text, font, color);
     let r = egui::Rect::from_center_size(at, galley.size()).expand(3.0);
-    painter.rect_filled(
-        r,
-        3.0,
-        Color32::from_black_alpha(if strong { 230 } else { 190 }),
-    );
+    let bg = palette_of(painter).label_bg;
+    painter.rect_filled(r, 3.0, if strong { bg.to_opaque() } else { bg });
     if strong {
         painter.rect_stroke(r, 3.0, Stroke::new(1.5, color), egui::StrokeKind::Outside);
     }
@@ -214,16 +256,17 @@ pub fn paint_sketch(
     st: &SketchStyle<'_>,
 ) -> Vec<(Item, egui::Rect)> {
     let mut targets = vec![];
+    let pal = palette_of(painter);
     let base = if st.state == StateKind::Full {
-        PALETTE.curve_full
+        pal.curve_full
     } else {
-        PALETTE.curve
+        pal.curve
     };
     let color_of = |item: Item| {
         let c = if st.selection.contains(&item) {
-            PALETTE.selected
+            pal.selected
         } else if st.hover == Some(item) {
-            PALETTE.hover
+            pal.hover
         } else {
             base
         };
@@ -255,7 +298,7 @@ pub fn paint_sketch(
             && st.hover != Some(item)
         {
             fade(
-                PALETTE.projected,
+                pal.projected,
                 st.alpha * if construction { 0.75 } else { 1.0 },
             )
         } else if construction {
@@ -323,7 +366,7 @@ pub fn paint_sketch(
                     }
                     painter.extend(egui::Shape::dashed_line(
                         &cp,
-                        Stroke::new(1.0, fade(PALETTE.glyph, st.alpha)),
+                        Stroke::new(1.0, fade(pal.glyph, st.alpha)),
                         4.0,
                         4.0,
                     ));
@@ -354,8 +397,8 @@ pub fn paint_sketch(
         let item = Item::Point(p.id);
         let c = color_of(item);
         if s.origin == Some(p.id) {
-            painter.circle_stroke(sp, 4.5, Stroke::new(1.5, fade(Color32::WHITE, st.alpha)));
-            painter.circle_filled(sp, 2.0, fade(Color32::WHITE, st.alpha));
+            painter.circle_stroke(sp, 4.5, Stroke::new(1.5, fade(pal.origin, st.alpha)));
+            painter.circle_filled(sp, 2.0, fade(pal.origin, st.alpha));
         } else if used.contains(&p.id) {
             let r = if st.selection.contains(&item) || st.hover == Some(item) {
                 4.5
@@ -369,7 +412,7 @@ pub fn paint_sketch(
             );
         } else {
             let d = 3.5;
-            let k = Stroke::new(1.2, fade(PALETTE.glyph, st.alpha));
+            let k = Stroke::new(1.2, fade(pal.glyph, st.alpha));
             painter.line_segment([sp + egui::vec2(-d, -d), sp + egui::vec2(d, d)], k);
             painter.line_segment([sp + egui::vec2(-d, d), sp + egui::vec2(d, -d)], k);
         }
@@ -381,13 +424,13 @@ pub fn paint_sketch(
         let item = Item::Constraint(i);
         let conflict = st.conflicts.contains(&i);
         let col = if conflict {
-            PALETTE.conflict
+            pal.conflict
         } else if st.selection.contains(&item) || st.editing == Some(i) {
-            PALETTE.selected
+            pal.selected
         } else if st.hover == Some(item) {
-            PALETTE.hover
+            pal.hover
         } else {
-            PALETTE.dim
+            pal.dim
         };
         let col = fade(col, st.alpha);
         if c.dimension().is_some() {
@@ -400,18 +443,18 @@ pub fn paint_sketch(
             continue;
         }
         let gcol = if conflict {
-            fade(PALETTE.conflict, st.alpha)
+            fade(pal.conflict, st.alpha)
         } else if st.selection.contains(&item) {
-            fade(PALETTE.selected, st.alpha)
+            fade(pal.selected, st.alpha)
         } else if st.hover == Some(item) {
-            fade(PALETTE.hover, st.alpha)
+            fade(pal.hover, st.alpha)
         } else {
-            fade(PALETTE.glyph, st.alpha)
+            fade(pal.glyph, st.alpha)
         };
         let glyph = |text: &str, at: Pos2| {
             let galley = painter.layout_no_wrap(text.into(), egui::FontId::monospace(11.0), gcol);
             let r = egui::Rect::from_center_size(at, galley.size()).expand(2.0);
-            painter.rect_filled(r, 2.0, Color32::from_black_alpha(170));
+            painter.rect_filled(r, 2.0, pal.label_bg);
             painter.rect_stroke(r, 2.0, Stroke::new(1.0, gcol), egui::StrokeKind::Inside);
             painter.galley(r.min + egui::vec2(2.0, 2.0), galley, gcol);
             r
@@ -725,6 +768,7 @@ fn paint_dimension(
 
 /// Sketch plane: translucent patch + local axes through the sketch origin.
 pub fn paint_plane(painter: &egui::Painter, pr: &Projector, half_extent: f64) {
+    let pal = palette_of(painter);
     let e = half_extent;
     let corners: Vec<Pos2> = [[-e, -e], [e, -e], [e, e], [-e, e]]
         .iter()
@@ -733,8 +777,8 @@ pub fn paint_plane(painter: &egui::Painter, pr: &Projector, half_extent: f64) {
     if corners.len() == 4 {
         painter.add(egui::Shape::convex_polygon(
             corners.clone(),
-            PALETTE.plane,
-            Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 80, 115, 110)),
+            pal.plane,
+            Stroke::new(1.0, pal.plane_edge),
         ));
     }
     let axis = |to: [f64; 2], c: Color32| {
@@ -742,16 +786,17 @@ pub fn paint_plane(painter: &egui::Painter, pr: &Projector, half_extent: f64) {
             painter.line_segment([o, t], Stroke::new(1.5, c));
         }
     };
-    axis([e, 0.0], Color32::from_rgb(220, 70, 70));
-    axis([0.0, e], Color32::from_rgb(80, 200, 80));
+    axis([e, 0.0], pal.axis_x);
+    axis([0.0, e], pal.axis_y);
 }
 
 /// Dashed preview of the open offset entry's copy (new curves only).
 fn paint_offset_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
+    let pal = palette_of(painter);
     let Some(Ok((s, ids))) = ed.offset_preview() else {
         return;
     };
-    let stroke = Stroke::new(1.8, PALETTE.preview);
+    let stroke = Stroke::new(1.8, pal.preview);
     let arc_pts = |c: [f64; 2], r: f64, a0: f64, sweep: f64| -> Vec<Pos2> {
         let n = ((sweep.abs() / 0.1).ceil() as usize).clamp(4, 128);
         (0..=n)
@@ -790,6 +835,7 @@ fn paint_offset_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEdit
 
 /// Dashed preview of the open fillet entry's arc.
 fn paint_fillet_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor) {
+    let pal = palette_of(painter);
     let Some(Ok((s, arc))) = ed.fillet_preview() else {
         return;
     };
@@ -809,7 +855,7 @@ fn paint_fillet_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEdit
     if pts.len() >= 2 {
         painter.extend(egui::Shape::dashed_line(
             &pts,
-            Stroke::new(1.8, PALETTE.preview),
+            Stroke::new(1.8, pal.preview),
             6.0,
             4.0,
         ));
@@ -826,7 +872,7 @@ pub fn paint_preview(painter: &egui::Painter, pr: &Projector, ed: &SketchEditor)
     let Some(sc) = pr.screen(cur.pos) else {
         return;
     };
-    let col = PALETTE.preview;
+    let col = palette_of(painter).preview;
     // Snap cue.
     match cur.kind {
         SnapKind::Point(_) => {

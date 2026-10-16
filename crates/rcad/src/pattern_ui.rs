@@ -57,7 +57,7 @@ pub fn pattern_window(ctx: &egui::Context, ed: &mut SketchEditor) {
                  editable dimensions.",
             );
             if let Some(fb) = ed.feedback.as_ref().filter(|f| f.error) {
-                ui.colored_label(egui::Color32::from_rgb(210, 60, 60), &fb.text);
+                ui.colored_label(crate::theme::of(ui).bad, &fb.text);
             }
             ui.horizontal(|ui| {
                 apply = ui.button("Apply pattern").clicked();

@@ -40,6 +40,7 @@ pub mod sketch_hud;
 pub mod sketch_project;
 pub mod sketch_view;
 pub mod text_ui;
+pub mod theme;
 pub mod view3d;
 
 pub use app::{

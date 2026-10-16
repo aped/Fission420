@@ -107,14 +107,14 @@ pub fn text_window(ctx: &egui::Context, ed: &mut SketchEditor) {
             ));
             if rcad_sketch::font::find_font(&x.spec.font).is_err() {
                 ui.colored_label(
-                    egui::Color32::from_rgb(200, 120, 0),
+                    crate::theme::of(ui).warn,
                     "This font is not installed here: placement edits work, changing the \
                      string or font is refused.",
                 );
             }
         }
         if let Some(fb) = ed.feedback.as_ref().filter(|f| f.error) {
-            ui.colored_label(egui::Color32::from_rgb(210, 60, 60), &fb.text);
+            ui.colored_label(crate::theme::of(ui).bad, &fb.text);
         }
         ui.horizontal(|ui| {
             apply = ui.button("Apply text").probe("Apply text").clicked();

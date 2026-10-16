@@ -371,7 +371,7 @@ impl RcadApp {
             .add_enabled(
                 !committing,
                 egui::Button::new(RichText::new("FINISH SKETCH").small().strong())
-                    .fill(Color32::from_rgb(40, 90, 50)),
+                    .fill(crate::theme::of(ui).go_fill),
             )
             .named("FINISH SKETCH")
             .on_hover_text("Commit the sketch as one undoable document step")
@@ -544,6 +544,7 @@ impl RcadApp {
 
     pub(crate) fn apply_theme(&self, ctx: &egui::Context) {
         use super::prefs::Theme;
+        crate::theme::install(ctx);
         ctx.set_theme(match self.shell.prefs.theme {
             Theme::FollowOs => egui::ThemePreference::System,
             Theme::Light => egui::ThemePreference::Light,
