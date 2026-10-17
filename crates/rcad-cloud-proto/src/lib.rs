@@ -103,7 +103,9 @@ pub type Timestamp = i64;
 
 /// True when `s` is a well-formed [`BlobHash`].
 pub fn is_blob_hash(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -413,7 +415,11 @@ pub struct UpdateFolderRequest {
     #[serde(default)]
     pub name: Option<String>,
     /// `Some(None)` moves to the project root.
-    #[serde(default, with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub parent: Option<Option<String>>,
 }
 
@@ -465,7 +471,11 @@ pub struct UpdateDocumentRequest {
     #[serde(default)]
     pub name: Option<String>,
     /// `Some(None)` moves to the project root.
-    #[serde(default, with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub folder: Option<Option<String>>,
 }
 
@@ -511,7 +521,11 @@ pub struct UpdateVersionRequest {
     #[serde(default)]
     pub description: Option<String>,
     /// `Some(None)` clears the milestone.
-    #[serde(default, with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub milestone: Option<Option<String>>,
 }
 
@@ -665,7 +679,10 @@ mod tests {
         let set: UpdateDocumentRequest = serde_json::from_str(r#"{"folder":"f1"}"#).unwrap();
         assert_eq!(set.folder, Some(Some("f1".into())));
         // Absent fields round-trip as absent only when skipped; null is accepted either way.
-        let req = UpdateVersionRequest { milestone: Some(None), ..Default::default() };
+        let req = UpdateVersionRequest {
+            milestone: Some(None),
+            ..Default::default()
+        };
         let back: UpdateVersionRequest =
             serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
         assert_eq!(back.milestone, Some(None));
