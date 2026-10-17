@@ -484,41 +484,107 @@ impl Viewport {
     }
 
     fn uniforms(&self, aspect: f32) -> Uniforms {
-        let (right, up, forward) = self.camera.basis();
-        let back = math::scale(forward, -1.0);
-        // Key light from over the viewer's upper-left shoulder.
-        let light = math::normalize(math::add(
-            back,
-            math::add(math::scale(up, 0.6), math::scale(right, -0.4)),
-        ))
-        .unwrap_or(back);
-        let eye = self.camera.eye();
-        let hl = self.highlight;
         let (near, far) = self.clip_range();
-        let bg = self.clear_color().map(|c| (c as f32).powf(2.2));
-        Uniforms {
-            view_proj: self.camera.view_proj_near_far(aspect, near, far),
-            eye: [eye[0], eye[1], eye[2], 1.0],
-            light_dir: [light[0], light[1], light[2], 0.0],
-            base_color: BASE_COLOR,
-            highlight_color: HIGHLIGHT_COLOR,
-            selection_color: SELECTION_COLOR,
-            fade: [
-                bg[0],
-                bg[1],
-                bg[2],
-                if self.dimmed { DIM_AMOUNT } else { 0.0 },
-            ],
-            section: self.section.map_or([0.0; 4], |s| {
-                [s.normal[0], s.normal[1], s.normal[2], s.offset]
-            }),
-            highlight: [
-                hl.unwrap_or(0),
-                u32::from(hl.is_some()),
-                u32::from(self.section.is_some()),
-                0,
-            ],
+        scene_uniforms(
+            &self.camera,
+            aspect,
+            (near, far),
+            self.clear_color(),
+            self.dimmed,
+            self.section,
+            self.highlight,
+        )
+    }
+
+    /// The camera of a version thumbnail: the isometric direction, framing every
+    /// body for a square image. None without a mesh.
+    pub fn thumbnail_camera(&self) -> Option<Camera> {
+        self.mesh_bounds.map(thumbnail_camera_for)
+    }
+
+    /// Per-vertex flags of a thumbnail: body tints kept, selection and the
+    /// highlight/dimmed tints dropped.
+    fn thumbnail_flags(&self) -> Vec<u32> {
+        let mut flags = vec![0u32; self.vertex_groups.len()];
+        for (f, g) in flags.iter_mut().zip(&self.vertex_groups) {
+            if let Some((_, t)) = self.tints.iter().find(|(r, _)| r.contains(g))
+                && *t != TINT_HIGHLIGHT
+                && *t != TINT_DIMMED
+            {
+                *f = u32::from(*t & 0xF) << TINT_SHIFT;
+            }
         }
+        flags
+    }
+
+    /// Render a clean `px`×`px` image of the model for a version thumbnail,
+    /// offscreen: isometric and fitted ([`Viewport::thumbnail_camera`]), on the
+    /// light backdrop, with feature edges but no grid, selection, hover, dimming,
+    /// section or anything egui paints over the view (sketches, dimensions,
+    /// captions, the triad). The window's view and camera are untouched. Returns
+    /// tightly packed RGBA8, or None without a mesh or on a GPU failure.
+    pub fn render_thumbnail(&self, px: u32) -> Option<Vec<u8>> {
+        let camera = self.thumbnail_camera()?;
+        let b = self.mesh_bounds?;
+        let range = camera.clip_planes(b.center(), b.radius());
+        let uniforms = scene_uniforms(&camera, 1.0, range, CLEAR_COLOR_LIGHT, false, None, None);
+        let edges = edge_vertices(&self.edges, EDGE_COLOR);
+        self.gpu.render_offscreen(
+            [px, px],
+            &uniforms,
+            CLEAR_COLOR_LIGHT,
+            &self.thumbnail_flags(),
+            &edges,
+        )
+    }
+}
+
+/// The isometric camera framing `bounds` in a square image (see
+/// [`Viewport::thumbnail_camera`]).
+pub fn thumbnail_camera_for(bounds: Aabb) -> Camera {
+    let mut camera = Camera::default();
+    camera.set_view(ViewPreset::Iso);
+    camera.fit_sphere(bounds.center(), bounds.radius(), 1.0);
+    camera
+}
+
+/// Shader uniforms for `camera` (lighting follows the camera).
+fn scene_uniforms(
+    camera: &Camera,
+    aspect: f32,
+    (near, far): (f32, f32),
+    clear: [f64; 3],
+    dimmed: bool,
+    section: Option<SectionPlane>,
+    highlight: Option<u32>,
+) -> Uniforms {
+    let (right, up, forward) = camera.basis();
+    let back = math::scale(forward, -1.0);
+    // Key light from over the viewer's upper-left shoulder.
+    let light = math::normalize(math::add(
+        back,
+        math::add(math::scale(up, 0.6), math::scale(right, -0.4)),
+    ))
+    .unwrap_or(back);
+    let eye = camera.eye();
+    let bg = clear.map(|c| (c as f32).powf(2.2));
+    Uniforms {
+        view_proj: camera.view_proj_near_far(aspect, near, far),
+        eye: [eye[0], eye[1], eye[2], 1.0],
+        light_dir: [light[0], light[1], light[2], 0.0],
+        base_color: BASE_COLOR,
+        highlight_color: HIGHLIGHT_COLOR,
+        selection_color: SELECTION_COLOR,
+        fade: [bg[0], bg[1], bg[2], if dimmed { DIM_AMOUNT } else { 0.0 }],
+        section: section.map_or([0.0; 4], |s| {
+            [s.normal[0], s.normal[1], s.normal[2], s.offset]
+        }),
+        highlight: [
+            highlight.unwrap_or(0),
+            u32::from(highlight.is_some()),
+            u32::from(section.is_some()),
+            0,
+        ],
     }
 }
 

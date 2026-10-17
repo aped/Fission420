@@ -117,7 +117,7 @@ on each server:
     the file do not change what is sent.
   - If a save's answer was lost (connection dropped after the server stored it), the replay
     finds the head already holding the same bytes and counts it as saved.
-  - A version can carry a thumbnail: a PNG of at most 1 MiB (the app captures the 3D view;
+  - A version can carry a thumbnail: a PNG of at most 1 MiB (the app renders a clean isometric view of the model;
     `rcad-cli cloud save|push --thumbnail FILE.png` takes one). It is checked (PNG
     signature, size) before anything is sent, stored in the blob cache next to the
     document snapshot (so a queued save keeps it), uploaded with the same missing/upload

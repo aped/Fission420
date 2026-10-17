@@ -335,11 +335,9 @@ pub struct CloudUi {
     save_to_cloud_after_save: bool,
     /// Code of the error shown in the Members or Organization window (probe).
     admin_error_code: Option<String>,
-    /// Screenshots of the 3D view become version thumbnails (interactive app
-    /// only; tests and headless runs send versions without one).
+    /// Versions saved or uploaded get a thumbnail rendered from the model
+    /// (interactive app only; tests opt in, and without a GPU view there is none).
     capture_thumbnails: bool,
-    /// A version save or upload waiting for its thumbnail screenshot.
-    shot: Option<ShotWait>,
     /// Thumbnails asked for, by (document, version): never asked twice.
     thumb_asked: HashSet<ThumbKey>,
     /// Thumbnail PNGs received and not yet turned into textures.
@@ -361,16 +359,6 @@ type ThumbKey = (String, u64);
 /// How often the open cloud document's head (and, with the Data panel open,
 /// the project list) is polled.
 pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
-/// How long a save waits for its thumbnail screenshot before it is sent
-/// without one.
-const SHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
-
-/// A request waiting for the thumbnail screenshot.
-struct ShotWait {
-    request: Request,
-    started: std::time::Instant,
-    requested: bool,
-}
 
 /// Panel actions collected while drawing and applied afterwards.
 enum Action {
@@ -751,6 +739,31 @@ impl RcadApp {
             "queue_listed": c.queue.len(),
             "server_head": link.and_then(|l| c.heads.get(&l.document).copied()),
             "thumbnails_loaded": c.thumbs.values().filter(|t| t.is_some()).count(),
+            "save_version_enabled": self
+                .command_enabled(crate::shell::CmdId::SaveVersion)
+                .is_ok(),
+            "detail_head": c.detail.as_ref().map(|d| d.document.head_version),
+            "milestones_listed": c.detail.as_ref().map_or(0, |d| d
+                .versions
+                .iter()
+                .filter(|v| v.milestone.is_some())
+                .count()),
+            "comments_listed": c.comments.as_ref().map_or(0, |(_, l)| l.len()),
+            "comments_resolved": c.comments.as_ref().map_or(0, |(_, l)| l
+                .iter()
+                .filter(|x| x.resolved)
+                .count()),
+            "document_folders": c.tree.as_ref().map(|t| t
+                .documents
+                .iter()
+                .map(|d| {
+                    let folder = d.folder.as_ref().and_then(|f| {
+                        t.folders.iter().find(|x| x.id == *f).map(|x| x.name.clone())
+                    });
+                    // "/" is the project root (a missing document reads as null).
+                    (d.name.clone(), serde_json::json!(folder.unwrap_or_else(|| "/".into())))
+                })
+                .collect::<serde_json::Map<_, _>>()),
         })
     }
 
@@ -920,7 +933,6 @@ impl RcadApp {
             self.cloud_event(e);
         }
         self.cloud_thumbnail_textures(ctx);
-        self.cloud_shot_tick(ctx);
         self.cloud_poll(ctx);
         if self.cloud.save_to_cloud_after_save
             && self.dialog.is_none()
@@ -1681,63 +1693,27 @@ impl RcadApp {
         }
     }
 
-    /// Send a version save or upload, with a thumbnail of the 3D view when
-    /// the app can take screenshots: the request waits (at most
-    /// [`SHOT_TIMEOUT`]) for the screenshot, then goes out with or without it.
-    fn cloud_send_with_thumbnail(&mut self, request: Request) {
-        if !self.cloud.capture_thumbnails || self.view_rect.is_none() {
-            return self.cloud_send(request);
+    /// Send a version save or upload with a thumbnail of the model when the
+    /// app has a GPU view: a clean offscreen render (fitted isometric view, no
+    /// sketches, dimensions, selection, hover, section or other overlays; see
+    /// `rcad_viewport::Viewport::render_thumbnail`). The window's view is not
+    /// changed, so nothing flickers. Without a view or a body the request goes
+    /// out without a thumbnail.
+    fn cloud_send_with_thumbnail(&mut self, mut request: Request) {
+        if self.cloud.capture_thumbnails {
+            let side = 2 * thumb::THUMBNAIL_PX;
+            let png = self
+                .viewport
+                .as_ref()
+                .and_then(|vp| vp.render_thumbnail(side))
+                .and_then(|rgba| thumb::thumbnail_png(&rgba, side));
+            if let Request::SaveVersion { thumbnail, .. } | Request::UploadNew { thumbnail, .. } =
+                &mut request
+            {
+                *thumbnail = png;
+            }
         }
-        // One at a time: an older waiting request goes out without a thumbnail.
-        if let Some(old) = self.cloud.shot.take() {
-            self.cloud_send(old.request);
-        }
-        self.cloud.shot = Some(ShotWait {
-            request,
-            started: std::time::Instant::now(),
-            requested: false,
-        });
-    }
-
-    /// Drive a waiting thumbnail screenshot (see [`Self::cloud_send_with_thumbnail`]).
-    fn cloud_shot_tick(&mut self, ctx: &egui::Context) {
-        let Some(wait) = self.cloud.shot.as_mut() else {
-            return;
-        };
-        ctx.request_repaint();
-        if !wait.requested {
-            wait.requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
-                thumb::ThumbnailShot,
-            )));
-            return;
-        }
-        let image = ctx.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                egui::Event::Screenshot {
-                    image, user_data, ..
-                } if thumb::is_thumbnail_shot(user_data) => Some(image.clone()),
-                _ => None,
-            })
-        });
-        let timed_out = wait.started.elapsed() > SHOT_TIMEOUT;
-        if image.is_none() && !timed_out {
-            return;
-        }
-        let Some(mut wait) = self.cloud.shot.take() else {
-            return;
-        };
-        let ppp = ctx.pixels_per_point();
-        let crop = self
-            .view_rect
-            .map(|r| [r.min.x * ppp, r.min.y * ppp, r.max.x * ppp, r.max.y * ppp]);
-        let png = image.and_then(|img| thumb::thumbnail_png(&img, crop));
-        if let Request::SaveVersion { thumbnail, .. } | Request::UploadNew { thumbnail, .. } =
-            &mut wait.request
-        {
-            *thumbnail = png;
-        }
-        self.cloud_send(wait.request);
+        self.cloud_send(request);
     }
 
     /// Turn received thumbnail PNGs into textures.
@@ -2160,7 +2136,7 @@ impl RcadApp {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button("Open")
-                    .probe("Open")
+                    .probe("Open document")
                     .on_hover_text("Download the latest version and open it")
                     .clicked()
                 {
@@ -2168,7 +2144,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Rename…"))
-                    .probe("Rename…")
+                    .probe("Rename document…")
                     .on_disabled_hover_text("Editors rename documents")
                     .clicked()
                 {
@@ -2179,7 +2155,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Move…"))
-                    .probe("Move…")
+                    .probe("Move document…")
                     .on_hover_text("Move to another folder of this project")
                     .on_disabled_hover_text("Editors move documents")
                     .clicked()
@@ -2191,7 +2167,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Move to trash…"))
-                    .probe("Move to trash…")
+                    .probe("Move document to trash…")
                     .on_disabled_hover_text("Editors move documents to the trash")
                     .clicked()
                 {
@@ -2367,6 +2343,7 @@ impl RcadApp {
                                 editor,
                                 egui::Button::new(format!("Clear milestone v{n}")).small(),
                             )
+                            .probe(&format!("Clear milestone v{n}"))
                             .clicked()
                         {
                             actions.push(Action::Send(Request::SetMilestone {
@@ -2380,6 +2357,7 @@ impl RcadApp {
                             editor,
                             egui::Button::new(format!("Set milestone v{n}…")).small(),
                         )
+                        .probe(&format!("Set milestone v{n}…"))
                         .clicked()
                     {
                         actions.push(Action::Dialog(CloudDialog::Milestone {
@@ -2598,12 +2576,17 @@ impl RcadApp {
                 .as_ref()
                 .and_then(|v| folders.iter().find(|(id, _)| id == v))
                 .map_or("(project root)".to_string(), |(_, n)| n.clone());
-            crate::form::combo(ui, label, current, |ui| {
-                ui.selectable_value(value, None, "(project root)");
+            let r = crate::form::combo(ui, label, current, |ui| {
+                let _ = ui
+                    .selectable_value(value, None, "(project root)")
+                    .probe(&format!("{label}: (project root)"));
                 for (id, name) in &folders {
-                    ui.selectable_value(value, Some(id.clone()), name);
+                    let _ = ui
+                        .selectable_value(value, Some(id.clone()), name)
+                        .probe(&format!("{label}: {name}"));
                 }
             });
+            let _ = r.response.probe(&format!("Folder list: {label}"));
         };
         egui::Window::new(title)
             .collapsible(false)
@@ -2746,7 +2729,7 @@ impl RcadApp {
                             head + 1
                         ));
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Promote").probe("Promote").clicked() || enter;
+                            ok |= ui.button("Promote").probe("Confirm promote").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
@@ -2763,14 +2746,14 @@ impl RcadApp {
                         field(ui, "New name", name, false);
                         ui.small("Names are unique within a project.");
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Rename").probe("Rename").clicked() || enter;
+                            ok |= ui.button("Rename").probe("Rename document").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
                     CloudDialog::MoveDocument { folder, .. } => {
                         folder_combo(ui, "Move to", folder);
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Move").probe("Move").clicked() || enter;
+                            ok |= ui.button("Move").probe("Move document").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
@@ -2780,7 +2763,10 @@ impl RcadApp {
                              from Trash; its versions are kept."
                         ));
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Move to trash").probe("Move to trash").clicked()
+                            ok |= ui
+                                .button("Move to trash")
+                                .probe("Confirm move to trash")
+                                .clicked()
                                 || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });

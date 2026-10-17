@@ -571,6 +571,8 @@ fn version_history_lists_versions_and_promote_asks_first() {
     .unwrap();
     settle(&mut c.h);
     assert_eq!(c.h.state().cloud_probe()["versions_listed"], 3);
+    assert_eq!(c.h.state().cloud_probe()["detail_head"], 3);
+    assert_eq!(c.h.state().cloud_probe()["milestones_listed"], 1);
     assert!(c.h.query_by_label("★ v2").is_some());
     assert!(c.h.query_by_label("Milestone: Prototype A").is_some());
     assert!(c.h.query_by_label("change 2").is_some());
@@ -629,6 +631,8 @@ fn read_only_copy_disables_save_version() {
             .command_enabled(rcad::shell::CmdId::SaveVersion)
             .is_err()
     );
+    assert_eq!(c.h.state().cloud_probe()["state"], "read_only");
+    assert_eq!(c.h.state().cloud_probe()["save_version_enabled"], false);
     edit(&mut c);
     assert!(drain(&c.req).is_empty(), "no lock for a read-only copy");
 }
@@ -1056,6 +1060,7 @@ fn folders_are_upload_targets_and_documents_rename_move_and_trash() {
         proto::ProjectRole::Editor,
         tree(vec![folder("f1", "Brackets", None)], vec![summary(3)]),
     );
+    assert_eq!(probe(&c)["document_folders"]["Bracket"], "/");
     // Selecting a folder makes it the target of New folder and Upload.
     click(&mut c.h, "Folder Brackets");
     assert_eq!(probe(&c)["selected_folder"], "f1");
@@ -1548,39 +1553,67 @@ fn thumbnails_load_once_and_show_in_rows_and_history() {
 }
 
 #[test]
-fn a_version_save_waiting_for_its_thumbnail_is_still_sent() {
+fn a_version_save_without_a_gpu_view_goes_out_at_once_without_a_thumbnail() {
     let mut c = opened([1400.0, 900.0]);
     c.h.state_mut().set_cloud_thumbnail_capture(true);
     drain(&c.req);
     file_menu(&mut c.h, "Save Version to Cloud…");
     type_into(&mut c.h, "Version description", "with a picture");
     click(&mut c.h, "Save Version");
-    // The request waits for the screenshot, or goes without one after a
-    // short timeout when the renderer cannot take one.
-    let start = Instant::now();
-    let sent = loop {
-        let _ = c.h.try_run();
-        let sent = drain(&c.req);
-        if !sent.is_empty() {
-            break sent;
-        }
-        assert!(start.elapsed() < Duration::from_secs(10), "never sent");
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    match sent.as_slice() {
+    // The thumbnail is rendered offscreen in the same frame; the test harness has
+    // no GPU view, so the request goes out immediately, without one.
+    match drain(&c.req).as_slice() {
         [
             Request::SaveVersion {
                 description,
-                thumbnail,
+                thumbnail: None,
                 ..
             },
-        ] => {
-            assert_eq!(description, "with a picture");
-            if let Some(png) = thumbnail {
-                assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
-                assert!(png.len() as u64 <= proto::MAX_THUMBNAIL_BYTES);
-            }
-        }
+        ] => assert_eq!(description, "with a picture"),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn comments_are_counted_for_the_probe() {
+    let mut c = opened([1400.0, 900.0]);
+    if !c.h.state().cloud_panel_open() {
+        click(&mut c.h, "Data panel");
+    }
+    drain(&c.req);
+    click(&mut c.h, "Comments section");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadComments {
+            document: "d1".into()
+        }]
+    );
+    let comment = |id: &str, resolved: bool| proto::Comment {
+        id: id.into(),
+        document: "d1".into(),
+        version: 3,
+        author: "bob".into(),
+        body: format!("note {id}"),
+        created_at: 1_792_224_300,
+        resolved,
+        parent: None,
+        anchor: None,
+    };
+    c.ev.send(Event::Comments {
+        document: "d1".into(),
+        comments: vec![comment("c1", false), comment("c2", true)],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["comments_listed"], 2);
+    assert_eq!(probe(&c)["comments_resolved"], 1);
+    click(&mut c.h, "Resolve comment 1");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::ResolveComment {
+            document: "d1".into(),
+            comment: "c1".into(),
+            resolved: true,
+        }]
+    );
 }

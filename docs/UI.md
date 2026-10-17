@@ -211,9 +211,14 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   `Newer v4 on server` if it has (its tooltip explains that Save Version will report a
   conflict). With the Data panel open the project list is re-read at the same pace, and a
   project whose revision changed has its tree reloaded.
-* **Thumbnails:** saving a version or uploading takes a screenshot of the 3D view, crops it to
-  a square and stores a 256 px PNG with the version (when no screenshot arrives within 1.5 s,
-  as in tests and headless runs, the version is saved without one). Document rows in the Data
+* **Thumbnails:** saving a version or uploading renders the model offscreen and stores a
+  256 px PNG with the version. The render is a clean model view, like a product shot: all
+  visible bodies fitted in the isometric direction on a light background, with feature
+  edges, and without sketches, dimensions, captions, selection or hover colours, a section
+  plane, the grid or the axis triad. It is drawn into a separate target (rendered at 512 px
+  and scaled down), so the window's view and camera do not change and nothing flickers.
+  Without a GPU view (tests, headless runs) or without a body, the version is saved without
+  a thumbnail. Document rows in the Data
   panel show the latest version's thumbnail small, and the version history shows each
   version's thumbnail larger. Thumbnails are fetched once per version, when first shown, and
   kept for the session; one that does not decode as a PNG is simply not shown.
