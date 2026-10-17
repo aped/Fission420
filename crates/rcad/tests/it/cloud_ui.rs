@@ -1297,3 +1297,290 @@ fn save_to_cloud_project_uploads_an_unlinked_document() {
             .is_err()
     );
 }
+
+/// A small valid PNG (what a server sends as a thumbnail).
+fn tiny_png() -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([40, 120, 200, 255]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    png
+}
+
+fn checks_head(reqs: &[Request]) -> bool {
+    reqs.iter()
+        .any(|r| matches!(r, Request::CheckHead { document } if document == "d1"))
+}
+
+#[test]
+fn update_polls_are_never_sent_without_an_account() {
+    let (svc, req, ev) = CloudService::detached();
+    let mut h = harness([1400.0, 900.0]);
+    let dir = tempfile::tempdir().unwrap();
+    h.state_mut().attach_cloud_service(svc);
+    assert_eq!(drain(&req), vec![Request::Refresh]);
+    let doc = dir.path().join("Bracket.rcad.json");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/bracket.rcad.json"),
+        &doc,
+    )
+    .unwrap();
+    // A linked working copy is open, but nobody is signed in.
+    ev.send(Event::DocumentReady {
+        path: doc.clone(),
+        link: link(&doc, 3),
+        read_only: false,
+        from_cache: true,
+    })
+    .unwrap();
+    settle(&mut h);
+    click(&mut h, "Data panel");
+    h.state_mut().cloud_expire_poll_timer();
+    settle(&mut h);
+    settle(&mut h);
+    let sent = drain(&req);
+    assert!(
+        !sent
+            .iter()
+            .any(|r| matches!(r, Request::CheckHead { .. } | Request::ListProjects { .. })),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn a_newer_version_on_the_server_offers_update() {
+    let mut c = opened([1400.0, 900.0]);
+    drain(&c.req);
+    // Just opened: no poll until the interval passes.
+    settle(&mut c.h);
+    assert!(!checks_head(&drain(&c.req)));
+    c.h.state_mut().cloud_expire_poll_timer();
+    settle(&mut c.h);
+    let sent = drain(&c.req);
+    assert!(checks_head(&sent), "{sent:?}");
+    // Polled once per interval, not every frame.
+    settle(&mut c.h);
+    assert!(!checks_head(&drain(&c.req)));
+
+    // Same head: still synced.
+    c.ev.send(Event::Head {
+        document: "d1".into(),
+        head_version: 3,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(chip(&c), "☁ Bracket v3 · Synced");
+    assert!(c.h.query_by_label("Update").is_none());
+
+    c.ev.send(Event::Head {
+        document: "d1".into(),
+        head_version: 4,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(chip(&c), "☁ Bracket v3 · v4 available");
+    assert_eq!(probe(&c)["state"], "update_available");
+    click(&mut c.h, "Update");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::OpenDocument {
+            document: "d1".into()
+        }]
+    );
+    // The reopened working copy is at the head: synced again.
+    c.ev.send(Event::DocumentReady {
+        path: c.doc.clone(),
+        link: link(&c.doc, 4),
+        read_only: false,
+        from_cache: false,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    settle(&mut c.h);
+    assert_eq!(chip(&c), "☁ Bracket v4 · Synced");
+}
+
+#[test]
+fn a_modified_copy_warns_instead_of_offering_update() {
+    let mut c = opened([1400.0, 900.0]);
+    edit(&mut c);
+    drain(&c.req);
+    c.ev.send(Event::Head {
+        document: "d1".into(),
+        head_version: 4,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(chip(&c), "☁ Bracket v3 · Newer v4 on server");
+    assert_eq!(probe(&c)["state"], "newer_on_server");
+    assert!(c.h.query_by_label("Update").is_none());
+    assert!(drain(&c.req).is_empty());
+}
+
+#[test]
+fn opening_the_data_panel_polls_and_a_new_project_revision_reloads_the_tree() {
+    let mut c = signed_in([1400.0, 900.0]);
+    browsing(
+        &mut c,
+        proto::ProjectRole::Editor,
+        tree(vec![], vec![summary(3)]),
+    );
+    drain(&c.req);
+    settle(&mut c.h);
+    assert!(drain(&c.req).is_empty(), "no poll right after loading");
+    c.h.state_mut().cloud_expire_poll_timer();
+    settle(&mut c.h);
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::ListProjects { org: "o1".into() }]
+    );
+    // Unchanged revision: nothing more.
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![project()],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(drain(&c.req).is_empty());
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![proto::Project {
+            revision: 2,
+            ..project()
+        }],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadTree {
+            project: "p1".into()
+        }]
+    );
+}
+
+#[test]
+fn thumbnails_load_once_and_show_in_rows_and_history() {
+    let mut c = opened([1400.0, 900.0]);
+    // Opening the Data panel checks the open document's head at once.
+    click(&mut c.h, "Data panel");
+    assert!(checks_head(&drain(&c.req)));
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![project()],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Project Parts");
+    drain(&c.req);
+    // A document row whose head has a thumbnail asks for it once.
+    c.ev.send(Event::Tree(tree(
+        vec![],
+        vec![proto::DocumentSummary {
+            has_thumbnail: true,
+            ..summary(3)
+        }],
+    )))
+    .unwrap();
+    settle(&mut c.h);
+    settle(&mut c.h);
+    settle(&mut c.h);
+    let sent = drain(&c.req);
+    let asks = |reqs: &[Request], v: u64| {
+        reqs.iter()
+            .filter(|r| {
+                matches!(r, Request::LoadThumbnail { document, version }
+                    if document == "d1" && *version == v)
+            })
+            .count()
+    };
+    assert_eq!(asks(&sent, 3), 1, "{sent:?}");
+    c.ev.send(Event::Thumbnail {
+        document: "d1".into(),
+        version: 3,
+        png: Some(tiny_png()),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(c.h.state().cloud_thumbnail_loaded("d1", 3));
+    assert!(c.h.query_by_label("Thumbnail of Bracket").is_some());
+
+    // Version history: v2 has a thumbnail, v1 none.
+    file_menu(&mut c.h, "Version History");
+    drain(&c.req);
+    let with_thumb = proto::Version {
+        thumbnail: Some("b".repeat(64)),
+        ..version(2, None)
+    };
+    c.ev.send(Event::Detail(proto::DocumentDetail {
+        document: summary(3),
+        versions: vec![version(3, None), with_thumb, version(1, None)],
+        my_role: proto::ProjectRole::Editor,
+    }))
+    .unwrap();
+    settle(&mut c.h);
+    settle(&mut c.h);
+    let sent = drain(&c.req);
+    assert_eq!(asks(&sent, 2), 1, "{sent:?}");
+    assert_eq!(asks(&sent, 1), 0, "{sent:?}");
+    assert!(c.h.query_by_label("Thumbnail of v2").is_none());
+    // A bad PNG gives no texture and is not asked for again.
+    c.ev.send(Event::Thumbnail {
+        document: "d1".into(),
+        version: 2,
+        png: Some(b"\x89PNG\r\n\x1a\nbroken".to_vec()),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(!c.h.state().cloud_thumbnail_loaded("d1", 2));
+    assert_eq!(asks(&drain(&c.req), 2), 0);
+    // A fresh history reload of another document version with a good PNG.
+    c.ev.send(Event::Thumbnail {
+        document: "d1".into(),
+        version: 2,
+        png: Some(tiny_png()),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(c.h.state().cloud_thumbnail_loaded("d1", 2));
+    assert!(c.h.query_by_label("Thumbnail of v2").is_some());
+}
+
+#[test]
+fn a_version_save_waiting_for_its_thumbnail_is_still_sent() {
+    let mut c = opened([1400.0, 900.0]);
+    c.h.state_mut().set_cloud_thumbnail_capture(true);
+    drain(&c.req);
+    file_menu(&mut c.h, "Save Version to Cloud…");
+    type_into(&mut c.h, "Version description", "with a picture");
+    click(&mut c.h, "Save Version");
+    // The request waits for the screenshot, or goes without one after a
+    // short timeout when the renderer cannot take one.
+    let start = Instant::now();
+    let sent = loop {
+        let _ = c.h.try_run();
+        let sent = drain(&c.req);
+        if !sent.is_empty() {
+            break sent;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "never sent");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    match sent.as_slice() {
+        [
+            Request::SaveVersion {
+                description,
+                thumbnail,
+                ..
+            },
+        ] => {
+            assert_eq!(description, "with a picture");
+            if let Some(png) = thumbnail {
+                assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+                assert!(png.len() as u64 <= proto::MAX_THUMBNAIL_BYTES);
+            }
+        }
+        other => panic!("{other:?}"),
+    }
+}

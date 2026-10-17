@@ -31,6 +31,7 @@ use crate::app::{Guarded, RcadApp};
 use crate::probe::Probe as _;
 
 mod admin;
+pub mod thumb;
 pub use admin::{fmt_bytes, member_error_text, org_role_name, project_role_name};
 
 /// The calls into `rcad-cloud` that construct things (account file, cache
@@ -222,6 +223,16 @@ pub enum SyncState {
     },
     /// A read-only copy of an older version.
     ReadOnly,
+    /// The server has a newer version and the working copy is unmodified:
+    /// "Update" replaces it.
+    UpdateAvailable {
+        head: u64,
+    },
+    /// The server has a newer version and the working copy has local edits:
+    /// a Save Version will conflict.
+    NewerOnServer {
+        head: u64,
+    },
 }
 
 impl SyncState {
@@ -233,6 +244,8 @@ impl SyncState {
             SyncState::Conflict => "Conflict".into(),
             SyncState::Locked { holder } => format!("Locked by {holder}"),
             SyncState::ReadOnly => "Read-only".into(),
+            SyncState::UpdateAvailable { head } => format!("v{head} available"),
+            SyncState::NewerOnServer { head } => format!("Newer v{head} on server"),
         }
     }
     /// Short machine name (live-test probe).
@@ -244,6 +257,8 @@ impl SyncState {
             SyncState::Conflict => "conflict",
             SyncState::Locked { .. } => "locked",
             SyncState::ReadOnly => "read_only",
+            SyncState::UpdateAvailable { .. } => "update_available",
+            SyncState::NewerOnServer { .. } => "newer_on_server",
         }
     }
 }
@@ -320,6 +335,41 @@ pub struct CloudUi {
     save_to_cloud_after_save: bool,
     /// Code of the error shown in the Members or Organization window (probe).
     admin_error_code: Option<String>,
+    /// Screenshots of the 3D view become version thumbnails (interactive app
+    /// only; tests and headless runs send versions without one).
+    capture_thumbnails: bool,
+    /// A version save or upload waiting for its thumbnail screenshot.
+    shot: Option<ShotWait>,
+    /// Thumbnails asked for, by (document, version): never asked twice.
+    thumb_asked: HashSet<ThumbKey>,
+    /// Thumbnail PNGs received and not yet turned into textures.
+    thumb_png: Vec<(ThumbKey, Option<Vec<u8>>)>,
+    /// Thumbnail textures (None: the version has none, or it did not decode).
+    thumbs: HashMap<ThumbKey, Option<egui::TextureHandle>>,
+    /// Head versions on the server, as last polled.
+    heads: HashMap<String, u64>,
+    /// When the next update-available poll is due (None: now).
+    poll_due: Option<std::time::Instant>,
+    /// Window focus last frame (a regained focus polls at once; None before
+    /// the first frame).
+    focused: Option<bool>,
+}
+
+/// A version of a document: (document id, version number).
+type ThumbKey = (String, u64);
+
+/// How often the open cloud document's head (and, with the Data panel open,
+/// the project list) is polled.
+pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a save waits for its thumbnail screenshot before it is sent
+/// without one.
+const SHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// A request waiting for the thumbnail screenshot.
+struct ShotWait {
+    request: Request,
+    started: std::time::Instant,
+    requested: bool,
 }
 
 /// Panel actions collected while drawing and applied afterwards.
@@ -341,9 +391,16 @@ enum Action {
     ToggleTrash,
     Members(String),
     Organization(String),
+    LoadThumbnail(String, u64),
+    Update(String),
 }
 
 impl CloudUi {
+    /// The server state was just seen: the next poll waits a full interval.
+    fn poll_next_interval(&mut self) {
+        self.poll_due = Some(std::time::Instant::now() + POLL_INTERVAL);
+    }
+
     fn link_for(&self, path: &Path) -> Option<&Link> {
         // The cache stores canonical paths; the open document may be named another way.
         let want = rcad_cloud::cache::normalize_local(path);
@@ -508,6 +565,8 @@ fn background(request: &str) -> bool {
             | "load_project_members"
             | "load_org_members"
             | "load_usage"
+            | "load_thumbnail"
+            | "check_head"
     )
 }
 
@@ -517,6 +576,7 @@ impl RcadApp {
     /// Interactive startup: start the cloud service only when an account is
     /// configured (reads the account file; nothing else).
     pub fn enable_cloud(&mut self) {
+        self.cloud.capture_thumbnails = true;
         if let (Some(c), Some(r)) = (adapter::config_path(), adapter::cache_root()) {
             self.enable_cloud_at(c, r);
         }
@@ -558,6 +618,22 @@ impl RcadApp {
     pub fn cloud_share_url(&self) -> Option<&str> {
         self.cloud.share_url.as_deref()
     }
+    /// Take a screenshot of the 3D view as the thumbnail of each version saved
+    /// or uploaded (on in the interactive app; tests opt in).
+    pub fn set_cloud_thumbnail_capture(&mut self, on: bool) {
+        self.cloud.capture_thumbnails = on;
+    }
+    /// Make the next update-available poll due now (tests: no 60 s wait).
+    pub fn cloud_expire_poll_timer(&mut self) {
+        self.cloud.poll_due = None;
+    }
+    /// Whether a thumbnail texture of `version` of `document` is loaded.
+    pub fn cloud_thumbnail_loaded(&self, document: &str, version: u64) -> bool {
+        self.cloud
+            .thumbs
+            .get(&(document.to_string(), version))
+            .is_some_and(Option::is_some)
+    }
 
     /// Link of the open document, if it is a cloud working copy.
     pub fn cloud_link(&self) -> Option<&Link> {
@@ -595,10 +671,16 @@ impl RcadApp {
             SyncState::Offline {
                 pending: self.cloud.pending,
             }
-        } else if self.cloud.edited.contains(doc) || self.has_unsaved_changes() {
-            SyncState::Modified
         } else {
-            SyncState::Synced
+            let modified = self.cloud.edited.contains(doc) || self.has_unsaved_changes();
+            match self.cloud.heads.get(doc) {
+                Some(&head) if head > link.base_version && modified => {
+                    SyncState::NewerOnServer { head }
+                }
+                Some(&head) if head > link.base_version => SyncState::UpdateAvailable { head },
+                _ if modified => SyncState::Modified,
+                _ => SyncState::Synced,
+            }
         })
     }
 
@@ -667,6 +749,8 @@ impl RcadApp {
                 _ => None,
             },
             "queue_listed": c.queue.len(),
+            "server_head": link.and_then(|l| c.heads.get(&l.document).copied()),
+            "thumbnails_loaded": c.thumbs.values().filter(|t| t.is_some()).count(),
         })
     }
 
@@ -824,7 +908,7 @@ impl RcadApp {
 
     /// Poll service events and follow the open document's edit state
     /// (auto-lock, unlock when leaving a locked document).
-    pub(crate) fn cloud_tick(&mut self) {
+    pub(crate) fn cloud_tick(&mut self, ctx: &egui::Context) {
         let Some(service) = &self.cloud.service else {
             return;
         };
@@ -835,6 +919,9 @@ impl RcadApp {
         for e in events {
             self.cloud_event(e);
         }
+        self.cloud_thumbnail_textures(ctx);
+        self.cloud_shot_tick(ctx);
+        self.cloud_poll(ctx);
         if self.cloud.save_to_cloud_after_save
             && self.dialog.is_none()
             && self.idle()
@@ -888,7 +975,19 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
-            Event::Thumbnail { .. } | Event::Head { .. } => {}
+            Event::Thumbnail {
+                document,
+                version,
+                png,
+            } => {
+                c.thumb_png.push(((document, version), png));
+            }
+            Event::Head {
+                document,
+                head_version,
+            } => {
+                c.heads.insert(document, head_version);
+            }
             Event::SignedIn {
                 server_url,
                 server_name,
@@ -910,6 +1009,7 @@ impl RcadApp {
                     server_name: server_name.clone(),
                     me,
                 });
+                c.poll_next_interval();
                 if let Some(org) = c.org.clone() {
                     self.cloud_send(Request::ListProjects { org });
                 }
@@ -922,11 +1022,13 @@ impl RcadApp {
                 let (config_path, cache_root) = (c.config_path.clone(), c.cache_root.clone());
                 let service = c.service.take();
                 let panel_open = c.panel_open;
+                let capture_thumbnails = c.capture_thumbnails;
                 *c = CloudUi {
                     service,
                     config_path,
                     cache_root,
                     panel_open,
+                    capture_thumbnails,
                     // Links stay: the working copies are still on disk.
                     links,
                     ..Default::default()
@@ -935,7 +1037,17 @@ impl RcadApp {
             }
             Event::Projects { org, projects } => {
                 if c.org.as_deref() == Some(org.as_str()) {
+                    // A project whose revision moved has a stale tree: reload it.
+                    let stale = c.tree.as_ref().and_then(|t| {
+                        projects
+                            .iter()
+                            .find(|p| p.id == t.project.id && p.revision != t.project.revision)
+                            .map(|p| p.id.clone())
+                    });
                     c.projects = projects;
+                    if let Some(project) = stale {
+                        self.cloud_send(Request::LoadTree { project });
+                    }
                 }
             }
             Event::Tree(t) => {
@@ -964,6 +1076,7 @@ impl RcadApp {
                         }
                     }
                     c.tree = Some(t);
+                    c.poll_next_interval();
                 }
             }
             Event::DocumentReady {
@@ -980,6 +1093,8 @@ impl RcadApp {
                     c.edited.remove(&link.document);
                 }
                 c.upsert_link(link);
+                // Just downloaded (or the server is unreachable): poll later.
+                c.poll_next_interval();
                 if read_only {
                     self.cloud_log(
                         false,
@@ -1001,6 +1116,7 @@ impl RcadApp {
                 }
                 c.read_only.remove(&link.local_path);
                 c.upsert_link(link);
+                c.poll_next_interval();
                 let unlock = c.my_locks.remove(&doc) | c.lock_sent.remove(&doc);
                 let reload_detail = c.detail.as_ref().is_some_and(|d| d.document.id == doc);
                 let reload_tree = c.project.as_deref() == Some(project.as_str());
@@ -1084,6 +1200,8 @@ impl RcadApp {
                 let was = c.offline;
                 c.offline = true;
                 c.pending = pending;
+                // Back off: the next poll waits a full interval.
+                c.poll_next_interval();
                 if let Some(CloudDialog::SignIn { sent, error, .. }) = &mut c.dialog {
                     *sent = false;
                     *error = Some("The server could not be reached.".into());
@@ -1198,7 +1316,7 @@ impl RcadApp {
                 path,
                 description,
                 milestone,
-            } => self.cloud_send(Request::SaveVersion {
+            } => self.cloud_send_with_thumbnail(Request::SaveVersion {
                 local_path: path,
                 description,
                 milestone,
@@ -1210,7 +1328,7 @@ impl RcadApp {
                 project,
                 folder,
                 name,
-            } => self.cloud_send(Request::UploadNew {
+            } => self.cloud_send_with_thumbnail(Request::UploadNew {
                 local_path: path,
                 project,
                 folder,
@@ -1262,6 +1380,10 @@ impl RcadApp {
 
     pub(crate) fn toggle_data_panel(&mut self) {
         self.cloud.panel_open = !self.cloud.panel_open;
+        if self.cloud.panel_open {
+            // Opening the panel checks for newer versions at once.
+            self.cloud.poll_due = None;
+        }
     }
 
     pub(crate) fn cloud_save_version_dialog(&mut self) {
@@ -1522,7 +1644,7 @@ impl RcadApp {
             });
             self.request(Command::Save { path });
         } else {
-            self.cloud_send(Request::UploadNew {
+            self.cloud_send_with_thumbnail(Request::UploadNew {
                 local_path: path,
                 project,
                 folder,
@@ -1549,7 +1671,7 @@ impl RcadApp {
             });
             self.request(Command::Save { path });
         } else {
-            self.cloud_send(Request::SaveVersion {
+            self.cloud_send_with_thumbnail(Request::SaveVersion {
                 local_path: path,
                 description,
                 milestone,
@@ -1557,6 +1679,138 @@ impl RcadApp {
                 thumbnail: None,
             });
         }
+    }
+
+    /// Send a version save or upload, with a thumbnail of the 3D view when
+    /// the app can take screenshots: the request waits (at most
+    /// [`SHOT_TIMEOUT`]) for the screenshot, then goes out with or without it.
+    fn cloud_send_with_thumbnail(&mut self, request: Request) {
+        if !self.cloud.capture_thumbnails || self.view_rect.is_none() {
+            return self.cloud_send(request);
+        }
+        // One at a time: an older waiting request goes out without a thumbnail.
+        if let Some(old) = self.cloud.shot.take() {
+            self.cloud_send(old.request);
+        }
+        self.cloud.shot = Some(ShotWait {
+            request,
+            started: std::time::Instant::now(),
+            requested: false,
+        });
+    }
+
+    /// Drive a waiting thumbnail screenshot (see [`Self::cloud_send_with_thumbnail`]).
+    fn cloud_shot_tick(&mut self, ctx: &egui::Context) {
+        let Some(wait) = self.cloud.shot.as_mut() else {
+            return;
+        };
+        ctx.request_repaint();
+        if !wait.requested {
+            wait.requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
+                thumb::ThumbnailShot,
+            )));
+            return;
+        }
+        let image = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot {
+                    image, user_data, ..
+                } if thumb::is_thumbnail_shot(user_data) => Some(image.clone()),
+                _ => None,
+            })
+        });
+        let timed_out = wait.started.elapsed() > SHOT_TIMEOUT;
+        if image.is_none() && !timed_out {
+            return;
+        }
+        let Some(mut wait) = self.cloud.shot.take() else {
+            return;
+        };
+        let ppp = ctx.pixels_per_point();
+        let crop = self
+            .view_rect
+            .map(|r| [r.min.x * ppp, r.min.y * ppp, r.max.x * ppp, r.max.y * ppp]);
+        let png = image.and_then(|img| thumb::thumbnail_png(&img, crop));
+        if let Request::SaveVersion { thumbnail, .. } | Request::UploadNew { thumbnail, .. } =
+            &mut wait.request
+        {
+            *thumbnail = png;
+        }
+        self.cloud_send(wait.request);
+    }
+
+    /// Turn received thumbnail PNGs into textures.
+    fn cloud_thumbnail_textures(&mut self, ctx: &egui::Context) {
+        for ((doc, version), png) in std::mem::take(&mut self.cloud.thumb_png) {
+            let tex = png.as_deref().and_then(thumb::decode_png).map(|img| {
+                ctx.load_texture(
+                    format!("cloud-thumb-{doc}-{version}"),
+                    img,
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+            self.cloud.thumbs.insert((doc, version), tex);
+        }
+    }
+
+    /// Update-available polling: while signed in, every [`POLL_INTERVAL`]
+    /// (and at once when the window regains focus or the Data panel opens),
+    /// ask for the open linked document's head, and with the Data panel open
+    /// re-list the projects (a changed revision reloads the tree).
+    fn cloud_poll(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|i| i.focused);
+        if focused && self.cloud.focused == Some(false) {
+            self.cloud.poll_due = None;
+        }
+        self.cloud.focused = Some(focused);
+        if self.cloud.account.is_none() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self.cloud.poll_due.is_some_and(|t| now < t) {
+            if let Some(t) = self.cloud.poll_due {
+                ctx.request_repaint_after(t - now);
+            }
+            return;
+        }
+        let doc = self
+            .cloud_link()
+            .filter(|_| !self.cloud_read_only())
+            .map(|l| l.document.clone());
+        let org = self
+            .cloud
+            .org
+            .clone()
+            .filter(|_| self.cloud.panel_open && self.cloud.tree.is_some());
+        if doc.is_none() && org.is_none() {
+            return;
+        }
+        self.cloud.poll_due = Some(now + POLL_INTERVAL);
+        ctx.request_repaint_after(POLL_INTERVAL);
+        if let Some(document) = doc {
+            self.cloud_send(Request::CheckHead { document });
+        }
+        if let Some(org) = org {
+            self.cloud_send(Request::ListProjects { org });
+        }
+    }
+
+    /// A thumbnail texture to draw, asking for it once when not loaded yet.
+    fn cloud_thumb(
+        &self,
+        document: &str,
+        version: u64,
+        actions: &mut Vec<Action>,
+    ) -> Option<egui::TextureHandle> {
+        let key = (document.to_string(), version);
+        if let Some(t) = self.cloud.thumbs.get(&key) {
+            return t.clone();
+        }
+        if !self.cloud.thumb_asked.contains(&key) {
+            actions.push(Action::LoadThumbnail(key.0, version));
+        }
+        None
     }
 
     // ----- drawing -----
@@ -1585,14 +1839,37 @@ impl RcadApp {
             SyncState::Modified | SyncState::Offline { .. } => p.warn,
             SyncState::Conflict => p.bad,
             SyncState::Locked { .. } => p.caution,
-            SyncState::ReadOnly => p.info,
+            SyncState::ReadOnly | SyncState::UpdateAvailable { .. } => p.info,
+            SyncState::NewerOnServer { .. } => p.warn,
+        };
+        let hover = match state {
+            SyncState::UpdateAvailable { head } => format!(
+                "Someone saved v{head} on the server. Your copy has no local edits: \
+                 Update replaces it with v{head}."
+            ),
+            SyncState::NewerOnServer { head } => format!(
+                "Someone saved v{head} on the server while you edited. Save Version will \
+                 report a conflict: save anyway, or save as a new document."
+            ),
+            _ => "Cloud document: version on the server and sync state. Click for the \
+                  version history."
+                .into(),
         };
         let r = ui
             .add(egui::Button::new(RichText::new(&text).color(color)).frame(false))
             .named("Cloud status")
-            .on_hover_text(
-                "Cloud document: version on the server and sync state. Click for the version history.",
-            );
+            .on_hover_text(hover);
+        if matches!(state, SyncState::UpdateAvailable { .. })
+            && let Some(doc) = self.cloud_link().map(|l| l.document.clone())
+            && ui
+                .small_button("Update")
+                .probe("Update")
+                .on_hover_text("Download the newer version into this working copy and reopen it")
+                .clicked()
+        {
+            self.cloud_apply(vec![Action::Update(doc)]);
+            return;
+        }
         if r.clicked() {
             if matches!(state, SyncState::Offline { .. }) {
                 self.cloud_sync_now();
@@ -1982,10 +2259,23 @@ impl RcadApp {
                 tip += &format!("\nLocked by {}", l.holder);
             }
             tip += "\nDouble-click to open";
+            let thumb = if d.has_thumbnail && d.head_version > 0 {
+                self.cloud_thumb(&d.id, d.head_version, actions)
+            } else {
+                None
+            };
             let r = ui
-                .add(egui::Button::selectable(sel, text))
-                .named(&format!("Document {}", d.name))
-                .on_hover_text(tip);
+                .horizontal(|ui| {
+                    if let Some(t) = &thumb {
+                        let _ = ui
+                            .add(egui::Image::new(t).fit_to_exact_size(egui::vec2(24.0, 24.0)))
+                            .named(&format!("Thumbnail of {}", d.name));
+                    }
+                    ui.add(egui::Button::selectable(sel, text))
+                        .named(&format!("Document {}", d.name))
+                        .on_hover_text(tip)
+                })
+                .inner;
             if r.double_clicked() {
                 actions.push(Action::Open(d.id.clone()));
             } else if r.clicked() {
@@ -2029,6 +2319,13 @@ impl RcadApp {
                     ui.label(&v.author);
                 });
                 ui.weak(fmt_time(v.created_at, now));
+                if v.thumbnail.is_some()
+                    && let Some(t) = self.cloud_thumb(&doc, n, actions)
+                {
+                    let _ = ui
+                        .add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(96.0, 96.0)))
+                        .named(&format!("Thumbnail of v{n}"));
+                }
                 if let Some(m) = &v.milestone {
                     ui.label(format!("Milestone: {m}"));
                 }
@@ -2211,6 +2508,14 @@ impl RcadApp {
                 Action::SelectFolder(f) => self.cloud.selected_folder = f,
                 Action::ToggleTrash => self.cloud.show_trash = !self.cloud.show_trash,
                 Action::Members(p) => self.cloud_open_members(p),
+                Action::LoadThumbnail(document, version) => {
+                    if self.cloud.thumb_asked.insert((document.clone(), version)) {
+                        self.cloud_send(Request::LoadThumbnail { document, version });
+                    }
+                }
+                Action::Update(document) => {
+                    self.cloud_send(Request::OpenDocument { document });
+                }
                 Action::Organization(o) => self.cloud_open_organization(o),
                 Action::ClosePanel => self.cloud.panel_open = false,
                 Action::AddComment => {

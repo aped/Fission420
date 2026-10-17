@@ -202,6 +202,21 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   `☁ Bracket v3 · Synced`, `Modified` (local edits since v3), `Offline · 2 pending`,
   `Conflict`, `Locked by sam` or `Read-only`. Clicking it opens the version history (and retries
   queued versions when offline).
+* **Newer version on the server** (Fusion's "out of date" indicator): while signed in with a
+  cloud document open, R-CAD asks the server for the document's latest version every 60 s, at
+  once when the Data panel opens or the window regains focus (never without an account; after
+  the server was unreachable it waits a full interval). When someone saved a newer version the
+  chip shows `☁ Bracket v3 · v4 available` with an **Update** button if the working copy has no
+  local edits (Update downloads v4 into the working copy and reopens it), or
+  `Newer v4 on server` if it has (its tooltip explains that Save Version will report a
+  conflict). With the Data panel open the project list is re-read at the same pace, and a
+  project whose revision changed has its tree reloaded.
+* **Thumbnails:** saving a version or uploading takes a screenshot of the 3D view, crops it to
+  a square and stores a 256 px PNG with the version (when no screenshot arrives within 1.5 s,
+  as in tests and headless runs, the version is saved without one). Document rows in the Data
+  panel show the latest version's thumbnail small, and the version history shows each
+  version's thumbnail larger. Thumbnails are fetched once per version, when first shown, and
+  kept for the session; one that does not decode as a PNG is simply not shown.
 * **File menu:** **Save to Cloud Project…** for an open document that is not on the server
   (Fusion's first Save into a project): pick a project you can edit, a folder and a name; a
   document never saved locally goes through Save As first, and unsaved changes are saved
@@ -243,6 +258,8 @@ project Parts). The live-test probe reports the cloud state under `doc.cloud` (`
 `linked`, `version`, `state`, `pending`, `versions_listed`, `share_url`, `dialog_kind`,
 `selected_document`, `selected_folder`, `documents_listed`, `folders_listed`, `trash_listed`,
 `members_listed`, `member_roles` (username → role), `org_members_listed`, `usage_loaded`,
-`usage_bytes`, `admin_error`, `admin_error_code`, `queue_listed`, …). The administration
+`usage_bytes`, `admin_error`, `admin_error_code`, `queue_listed`, `server_head`,
+`thumbnails_loaded`, …; `state` adds `update_available` and `newer_on_server`). Thumbnail
+cropping and decoding are in `crates/rcad/src/cloud_ui/thumb.rs`. The administration
 windows are in `crates/rcad/src/cloud_ui/admin.rs`; the navigation bar layout test is
 `crates/rcad/tests/it/toolbar_layout.rs`.

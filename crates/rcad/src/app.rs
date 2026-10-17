@@ -2293,7 +2293,7 @@ impl RcadApp {
             self.handle_reply(r);
         }
         #[cfg(feature = "cloud")]
-        self.cloud_tick();
+        self.cloud_tick(&ctx);
         self.advance_demo();
         self.advance_scene();
         self.autosave_tick();
