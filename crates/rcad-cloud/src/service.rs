@@ -724,6 +724,7 @@ impl CloudService {
             .name("rcad-cloud".into())
             .spawn(move || {
                 let mut worker = worker;
+                worker.pin_account();
                 for req in req_rx {
                     let name = req.name();
                     let mut emit = |e: Event| {
@@ -804,6 +805,11 @@ pub struct Worker {
     /// Server URL and optional username of the account to use instead of the file's active
     /// one ([`Worker::use_account`]).
     account_override: Option<(String, Option<String>)>,
+    /// Pin the account: the first account used becomes the override, and only a sign-in
+    /// through this worker changes it ([`Worker::pin_account`]).
+    pin: bool,
+    /// A pinned worker signed out: it has no account until it signs in again.
+    pinned_out: bool,
     /// Set to stop a single sign-on wait ([`Worker::sso_cancel_flag`]).
     sso_cancel: Arc<AtomicBool>,
     /// How long a single sign-on waits for the browser.
@@ -869,6 +875,8 @@ impl Worker {
             config_path,
             cache_root,
             account_override: None,
+            pin: false,
+            pinned_out: false,
             sso_cancel: Arc::new(AtomicBool::new(false)),
             sso_timeout: crate::sso::DEFAULT_TIMEOUT,
         }
@@ -900,7 +908,29 @@ impl Worker {
 
     /// The account in use, if any (re-read from disk): the one named by
     /// [`Worker::use_account`], else the account file's active one.
+    /// Keep using the account this worker first uses (the file's active one then) even if
+    /// another program (`rcad-cli cloud use`) changes the file's active account; a sign-in
+    /// through this worker moves the pin to the new account, a sign-out clears it. The
+    /// desktop app's service pins, so a session never switches accounts underneath it.
+    pub fn pin_account(&mut self) {
+        self.pin = true;
+    }
+
+    /// Pin the file's active account now if pinning is on and nothing is pinned yet.
+    fn pin_now(&mut self) {
+        if self.pin
+            && !self.pinned_out
+            && self.account_override.is_none()
+            && let Ok(Some(a)) = self.active_account()
+        {
+            self.account_override = Some((a.server_url, Some(a.username)));
+        }
+    }
+
     pub fn active_account(&self) -> Result<Option<Account>, CloudError> {
+        if self.pin && self.pinned_out {
+            return Ok(None);
+        }
         let config = CloudConfig::load(&self.config_path)?;
         if let Some((url, user)) = &self.account_override {
             let i = config.find_account(url, user.as_deref())?;
@@ -939,6 +969,7 @@ impl Worker {
     /// Run one request, reporting its events through `emit`.
     pub fn handle(&mut self, req: Request, emit: &mut dyn FnMut(Event)) {
         let name = req.name();
+        self.pin_now();
         let sign_in = matches!(
             req,
             Request::SignIn { .. } | Request::SignInSso { .. } | Request::LoadServerInfo { .. }
@@ -1454,6 +1485,11 @@ impl Worker {
             token: login.token,
             max_blob_bytes: Some(info.max_blob_bytes).filter(|&n| n > 0),
         };
+        if self.pin {
+            self.pinned_out = false;
+            self.account_override =
+                Some((account.server_url.clone(), Some(account.username.clone())));
+        }
         CloudConfig::update(&self.config_path, |c| c.upsert(account))?;
         emit(Event::SignedIn {
             server_url: client.server_url().to_string(),
@@ -1520,6 +1556,10 @@ impl Worker {
             CloudConfig::update(&self.config_path, |c| {
                 c.remove_account(&account.server_url, &account.username)
             })?;
+        }
+        if self.pin {
+            self.account_override = None;
+            self.pinned_out = true;
         }
         emit(Event::SignedOut);
         Ok(())

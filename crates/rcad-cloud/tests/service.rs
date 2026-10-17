@@ -2007,3 +2007,49 @@ fn server_info_is_loaded_without_credentials() {
     assert_eq!(server.log(), vec!["GET /api/v1/info".to_string()]);
     assert!(!h.config_path().exists());
 }
+
+#[test]
+fn a_pinned_worker_keeps_its_account_when_another_program_switches() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.worker.pin_account();
+    h.sign_in(&server.url);
+    // `rcad-cli cloud use` (or a CLI login) makes another account active in the file.
+    rcad_cloud::config::CloudConfig::update(&h.config_path(), |c| {
+        c.upsert(rcad_cloud::config::Account {
+            server_url: format!("http://127.0.0.1:{}", fake_server::dead_port()),
+            server_name: "Other".into(),
+            username: "mallory".into(),
+            token: "rcs_other".into(),
+            max_blob_bytes: None,
+        })
+    })
+    .unwrap();
+    let ev = h.run(Request::Refresh);
+    assert!(
+        matches!(ev.as_slice(), [Event::SignedIn { me, server_url, .. }]
+            if me.user.username == USER && *server_url == server.url),
+        "{ev:?}"
+    );
+    // An unpinned worker (the CLI) follows the file.
+    let mut cli = Worker::new(h.config_path(), h.cache_root());
+    let ev = {
+        let mut out = Vec::new();
+        cli.handle(Request::Refresh, &mut |e| out.push(e));
+        out
+    };
+    assert!(matches!(ev.as_slice(), [Event::Offline { .. }]), "{ev:?}");
+    // Signing out ends the pinned session: no silent switch to the remaining account.
+    assert_eq!(h.run(Request::SignOut), vec![Event::SignedOut]);
+    let ev = h.run(Request::Refresh);
+    assert!(
+        matches!(ev.as_slice(), [Event::Error { code: None, message, .. }] if message.contains("not signed in")),
+        "{ev:?}"
+    );
+    // A new sign-in through the worker pins again.
+    h.sign_in(&server.url);
+    assert!(matches!(
+        h.run(Request::Refresh).as_slice(),
+        [Event::SignedIn { .. }]
+    ));
+}
