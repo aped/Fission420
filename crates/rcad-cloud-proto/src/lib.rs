@@ -46,6 +46,7 @@
 //! PUT    /api/v1/projects/{project}/members SetProjectMemberRequest → ProjectMember (project admin)
 //! DELETE /api/v1/projects/{project}/members/{username}  → 204                   (project admin)
 //! GET    /api/v1/projects/{project}/tree                → ProjectTree
+//! GET    /api/v1/projects/{project}/activity?limit=N    → Vec<ActivityEntry>    (viewer; newest first, at most 200)
 //! POST   /api/v1/projects/{project}/folders CreateFolderRequest → Folder        (editor)
 //! PATCH  /api/v1/folders/{folder}      UpdateFolderRequest → Folder             (editor)
 //! DELETE /api/v1/folders/{folder}                       → 204 (must be empty)   (editor)
