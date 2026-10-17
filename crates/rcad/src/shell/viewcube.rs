@@ -29,6 +29,84 @@ pub enum NavMode {
     Zoom,
 }
 
+/// How the navigation bar draws its buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavStyle {
+    /// Text labels (the default when the view is wide enough).
+    Labels,
+    /// One glyph per button (narrow views).
+    Icons,
+}
+
+/// Room the timeline keeps next to the navigation bar before the bar moves
+/// to its own row (points).
+const TIMELINE_MIN: f32 = 160.0;
+
+/// Visible text of a navigation-bar button (`StyleEdges` stands for the
+/// Display style menu).
+fn nav_text(id: CmdId, style: NavStyle) -> &'static str {
+    match (style, id) {
+        (NavStyle::Labels, CmdId::StyleEdges) => "Display style",
+        (NavStyle::Labels, id) => registry::def(id).label,
+        (NavStyle::Icons, CmdId::Orbit) => "⟳",
+        (NavStyle::Icons, CmdId::Pan) => "✋",
+        (NavStyle::Icons, CmdId::Zoom) => "🔍",
+        (NavStyle::Icons, CmdId::Fit) => "⛶",
+        (NavStyle::Icons, CmdId::LookAt) => "👁",
+        (NavStyle::Icons, _) => "◔",
+    }
+}
+
+/// Width the navigation bar takes on one row in `style` (points): the
+/// button texts with their padding, the gaps and the two separators.
+fn nav_bar_width(ui: &egui::Ui, style: NavStyle) -> f32 {
+    let ids = [
+        CmdId::Orbit,
+        CmdId::Pan,
+        CmdId::Zoom,
+        CmdId::Fit,
+        CmdId::LookAt,
+        CmdId::StyleEdges,
+    ];
+    let spacing = ui.spacing();
+    let (pad, gap) = (spacing.button_padding.x, spacing.item_spacing.x);
+    let texts: f32 = ids
+        .iter()
+        .map(|id| {
+            egui::WidgetText::from(nav_text(*id, style))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                )
+                .size()
+                .x
+                + 2.0 * pad
+        })
+        .sum();
+    // Six buttons and two separators: seven gaps, each separator adds its
+    // own spacing; a little slack for rounding.
+    texts + 7.0 * gap + 2.0 * (spacing.item_spacing.x + 2.0) + 8.0
+}
+
+/// Style of the navigation bar and whether it shares the row with the
+/// timeline, for a strip `width` wide and the bar's one-row widths with
+/// labels and with icons. Labels next to the timeline when they fit, else
+/// icons next to the timeline, else the bar on its own (wrapping) row,
+/// with labels if they fit there.
+pub fn nav_plan(width: f32, labels: f32, icons: f32) -> (NavStyle, bool) {
+    if width >= labels + TIMELINE_MIN {
+        (NavStyle::Labels, true)
+    } else if width >= icons + TIMELINE_MIN {
+        (NavStyle::Icons, true)
+    } else if width >= labels {
+        (NavStyle::Labels, false)
+    } else {
+        (NavStyle::Icons, false)
+    }
+}
+
 const CUBE: f32 = 34.0; // half-size of the drawn cube (points)
 
 type V3 = [f32; 3];
@@ -249,8 +327,34 @@ impl RcadApp {
         }
     }
 
-    /// The navigation bar (a left-to-right group of buttons).
-    pub(crate) fn nav_bar(&mut self, ui: &mut egui::Ui) {
+    /// The strip below the 3D view: the timeline, and the navigation bar at
+    /// its right end. When the view is narrow (wide side columns) the bar
+    /// switches to icons and, if even that leaves too little room for the
+    /// timeline, moves to its own wrapping row, so no button overlaps
+    /// another or runs outside the view ([`nav_plan`]).
+    pub(crate) fn bottom_strip(&mut self, ui: &mut egui::Ui) {
+        let width = ui.available_width();
+        let labels = nav_bar_width(ui, NavStyle::Labels);
+        let icons = nav_bar_width(ui, NavStyle::Icons);
+        let (style, same_row) = nav_plan(width, labels, icons);
+        if same_row {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.horizontal(|ui| self.nav_bar(ui, style));
+                ui.separator();
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.timeline_ui(ui)
+                });
+            });
+        } else {
+            ui.horizontal(|ui| self.timeline_ui(ui));
+            ui.horizontal_wrapped(|ui| self.nav_bar(ui, style));
+        }
+    }
+
+    /// The navigation bar (a left-to-right group of buttons). With
+    /// [`NavStyle::Icons`] each button shows a glyph; its accessible name,
+    /// probe key and tooltip stay the command's label.
+    pub(crate) fn nav_bar(&mut self, ui: &mut egui::Ui, style: NavStyle) {
         let mode = self.shell.nav_mode;
         for (id, m) in [
             (CmdId::Orbit, NavMode::Orbit),
@@ -259,19 +363,25 @@ impl RcadApp {
         ] {
             let d = registry::def(id);
             let r = ui
-                .add(egui::Button::selectable(mode == m, d.label))
-                .probe(d.label)
+                .add(egui::Button::selectable(mode == m, nav_text(id, style)))
+                .named(d.label)
                 .on_hover_text(self.command_tooltip(d));
             if r.clicked() {
                 (d.run)(self);
             }
         }
         ui.separator();
-        self.cmd_bar_button(ui, CmdId::Fit);
-        self.cmd_bar_button(ui, CmdId::LookAt);
+        for id in [CmdId::Fit, CmdId::LookAt] {
+            match style {
+                NavStyle::Labels => {
+                    self.cmd_bar_button(ui, id);
+                }
+                NavStyle::Icons => self.nav_icon_button(ui, id),
+            }
+        }
         ui.separator();
         let edges = self.shell.show_edges;
-        let r = ui.menu_button("Display style", |ui| {
+        let r = ui.menu_button(nav_text(CmdId::StyleEdges, style), |ui| {
             crate::shell::ribbon::menu_min_width(ui);
             for (id, on) in [(CmdId::StyleEdges, true), (CmdId::StyleShaded, false)] {
                 let d = registry::def(id);
@@ -285,7 +395,29 @@ impl RcadApp {
                 }
             }
         });
-        r.response.probe("Display style");
+        let r = r.response.named("Display style");
+        if style == NavStyle::Icons {
+            r.on_hover_text("Display style");
+        }
+    }
+
+    /// A command button showing its glyph (compact navigation bar).
+    fn nav_icon_button(&mut self, ui: &mut egui::Ui, id: CmdId) {
+        let d = registry::def(id);
+        let state = (d.enabled)(self);
+        let r = ui
+            .add_enabled(
+                state.is_ok(),
+                egui::Button::new(nav_text(id, NavStyle::Icons)),
+            )
+            .named(d.label);
+        let r = match &state {
+            Ok(()) => r.on_hover_text(self.command_tooltip(d)),
+            Err(why) => r.on_disabled_hover_text(why),
+        };
+        if r.clicked() {
+            (d.run)(self);
+        }
     }
 
     /// Left drag in Pan / Zoom mode (Orbit is the viewport's own drag).
@@ -302,5 +434,18 @@ impl RcadApp {
             NavMode::Zoom => cam.zoom(-d.y * 0.05),
             NavMode::Orbit => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nav_plan_prefers_labels_then_icons_then_its_own_row() {
+        assert_eq!(nav_plan(900.0, 380.0, 170.0), (NavStyle::Labels, true));
+        assert_eq!(nav_plan(400.0, 380.0, 170.0), (NavStyle::Icons, true));
+        assert_eq!(nav_plan(300.0, 280.0, 170.0), (NavStyle::Labels, false));
+        assert_eq!(nav_plan(120.0, 380.0, 170.0), (NavStyle::Icons, false));
     }
 }

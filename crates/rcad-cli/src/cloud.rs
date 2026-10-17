@@ -5,9 +5,14 @@
 //! runs one or more `rcad_cloud::service::Request`s synchronously and prints the resulting
 //! events, as lines of text or (with `--json`) one JSON object per event.
 //!
+//! Administration commands (projects, members, folders, trash) call the client library
+//! directly and print the server's answer.
+//!
 //! Exit codes: 0 ok, 1 error, 3 version conflict, 4 locked by another user, 5 server
 //! unreachable and the version was queued (`rcad-cli cloud sync` sends it later), 64 usage.
+use rcad_cloud::CloudError;
 use rcad_cloud::cache::Link;
+use rcad_cloud::client::Client;
 use rcad_cloud::proto;
 use rcad_cloud::service::{Event, Request, Worker};
 use serde_json::json;
@@ -29,6 +34,15 @@ usage: rcad-cli cloud [--json] COMMAND
   versions DOCUMENT-ID
   share DOCUMENT-ID [--version N] [--days N] [--download]
   sync                             send versions queued while offline
+  queue                            list versions queued while offline (INDEX first)
+  discard INDEX                    drop a queued version (the local file is not changed)
+  project create ORG-ID NAME [--description TEXT]
+  members PROJECT-ID               explicit project members and their roles
+  member add|set PROJECT-ID USERNAME ROLE    ROLE: viewer, commenter, editor or admin
+  member remove PROJECT-ID USERNAME
+  mkdir PROJECT-ID NAME [--parent FOLDER-ID]
+  trash DOCUMENT-ID                move a document to the project's trash
+  restore DOCUMENT-ID              restore a document from the trash
 exit codes: 0 ok, 1 error, 3 conflict, 4 locked, 5 offline (queued), 64 usage";
 
 fn usage() -> ExitCode {
@@ -128,10 +142,18 @@ pub fn run(args: &[String]) -> ExitCode {
             document: p[0].clone(),
         }),
         "sync" => cli.simple(rest, 0, |_| Request::SyncPending),
+        "queue" => cli.simple(rest, 0, |_| Request::LoadPending),
+        "discard" => cli.discard(rest),
         "push" => cli.push(rest),
         "save" => cli.save(rest),
         "pull" => cli.pull(rest),
         "share" => cli.share(rest),
+        "project" => cli.project(rest),
+        "members" => cli.members(rest),
+        "member" => cli.member(rest),
+        "mkdir" => cli.mkdir(rest),
+        "trash" => cli.trash(rest, false),
+        "restore" => cli.trash(rest, true),
         _ => return usage(),
     };
     match code {
@@ -363,6 +385,253 @@ impl Cli {
         ))
     }
 
+    // -- Administration (direct client calls) ---------------------------------------------------
+
+    /// A client for the active account.
+    fn client(&self) -> Result<Client, CloudError> {
+        let account = self
+            .worker
+            .active_account()?
+            .ok_or(CloudError::NotSignedIn)?;
+        Ok(Client::new(&account.server_url)?.with_token(account.token))
+    }
+
+    /// Run `call` against the server; print a failure (with `hint` for a 404) and map it to
+    /// an exit outcome.
+    fn direct<T>(
+        &mut self,
+        request: &'static str,
+        hint_not_found: Option<&str>,
+        call: impl FnOnce(&Client) -> Result<T, CloudError>,
+    ) -> Result<T, Outcome> {
+        let result = self.client().and_then(|c| call(&c));
+        result.map_err(|e| {
+            let code = e.code();
+            let mut message = e.to_string();
+            if let (Some(proto::ErrorCode::NotFound), Some(h)) = (code, hint_not_found) {
+                message = format!("{message} ({h})");
+            }
+            self.print(&Event::Error {
+                request,
+                code,
+                message,
+            });
+            Outcome::Error
+        })
+    }
+
+    fn emit_json(&self, v: serde_json::Value) {
+        println!("{v}");
+    }
+
+    fn project(&mut self, args: &[String]) -> Option<Outcome> {
+        let (sub, rest) = args.split_first()?;
+        if sub != "create" {
+            return None;
+        }
+        let opts = Opts::parse(rest, &["--description"], &[])?;
+        let [org, name] = opts.positional.as_slice() else {
+            return None;
+        };
+        let req = proto::CreateProjectRequest {
+            name: name.clone(),
+            description: opts.value(&["--description"]).unwrap_or_default(),
+        };
+        Some(
+            match self.direct("create_project", None, |c| c.create_project(org, &req)) {
+                Ok(p) => {
+                    if self.json {
+                        self.emit_json(json!({"event": "project_created", "project": to_json(&p)}));
+                    } else {
+                        println!("{}\t{}\t{}", p.id, p.name, role_name(p.my_role));
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            },
+        )
+    }
+
+    fn members(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let [project] = opts.positional.as_slice() else {
+            return None;
+        };
+        Some(
+            match self.direct("project_members", None, |c| c.project_members(project)) {
+                Ok(members) => {
+                    if self.json {
+                        self.emit_json(json!({
+                            "event": "project_members", "project": project,
+                            "members": to_json(&members)
+                        }));
+                    } else {
+                        for m in &members {
+                            println!(
+                                "{}\t{}\t{}",
+                                m.user.username,
+                                role_name(m.role),
+                                m.user.display_name
+                            );
+                        }
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            },
+        )
+    }
+
+    fn member(&mut self, args: &[String]) -> Option<Outcome> {
+        let (sub, rest) = args.split_first()?;
+        let opts = Opts::parse(rest, &[], &[])?;
+        match (sub.as_str(), opts.positional.as_slice()) {
+            ("add" | "set", [project, username, role]) => {
+                let req = proto::SetProjectMemberRequest {
+                    username: username.clone(),
+                    role: parse_role(role)?,
+                };
+                let hint = format!(
+                    "the project is not visible to you, or {username} is not a member of the \
+                     project's organization; add them to the organization first"
+                );
+                Some(
+                    match self.direct("set_project_member", Some(&hint), |c| {
+                        c.set_project_member(project, &req)
+                    }) {
+                        Ok(m) => {
+                            if self.json {
+                                self.emit_json(json!({
+                                    "event": "project_member_set", "project": project,
+                                    "member": to_json(&m)
+                                }));
+                            } else {
+                                println!(
+                                    "{} is {} of {project}",
+                                    m.user.username,
+                                    role_name(m.role)
+                                );
+                            }
+                            Outcome::Ok
+                        }
+                        Err(o) => o,
+                    },
+                )
+            }
+            ("remove", [project, username]) => Some(
+                match self.direct("remove_project_member", None, |c| {
+                    c.remove_project_member(project, username)
+                }) {
+                    Ok(()) => {
+                        if self.json {
+                            self.emit_json(json!({
+                                "event": "project_member_removed", "project": project,
+                                "username": username
+                            }));
+                        } else {
+                            println!("removed {username} from {project}");
+                        }
+                        Outcome::Ok
+                    }
+                    Err(o) => o,
+                },
+            ),
+            _ => None,
+        }
+    }
+
+    fn mkdir(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &["--parent"], &[])?;
+        let [project, name] = opts.positional.as_slice() else {
+            return None;
+        };
+        let req = proto::CreateFolderRequest {
+            name: name.clone(),
+            parent: opts.value(&["--parent"]),
+        };
+        Some(
+            match self.direct("create_folder", None, |c| c.create_folder(project, &req)) {
+                Ok(f) => {
+                    if self.json {
+                        self.emit_json(json!({"event": "folder_created", "folder": to_json(&f)}));
+                    } else {
+                        println!("{}\t{}", f.id, f.name);
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            },
+        )
+    }
+
+    /// `trash` (restore = false) or `restore` a document.
+    /// Drop the queued save at INDEX (as `queue` lists it).
+    fn discard(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let [index] = opts.positional.as_slice() else {
+            return None;
+        };
+        let index: usize = index.parse().ok()?;
+        let entry = self
+            .worker
+            .cache()
+            .ok()
+            .flatten()
+            .and_then(|c| c.pending().ok())
+            .and_then(|q| q.get(index).cloned());
+        let Some(entry) = entry else {
+            eprintln!(
+                "error (discard_pending): no queued version {index} (see `rcad-cli cloud queue`)"
+            );
+            return Some(Outcome::Error);
+        };
+        Some(self.report(
+            Request::DiscardPending {
+                index,
+                document: entry.document,
+                blob: entry.blob,
+            },
+            false,
+        ))
+    }
+
+    fn trash(&mut self, args: &[String], restore: bool) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let [doc] = opts.positional.as_slice() else {
+            return None;
+        };
+        let outcome = if restore {
+            match self.direct("restore_document", None, |c| c.restore_document(doc)) {
+                Ok(d) => {
+                    if self.json {
+                        self.emit_json(
+                            json!({"event": "document_restored", "document": to_json(&d)}),
+                        );
+                    } else {
+                        println!("restored {} ({})", d.name, d.id);
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            }
+        } else {
+            match self.direct("trash_document", None, |c| c.delete_document(doc)) {
+                Ok(()) => {
+                    if self.json {
+                        self.emit_json(json!({"event": "document_trashed", "document": doc}));
+                    } else {
+                        println!(
+                            "moved {doc} to the trash (restore with `rcad-cli cloud restore {doc}`)"
+                        );
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            }
+        };
+        Some(outcome)
+    }
+
     fn print(&mut self, e: &Event) {
         if let Event::DocumentReady { path, .. } = e {
             self.last_ready = Some(path.clone());
@@ -462,10 +731,59 @@ impl Cli {
                 "server unreachable; {pending} version(s) queued (run `rcad-cli cloud sync` later)"
             ),
             Event::Synced { pending } => println!("pending versions: {pending}"),
+            Event::PendingQueue { saves } => {
+                for (i, p) in saves.iter().enumerate() {
+                    println!(
+                        "{i}\t{}\t{}\t{}",
+                        p.document,
+                        time(p.queued_at),
+                        p.description
+                    );
+                }
+            }
+            Event::ProjectMembers { members, .. } => {
+                for m in members {
+                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                }
+            }
+            Event::OrgMembers { members, .. } => {
+                for m in members {
+                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                }
+            }
+            Event::Usage { usage, .. } => println!(
+                "{} bytes used of {}; {} documents, {} versions",
+                usage.used_bytes,
+                usage
+                    .quota_bytes
+                    .map_or("no quota".to_string(), |q| format!("{q} bytes")),
+                usage.documents,
+                usage.versions
+            ),
             Event::Error {
                 request, message, ..
             } => eprintln!("error ({request}): {message}"),
         }
+    }
+}
+
+/// A project role from its name, case-insensitively.
+fn parse_role(s: &str) -> Option<proto::ProjectRole> {
+    match s.to_ascii_lowercase().as_str() {
+        "viewer" => Some(proto::ProjectRole::Viewer),
+        "commenter" => Some(proto::ProjectRole::Commenter),
+        "editor" => Some(proto::ProjectRole::Editor),
+        "admin" => Some(proto::ProjectRole::Admin),
+        _ => None,
+    }
+}
+
+fn role_name(r: proto::ProjectRole) -> &'static str {
+    match r {
+        proto::ProjectRole::Viewer => "viewer",
+        proto::ProjectRole::Commenter => "commenter",
+        proto::ProjectRole::Editor => "editor",
+        proto::ProjectRole::Admin => "admin",
     }
 }
 
@@ -618,6 +936,16 @@ fn event_json(e: &Event) -> serde_json::Value {
         }
         Event::Offline { pending } => json!({"event": "offline", "pending": pending}),
         Event::Synced { pending } => json!({"event": "synced", "pending": pending}),
+        Event::PendingQueue { saves } => json!({"event": "pending_queue", "saves": to_json(saves)}),
+        Event::ProjectMembers { project, members } => {
+            json!({"event": "project_members", "project": project, "members": to_json(members)})
+        }
+        Event::OrgMembers { org, members } => {
+            json!({"event": "org_members", "org": org, "members": to_json(members)})
+        }
+        Event::Usage { org, usage } => {
+            json!({"event": "usage", "org": org, "usage": to_json(usage)})
+        }
         Event::Error {
             request,
             code,
@@ -651,5 +979,22 @@ mod tests {
         assert!(Opts::parse(&["--bogus".to_string()], &[], &[]).is_none());
         assert!(Opts::parse(&["-m".to_string()], &["-m"], &[]).is_none());
         assert_eq!(default_name(Path::new("/x/Bracket.rcad.json")), "Bracket");
+    }
+
+    #[test]
+    fn roles_parse_case_insensitively() {
+        assert_eq!(parse_role("Editor"), Some(proto::ProjectRole::Editor));
+        assert_eq!(parse_role("ADMIN"), Some(proto::ProjectRole::Admin));
+        assert_eq!(parse_role("viewer"), Some(proto::ProjectRole::Viewer));
+        assert_eq!(parse_role("commenter"), Some(proto::ProjectRole::Commenter));
+        assert_eq!(parse_role("owner"), None);
+        for r in [
+            proto::ProjectRole::Viewer,
+            proto::ProjectRole::Commenter,
+            proto::ProjectRole::Editor,
+            proto::ProjectRole::Admin,
+        ] {
+            assert_eq!(parse_role(role_name(r)), Some(r));
+        }
     }
 }

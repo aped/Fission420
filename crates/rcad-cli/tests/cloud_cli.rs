@@ -228,3 +228,134 @@ fn offline_save_queues_then_sync_sends() {
         2
     );
 }
+
+#[test]
+fn queue_lists_and_discard_drops_a_queued_version() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Pin.rcad.json", b"one");
+    let doc = push(&env, &file);
+    drop(server.stop());
+    std::fs::write(&file, b"two").unwrap();
+    let o = env.cli(&["save", "Pin.rcad.json", "-m", "longer"], None);
+    assert_eq!(code(&o), 5, "{}", text(&o));
+    // Listing and discarding work offline: the queue is local.
+    let o = env.cli(&["queue"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.starts_with(&format!("0\t{doc}\t")) && out.contains("longer"),
+        "{out}"
+    );
+    let o = env.cli(&["discard", "3"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert_eq!(code(&env.cli(&["discard", "x"], None)), 64);
+    let o = env.cli(&["--json", "discard", "0"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
+    assert_eq!(v["event"], "pending_queue");
+    assert_eq!(v["saves"].as_array().map(Vec::len), Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"two");
+}
+
+#[test]
+fn admin_command_usage() {
+    let env = Env::new();
+    for args in [
+        &["project"][..],
+        &["project", "delete", "o1", "X"],
+        &["project", "create", "o1"],
+        &["members"],
+        &["member", "add", "p1", "bob"],
+        &["member", "add", "p1", "bob", "owner"],
+        &["member", "remove", "p1"],
+        &["member", "promote", "p1", "bob", "editor"],
+        &["mkdir", "p1"],
+        &["mkdir", "p1", "X", "--parent"],
+        &["trash"],
+        &["restore", "a", "b"],
+    ] {
+        let o = env.cli(args, None);
+        assert_eq!(code(&o), 64, "{args:?}: {}", text(&o));
+    }
+    // Signed out: a plain error, nothing sent.
+    let o = env.cli(&["members", "p1"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("not signed in"), "{}", text(&o));
+}
+
+#[test]
+fn project_create_and_mkdir() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let o = env.cli(&["project", "create", fake_server::ORG, "Fixtures"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("Fixtures\tadmin"), "{}", text(&o));
+    let o = env.cli(&["projects", fake_server::ORG], None);
+    assert!(text(&o).contains("Fixtures"), "{}", text(&o));
+
+    let o = env.cli(&["--json", "mkdir", PROJECT, "Brackets"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
+    assert_eq!(v["event"], "folder_created");
+    let parent = v["folder"]["id"].as_str().unwrap().to_string();
+    let o = env.cli(&["mkdir", PROJECT, "M6", "--parent", &parent], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let st = server.state.lock().unwrap();
+    let m6 = st.folders.iter().find(|f| f.name == "M6").unwrap();
+    assert_eq!(m6.parent.as_deref(), Some(parent.as_str()));
+    assert_eq!(m6.project, PROJECT);
+}
+
+#[test]
+fn members_and_trash_reach_their_routes() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let o = env.cli(&["member", "add", PROJECT, "bob", "Editor"], None);
+    assert!(
+        server
+            .log()
+            .iter()
+            .any(|l| l == &format!("PUT /api/v1/projects/{PROJECT}/members")),
+        "{:?}",
+        server.log()
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("bob is editor"), "{}", text(&o));
+    let o = env.cli(&["members", PROJECT], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("bob\teditor"), "{}", text(&o));
+    let o = env.cli(&["member", "set", PROJECT, "bob", "viewer"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    // Not a member of the organization: 404 with the explanation.
+    let o = env.cli(&["member", "add", PROJECT, "carol", "editor"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("add them to the organization first"),
+        "{}",
+        text(&o)
+    );
+    let o = env.cli(&["member", "remove", PROJECT, "bob"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = env.cli(&["--json", "members", PROJECT], None);
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
+    assert_eq!(v["members"].as_array().map(Vec::len), Some(0));
+
+    let file = env.file("Plate.rcad.json", b"one");
+    let doc = push(&env, &file);
+    let o = env.cli(&["trash", &doc], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = env.cli(&["tree", PROJECT], None);
+    assert!(text(&o).contains("trash:"), "{}", text(&o));
+    let o = env.cli(&["restore", &doc], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("restored Plate"), "{}", text(&o));
+    let o = env.cli(&["restore", &doc], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+}

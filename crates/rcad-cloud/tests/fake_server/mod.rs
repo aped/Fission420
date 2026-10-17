@@ -35,6 +35,14 @@ pub struct State {
     /// Serve content with one extra byte (hash mismatch).
     pub tamper_content: bool,
     pub logins: Vec<proto::LoginRequest>,
+    /// Documents in the trash.
+    pub trash: Vec<Doc>,
+    pub org_members: Vec<proto::OrgMember>,
+    /// Explicit project members (project id, member).
+    pub project_members: Vec<(String, proto::ProjectMember)>,
+    pub usage: proto::OrgUsage,
+    /// Answer every version save with this error (e.g. a full quota).
+    pub fail_saves: Option<(u16, ErrorCode)>,
 }
 
 fn user(name: &str) -> proto::User {
@@ -76,6 +84,25 @@ impl State {
             next_id: 1,
             tamper_content: false,
             logins: Vec::new(),
+            trash: Vec::new(),
+            org_members: vec![
+                proto::OrgMember {
+                    user: user(USER),
+                    role: proto::OrgRole::Owner,
+                },
+                proto::OrgMember {
+                    user: user("bob"),
+                    role: proto::OrgRole::Member,
+                },
+            ],
+            project_members: Vec::new(),
+            usage: proto::OrgUsage {
+                used_bytes: 1_000,
+                quota_bytes: Some(10_000),
+                documents: 0,
+                versions: 0,
+            },
+            fail_saves: None,
         }
     }
 
@@ -284,6 +311,156 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 }],
             },
         ),
+        ("GET", ["orgs", _, "members"]) => json(200, &st.org_members),
+        ("PUT", ["orgs", _, "members"]) => {
+            let req: proto::SetOrgMemberRequest = match parse(body) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            let m = proto::OrgMember {
+                user: user(&req.username),
+                role: req.role,
+            };
+            match st
+                .org_members
+                .iter_mut()
+                .find(|x| x.user.username.eq_ignore_ascii_case(&req.username))
+            {
+                Some(x) => x.role = req.role,
+                None => st.org_members.push(m.clone()),
+            }
+            json(200, &m)
+        }
+        ("DELETE", ["orgs", _, "members", name]) => {
+            let before = st.org_members.len();
+            st.org_members.retain(|x| x.user.username != *name);
+            if st.org_members.len() == before {
+                return err(404, ErrorCode::NotFound, "no such member");
+            }
+            st.project_members.retain(|(_, m)| m.user.username != *name);
+            (204, Vec::new(), "application/json")
+        }
+        ("GET", ["orgs", _, "usage"]) => json(200, &st.usage),
+        ("GET", ["projects", p, "members"]) => {
+            let list: Vec<_> = st
+                .project_members
+                .iter()
+                .filter(|(q, _)| q == p)
+                .map(|(_, m)| m.clone())
+                .collect();
+            json(200, &list)
+        }
+        ("PUT", ["projects", p, "members"]) => {
+            let req: proto::SetProjectMemberRequest = match parse(body) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            if !st
+                .org_members
+                .iter()
+                .any(|x| x.user.username.eq_ignore_ascii_case(&req.username))
+            {
+                return err(404, ErrorCode::NotFound, "no such user in the organization");
+            }
+            let m = proto::ProjectMember {
+                user: user(&req.username),
+                role: req.role,
+            };
+            match st
+                .project_members
+                .iter_mut()
+                .find(|(q, x)| q == p && x.user.username == req.username)
+            {
+                Some((_, x)) => x.role = req.role,
+                None => st.project_members.push((p.to_string(), m.clone())),
+            }
+            json(200, &m)
+        }
+        ("DELETE", ["projects", p, "members", name]) => {
+            let before = st.project_members.len();
+            st.project_members
+                .retain(|(q, m)| !(q == p && m.user.username == *name));
+            if st.project_members.len() == before {
+                return err(404, ErrorCode::NotFound, "not a member");
+            }
+            (204, Vec::new(), "application/json")
+        }
+        ("PATCH", ["folders", f]) => {
+            let req: proto::UpdateFolderRequest = match parse(body) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            let Some(folder) = st.folders.iter_mut().find(|x| x.id == *f) else {
+                return err(404, ErrorCode::NotFound, "no folder");
+            };
+            if let Some(n) = req.name {
+                folder.name = n;
+            }
+            if let Some(p) = req.parent {
+                folder.parent = p;
+            }
+            json(200, &folder.clone())
+        }
+        ("DELETE", ["folders", f]) => {
+            let used = st.folders.iter().any(|x| x.parent.as_deref() == Some(*f))
+                || st
+                    .docs
+                    .iter()
+                    .chain(st.trash.iter())
+                    .any(|d| d.summary.folder.as_deref() == Some(*f));
+            if used {
+                return err(409, ErrorCode::NotEmpty, "the folder is not empty");
+            }
+            let before = st.folders.len();
+            st.folders.retain(|x| x.id != *f);
+            if st.folders.len() == before {
+                return err(404, ErrorCode::NotFound, "no folder");
+            }
+            (204, Vec::new(), "application/json")
+        }
+        ("PATCH", ["documents", d]) => {
+            let req: proto::UpdateDocumentRequest = match parse(body) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            if let Some(name) = &req.name {
+                let project = st.doc_mut(d).map(|x| x.summary.project.clone());
+                if st.docs.iter().any(|x| {
+                    x.summary.id != *d
+                        && Some(&x.summary.project) == project.as_ref()
+                        && x.summary.name.eq_ignore_ascii_case(name)
+                }) {
+                    return err(409, ErrorCode::AlreadyExists, "name taken");
+                }
+            }
+            let Some(doc) = st.doc_mut(d) else {
+                return err(404, ErrorCode::NotFound, "no document");
+            };
+            if let Some(n) = req.name {
+                doc.summary.name = n;
+            }
+            if let Some(f) = req.folder {
+                doc.summary.folder = f;
+            }
+            json(200, &doc.summary.clone())
+        }
+        ("DELETE", ["documents", d]) => {
+            let Some(i) = st.docs.iter().position(|x| x.summary.id == *d) else {
+                return err(404, ErrorCode::NotFound, "no document");
+            };
+            let doc = st.docs.remove(i);
+            st.trash.push(doc);
+            (204, Vec::new(), "application/json")
+        }
+        ("POST", ["documents", d, "restore"]) => {
+            let Some(i) = st.trash.iter().position(|x| x.summary.id == *d) else {
+                return err(404, ErrorCode::NotFound, "not in the trash");
+            };
+            let doc = st.trash.remove(i);
+            let summary = doc.summary.clone();
+            st.docs.push(doc);
+            json(200, &summary)
+        }
         ("GET", ["orgs", _, "projects"]) => json(200, &st.projects),
         ("POST", ["orgs", org, "projects"]) => {
             let req: proto::CreateProjectRequest = match parse(body) {
@@ -351,7 +528,12 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                         .filter(|d| d.summary.project == *p)
                         .map(|d| d.summary.clone())
                         .collect(),
-                    trash: Vec::new(),
+                    trash: st
+                        .trash
+                        .iter()
+                        .filter(|d| d.summary.project == *p)
+                        .map(|d| d.summary.clone())
+                        .collect(),
                 },
             )
         }
@@ -401,6 +583,9 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 Ok(r) => r,
                 Err(e) => return e,
             };
+            if let Some((status, code)) = st.fail_saves {
+                return err(status, code, "save refused");
+            }
             if !st.blobs.contains_key(&req.blob) {
                 return err(422, ErrorCode::HashMismatch, "blob missing");
             }
