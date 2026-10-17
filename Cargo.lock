@@ -2533,6 +2533,7 @@ version = "1.0.0"
 dependencies = [
  "blake3",
  "rcad-cloud-proto",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

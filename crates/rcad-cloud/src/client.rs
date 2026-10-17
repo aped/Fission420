@@ -394,6 +394,14 @@ impl Client {
         self.with_body("POST", "/auth/login", req)
     }
 
+    /// Redeem a single sign-on authorization code (see [`crate::sso`]).
+    pub fn oidc_exchange(
+        &self,
+        req: &proto::OidcExchangeRequest,
+    ) -> Result<proto::LoginResponse, CloudError> {
+        self.with_body("POST", "/auth/oidc/exchange", req)
+    }
+
     pub fn logout(&self) -> Result<(), CloudError> {
         self.no_content("POST", "/auth/logout")
     }

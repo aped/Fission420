@@ -1122,6 +1122,23 @@ impl Cli {
                     outln!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
                 }
             }
+            Event::OpenBrowser { url } => {
+                errln!("Open this address in a browser to sign in:");
+                outln!("{url}");
+            }
+            Event::ServerInfo { server_url, info } => {
+                outln!("{} <{server_url}>", info.name);
+                outln!(
+                    "password sign-in: {}",
+                    if info.local_login { "yes" } else { "no" }
+                );
+                outln!(
+                    "single sign-on: {}",
+                    info.oidc
+                        .as_ref()
+                        .map_or("no".to_string(), |o| o.display_name.clone())
+                );
+            }
             Event::Shares { shares, .. } => {
                 for l in shares {
                     outln!("{}", share_line(l));
@@ -1385,6 +1402,10 @@ fn event_json(e: &Event) -> serde_json::Value {
         }
         Event::Usage { org, usage } => {
             json!({"event": "usage", "org": org, "usage": to_json(usage)})
+        }
+        Event::OpenBrowser { url } => json!({"event": "open_browser", "url": url}),
+        Event::ServerInfo { server_url, info } => {
+            json!({"event": "server_info", "server_url": server_url, "info": to_json(info)})
         }
         Event::Shares { document, shares } => {
             json!({"event": "shares", "document": document, "shares": to_json(shares)})

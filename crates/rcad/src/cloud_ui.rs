@@ -1013,6 +1013,7 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
+            Event::OpenBrowser { .. } | Event::ServerInfo { .. } => {}
             Event::Shares { document, shares } => {
                 if let Some(CloudDialog::Share { revoke, .. }) = &mut c.dialog
                     && revoke

@@ -20,6 +20,9 @@ blake3 = { version = "1.8", default-features = false, features = ["std", "pure"]
 # verifier (no bundled Mozilla root list).
 ureq = { version = "3.3", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# SHA-256 and the system CSPRNG for single sign-on (PKCE, state, nonce); already in the
+# build through rustls.
+ring = "0.17"
 
 [dev-dependencies]
 tempfile.workspace = true

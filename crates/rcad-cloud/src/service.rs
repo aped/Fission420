@@ -40,12 +40,21 @@
 //! * Member and organization changes answer with the reloaded list (`ProjectMembers`,
 //!   `OrgMembers`); document and folder changes (rename, move, trash, restore) answer with the
 //!   reloaded `Tree`. Renaming a document also renames it in the local links.
+//! * `SignInSso` signs in through the server's OpenID Connect provider ([`crate::sso`]): it
+//!   emits [`Event::OpenBrowser`] with the authorization URL, waits (at most five minutes) for
+//!   the browser's redirect to a loopback listener, then exchanges the code with the server and
+//!   stores the account like `SignIn`. `CancelSso` stops the wait: [`CloudService::send`] sets
+//!   a shared flag at once (the worker is busy waiting), so cancelling never queues behind it.
+//! * `LoadServerInfo` reads `GET /info` only (no credentials), so the sign-in dialog can offer
+//!   the sign-in methods the server has.
 use crate::cache::{Link, PendingSave, ServerCache};
 use crate::client::Client;
 use crate::config::{Account, CloudConfig};
 use crate::proto::{self, ErrorCode};
 use crate::{CloudError, fsutil};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 
 #[derive(Clone, PartialEq)]
@@ -58,6 +67,17 @@ pub enum Request {
         /// The user confirmed signing in over unencrypted `http://` to a host that is not on
         /// a local network (see [`crate::client::needs_insecure_consent`]).
         allow_insecure_http: bool,
+    },
+    /// Sign in through the server's OpenID Connect provider (see the module documentation).
+    SignInSso {
+        server_url: String,
+        allow_insecure_http: bool,
+    },
+    /// Stop a running `SignInSso` (it then reports an `Error` "sign-in cancelled").
+    CancelSso,
+    /// The server's public information (answer: [`Event::ServerInfo`]).
+    LoadServerInfo {
+        server_url: String,
     },
     /// Revoke the token on the server (best effort) and forget the account.
     SignOut,
@@ -257,6 +277,19 @@ impl std::fmt::Debug for Request {
                 .field("username", username)
                 .field("password", &"<redacted>")
                 .field("allow_insecure_http", allow_insecure_http)
+                .finish(),
+            Request::SignInSso {
+                server_url,
+                allow_insecure_http,
+            } => f
+                .debug_struct("SignInSso")
+                .field("server_url", server_url)
+                .field("allow_insecure_http", allow_insecure_http)
+                .finish(),
+            Request::CancelSso => f.write_str("CancelSso"),
+            Request::LoadServerInfo { server_url } => f
+                .debug_struct("LoadServerInfo")
+                .field("server_url", server_url)
                 .finish(),
             Request::SignOut => f.write_str("SignOut"),
             Request::Refresh => f.write_str("Refresh"),
@@ -499,6 +532,9 @@ impl Request {
     pub fn name(&self) -> &'static str {
         match self {
             Request::SignIn { .. } => "sign_in",
+            Request::SignInSso { .. } => "sign_in_sso",
+            Request::CancelSso => "cancel_sso",
+            Request::LoadServerInfo { .. } => "load_server_info",
             Request::SignOut => "sign_out",
             Request::Refresh => "refresh",
             Request::ListProjects { .. } => "list_projects",
@@ -553,6 +589,15 @@ pub enum Event {
         me: proto::Me,
     },
     SignedOut,
+    /// Open `url` in the user's browser (single sign-on; the URL carries no secret).
+    OpenBrowser {
+        url: String,
+    },
+    /// Answer to `LoadServerInfo`. `server_url` is normalized.
+    ServerInfo {
+        server_url: String,
+        info: proto::ServerInfo,
+    },
     Projects {
         org: String,
         projects: Vec<proto::Project>,
@@ -661,6 +706,8 @@ pub const ACTIVITY_LIMIT: u32 = 100;
 pub struct CloudService {
     pub(crate) tx: Sender<Request>,
     pub(crate) rx: Receiver<Event>,
+    /// The worker's single sign-on cancel flag (None for a detached service).
+    pub(crate) sso_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl CloudService {
@@ -671,10 +718,12 @@ impl CloudService {
         let (tx, req_rx) = std::sync::mpsc::channel::<Request>();
         let (ev_tx, rx) = std::sync::mpsc::channel();
         let thread_tx = ev_tx.clone();
+        let worker = Worker::new(config_path, cache_root);
+        let sso_cancel = Some(worker.sso_cancel_flag());
         let spawned = std::thread::Builder::new()
             .name("rcad-cloud".into())
             .spawn(move || {
-                let mut worker = Worker::new(config_path, cache_root);
+                let mut worker = worker;
                 for req in req_rx {
                     let name = req.name();
                     let mut emit = |e: Event| {
@@ -699,11 +748,18 @@ impl CloudService {
                 message: format!("cannot start the cloud service: {e}"),
             });
         }
-        CloudService { tx, rx }
+        CloudService { tx, rx, sso_cancel }
     }
 
     /// Queue a request for the service thread.
     pub fn send(&self, request: Request) {
+        if let Some(flag) = &self.sso_cancel {
+            match request {
+                Request::SignInSso { .. } => flag.store(false, Ordering::SeqCst),
+                Request::CancelSso => flag.store(true, Ordering::SeqCst),
+                _ => {}
+            }
+        }
         // The thread only stops when the handle is dropped; a send error means it panicked,
         // which the next poll reports.
         let _ = self.tx.send(request);
@@ -719,7 +775,15 @@ impl CloudService {
     pub fn detached() -> (CloudService, Receiver<Request>, Sender<Event>) {
         let (tx, req_rx) = std::sync::mpsc::channel();
         let (ev_tx, rx) = std::sync::mpsc::channel();
-        (CloudService { tx, rx }, req_rx, ev_tx)
+        (
+            CloudService {
+                tx,
+                rx,
+                sso_cancel: None,
+            },
+            req_rx,
+            ev_tx,
+        )
     }
 }
 
@@ -740,6 +804,10 @@ pub struct Worker {
     /// Server URL and optional username of the account to use instead of the file's active
     /// one ([`Worker::use_account`]).
     account_override: Option<(String, Option<String>)>,
+    /// Set to stop a single sign-on wait ([`Worker::sso_cancel_flag`]).
+    sso_cancel: Arc<AtomicBool>,
+    /// How long a single sign-on waits for the browser.
+    sso_timeout: std::time::Duration,
 }
 
 /// `R-CAD on <hostname>` (standard library only: `HOSTNAME`, `/etc/hostname`, `COMPUTERNAME`).
@@ -801,7 +869,20 @@ impl Worker {
             config_path,
             cache_root,
             account_override: None,
+            sso_cancel: Arc::new(AtomicBool::new(false)),
+            sso_timeout: crate::sso::DEFAULT_TIMEOUT,
         }
+    }
+
+    /// The flag that stops a running single sign-on wait when set (another thread sets it;
+    /// the next `SignInSso` does not clear it, so whoever starts one clears it first).
+    pub fn sso_cancel_flag(&self) -> Arc<AtomicBool> {
+        self.sso_cancel.clone()
+    }
+
+    /// How long single sign-on waits for the browser (default five minutes).
+    pub fn set_sso_timeout(&mut self, timeout: std::time::Duration) {
+        self.sso_timeout = timeout;
     }
 
     /// Use the account of `username` on `server_url` (the server's only account when
@@ -858,7 +939,10 @@ impl Worker {
     /// Run one request, reporting its events through `emit`.
     pub fn handle(&mut self, req: Request, emit: &mut dyn FnMut(Event)) {
         let name = req.name();
-        let sign_in = matches!(req, Request::SignIn { .. });
+        let sign_in = matches!(
+            req,
+            Request::SignIn { .. } | Request::SignInSso { .. } | Request::LoadServerInfo { .. }
+        );
         if let Err(e) = self.dispatch(req, emit) {
             match e {
                 CloudError::Offline(m) if sign_in => emit(Event::Error {
@@ -891,6 +975,21 @@ impl Worker {
                 password,
                 allow_insecure_http,
             } => self.sign_in(&server_url, &username, &password, allow_insecure_http, emit),
+            Request::SignInSso {
+                server_url,
+                allow_insecure_http,
+            } => self.sign_in_sso(&server_url, allow_insecure_http, emit),
+            // The flag was set by `CloudService::send` (or the caller of `sso_cancel_flag`).
+            Request::CancelSso => Ok(()),
+            Request::LoadServerInfo { server_url } => {
+                let client = Client::new(&server_url)?;
+                let info = client.info()?;
+                emit(Event::ServerInfo {
+                    server_url: client.server_url().to_string(),
+                    info,
+                });
+                Ok(())
+            }
             Request::SignOut => self.sign_out(emit),
             Request::Refresh => {
                 let s = self.session()?;
@@ -1301,14 +1400,11 @@ impl Worker {
         Ok(())
     }
 
-    fn sign_in(
-        &mut self,
+    /// A client for `server_url` after the consent check, and its checked `/info`.
+    fn server_for_sign_in(
         server_url: &str,
-        username: &str,
-        password: &str,
         allow_insecure_http: bool,
-        emit: &mut dyn FnMut(Event),
-    ) -> Result<(), CloudError> {
+    ) -> Result<(Client, proto::ServerInfo), CloudError> {
         let client = Client::new(server_url)?;
         if !allow_insecure_http && crate::client::needs_insecure_consent(client.server_url()) {
             return Err(CloudError::Invalid(format!(
@@ -1338,16 +1434,17 @@ impl Worker {
                 }
             )));
         }
-        if !info.local_login {
-            return Err(CloudError::Invalid(
-                "this server does not offer username and password sign-in".into(),
-            ));
-        }
-        let login = client.login(&proto::LoginRequest {
-            username: username.to_string(),
-            password: password.to_string(),
-            device_name: device_name(),
-        })?;
+        Ok((client, info))
+    }
+
+    /// Store the account a login produced and report it.
+    fn finish_sign_in(
+        &mut self,
+        client: &Client,
+        info: proto::ServerInfo,
+        login: proto::LoginResponse,
+        emit: &mut dyn FnMut(Event),
+    ) -> Result<(), CloudError> {
         let authed = Client::new(client.server_url())?.with_token(login.token.clone());
         let me = authed.me()?;
         let account = Account {
@@ -1364,6 +1461,53 @@ impl Worker {
             me,
         });
         Ok(())
+    }
+
+    fn sign_in(
+        &mut self,
+        server_url: &str,
+        username: &str,
+        password: &str,
+        allow_insecure_http: bool,
+        emit: &mut dyn FnMut(Event),
+    ) -> Result<(), CloudError> {
+        let (client, info) = Self::server_for_sign_in(server_url, allow_insecure_http)?;
+        if !info.local_login {
+            return Err(CloudError::Invalid(
+                "this server does not offer username and password sign-in".into(),
+            ));
+        }
+        let login = client.login(&proto::LoginRequest {
+            username: username.to_string(),
+            password: password.to_string(),
+            device_name: device_name(),
+        })?;
+        self.finish_sign_in(&client, info, login, emit)
+    }
+
+    fn sign_in_sso(
+        &mut self,
+        server_url: &str,
+        allow_insecure_http: bool,
+        emit: &mut dyn FnMut(Event),
+    ) -> Result<(), CloudError> {
+        let (client, info) = Self::server_for_sign_in(server_url, allow_insecure_http)?;
+        let Some(oidc) = info.oidc.clone() else {
+            return Err(CloudError::Invalid(
+                "this server does not offer single sign-on".into(),
+            ));
+        };
+        let (pending, url) = crate::sso::begin(&oidc)?;
+        emit(Event::OpenBrowser { url });
+        let code = pending.wait_for_code(self.sso_timeout, &self.sso_cancel)?;
+        let login = client.oidc_exchange(&proto::OidcExchangeRequest {
+            code,
+            code_verifier: pending.verifier.clone(),
+            redirect_uri: pending.redirect_uri.clone(),
+            nonce: pending.nonce.clone(),
+            device_name: device_name(),
+        })?;
+        self.finish_sign_in(&client, info, login, emit)
     }
 
     fn sign_out(&mut self, emit: &mut dyn FnMut(Event)) -> Result<(), CloudError> {

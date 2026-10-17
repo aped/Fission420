@@ -16,6 +16,7 @@ pub mod client;
 pub mod config;
 mod fsutil;
 pub mod service;
+pub mod sso;
 
 pub use rcad_cloud_proto as proto;
 
