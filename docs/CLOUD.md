@@ -137,6 +137,10 @@ on each server:
   first: who, what, when, and the document it concerns); any project member may read it.
   `LoadOrgActivity` reads the organization's, which only organization admins may. The app
   shows both (docs/UI.md); `rcad-cli cloud activity PROJECT-ID` prints the project's.
+- **Version on every save.** With the app preference "Upload a version on every save"
+  (Preferences ▸ Cloud, off by default), every successful local save of a linked, editable
+  working copy also sends `SaveVersion` with the description "Saved from R-CAD" and a
+  thumbnail; a conflict, a lock or an offline server behaves as for Save Version.
 - **Share links in the app.** `LoadShares` lists a document's live links and `RevokeShare`
   revokes one and answers with the links that remain.
 - **Sync.** Queued versions are sent in order.
