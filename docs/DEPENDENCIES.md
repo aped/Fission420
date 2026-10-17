@@ -79,7 +79,8 @@ External tools used only for validation (not linked, not shipped): FreeCAD 1.1.4
 Full transitive license audit: see `artifacts/licenses.txt` (generated) / section below.
 
 ### Transitive C code (audited 2026-10-15)
-- None. `lzma-sys` (liblzma via `cc`), with `xz2`, `vtkio`, quick-xml 0.22 and lz4_flex 0.7, came
+- `ring` (TLS cryptography for the optional sync client; see "Optional sync client" below).
+- Otherwise none. `lzma-sys` (liblzma via `cc`), with `xz2`, `vtkio`, quick-xml 0.22 and lz4_flex 0.7, came
   from truck-meshalgo's default `vtk` feature (VTK file I/O, unused), which the vendored
   `truck-shapeops` fork enabled; the fork now depends on truck-meshalgo without it
   (`third_party/truck-shapeops/R-CAD-CHANGES.md`).
@@ -136,6 +137,36 @@ Fixtures: FreeCAD 1.1.4 (external tool) and Python stdlib generators under `tool
 | i_float / i_shape / i_tree / i_key_sort | 4.1.0 / 4.0.0 / 0.19.0 / 0.11.0 (transitive) | MIT | i_overlay |
 
 Pure Rust, no C code. `i_overlay` is the boolean engine `geo` uses.
+
+## Optional sync client (`rcad-cloud`, `rcad-cli cloud`)
+
+Used only when the user signs in to a sync server (docs/CLOUD.md); nothing here opens a socket
+otherwise. TLS is rustls with the operating system's certificate verifier, so no root
+certificate list is bundled: ureq's default `rustls` feature (which pulls `webpki-roots`,
+CDLA-Permissive-2.0) is off.
+
+| crate | version (Cargo.lock) | license | source | used for |
+|---|---|---|---|---|
+| ureq | 3.4.2 (`default-features = false`, features `rustls-no-provider`, `platform-verifier`) | MIT OR Apache-2.0 | https://crates.io/crates/ureq | blocking HTTP/1.1 client |
+| rustls | 0.23.46 (`default-features = false`, features `ring`, `std`, `tls12`, `logging`) | Apache-2.0 OR ISC OR MIT | https://crates.io/crates/rustls | TLS; named directly to select the ring crypto provider |
+| blake3 | 1.8.7 (`default-features = false`, features `std`, `pure`) | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | https://crates.io/crates/blake3 | blob hashes (protocol `BlobHash`); `pure` = no assembly or C |
+| tiny_http | 0.12.0 (dev) | MIT OR Apache-2.0 | https://crates.io/crates/tiny_http | in-memory fake server in tests (127.0.0.1 only) |
+
+Transitive crates new to the build on the shipped targets: ureq-proto 0.6.4, http 1.5.0,
+httparse 1.10.1, base64 0.23.1, utf8-zero 0.8.1, rustls-pki-types 1.15.1 (MIT OR Apache-2.0);
+rustls-webpki 0.103.15 and untrusted 0.9.0 (ISC); ring 0.17.14 (Apache-2.0 AND ISC); subtle
+2.6.1 (BSD-3-Clause); zeroize 1.9.1 (Apache-2.0 OR MIT); rustls-platform-verifier 0.7.1 (MIT OR
+Apache-2.0) with rustls-native-certs 0.8.5 and openssl-probe 0.2.1 on Linux (certificate paths
+only; OpenSSL is not linked), security-framework 3.7.0 on macOS and schannel 0.1.30 (MIT) on
+Windows; constant_time_eq 0.4.2 (CC0-1.0 OR MIT-0 OR Apache-2.0), cpufeatures 0.3.1. Dev only:
+ascii 1.1.0, chunked_transfer 1.5.0, httpdate 1.0.3 (MIT OR Apache-2.0).
+`rustls-platform-verifier` depends on `webpki-root-certs` (CDLA-Permissive-2.0) and `jni` only
+on Android, which R-CAD does not build for; neither is in the Linux, Windows or macOS graph.
+
+C code: `ring` compiles its own C and assembly (cryptographic primitives derived from BoringSSL)
+with `cc`. The project rule is against an application-owned C/C++ geometry kernel; a third-party
+cryptography library is not that. The other maintained rustls provider, aws-lc-rs, is also C
+(and larger).
 
 ## Icons
 

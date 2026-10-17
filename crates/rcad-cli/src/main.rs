@@ -3,7 +3,13 @@
 //! ```text
 //! rcad-cli acceptance [--out DIR]     run the acceptance workflow with analytic checks
 //! rcad-cli run SCRIPT.json            execute a JSON array of commands, print JSON lines
+//! rcad-cli cloud COMMAND ...          optional sync server: login, push, save, pull, sync, ...
 //! ```
+//!
+//! `cloud` commands (see [`cloud`]) use the app's account file and cache; nothing touches the
+//! network unless a `cloud` command is run.
+mod cloud;
+
 use rcad_commands::{Command, Session, acceptance};
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -24,7 +30,7 @@ fn yes() -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  rcad-cli acceptance [--out DIR]\n  rcad-cli run SCRIPT.json\n  rcad-cli --version"
+        "usage:\n  rcad-cli acceptance [--out DIR]\n  rcad-cli run SCRIPT.json\n  rcad-cli cloud COMMAND (rcad-cli cloud help)\n  rcad-cli --version"
     );
     ExitCode::from(64)
 }
@@ -47,6 +53,7 @@ fn main() -> ExitCode {
             println!("{}", rcad_commands::version_string());
             ExitCode::SUCCESS
         }
+        Some("cloud") => cloud::run(&args[1..]),
         Some("run") => match args.get(1) {
             Some(p) => run_script(PathBuf::from(p)),
             None => usage(),

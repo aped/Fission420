@@ -948,3 +948,16 @@ fn nothing_touches_disk_or_network_without_an_account() {
     assert!(!h.config_path().exists());
     assert!(!h.cache_root().exists());
 }
+
+#[test]
+fn tls_is_configured_and_a_failed_handshake_counts_as_offline() {
+    // A plain-HTTP listener answering an https:// URL: the TCP connect works and the TLS
+    // handshake fails, which exercises the rustls + platform verifier setup without network.
+    let server = FakeServer::start();
+    let client =
+        rcad_cloud::client::Client::new(&format!("https://127.0.0.1:{}", server.port)).unwrap();
+    match client.info() {
+        Err(rcad_cloud::CloudError::Offline(_)) => {}
+        other => panic!("{other:?}"),
+    }
+}

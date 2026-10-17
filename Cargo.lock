@@ -2517,9 +2517,12 @@ version = "1.0.0"
 name = "rcad-cli"
 version = "1.0.0"
 dependencies = [
+ "rcad-cloud",
  "rcad-commands",
  "serde",
  "serde_json",
+ "tempfile",
+ "tiny_http",
 ]
 
 [[package]]
