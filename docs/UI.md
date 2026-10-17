@@ -173,10 +173,28 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   Signed out, it explains what a server adds and offers **Connect to server…** (server URL,
   username, password; the password field is masked, Enter connects, Esc cancels, errors show in
   the dialog and the message log). Signed in: server name, user, **Refresh**, **Sign out**, the
-  organization selector, then three sections. **Browse** lists projects (**New project…**), and a
-  selected project's folders and documents with their latest version, who saved it and a lock
-  mark (**New folder…**, **Upload current document…**, **Open** or double-click). **History**
-  and **Comments** belong to the open cloud document.
+  organization selector (with **Organization…** for organization administrators), then three
+  sections. **Browse** lists projects (**New project…**), and a selected project's folders and
+  documents with their latest version, who saved it and a lock mark (**New folder…**,
+  **Upload current document…**, **Open** or double-click). Clicking a folder selects it (click
+  again to clear): new folders and uploads go into the selected folder, and **Rename folder…**
+  and **Delete folder…** (empty folders only) act on it. A selected document offers **Rename…**,
+  **Move…** (folder combo) and **Move to trash…** (with confirmation); **Trash (N)** switches to
+  the project's trash with **Restore** per document. Controls an editor needs are disabled for
+  viewers and commenters. **History** and **Comments** belong to the open cloud document.
+* **Members** (**Members…** next to the project name, for everyone who can see the project):
+  the explicit members and their roles. Project administrators get a role combo and **Remove**
+  per member and **Add member** (username and role, default Editor). The server's refusals show
+  in the window, with the usual cause spelled out (a user outside the organization: "the user
+  must be a member of the organization first").
+* **Organization…** (organization Admins and Owners): storage used against the quota (a bar,
+  or "no quota"), document and version counts, and the members with role combos, **Remove** and
+  **Add to organization**. Owners assign every role; Admins manage Guests and Members.
+* **Offline queue:** while versions wait to be sent the panel shows the count with **Sync now**
+  and a **Queued versions** list (document, description, when it was queued). **Discard** asks
+  for confirmation and then drops that version from the queue; the local file is not changed.
+  A refusal that may pass later (a full storage quota) keeps the queue blocked until the version
+  is discarded or the cause is fixed.
 * **Working copies.** Opening a cloud document downloads it into the cache and opens that file
   through the normal Open path (with the unsaved-changes guard). A cloud document is an
   ordinary local file: Save, autosave and recovery work as for any document, offline too.
@@ -184,7 +202,11 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   `☁ Bracket v3 · Synced`, `Modified` (local edits since v3), `Offline · 2 pending`,
   `Conflict`, `Locked by sam` or `Read-only`. Clicking it opens the version history (and retries
   queued versions when offline).
-* **File menu:** **Save Version to Cloud…** (description and optional milestone; unsaved changes
+* **File menu:** **Save to Cloud Project…** for an open document that is not on the server
+  (Fusion's first Save into a project): pick a project you can edit, a folder and a name; a
+  document never saved locally goes through Save As first, and unsaved changes are saved
+  locally before the upload. The file becomes the cloud document's working copy.
+  **Save Version to Cloud…** (description and optional milestone; unsaved changes
   are saved locally first), **Version History**, **Share Link…** (expiry in days, empty = never;
   allow download; latest or a fixed version; the URL is shown once with **Copy**), **Comments**
   and **Sync Now** (versions saved while the server was unreachable). They are registry commands
@@ -204,12 +226,23 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   such as refreshing or locking do not raise the error banner). Tokens and passwords are never
   logged.
 * **Layout:** the Data panel narrows the 3D view rather than covering it; at 1280 px wide with
-  the panel open the view keeps at least 380 px and the application bar stays one row.
+  the panel open the view keeps at least 380 px and the application bar stays one row. The
+  navigation bar under the view (Orbit, Pan, Zoom, Fit view, Look At, display style) shows
+  labels next to the timeline when they fit, one glyph per button (same tooltips and
+  accessible names) when the view is narrow, and moves to its own wrapping row when even that
+  does not fit; its buttons never overlap or leave the view's width.
 
 Code `crates/rcad/src/cloud_ui.rs` (the calls that construct `rcad-cloud` objects are in its
 `adapter` module); screenshot scenes `cloud_browse` and `cloud_history` (a sample server's
 events, no network); UI tests `crates/rcad/tests/it/cloud_ui.rs` drive the widgets against a
 detached service, asserting the requests sent and the state after injected events. The live
 script `tools/live/cloud/u_cloud_roundtrip.txt` runs against a real server and is not part of the
-default walkthrough. The live-test probe reports the cloud state under `doc.cloud` (`signed_in`,
-`linked`, `version`, `state`, `pending`, `versions_listed`, `share_url`, …).
+default walkthrough, and neither is `tools/live/cloud/v_cloud_members.txt` (members and the
+organization window; needs users alice, owner of organization Home, and bob, a member, and
+project Parts). The live-test probe reports the cloud state under `doc.cloud` (`signed_in`,
+`linked`, `version`, `state`, `pending`, `versions_listed`, `share_url`, `dialog_kind`,
+`selected_document`, `selected_folder`, `documents_listed`, `folders_listed`, `trash_listed`,
+`members_listed`, `member_roles` (username → role), `org_members_listed`, `usage_loaded`,
+`usage_bytes`, `admin_error`, `admin_error_code`, `queue_listed`, …). The administration
+windows are in `crates/rcad/src/cloud_ui/admin.rs`; the navigation bar layout test is
+`crates/rcad/tests/it/toolbar_layout.rs`.

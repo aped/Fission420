@@ -80,6 +80,42 @@ Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one director
     permission, it is too large, or the file is no longer linked. Its bytes stay in the blob
     cache and the file is untouched.
   - A save of a document that already has queued versions goes behind them.
+  - Any other refusal (for example `quota_exceeded`) stops the queue with an error and keeps
+    the entry, since it may succeed later. The queue is listed in the Data panel and by
+    `rcad-cli cloud queue`; **Discard** (or `rcad-cli cloud discard INDEX`) drops one entry
+    after confirmation. Discarding is local: the file and the blob cache are not touched, and
+    the request names the entry's document and blob, so a queue that changed since it was
+    listed is not edited by position alone.
+- **Rename, move, trash.** Renaming a document also renames it in the local links (the chip
+  and the panel follow). Moving to the trash keeps the document's versions on the server;
+  editors restore it from the project's Trash. A trashed document keeps its folder, so a
+  folder whose documents are in the trash is still not empty and cannot be deleted. A local
+  working copy of a trashed document stays on disk and linked; restore the document before
+  saving versions of it.
+
+## Roles and permissions
+
+The server decides every permission (403 `forbidden` for an action the role does not allow,
+404 `not_found` for anything the caller cannot see). The client uses the roles it is told
+(`OrgSummary::my_role`, `Project::my_role`, `DocumentDetail::my_role`) only to hide or
+disable controls, and shows the server's refusals.
+
+| action | who (as the client offers it) |
+|---|---|
+| see a project, open and download its documents, list its members | project Viewer and up |
+| comment | project Commenter and up |
+| upload, save versions, rename, move, trash and restore documents; create, rename and delete folders; share links; promote; milestones | project Editor and up |
+| add, change and remove project members (the server also lets them break locks) | project Admin (organization Admins and Owners are project admins everywhere without being listed) |
+| create projects | organization Member and up (Guests see only projects they are invited to) |
+| organization members and storage usage | organization Admin and Owner; Admins manage Guests and Members, only Owners manage Admins and Owners |
+
+- A project member must already be a member of the project's organization; adding anyone else
+  is refused with 404, and the Members window explains that the user must join the
+  organization first (an organization administrator adds them under **Organization…**).
+- The Members list shows explicit members only. Organization administrators do not appear in
+  it but administer the project anyway.
+- Names are unique (ignoring case) per scope: projects in an organization, documents in a
+  project. A clash is 409 `already_exists`.
 
 ## Command line
 
@@ -98,12 +134,23 @@ rcad-cli cloud pull <document-id> [--version N] [--out copy.rcad.json]
 rcad-cli cloud versions <document-id>
 rcad-cli cloud share <document-id> [--version N] [--days 7] [--download]
 rcad-cli cloud sync
+rcad-cli cloud queue                                   # versions queued while offline, INDEX first
+rcad-cli cloud discard <index>                         # drop one (the local file is not changed)
+rcad-cli cloud project create <org-id> <name> [--description TEXT]
+rcad-cli cloud members <project-id>
+rcad-cli cloud member add|set <project-id> <username> viewer|commenter|editor|admin
+rcad-cli cloud member remove <project-id> <username>
+rcad-cli cloud mkdir <project-id> <name> [--parent <folder-id>]
+rcad-cli cloud trash <document-id>
+rcad-cli cloud restore <document-id>
 rcad-cli cloud logout
 ```
 
 - `pull` without `--out` prints the path of the linked working copy: edit it and `save` it.
 - `pull --out` writes an unlinked copy.
 - `--json` prints one JSON object per event.
+- Roles are case-insensitive. `member add` and `member set` send the same request (add, or
+  change the role).
 - Exit codes:
 
   | code | meaning |
