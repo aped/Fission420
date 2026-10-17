@@ -32,7 +32,7 @@ use crate::{CloudError, fsutil};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Request {
     /// Log in and store the account (replaces an account for the same server and user).
     SignIn {
@@ -122,6 +122,144 @@ pub enum Request {
     },
     /// Retry versions queued while offline.
     SyncPending,
+}
+
+/// Like a derived `Debug`, except that the sign-in password is never printed.
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Request::SignIn {
+                server_url,
+                username,
+                password: _,
+            } => f
+                .debug_struct("SignIn")
+                .field("server_url", server_url)
+                .field("username", username)
+                .field("password", &"<redacted>")
+                .finish(),
+            Request::SignOut => f.write_str("SignOut"),
+            Request::Refresh => f.write_str("Refresh"),
+            Request::ListProjects { org } => {
+                f.debug_struct("ListProjects").field("org", org).finish()
+            }
+            Request::CreateProject { org, name } => f
+                .debug_struct("CreateProject")
+                .field("org", org)
+                .field("name", name)
+                .finish(),
+            Request::LoadTree { project } => f
+                .debug_struct("LoadTree")
+                .field("project", project)
+                .finish(),
+            Request::CreateFolder {
+                project,
+                parent,
+                name,
+            } => f
+                .debug_struct("CreateFolder")
+                .field("project", project)
+                .field("parent", parent)
+                .field("name", name)
+                .finish(),
+            Request::OpenDocument { document } => f
+                .debug_struct("OpenDocument")
+                .field("document", document)
+                .finish(),
+            Request::OpenVersion { document, version } => f
+                .debug_struct("OpenVersion")
+                .field("document", document)
+                .field("version", version)
+                .finish(),
+            Request::UploadNew {
+                local_path,
+                project,
+                folder,
+                name,
+            } => f
+                .debug_struct("UploadNew")
+                .field("local_path", local_path)
+                .field("project", project)
+                .field("folder", folder)
+                .field("name", name)
+                .finish(),
+            Request::SaveVersion {
+                local_path,
+                description,
+                milestone,
+                force,
+            } => f
+                .debug_struct("SaveVersion")
+                .field("local_path", local_path)
+                .field("description", description)
+                .field("milestone", milestone)
+                .field("force", force)
+                .finish(),
+            Request::LoadDetail { document } => f
+                .debug_struct("LoadDetail")
+                .field("document", document)
+                .finish(),
+            Request::SetMilestone {
+                document,
+                version,
+                milestone,
+            } => f
+                .debug_struct("SetMilestone")
+                .field("document", document)
+                .field("version", version)
+                .field("milestone", milestone)
+                .finish(),
+            Request::Promote { document, version } => f
+                .debug_struct("Promote")
+                .field("document", document)
+                .field("version", version)
+                .finish(),
+            Request::Lock { document } => {
+                f.debug_struct("Lock").field("document", document).finish()
+            }
+            Request::Unlock { document } => f
+                .debug_struct("Unlock")
+                .field("document", document)
+                .finish(),
+            Request::CreateShare {
+                document,
+                version,
+                expires_in_days,
+                allow_download,
+            } => f
+                .debug_struct("CreateShare")
+                .field("document", document)
+                .field("version", version)
+                .field("expires_in_days", expires_in_days)
+                .field("allow_download", allow_download)
+                .finish(),
+            Request::LoadComments { document } => f
+                .debug_struct("LoadComments")
+                .field("document", document)
+                .finish(),
+            Request::AddComment {
+                document,
+                version,
+                body,
+            } => f
+                .debug_struct("AddComment")
+                .field("document", document)
+                .field("version", version)
+                .field("body", body)
+                .finish(),
+            Request::ResolveComment {
+                document,
+                comment,
+                resolved,
+            } => f
+                .debug_struct("ResolveComment")
+                .field("document", document)
+                .field("comment", comment)
+                .field("resolved", resolved)
+                .finish(),
+            Request::SyncPending => f.write_str("SyncPending"),
+        }
+    }
 }
 
 impl Request {
@@ -1196,5 +1334,30 @@ impl Worker {
             pending: queue.len(),
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_prints_the_password() {
+        let r = Request::SignIn {
+            server_url: "https://x".into(),
+            username: "ada".into(),
+            password: "hunter2".into(),
+        };
+        let text = format!("{r:?}");
+        assert!(!text.contains("hunter2"), "{text}");
+        assert!(text.contains("ada") && text.contains("<redacted>"));
+        assert_eq!(format!("{:?}", Request::SignOut), "SignOut");
+        let t = format!(
+            "{:?}",
+            Request::Lock {
+                document: "d1".into()
+            }
+        );
+        assert_eq!(t, r#"Lock { document: "d1" }"#);
     }
 }
