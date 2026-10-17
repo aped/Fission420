@@ -841,3 +841,44 @@ fn activity_lists_the_project_log() {
     assert_eq!(v["entries"].as_array().unwrap().len(), 1);
     assert_eq!(code(&env.cli(&["activity"], None)), 64);
 }
+
+#[test]
+fn login_sso_prints_the_address_and_waits_for_the_browser() {
+    use std::io::BufRead;
+    let server = FakeServer::start();
+    server.state.lock().unwrap().info.oidc = Some(fake_server::oidc_info());
+    let env = Env::new();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rcad-cli"))
+        .args(["cloud", "login", "--sso", &server.url, "--no-browser"])
+        .env("HOME", env.dir.path())
+        .env("XDG_CONFIG_HOME", env.dir.path().join("config"))
+        .env("XDG_CACHE_HOME", env.dir.path().join("cache"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let url = url.trim().to_string();
+    assert!(
+        url.starts_with("https://id.example.invalid/authorize?"),
+        "{url}"
+    );
+    let page = fake_server::authorize(&server.state, &url, None);
+    assert!(page.contains("Signed in"), "{page}");
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut stdout, &mut rest).unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{rest}");
+    assert!(rest.contains("signed in"), "{rest}");
+    let o = env.cli(&["whoami"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    // --sso takes the server URL only.
+    assert_eq!(code(&env.cli(&["login", "--sso"], None)), 64);
+    assert_eq!(
+        code(&env.cli(&["login", &server.url, USER, "--no-browser"], None)),
+        64
+    );
+}

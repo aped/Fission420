@@ -1844,3 +1844,166 @@ fn project_and_organization_activity_newest_first() {
         "{ev:?}"
     );
 }
+
+/// Run `SignInSso` on `h`; on `OpenBrowser` a thread plays the browser with `query`.
+fn sso(h: &mut Harness, server: &FakeServer, query: Option<&'static str>) -> (Vec<Event>, String) {
+    let state = server.state.clone();
+    let url = server.url.clone();
+    let mut page = None;
+    let mut out = Vec::new();
+    h.worker.handle(
+        Request::SignInSso {
+            server_url: url,
+            allow_insecure_http: false,
+        },
+        &mut |e| {
+            if let Event::OpenBrowser { url } = &e {
+                let (state, url) = (state.clone(), url.clone());
+                page = Some(std::thread::spawn(move || {
+                    fake_server::authorize(&state, &url, query)
+                }));
+            }
+            out.push(e);
+        },
+    );
+    let page = page.map(|t| t.join().unwrap()).unwrap_or_default();
+    (out, page)
+}
+
+#[test]
+fn single_sign_on_stores_the_account() {
+    let server = FakeServer::start();
+    server.state.lock().unwrap().info.oidc = Some(fake_server::oidc_info());
+    let mut h = Harness::new();
+    let (ev, page) = sso(&mut h, &server, None);
+    match ev.as_slice() {
+        [Event::OpenBrowser { url }, Event::SignedIn { me, .. }] => {
+            assert!(
+                url.starts_with("https://id.example.invalid/authorize?"),
+                "{url}"
+            );
+            assert_eq!(me.user.username, USER);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        page.starts_with("HTTP/1.1 200") && page.contains("Signed in"),
+        "{page}"
+    );
+    let cfg = CloudConfig::load(&h.config_path()).unwrap();
+    assert_eq!(cfg.active_account().unwrap().username, USER);
+    let st = server.state.lock().unwrap();
+    assert_eq!(st.oidc_exchanges.len(), 1);
+    assert!(st.oidc_codes.is_empty(), "the code was redeemed");
+    let x = &st.oidc_exchanges[0];
+    assert!((43..=128).contains(&x.code_verifier.len()));
+    assert!(x.redirect_uri.starts_with("http://127.0.0.1:"));
+    assert!(x.device_name.starts_with("R-CAD on "));
+    // The verifier never travels in the authorization URL.
+    let url = match &ev[0] {
+        Event::OpenBrowser { url } => url.clone(),
+        _ => unreachable!(),
+    };
+    assert!(!url.contains(&x.code_verifier));
+}
+
+#[test]
+fn single_sign_on_refuses_a_wrong_state_and_provider_errors() {
+    let server = FakeServer::start();
+    server.state.lock().unwrap().info.oidc = Some(fake_server::oidc_info());
+    for (query, want) in [
+        ("code=stolen&state=forged", "state mismatch"),
+        (
+            "error=access_denied&error_description=user+said+no",
+            "refused the sign-in: access_denied (user said no)",
+        ),
+    ] {
+        let mut h = Harness::new();
+        let (ev, page) = sso(&mut h, &server, Some(query));
+        match ev.as_slice() {
+            [
+                Event::OpenBrowser { .. },
+                Event::Error {
+                    request: "sign_in_sso",
+                    message,
+                    ..
+                },
+            ] => assert!(message.contains(want), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(page.contains("Sign-in failed"), "{page}");
+        assert!(!h.config_path().exists());
+    }
+    assert!(server.state.lock().unwrap().oidc_exchanges.is_empty());
+}
+
+#[test]
+fn single_sign_on_times_out_cancels_and_needs_the_server_to_offer_it() {
+    let server = FakeServer::start();
+    // No single sign-on advertised: refused before any browser opens.
+    let mut h = Harness::new();
+    let ev = h.run(Request::SignInSso {
+        server_url: server.url.clone(),
+        allow_insecure_http: false,
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::Error { request: "sign_in_sso", message, .. }]
+            if message.contains("does not offer single sign-on")),
+        "{ev:?}"
+    );
+    server.state.lock().unwrap().info.oidc = Some(fake_server::oidc_info());
+    // Nobody comes back from the browser.
+    h.worker.set_sso_timeout(Duration::from_millis(300));
+    let ev = h.run(Request::SignInSso {
+        server_url: server.url.clone(),
+        allow_insecure_http: false,
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::OpenBrowser { .. }, Event::Error { message, .. }]
+            if message.contains("timed out")),
+        "{ev:?}"
+    );
+    // Cancel through the service handle while the worker waits.
+    let svc = CloudService::start(h.config_path(), h.cache_root());
+    svc.send(Request::SignInSso {
+        server_url: server.url.clone(),
+        allow_insecure_http: false,
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut seen = Vec::new();
+    loop {
+        assert!(Instant::now() < deadline, "{seen:?}");
+        match svc.poll() {
+            Some(Event::OpenBrowser { .. }) => svc.send(Request::CancelSso),
+            Some(Event::Error {
+                request, message, ..
+            }) => {
+                assert_eq!(request, "sign_in_sso");
+                assert!(message.contains("cancelled"), "{message}");
+                break;
+            }
+            Some(other) => seen.push(other),
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    assert!(!h.config_path().exists());
+}
+
+#[test]
+fn server_info_is_loaded_without_credentials() {
+    let server = FakeServer::start();
+    server.state.lock().unwrap().info.oidc = Some(fake_server::oidc_info());
+    let mut h = Harness::new();
+    let ev = h.run(Request::LoadServerInfo {
+        server_url: format!("{}/", server.url),
+    });
+    match ev.as_slice() {
+        [Event::ServerInfo { server_url, info }] => {
+            assert_eq!(server_url, &server.url);
+            assert_eq!(info.oidc.as_ref().unwrap().display_name, "Test ID");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(server.log(), vec!["GET /api/v1/info".to_string()]);
+    assert!(!h.config_path().exists());
+}

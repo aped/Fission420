@@ -87,6 +87,26 @@ on each server:
 
 ## Behaviour details
 
+- **Single sign-on.** When `/info` advertises `oidc`, the client can sign in through the
+  server's OpenID Connect provider as a native app (RFC 8252, authorization code flow with
+  PKCE, RFC 7636):
+  - It makes a PKCE verifier (32 random bytes, base64url: 43 characters) and its S256
+    challenge, plus a random `state` and `nonce`, all from the operating system's CSPRNG.
+  - It listens on `127.0.0.1:<random port>` and sends the browser to the provider's
+    authorization endpoint with `response_type=code`, the client id, the scopes (`openid`
+    added if missing), `redirect_uri=http://127.0.0.1:<port>/callback`, `state`, `nonce` and
+    the challenge. The app opens the system browser (`xdg-open`, `open`, or the Windows URL
+    handler); `rcad-cli cloud login --sso URL` prints the address and opens it unless
+    `--no-browser` is given.
+  - It waits at most five minutes (the app's Cancel stops it) for one `GET /callback`. Other
+    paths get 404. A provider `error=` answer or a `state` that does not match ends the
+    sign-in with a message; the browser gets a short page either way.
+  - It sends `POST /api/v1/auth/oidc/exchange` with the code, the verifier, the exact
+    redirect URI, the nonce and the device name. The server redeems the code with the
+    provider and checks the ID token. The session token it returns is stored like a password
+    sign-in's. The verifier, code and token are never printed or logged.
+  - Plain `http://` servers need the same consent as for a password sign-in. The
+    authorization endpoint must be `https://` (or a loopback address).
 - **Sign in.** The client first reads `GET /api/v1/info`. A server that is not an R-CAD
   server, or that speaks another protocol version, is refused before the password is sent.
   The login request is `POST /api/v1/auth/login` with the JSON body
@@ -202,6 +222,7 @@ command line also signs in the app. Commands act on the active account (see Clie
 ```text
 rcad-cli cloud login https://cad.example.net ada      # password: $RCAD_PASSWORD, prompt or stdin
 rcad-cli cloud login http://cad.example.net ada --allow-insecure-http
+rcad-cli cloud login --sso https://cad.example.net [--no-browser]   # single sign-on
 rcad-cli cloud whoami
 rcad-cli cloud accounts                                # * marks the active account
 rcad-cli cloud use https://cad.example.net [ada]       # make that account active

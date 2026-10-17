@@ -54,6 +54,11 @@ pub struct State {
     pub shares: Vec<proto::ShareLink>,
     /// Activity log, oldest first: (org, entry).
     pub activity: Vec<proto::ActivityEntry>,
+    /// Authorization codes the fake identity provider issued: code → (PKCE challenge,
+    /// redirect URI, nonce) from the authorization request.
+    pub oidc_codes: HashMap<String, (String, String, String)>,
+    /// Single sign-on exchanges received.
+    pub oidc_exchanges: Vec<proto::OidcExchangeRequest>,
 }
 
 fn user(name: &str) -> proto::User {
@@ -120,6 +125,8 @@ impl State {
             fail_saves: None,
             shares: Vec::new(),
             activity: Vec::new(),
+            oidc_codes: HashMap::new(),
+            oidc_exchanges: Vec::new(),
         }
     }
 
@@ -280,6 +287,35 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
     let segs: Vec<&str> = rest.trim_start_matches('/').split('/').collect();
     match (method, segs.as_slice()) {
         ("GET", ["info"]) => return json(200, &st.info),
+        ("POST", ["auth", "oidc", "exchange"]) => {
+            let req: proto::OidcExchangeRequest = match parse(body) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            st.oidc_exchanges.push(req.clone());
+            if st.info.oidc.is_none() {
+                return err(404, ErrorCode::NotFound, "no single sign-on");
+            }
+            let Some((challenge, redirect, nonce)) = st.oidc_codes.remove(&req.code) else {
+                return err(401, ErrorCode::Unauthenticated, "unknown or used code");
+            };
+            if rcad_cloud::sso::pkce_challenge(&req.code_verifier) != challenge
+                || req.redirect_uri != redirect
+                || req.nonce != nonce
+            {
+                return err(401, ErrorCode::Unauthenticated, "the code does not match");
+            }
+            let token = format!("{}{}", proto::SESSION_TOKEN_PREFIX, st.id("tok"));
+            st.tokens.insert(token.clone(), USER.into());
+            return json(
+                200,
+                &proto::LoginResponse {
+                    token,
+                    user: user(USER),
+                    expires_at: 9_999_999_999,
+                },
+            );
+        }
         ("POST", ["auth", "login"]) => {
             let req: proto::LoginRequest = match parse(body) {
                 Ok(r) => r,
@@ -908,4 +944,72 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
             &format!("no route {method} {path}"),
         ),
     }
+}
+
+/// Single sign-on settings that turn on the fake server's OpenID Connect mode.
+pub fn oidc_info() -> proto::OidcInfo {
+    proto::OidcInfo {
+        display_name: "Test ID".into(),
+        authorization_endpoint: "https://id.example.invalid/authorize".into(),
+        client_id: "rcad-desktop".into(),
+        scopes: "openid profile".into(),
+    }
+}
+
+/// A raw `GET path` to 127.0.0.1:`port`; the response text.
+pub fn http_get(port: u16, path: &str) -> String {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out);
+    out
+}
+
+/// Play the browser and the identity provider for an authorization `url`: issue a code
+/// bound to the request's PKCE challenge, redirect URI and nonce, then follow the redirect to
+/// the client's loopback listener with `query` (None: `code` and the request's `state`).
+/// A favicon request comes first, as browsers send one. Returns the callback's response.
+pub fn authorize(state: &Arc<Mutex<State>>, url: &str, query: Option<&str>) -> String {
+    let params = rcad_cloud::sso::parse_query(url.split_once('?').expect("query").1);
+    let get = |k: &str| {
+        params
+            .iter()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(get("response_type"), "code");
+    assert_eq!(get("code_challenge_method"), "S256");
+    let redirect = get("redirect_uri");
+    let code = {
+        let mut st = state.lock().unwrap();
+        let code = st.id("code");
+        st.oidc_codes.insert(
+            code.clone(),
+            (get("code_challenge"), redirect.clone(), get("nonce")),
+        );
+        code
+    };
+    let rest = redirect
+        .strip_prefix("http://127.0.0.1:")
+        .expect("loopback redirect");
+    let (port, path) = rest.split_once('/').expect("path");
+    let port: u16 = port.parse().expect("port");
+    assert!(http_get(port, "/favicon.ico").starts_with("HTTP/1.1 404"));
+    let query = query.map_or_else(
+        || {
+            format!(
+                "code={}&state={}",
+                rcad_cloud::sso::query_encode(&code),
+                rcad_cloud::sso::query_encode(&get("state"))
+            )
+        },
+        str::to_string,
+    );
+    http_get(port, &format!("/{path}?{query}"))
 }

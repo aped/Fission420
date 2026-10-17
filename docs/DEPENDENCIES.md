@@ -149,6 +149,7 @@ CDLA-Permissive-2.0) is off.
 |---|---|---|---|---|
 | ureq | 3.4.2 (`default-features = false`, features `rustls-no-provider`, `platform-verifier`) | MIT OR Apache-2.0 | https://crates.io/crates/ureq | blocking HTTP/1.1 client |
 | rustls | 0.23.46 (`default-features = false`, features `ring`, `std`, `tls12`, `logging`) | Apache-2.0 OR ISC OR MIT | https://crates.io/crates/rustls | TLS; named directly to select the ring crypto provider |
+| ring | 0.17.14 (already in the build through rustls; named directly) | Apache-2.0 AND ISC | https://crates.io/crates/ring | single sign-on: SHA-256 for the PKCE challenge and the system CSPRNG for the verifier, state and nonce |
 | blake3 | 1.8.7 (`default-features = false`, features `std`, `pure`) | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | https://crates.io/crates/blake3 | blob hashes (protocol `BlobHash`); `pure` = no assembly or C |
 | tiny_http | 0.12.0 (dev) | MIT OR Apache-2.0 | https://crates.io/crates/tiny_http | in-memory fake server in tests (127.0.0.1 only) |
 | rpassword | 7.5.4 (`rcad-cli` only) | Apache-2.0 | https://crates.io/crates/rpassword | `rcad-cli cloud login` password prompt with echo off on a terminal |

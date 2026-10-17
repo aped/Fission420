@@ -73,6 +73,9 @@ usage: rcad-cli cloud [--json] [--account SERVER-URL[#USERNAME]] COMMAND
                                    password from $RCAD_PASSWORD, a no-echo prompt on a
                                    terminal, or one line of stdin; plain http:// to a host
                                    not on a local network needs --allow-insecure-http
+  login --sso SERVER-URL [--no-browser] [--allow-insecure-http]
+                                   single sign-on: prints the sign-in address, opens it
+                                   in the browser (unless --no-browser) and waits for it
   logout                           sign out of the active account (or --account's)
   whoami
   accounts                         list signed-in accounts; * marks the active one
@@ -351,11 +354,24 @@ impl Cli {
     }
 
     fn login(&mut self, args: &[String]) -> Option<Outcome> {
-        let opts = Opts::parse(args, &[], &["--allow-insecure-http"])?;
+        let opts = Opts::parse(
+            args,
+            &[],
+            &["--allow-insecure-http", "--sso", "--no-browser"],
+        )?;
+        let allow_insecure_http = opts.has("--allow-insecure-http");
+        if opts.has("--sso") {
+            let [url] = opts.positional.as_slice() else {
+                return None;
+            };
+            return Some(self.login_sso(url, allow_insecure_http, !opts.has("--no-browser")));
+        }
+        if opts.has("--no-browser") {
+            return None;
+        }
         let [url, user] = opts.positional.as_slice() else {
             return None;
         };
-        let allow_insecure_http = opts.has("--allow-insecure-http");
         // Refuse before asking for the password.
         if let Ok(normalized) = rcad_cloud::client::normalize_server_url(url)
             && rcad_cloud::client::needs_insecure_consent(&normalized)
@@ -403,6 +419,61 @@ impl Cli {
             },
             false,
         ))
+    }
+
+    /// `login --sso`: the sign-in address is printed (and opened) as soon as it is known,
+    /// while the worker waits for the browser; the other events follow.
+    fn login_sso(&mut self, url: &str, allow_insecure_http: bool, browser: bool) -> Outcome {
+        if let Ok(normalized) = rcad_cloud::client::normalize_server_url(url)
+            && rcad_cloud::client::needs_insecure_consent(&normalized)
+        {
+            if !allow_insecure_http {
+                errln!(
+                    "error (sign_in_sso): {normalized} is not encrypted. {} Pass \
+                     --allow-insecure-http to connect anyway.",
+                    rcad_cloud::client::INSECURE_HTTP_WARNING
+                );
+                return Outcome::Error;
+            }
+            errln!(
+                "warning: {normalized} is not encrypted. {}",
+                rcad_cloud::client::INSECURE_HTTP_WARNING
+            );
+        }
+        let json = self.json;
+        let mut events = Vec::new();
+        self.worker.handle(
+            Request::SignInSso {
+                server_url: url.to_string(),
+                allow_insecure_http,
+            },
+            &mut |e| match e {
+                Event::OpenBrowser { url } => {
+                    if json {
+                        crate::out::line(
+                            &event_json(&Event::OpenBrowser { url: url.clone() }).to_string(),
+                        );
+                    } else {
+                        errln!(
+                            "Open this address in a browser to sign in (waiting up to 5 minutes):"
+                        );
+                        outln!("{url}");
+                    }
+                    if browser && let Err(e) = rcad_cloud::sso::open_browser(&url) {
+                        errln!("cannot open a browser ({e}); open the address yourself");
+                    }
+                }
+                other => events.push(other),
+            },
+        );
+        let mut outcome = Outcome::Ok;
+        for e in &events {
+            if matches!(e, Event::Error { .. }) {
+                outcome = Outcome::Error;
+            }
+            self.print(e);
+        }
+        outcome
     }
 
     fn whoami(&mut self, args: &[String], orgs_only: bool) -> Option<Outcome> {
