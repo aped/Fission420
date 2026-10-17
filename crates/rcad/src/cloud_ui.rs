@@ -38,36 +38,25 @@ pub mod adapter {
 
     /// The account file (`<config>/r-cad/cloud.json`, next to `prefs.json`).
     pub fn config_path() -> Option<PathBuf> {
-        crate::shell::prefs::Prefs::default_path().map(|p| p.with_file_name("cloud.json"))
+        rcad_cloud::config::CloudConfig::default_path()
     }
 
     /// The cache root (`$XDG_CACHE_HOME/r-cad/cloud`, else `~/.cache/r-cad/cloud`).
     pub fn cache_root() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-        Some(base.join("r-cad").join("cloud"))
+        rcad_cloud::cache::default_root()
     }
 
     /// Whether the account file lists at least one account. Reads one small
     /// file; a missing or unreadable file means no account.
     pub fn has_account(config: &Path) -> bool {
-        // Placeholder until rcad-cloud provides `CloudConfig::load`: the file
-        // is `{"accounts": [...]}`.
-        std::fs::read_to_string(config)
-            .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-            .and_then(|v| v.get("accounts")?.as_array().map(|a| !a.is_empty()))
+        rcad_cloud::config::CloudConfig::load(config)
+            .map(|c| !c.accounts.is_empty())
             .unwrap_or(false)
     }
 
-    /// Start the service thread (None when this build has no sync client).
+    /// Start the service thread.
     pub fn start(config: PathBuf, cache_root: PathBuf) -> Option<CloudService> {
-        // Placeholder until rcad-cloud provides
-        // `CloudService::start(config, cache_root)`.
-        let _ = (config, cache_root);
-        None
+        Some(CloudService::start(config, cache_root))
     }
 }
 
@@ -258,7 +247,11 @@ enum Action {
 
 impl CloudUi {
     fn link_for(&self, path: &Path) -> Option<&Link> {
-        self.links.iter().find(|l| l.local_path == path)
+        // The cache stores canonical paths; the open document may be named another way.
+        let want = rcad_cloud::cache::normalize_local(path);
+        self.links
+            .iter()
+            .find(|l| l.local_path == path || l.local_path == want)
     }
     fn upsert_link(&mut self, link: Link) {
         match self
@@ -2187,9 +2180,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("cloud.json");
         assert!(!adapter::has_account(&p));
-        std::fs::write(&p, r#"{"accounts": []}"#).unwrap();
+        std::fs::write(&p, r#"{"version": 1, "accounts": []}"#).unwrap();
         assert!(!adapter::has_account(&p));
-        std::fs::write(&p, r#"{"accounts": [{"server_url": "https://x"}]}"#).unwrap();
+        std::fs::write(
+            &p,
+            r#"{"version": 1, "accounts": [{"server_url": "https://x", "server_name": "x",
+                "username": "u", "token": "t"}]}"#,
+        )
+        .unwrap();
         assert!(adapter::has_account(&p));
         std::fs::write(&p, "not json").unwrap();
         assert!(!adapter::has_account(&p));
