@@ -30,9 +30,22 @@ The client side is the `rcad-cloud` crate (used by the app and by `rcad-cli clou
 
 Accounts: `$XDG_CONFIG_HOME/r-cad/cloud.json` (else `~/.config/r-cad/cloud.json`), next to
 `prefs.json`. Versioned JSON (`"version": 1`) holding each account's server URL, server
-name, username, bearer token and the server's download size limit. The file is written
-atomically, with mode 0600 on Unix. Signing out revokes the token on the server (best effort)
-and removes that account from the file.
+name, username, bearer token and the server's download size limit, plus which account is
+active. The file is written atomically, with mode 0600 on Unix. Signing out revokes the token
+on the server (best effort) and removes that account from the file.
+
+The file can hold several accounts (several servers, or several users on one server). The app
+and every `rcad-cli cloud` command use the **active** one:
+
+- signing in (again) makes that account active;
+- `rcad-cli cloud use SERVER-URL [USERNAME]` makes an existing account active;
+- signing out of the active account makes the first remaining account active;
+- `rcad-cli cloud --account SERVER-URL[#USERNAME] COMMAND` uses another account for that one
+  command without changing the file.
+
+`rcad-cli cloud accounts` lists the accounts and marks the active one with `*`. Each account
+has its own cache directory, links and offline queue (see below), so `queue`, `sync` and
+`save` act on the account in use.
 
 Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one directory per account
 on each server:
@@ -76,8 +89,15 @@ on each server:
 
 - **Sign in.** The client first reads `GET /api/v1/info`. A server that is not an R-CAD
   server, or that speaks another protocol version, is refused before the password is sent.
-  The token's device name is `R-CAD on <hostname>`. Plain `http://` needs consent unless the
-  host is on a local network (see Security notes).
+  The login request is `POST /api/v1/auth/login` with the JSON body
+  `{"username": "...", "password": "...", "device_name": "R-CAD on <hostname>"}`; all three
+  fields are required (a body without `device_name` is refused with `missing field
+  device_name`), and the device name labels the token in the server's token list. Plain
+  `http://` needs consent unless the host is on a local network (see Security notes).
+- **Revoked token.** When the token stops working (revoked by an administrator, or every
+  session signed out by a password change), requests fail with `invalid or revoked token`.
+  Sign in again (`rcad-cli cloud login SERVER-URL USERNAME`): it replaces that account's token
+  and keeps its cache, links and queue.
 - **Download limits.** A version is downloaded only if its declared size is within the
   server's advertised `max_blob_bytes` (recorded at sign-in; 1 GiB for accounts added by
   earlier builds). The download stops as soon as the server sends more bytes than the
@@ -122,10 +142,17 @@ on each server:
   - A save of a document that already has queued versions goes behind them.
   - Any other refusal (for example `quota_exceeded`) stops the queue with an error and keeps
     the entry, since it may succeed later. The queue is listed in the Data panel and by
-    `rcad-cli cloud queue`; **Discard** (or `rcad-cli cloud discard INDEX`) drops one entry
-    after confirmation. Discarding is local: the file and the blob cache are not touched, and
+    `rcad-cli cloud queue`. **Discard** in the app drops one entry after a confirmation
+    dialog. `rcad-cli cloud discard INDEX` asks `[y/N]` when stdin is a terminal; otherwise it
+    refuses (exit 64) unless `--yes` is given. It prints `discarded INDEX: DOCUMENT queued
+    TIME DESCRIPTION`. Discarding is local: the file and the blob cache are not touched, and
     the request names the entry's document and blob, so a queue that changed since it was
     listed is not edited by position alone.
+- **Share links.** A share link (`rcad-cli cloud share`) shows its URL once; the server keeps
+  only its id. `rcad-cli cloud shares DOCUMENT-ID` lists a document's live links (id, the
+  version it pins or `latest`, expiry, whether downloading is allowed, who created it), and
+  `rcad-cli cloud unshare SHARE-ID` revokes one: its page, metadata and content answer 410
+  from then on. Listing and revoking need the project Editor role, like creating.
 - **Rename, move, trash.** Renaming a document also renames it in the local links (the chip
   and the panel follow). Moving to the trash keeps the document's versions on the server;
   editors restore it from the project's Trash. A trashed document keeps its folder, so a
@@ -160,12 +187,15 @@ disable controls, and shows the server's refusals.
 ## Command line
 
 `rcad-cli cloud` uses the same account file and cache as the app, so signing in from the
-command line also signs in the app.
+command line also signs in the app. Commands act on the active account (see Client files).
 
 ```text
 rcad-cli cloud login https://cad.example.net ada      # password: $RCAD_PASSWORD, prompt or stdin
 rcad-cli cloud login http://cad.example.net ada --allow-insecure-http
 rcad-cli cloud whoami
+rcad-cli cloud accounts                                # * marks the active account
+rcad-cli cloud use https://cad.example.net [ada]       # make that account active
+rcad-cli cloud --account https://lab.local:8640#bob tree <project-id>   # one command only
 rcad-cli cloud orgs
 rcad-cli cloud projects <org-id>
 rcad-cli cloud tree <project-id>
@@ -174,9 +204,11 @@ rcad-cli cloud save Bracket.rcad.json -m "thicker web" [--milestone "Prototype A
 rcad-cli cloud pull <document-id> [--version N] [--out copy.rcad.json]
 rcad-cli cloud versions <document-id>
 rcad-cli cloud share <document-id> [--version N] [--days 7] [--download]
+rcad-cli cloud shares <document-id>                    # id, version|latest, expiry, download, creator
+rcad-cli cloud unshare <share-id>                      # revoke a share link
 rcad-cli cloud sync
 rcad-cli cloud queue                                   # versions queued while offline, INDEX first
-rcad-cli cloud discard <index>                         # drop one (the local file is not changed)
+rcad-cli cloud discard <index> [--yes]                 # drop one (the local file is not changed)
 rcad-cli cloud project create <org-id> <name> [--description TEXT]
 rcad-cli cloud members <project-id>
 rcad-cli cloud member add|set <project-id> <username> viewer|commenter|editor|admin
@@ -196,9 +228,25 @@ rcad-cli cloud logout
   server error messages), as `\u{1b}` and so on, so a hostile string cannot drive the
   terminal (colour, cursor, title or clipboard sequences) or forge output lines. `--json`
   output carries the exact strings, escaped by the JSON encoder.
+- `push` prints the new document's id on a `document <id>` line (with `--json`, the
+  `version_saved` event's `document` field). `versions`, `pull`, `share` and `shares` take it;
+  `tree` lists it too.
 - `pull` without `--out` prints the path of the linked working copy: edit it and `save` it.
 - `pull --out` writes an unlinked copy.
-- `--json` prints one JSON object per event.
+- `--json` prints one JSON object per line, one per event, with an `"event"` field naming
+  it. `--json` and `--account` may appear anywhere after `cloud` (`rcad-cli cloud versions
+  <id> --json`) or before it (`rcad-cli --json cloud versions <id>`).
+- `--account SERVER-URL[#USERNAME]` (also `--account=...`) picks the account for one command.
+  The URL is matched after normalization (a bare host means `https://`, a trailing slash is
+  ignored); the username is needed only when that server has several accounts. A missing or
+  ambiguous account is an error (exit 1). It is refused (exit 64) with `login`, `accounts`
+  and `use`, which name their account themselves. `logout --account ...` signs out of that
+  account.
+- `discard` asks for confirmation on a terminal; in scripts pass `--yes` (`-y`). Without
+  either, when stdin is not a terminal, nothing is discarded and the exit code is 64.
+- When standard output is closed early (`rcad-cli cloud versions <id> | head -1`), the
+  command stops printing and exits with status 141 (128 + SIGPIPE, as a shell reports for a
+  tool killed by the signal). The request itself has already completed by then.
 - Roles are case-insensitive. `member add` and `member set` send the same request (add, or
   change the role).
 - Exit codes:
@@ -211,6 +259,7 @@ rcad-cli cloud logout
   | 4 | locked by another user |
   | 5 | server unreachable, version queued |
   | 64 | usage |
+  | 141 | standard output closed before everything was printed |
 
 ## Security notes
 
