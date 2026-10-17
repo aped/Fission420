@@ -50,6 +50,8 @@ pub struct State {
     pub usage: proto::OrgUsage,
     /// Answer every version save with this error (e.g. a full quota).
     pub fail_saves: Option<(u16, ErrorCode)>,
+    /// Live share links (revoked ones are removed).
+    pub shares: Vec<proto::ShareLink>,
 }
 
 fn user(name: &str) -> proto::User {
@@ -113,6 +115,7 @@ impl State {
                 versions: 0,
             },
             fail_saves: None,
+            shares: Vec::new(),
         }
     }
 
@@ -819,23 +822,41 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 Err(e) => return e,
             };
             let token = st.id("share");
+            let link = proto::ShareLink {
+                id: token.clone(),
+                document: d.to_string(),
+                version: req.version,
+                created_by: who.clone(),
+                created_at: 7,
+                expires_at: req.expires_in_days.map(|d| 7 + d as i64 * 86_400),
+                allow_download: req.allow_download,
+            };
+            st.shares.push(link.clone());
             json(
                 200,
                 &proto::CreateShareResponse {
                     url: format!("http://example.invalid/s/{token}"),
-                    token: token.clone(),
-                    link: proto::ShareLink {
-                        id: token,
-                        document: d.to_string(),
-                        version: req.version,
-                        created_by: who.clone(),
-                        created_at: 7,
-                        expires_at: req.expires_in_days.map(|d| 7 + d as i64 * 86_400),
-                        allow_download: req.allow_download,
-                    },
+                    token,
+                    link,
                 },
             )
         }
+        ("GET", ["documents", d, "shares"]) => {
+            let links: Vec<proto::ShareLink> = st
+                .shares
+                .iter()
+                .filter(|l| l.document == *d)
+                .cloned()
+                .collect();
+            json(200, &links)
+        }
+        ("DELETE", ["shares", s]) => match st.shares.iter().position(|l| l.id == *s) {
+            Some(i) => {
+                st.shares.remove(i);
+                (204, Vec::new(), "application/json")
+            }
+            None => err(404, ErrorCode::NotFound, "no share link"),
+        },
         _ => err(
             404,
             ErrorCode::NotFound,

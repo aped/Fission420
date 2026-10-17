@@ -681,6 +681,9 @@ struct Session {
 pub struct Worker {
     config_path: PathBuf,
     cache_root: PathBuf,
+    /// Server URL and optional username of the account to use instead of the file's active
+    /// one ([`Worker::use_account`]).
+    account_override: Option<(String, Option<String>)>,
 }
 
 /// `R-CAD on <hostname>` (standard library only: `HOSTNAME`, `/etc/hostname`, `COMPUTERNAME`).
@@ -741,7 +744,16 @@ impl Worker {
         Worker {
             config_path,
             cache_root,
+            account_override: None,
         }
+    }
+
+    /// Use the account of `username` on `server_url` (the server's only account when
+    /// `username` is None) instead of the account file's active one, without changing the
+    /// file. The account is looked up on every request; a missing or ambiguous one is an
+    /// error. Signing in still makes the new account the file's active one.
+    pub fn use_account(&mut self, server_url: String, username: Option<String>) {
+        self.account_override = Some((server_url, username));
     }
 
     /// The account file in use.
@@ -749,11 +761,15 @@ impl Worker {
         &self.config_path
     }
 
-    /// The active account, if any (re-read from disk).
+    /// The account in use, if any (re-read from disk): the one named by
+    /// [`Worker::use_account`], else the account file's active one.
     pub fn active_account(&self) -> Result<Option<Account>, CloudError> {
-        Ok(CloudConfig::load(&self.config_path)?
-            .active_account()
-            .cloned())
+        let config = CloudConfig::load(&self.config_path)?;
+        if let Some((url, user)) = &self.account_override {
+            let i = config.find_account(url, user.as_deref())?;
+            return Ok(config.accounts.get(i).cloned());
+        }
+        Ok(config.active_account().cloned())
     }
 
     /// The active account's cache, if signed in.

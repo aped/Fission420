@@ -124,6 +124,42 @@ impl CloudConfig {
         self.active.and_then(|i| self.accounts.get(i))
     }
 
+    /// Index of the account on `server_url` (normalized first, so `cad.example/` matches
+    /// `https://cad.example`) for `username`. Without a username the server must have
+    /// exactly one account; several are an error that lists their usernames.
+    pub fn find_account(
+        &self,
+        server_url: &str,
+        username: Option<&str>,
+    ) -> Result<usize, CloudError> {
+        let url = crate::client::normalize_server_url(server_url)?;
+        let matches: Vec<usize> = (0..self.accounts.len())
+            .filter(|&i| {
+                let a = &self.accounts[i];
+                a.server_url == url && username.is_none_or(|u| a.username == u)
+            })
+            .collect();
+        match (matches.as_slice(), username) {
+            ([i], _) => Ok(*i),
+            ([], Some(u)) => Err(CloudError::Invalid(format!(
+                "no account for {u} on {url} (sign in with `rcad-cli cloud login {url} {u}`)"
+            ))),
+            ([], None) => Err(CloudError::Invalid(format!(
+                "no account on {url} (sign in with `rcad-cli cloud login {url} USERNAME`)"
+            ))),
+            (several, _) => {
+                let names: Vec<&str> = several
+                    .iter()
+                    .map(|&i| self.accounts[i].username.as_str())
+                    .collect();
+                Err(CloudError::Invalid(format!(
+                    "{url} has several accounts ({}); name one",
+                    names.join(", ")
+                )))
+            }
+        }
+    }
+
     /// Add `account`, replacing one for the same server and username, and make it active.
     pub fn upsert(&mut self, account: Account) {
         let i = match self
@@ -287,6 +323,27 @@ mod tests {
             "cy"
         );
         assert_eq!(c.active_account().unwrap().username, "bob");
+    }
+
+    #[test]
+    fn find_account_by_server_and_optional_username() {
+        let mut c = CloudConfig::default();
+        c.upsert(account("ada"));
+        c.upsert(account("bob"));
+        let mut other = account("ada");
+        other.server_url = "http://lab.local:8640".into();
+        c.upsert(other);
+        assert_eq!(
+            c.find_account("https://cad.example/", Some("bob")).unwrap(),
+            1
+        );
+        assert_eq!(c.find_account("cad.example", Some("ada")).unwrap(), 0);
+        assert_eq!(c.find_account("http://lab.local:8640", None).unwrap(), 2);
+        let several = c.find_account("https://cad.example", None).unwrap_err();
+        assert!(several.to_string().contains("ada, bob"), "{several}");
+        assert!(c.find_account("https://cad.example", Some("cy")).is_err());
+        assert!(c.find_account("https://nowhere.example", None).is_err());
+        assert!(c.find_account("ftp://x", None).is_err());
     }
 
     #[test]
