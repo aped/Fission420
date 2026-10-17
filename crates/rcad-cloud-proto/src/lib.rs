@@ -623,8 +623,22 @@ pub struct CreateShareResponse {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SharedDocument {
     pub name: String,
-    pub version: Version,
+    pub version: SharedVersion,
     pub allow_download: bool,
+}
+
+/// A version as a share link shows it: no blob hash, so a view-only link never hands out
+/// the address of the document's bytes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SharedVersion {
+    pub number: u64,
+    pub size: u64,
+    pub author: String,
+    pub created_at: Timestamp,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub milestone: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------
