@@ -1594,6 +1594,7 @@ impl Worker {
             milestone: save.milestone.clone(),
             force,
             generator: crate::generator(),
+            thumbnail: None,
         };
         let mut created = s.client.create_version(&link.document, &req);
         if matches!(&created, Err(CloudError::Api(e)) if e.code == ErrorCode::HashMismatch)

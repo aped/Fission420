@@ -59,6 +59,7 @@
 //! PATCH  /api/v1/documents/{doc}/versions/{n} UpdateVersionRequest → Version    (editor)
 //! POST   /api/v1/documents/{doc}/versions/{n}/promote PromoteRequest → Version  (editor)
 //! GET    /api/v1/documents/{doc}/versions/{n}/content   → raw bytes             (viewer)
+//! GET    /api/v1/documents/{doc}/versions/{n}/thumbnail → image/png             (viewer; 404 if none)
 //! POST   /api/v1/documents/{doc}/lock                   → Lock                  (editor)
 //! DELETE /api/v1/documents/{doc}/lock                   → 204 (holder, or project admin breaks it)
 //! GET    /api/v1/documents/{doc}/comments               → Vec<Comment>          (viewer)
@@ -71,6 +72,7 @@
 //! GET    /s/{token}                                     → HTML landing page     (no auth)
 //! GET    /api/v1/shared/{token}                         → SharedDocument        (no auth)
 //! GET    /api/v1/shared/{token}/content                 → raw bytes             (no auth, if allowed)
+//! GET    /api/v1/shared/{token}/thumbnail               → image/png             (no auth; 404 if none)
 //! ```
 //!
 //! # Saving a version
@@ -82,6 +84,10 @@
 //!    from. If the head moved, the server answers 409 [`ErrorCode::VersionConflict`] and the
 //!    client offers to save anyway (`force`) or to save as a new document. If another user
 //!    holds the edit lock, the answer is 423 [`ErrorCode::Locked`].
+//!
+//! A version may carry a thumbnail: a PNG of at most [`MAX_THUMBNAIL_BYTES`], uploaded as a
+//! blob like the document (steps 1–2) and named in [`CreateVersionRequest::thumbnail`]. The
+//! server checks the PNG signature and size and refuses others with 400.
 
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +101,8 @@ pub const PRODUCT: &str = "rcad-server";
 pub const SESSION_TOKEN_PREFIX: &str = "rcs_";
 /// Prefix of personal access tokens.
 pub const ACCESS_TOKEN_PREFIX: &str = "rcp_";
+/// Largest thumbnail PNG a server accepts.
+pub const MAX_THUMBNAIL_BYTES: u64 = 1024 * 1024;
 
 /// Lowercase hex BLAKE3 hash (64 characters) of a blob's bytes.
 pub type BlobHash = String;
@@ -449,6 +457,9 @@ pub struct DocumentSummary {
     pub updated_by: String,
     #[serde(default)]
     pub lock: Option<Lock>,
+    /// The head version has a thumbnail.
+    #[serde(default)]
+    pub has_thumbnail: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -497,6 +508,9 @@ pub struct Version {
     /// Application that wrote it (`R-CAD 1.1.0 (abc1234)`), informational.
     #[serde(default)]
     pub generator: String,
+    /// Blob of the version's PNG thumbnail, if it has one.
+    #[serde(default)]
+    pub thumbnail: Option<BlobHash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -514,6 +528,9 @@ pub struct CreateVersionRequest {
     pub force: bool,
     #[serde(default)]
     pub generator: String,
+    /// Already-uploaded PNG blob (≤ [`MAX_THUMBNAIL_BYTES`]) shown for this version.
+    #[serde(default)]
+    pub thumbnail: Option<BlobHash>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -639,6 +656,8 @@ pub struct SharedVersion {
     pub description: String,
     #[serde(default)]
     pub milestone: Option<String>,
+    #[serde(default)]
+    pub has_thumbnail: bool,
 }
 
 // ---------------------------------------------------------------------------------------------
