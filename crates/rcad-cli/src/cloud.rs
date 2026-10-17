@@ -34,6 +34,8 @@ usage: rcad-cli cloud [--json] COMMAND
   versions DOCUMENT-ID
   share DOCUMENT-ID [--version N] [--days N] [--download]
   sync                             send versions queued while offline
+  queue                            list versions queued while offline (INDEX first)
+  discard INDEX                    drop a queued version (the local file is not changed)
   project create ORG-ID NAME [--description TEXT]
   members PROJECT-ID               explicit project members and their roles
   member add|set PROJECT-ID USERNAME ROLE    ROLE: viewer, commenter, editor or admin
@@ -140,6 +142,8 @@ pub fn run(args: &[String]) -> ExitCode {
             document: p[0].clone(),
         }),
         "sync" => cli.simple(rest, 0, |_| Request::SyncPending),
+        "queue" => cli.simple(rest, 0, |_| Request::LoadPending),
+        "discard" => cli.discard(rest),
         "push" => cli.push(rest),
         "save" => cli.save(rest),
         "pull" => cli.pull(rest),
@@ -561,6 +565,36 @@ impl Cli {
     }
 
     /// `trash` (restore = false) or `restore` a document.
+    /// Drop the queued save at INDEX (as `queue` lists it).
+    fn discard(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let [index] = opts.positional.as_slice() else {
+            return None;
+        };
+        let index: usize = index.parse().ok()?;
+        let entry = self
+            .worker
+            .cache()
+            .ok()
+            .flatten()
+            .and_then(|c| c.pending().ok())
+            .and_then(|q| q.get(index).cloned());
+        let Some(entry) = entry else {
+            eprintln!(
+                "error (discard_pending): no queued version {index} (see `rcad-cli cloud queue`)"
+            );
+            return Some(Outcome::Error);
+        };
+        Some(self.report(
+            Request::DiscardPending {
+                index,
+                document: entry.document,
+                blob: entry.blob,
+            },
+            false,
+        ))
+    }
+
     fn trash(&mut self, args: &[String], restore: bool) -> Option<Outcome> {
         let opts = Opts::parse(args, &[], &[])?;
         let [doc] = opts.positional.as_slice() else {

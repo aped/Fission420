@@ -230,6 +230,37 @@ fn offline_save_queues_then_sync_sends() {
 }
 
 #[test]
+fn queue_lists_and_discard_drops_a_queued_version() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Pin.rcad.json", b"one");
+    let doc = push(&env, &file);
+    drop(server.stop());
+    std::fs::write(&file, b"two").unwrap();
+    let o = env.cli(&["save", "Pin.rcad.json", "-m", "longer"], None);
+    assert_eq!(code(&o), 5, "{}", text(&o));
+    // Listing and discarding work offline: the queue is local.
+    let o = env.cli(&["queue"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.starts_with(&format!("0\t{doc}\t")) && out.contains("longer"),
+        "{out}"
+    );
+    let o = env.cli(&["discard", "3"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert_eq!(code(&env.cli(&["discard", "x"], None)), 64);
+    let o = env.cli(&["--json", "discard", "0"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
+    assert_eq!(v["event"], "pending_queue");
+    assert_eq!(v["saves"].as_array().map(Vec::len), Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"two");
+}
+
+#[test]
 fn admin_command_usage() {
     let env = Env::new();
     for args in [
