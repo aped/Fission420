@@ -1,0 +1,115 @@
+# keymap: fusion
+# Version history, read-only versions, promote and comments against a running R-CAD
+# server (not part of the default walkthrough): http://127.0.0.1:18640 with user alice /
+# alice-pass-123, organization Home and project Parts already present. Uploads a copy of
+# the bracket example as "Bracket history", saves two more versions (the first with a
+# milestone), opens version 1 read-only, returns to the working copy, promotes version 1
+# to version 4, then adds a comment and resolves it.
+key ctrl+o
+typew File path | @ROOT@/examples/bracket.rcad.json
+clickw OK
+wait_idle
+key ctrl+shift+s
+typew File path | @OUT@/bracket.rcad.json
+clickw OK
+wait_idle
+clickw Data panel
+clickw Connect to server…
+typew Server URL | http://127.0.0.1:18640
+typew Username | alice
+typew Password | alice-pass-123
+clickw Connect
+sleep 1500
+expect cloud.signed_in true
+clickw Project Parts
+sleep 800
+clickw Upload current document…
+typew Document name | Bracket history
+clickw Upload
+sleep 1500
+expect cloud.linked true
+expect cloud.version 1
+# Version 2, with a milestone.
+clickw Bracket outline
+clickw Rename…
+key ctrl+a
+type Outline v2
+key Return
+wait_idle
+expect cloud.state modified
+clickw File menu
+clickw Save Version to Cloud…
+typew Version description | renamed outline
+typew Milestone name (optional) | Proto A
+clickw Save Version
+sleep 1500
+expect cloud.version 2
+expect cloud.state synced
+# Version 3.
+clickw Outline v2
+clickw Rename…
+key ctrl+a
+type Outline v3
+key Return
+wait_idle
+clickw File menu
+clickw Save Version to Cloud…
+typew Version description | renamed again
+clickw Save Version
+sleep 1500
+expect cloud.version 3
+clickw File menu
+clickw Version History
+sleep 1000
+expect cloud.versions_listed 3
+expect cloud.milestones_listed 1
+expect cloud.detail_head 3
+shot
+# Version 1 opens as a read-only copy: no Save Version for it. It is at the bottom of
+# the list, below the panel's fold: scroll the Data panel down first.
+scroll 150 500 20
+sleep 300
+clickw Open v1
+sleep 1500
+wait_idle
+expect cloud.version 1
+expect cloud.state read_only
+expect cloud.save_version_enabled false
+shot
+# Back to the working copy through the project browser.
+clickw Browse section
+sleep 500
+clickw Document Bracket history
+clickw Open document
+sleep 1500
+wait_idle
+expect cloud.version 3
+expect cloud.state synced
+expect cloud.save_version_enabled true
+# Promote version 1: saved as version 4 with version 1's content.
+clickw History section
+sleep 1000
+scroll 150 500 20
+sleep 300
+clickw Promote v1
+expect cloud.dialog_kind promote
+clickw Confirm promote
+sleep 1500
+expect cloud.dialog false
+expect cloud.detail_head 4
+expect cloud.versions_listed 4
+shot
+# A comment, then resolve it.
+clickw Comments section
+sleep 1000
+expect cloud.comments_listed 0
+typew New comment | check the hole spacing
+clickw Add comment
+sleep 1000
+expect cloud.comments_listed 1
+expect cloud.comments_resolved 0
+clickw Resolve comment 1
+sleep 1000
+expect cloud.comments_listed 1
+expect cloud.comments_resolved 1
+shot

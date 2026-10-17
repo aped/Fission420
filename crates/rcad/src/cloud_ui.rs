@@ -739,6 +739,31 @@ impl RcadApp {
             "queue_listed": c.queue.len(),
             "server_head": link.and_then(|l| c.heads.get(&l.document).copied()),
             "thumbnails_loaded": c.thumbs.values().filter(|t| t.is_some()).count(),
+            "save_version_enabled": self
+                .command_enabled(crate::shell::CmdId::SaveVersion)
+                .is_ok(),
+            "detail_head": c.detail.as_ref().map(|d| d.document.head_version),
+            "milestones_listed": c.detail.as_ref().map_or(0, |d| d
+                .versions
+                .iter()
+                .filter(|v| v.milestone.is_some())
+                .count()),
+            "comments_listed": c.comments.as_ref().map_or(0, |(_, l)| l.len()),
+            "comments_resolved": c.comments.as_ref().map_or(0, |(_, l)| l
+                .iter()
+                .filter(|x| x.resolved)
+                .count()),
+            "document_folders": c.tree.as_ref().map(|t| t
+                .documents
+                .iter()
+                .map(|d| {
+                    let folder = d.folder.as_ref().and_then(|f| {
+                        t.folders.iter().find(|x| x.id == *f).map(|x| x.name.clone())
+                    });
+                    // "/" is the project root (a missing document reads as null).
+                    (d.name.clone(), serde_json::json!(folder.unwrap_or_else(|| "/".into())))
+                })
+                .collect::<serde_json::Map<_, _>>()),
         })
     }
 
@@ -2111,7 +2136,7 @@ impl RcadApp {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button("Open")
-                    .probe("Open")
+                    .probe("Open document")
                     .on_hover_text("Download the latest version and open it")
                     .clicked()
                 {
@@ -2119,7 +2144,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Rename…"))
-                    .probe("Rename…")
+                    .probe("Rename document…")
                     .on_disabled_hover_text("Editors rename documents")
                     .clicked()
                 {
@@ -2130,7 +2155,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Move…"))
-                    .probe("Move…")
+                    .probe("Move document…")
                     .on_hover_text("Move to another folder of this project")
                     .on_disabled_hover_text("Editors move documents")
                     .clicked()
@@ -2142,7 +2167,7 @@ impl RcadApp {
                 }
                 if ui
                     .add_enabled(editor, egui::Button::new("Move to trash…"))
-                    .probe("Move to trash…")
+                    .probe("Move document to trash…")
                     .on_disabled_hover_text("Editors move documents to the trash")
                     .clicked()
                 {
@@ -2318,6 +2343,7 @@ impl RcadApp {
                                 editor,
                                 egui::Button::new(format!("Clear milestone v{n}")).small(),
                             )
+                            .probe(&format!("Clear milestone v{n}"))
                             .clicked()
                         {
                             actions.push(Action::Send(Request::SetMilestone {
@@ -2331,6 +2357,7 @@ impl RcadApp {
                             editor,
                             egui::Button::new(format!("Set milestone v{n}…")).small(),
                         )
+                        .probe(&format!("Set milestone v{n}…"))
                         .clicked()
                     {
                         actions.push(Action::Dialog(CloudDialog::Milestone {
@@ -2549,12 +2576,17 @@ impl RcadApp {
                 .as_ref()
                 .and_then(|v| folders.iter().find(|(id, _)| id == v))
                 .map_or("(project root)".to_string(), |(_, n)| n.clone());
-            crate::form::combo(ui, label, current, |ui| {
-                ui.selectable_value(value, None, "(project root)");
+            let r = crate::form::combo(ui, label, current, |ui| {
+                let _ = ui
+                    .selectable_value(value, None, "(project root)")
+                    .probe(&format!("{label}: (project root)"));
                 for (id, name) in &folders {
-                    ui.selectable_value(value, Some(id.clone()), name);
+                    let _ = ui
+                        .selectable_value(value, Some(id.clone()), name)
+                        .probe(&format!("{label}: {name}"));
                 }
             });
+            let _ = r.response.probe(&format!("Folder list: {label}"));
         };
         egui::Window::new(title)
             .collapsible(false)
@@ -2697,7 +2729,7 @@ impl RcadApp {
                             head + 1
                         ));
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Promote").probe("Promote").clicked() || enter;
+                            ok |= ui.button("Promote").probe("Confirm promote").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
@@ -2714,14 +2746,14 @@ impl RcadApp {
                         field(ui, "New name", name, false);
                         ui.small("Names are unique within a project.");
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Rename").probe("Rename").clicked() || enter;
+                            ok |= ui.button("Rename").probe("Rename document").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
                     CloudDialog::MoveDocument { folder, .. } => {
                         folder_combo(ui, "Move to", folder);
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Move").probe("Move").clicked() || enter;
+                            ok |= ui.button("Move").probe("Move document").clicked() || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
@@ -2731,7 +2763,10 @@ impl RcadApp {
                              from Trash; its versions are kept."
                         ));
                         ui.horizontal(|ui| {
-                            ok |= ui.button("Move to trash").probe("Move to trash").clicked()
+                            ok |= ui
+                                .button("Move to trash")
+                                .probe("Confirm move to trash")
+                                .clicked()
                                 || enter;
                             cancel |= ui.button("Cancel").clicked();
                         });
