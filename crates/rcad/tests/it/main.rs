@@ -64,6 +64,7 @@ mod sketch_text_ui;
 mod sketch_trim_ui;
 mod sketch_workflow;
 mod timeline_ui;
+mod toolbar_layout;
 mod ui_workflow;
 mod value_labels;
 mod view_chrome_ui;
