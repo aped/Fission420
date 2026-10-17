@@ -51,41 +51,48 @@ pub(crate) fn term_safe(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
-/// `println!` for text output, through [`term_safe`].
+/// A line of text output, through [`term_safe`] and [`crate::out::line`].
 macro_rules! outln {
     ($($arg:tt)*) => {
-        println!("{}", term_safe(&format!($($arg)*)))
+        crate::out::line(&term_safe(&format!($($arg)*)))
     };
 }
 
-/// `eprintln!` for text output, through [`term_safe`].
+/// A line on standard error, through [`term_safe`] and [`crate::out::eline`].
 macro_rules! errln {
     ($($arg:tt)*) => {
-        eprintln!("{}", term_safe(&format!($($arg)*)))
+        crate::out::eline(&term_safe(&format!($($arg)*)))
     };
 }
 
 const USAGE: &str = "\
-usage: rcad-cli cloud [--json] COMMAND
+usage: rcad-cli cloud [--json] [--account SERVER-URL[#USERNAME]] COMMAND
+  --json and --account may appear anywhere after `cloud` (or before it). --account uses
+  that account for this one command instead of the active one.
   login SERVER-URL USERNAME [--allow-insecure-http]
                                    password from $RCAD_PASSWORD, a no-echo prompt on a
                                    terminal, or one line of stdin; plain http:// to a host
                                    not on a local network needs --allow-insecure-http
-  logout
+  logout                           sign out of the active account (or --account's)
   whoami
+  accounts                         list signed-in accounts; * marks the active one
+  use SERVER-URL [USERNAME]        make that account the active one
   orgs
   projects ORG-ID
   tree PROJECT-ID
   push FILE --project ID [--folder ID] [--name NAME] [--thumbnail PNG]
-                                   upload as a new document
+                                   upload as a new document; prints its id
   save FILE [-m MESSAGE] [--milestone NAME] [--force] [--thumbnail PNG]
                                    save a linked file as a new version (PNG: at most 1 MiB)
   pull DOCUMENT-ID [--version N] [--out FILE]
   versions DOCUMENT-ID
   share DOCUMENT-ID [--version N] [--days N] [--download]
+  shares DOCUMENT-ID               list the document's share links
+  unshare SHARE-ID                 revoke a share link (it stops working at once)
   sync                             send versions queued while offline
   queue                            list versions queued while offline (INDEX first)
-  discard INDEX                    drop a queued version (the local file is not changed)
+  discard INDEX [--yes]            drop a queued version (the local file is not changed);
+                                   asks first on a terminal, needs --yes otherwise
   project create ORG-ID NAME [--description TEXT]
   members PROJECT-ID               explicit project members and their roles
   member add|set PROJECT-ID USERNAME ROLE    ROLE: viewer, commenter, editor or admin
@@ -93,11 +100,63 @@ usage: rcad-cli cloud [--json] COMMAND
   mkdir PROJECT-ID NAME [--parent FOLDER-ID]
   trash DOCUMENT-ID                move a document to the project's trash
   restore DOCUMENT-ID              restore a document from the trash
-exit codes: 0 ok, 1 error, 3 conflict, 4 locked, 5 offline (queued), 64 usage";
+exit codes: 0 ok, 1 error, 3 conflict, 4 locked, 5 offline (queued), 64 usage,
+  141 standard output closed early (for example by `| head`)";
 
 fn usage() -> ExitCode {
-    eprintln!("{USAGE}");
+    crate::out::eline(USAGE);
     ExitCode::from(64)
+}
+
+/// True for the options every `cloud` command takes (`--json`, `--account URL`,
+/// `--account=URL`).
+pub fn is_global_option(a: &str) -> bool {
+    a == "--json" || a == "--account" || a.starts_with("--account=")
+}
+
+/// Options every `cloud` command takes, removed from the arguments wherever they appear.
+struct Globals {
+    json: bool,
+    /// `--account SERVER-URL[#USERNAME]`.
+    account: Option<(String, Option<String>)>,
+}
+
+/// Split `args` into [`Globals`] and the rest; None for `--account` without a value or with
+/// an empty server or username.
+fn split_globals(args: &[String]) -> Option<(Globals, Vec<String>)> {
+    let mut g = Globals {
+        json: false,
+        account: None,
+    };
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let account = if a == "--json" {
+            g.json = true;
+            continue;
+        } else if a == "--account" {
+            it.next()?.clone()
+        } else if let Some(v) = a.strip_prefix("--account=") {
+            v.to_string()
+        } else {
+            rest.push(a.clone());
+            continue;
+        };
+        g.account = Some(parse_account_ref(&account)?);
+    }
+    Some((g, rest))
+}
+
+/// `SERVER-URL[#USERNAME]` (a server URL never contains `#`).
+fn parse_account_ref(s: &str) -> Option<(String, Option<String>)> {
+    let (url, user) = match s.rsplit_once('#') {
+        Some((u, n)) => (u, Some(n)),
+        None => (s, None),
+    };
+    if url.trim().is_empty() || user.is_some_and(|u| u.is_empty()) {
+        return None;
+    }
+    Some((url.to_string(), user.map(str::to_string)))
 }
 
 /// Parsed options after the positional arguments.
@@ -155,17 +214,25 @@ enum Outcome {
     Conflict = 3,
     Locked = 4,
     Queued = 5,
+    Usage = 64,
 }
 
 pub fn run(args: &[String]) -> ExitCode {
-    let json = args.iter().any(|a| a == "--json");
-    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
+    let Some((globals, args)) = split_globals(args) else {
+        return usage();
+    };
+    let json = globals.json;
     let Some(cmd) = args.first().map(String::as_str) else {
         return usage();
     };
     if matches!(cmd, "-h" | "--help" | "help") {
-        println!("{USAGE}");
+        crate::out::line(USAGE);
         return ExitCode::SUCCESS;
+    }
+    // These name their account themselves.
+    if globals.account.is_some() && matches!(cmd, "login" | "accounts" | "use") {
+        errln!("--account cannot be used with `{cmd}`");
+        return usage();
     }
     let (Some(config), Some(cache)) = (
         rcad_cloud::config::default_path(),
@@ -174,8 +241,12 @@ pub fn run(args: &[String]) -> ExitCode {
         errln!("cannot locate the configuration directory (set HOME or XDG_CONFIG_HOME)");
         return ExitCode::FAILURE;
     };
+    let mut worker = Worker::new(config, cache);
+    if let Some((url, user)) = globals.account {
+        worker.use_account(url, user);
+    }
     let mut cli = Cli {
-        worker: Worker::new(config, cache),
+        worker,
         json,
         last_ready: None,
     };
@@ -184,6 +255,10 @@ pub fn run(args: &[String]) -> ExitCode {
         "login" => cli.login(rest),
         "logout" => cli.simple(rest, 0, |_| Request::SignOut),
         "whoami" | "orgs" => cli.whoami(rest, cmd == "orgs"),
+        "accounts" => cli.accounts(rest),
+        "use" => cli.use_account(rest),
+        "shares" => cli.shares(rest),
+        "unshare" => cli.unshare(rest),
         "projects" => cli.simple(rest, 1, |p| Request::ListProjects { org: p[0].clone() }),
         "tree" => cli.simple(rest, 1, |p| Request::LoadTree {
             project: p[0].clone(),
@@ -332,6 +407,20 @@ impl Cli {
         }
         let pending = self.worker.pending_count();
         let (events, outcome) = self.exec(Request::Refresh);
+        // Offline: still say which account is in use (from the account file).
+        if outcome == Outcome::Queued
+            && !self.json
+            && !orgs_only
+            && let Ok(Some(a)) = self.worker.active_account()
+        {
+            outln!(
+                "{} on {} <{}> (server unreachable)",
+                a.username,
+                a.server_name,
+                a.server_url
+            );
+            outln!("pending versions: {pending}");
+        }
         for e in &events {
             match e {
                 Event::SignedIn {
@@ -380,16 +469,24 @@ impl Cli {
             Ok(t) => t,
             Err(o) => return Some(o),
         };
-        Some(self.report(
-            Request::UploadNew {
-                local_path: path,
-                project,
-                folder: opts.value(&["--folder"]),
-                name,
-                thumbnail,
-            },
-            true,
-        ))
+        let (events, outcome) = self.exec(Request::UploadNew {
+            local_path: path,
+            project,
+            folder: opts.value(&["--folder"]),
+            name,
+            thumbnail,
+        });
+        for e in &events {
+            self.print(e);
+            // Every later command (versions, share, pull) needs the new id. (`--json` has it
+            // in the event's `document` field.)
+            if let Event::VersionSaved { link, .. } = e
+                && !self.json
+            {
+                outln!("document {}", link.document);
+            }
+        }
+        Some(outcome)
     }
 
     fn save(&mut self, args: &[String]) -> Option<Outcome> {
@@ -514,7 +611,7 @@ impl Cli {
     }
 
     fn emit_json(&self, v: serde_json::Value) {
-        println!("{v}");
+        crate::out::line(&v.to_string());
     }
 
     fn project(&mut self, args: &[String]) -> Option<Outcome> {
@@ -653,14 +750,140 @@ impl Cli {
         )
     }
 
-    /// `trash` (restore = false) or `restore` a document.
-    /// Drop the queued save at INDEX (as `queue` lists it).
-    fn discard(&mut self, args: &[String]) -> Option<Outcome> {
+    /// The document's share links.
+    fn shares(&mut self, args: &[String]) -> Option<Outcome> {
         let opts = Opts::parse(args, &[], &[])?;
+        let [doc] = opts.positional.as_slice() else {
+            return None;
+        };
+        Some(match self.direct("list_shares", None, |c| c.shares(doc)) {
+            Ok(links) => {
+                if self.json {
+                    self.emit_json(
+                        json!({"event": "shares", "document": doc, "shares": to_json(&links)}),
+                    );
+                } else {
+                    for l in &links {
+                        outln!("{}", share_line(l));
+                    }
+                }
+                Outcome::Ok
+            }
+            Err(o) => o,
+        })
+    }
+
+    /// Revoke a share link.
+    fn unshare(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let [share] = opts.positional.as_slice() else {
+            return None;
+        };
+        Some(
+            match self.direct(
+                "revoke_share",
+                Some("see `rcad-cli cloud shares DOCUMENT-ID` for the link ids"),
+                |c| c.delete_share(share),
+            ) {
+                Ok(()) => {
+                    if self.json {
+                        self.emit_json(json!({"event": "share_revoked", "share": share}));
+                    } else {
+                        outln!("revoked share link {share}");
+                    }
+                    Outcome::Ok
+                }
+                Err(o) => o,
+            },
+        )
+    }
+
+    /// The signed-in accounts, the active one marked. Local only.
+    fn accounts(&mut self, args: &[String]) -> Option<Outcome> {
+        if !args.is_empty() {
+            return None;
+        }
+        let config = match rcad_cloud::config::CloudConfig::load(self.worker.config_path()) {
+            Ok(c) => c,
+            Err(e) => return Some(self.local_error("accounts", e)),
+        };
+        if self.json {
+            let list: Vec<_> = config
+                .accounts
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    json!({
+                        "server_url": a.server_url, "server_name": a.server_name,
+                        "username": a.username, "active": config.active == Some(i)
+                    })
+                })
+                .collect();
+            self.emit_json(json!({"event": "accounts", "accounts": list}));
+        } else {
+            for (i, a) in config.accounts.iter().enumerate() {
+                let mark = if config.active == Some(i) { "*" } else { " " };
+                outln!("{mark} {}\t{}\t{}", a.server_url, a.username, a.server_name);
+            }
+        }
+        Some(Outcome::Ok)
+    }
+
+    /// Make an account the active one. Local only.
+    fn use_account(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &[])?;
+        let (url, user) = match opts.positional.as_slice() {
+            [url] => (url, None),
+            [url, user] => (url, Some(user.as_str())),
+            _ => return None,
+        };
+        let result = rcad_cloud::config::CloudConfig::update(self.worker.config_path(), |c| {
+            c.find_account(url, user).map(|i| {
+                c.active = Some(i);
+                c.accounts[i].clone()
+            })
+        })
+        .and_then(|r| r);
+        Some(match result {
+            Ok(a) => {
+                if self.json {
+                    self.emit_json(json!({
+                        "event": "account_selected", "server_url": a.server_url,
+                        "server_name": a.server_name, "username": a.username
+                    }));
+                } else {
+                    outln!(
+                        "using {} on {} <{}>",
+                        a.username,
+                        a.server_name,
+                        a.server_url
+                    );
+                }
+                Outcome::Ok
+            }
+            Err(e) => self.local_error("use", e),
+        })
+    }
+
+    /// Print a local failure as an error event.
+    fn local_error(&mut self, request: &'static str, e: CloudError) -> Outcome {
+        self.print(&Event::Error {
+            request,
+            code: e.code(),
+            message: e.to_string(),
+        });
+        Outcome::Error
+    }
+
+    /// Drop the queued save at INDEX (as `queue` lists it), after confirmation: a prompt on a
+    /// terminal, `--yes` otherwise.
+    fn discard(&mut self, args: &[String]) -> Option<Outcome> {
+        let opts = Opts::parse(args, &[], &["--yes", "-y"])?;
         let [index] = opts.positional.as_slice() else {
             return None;
         };
         let index: usize = index.parse().ok()?;
+        let confirmed = opts.has("--yes") || opts.has("-y");
         let entry = self
             .worker
             .cache()
@@ -674,14 +897,57 @@ impl Cli {
             );
             return Some(Outcome::Error);
         };
-        Some(self.report(
-            Request::DiscardPending {
-                index,
-                document: entry.document,
-                blob: entry.blob,
-            },
-            false,
-        ))
+        let what = format!(
+            "{index}: {} queued {} {}",
+            entry.document,
+            time(entry.queued_at),
+            entry.description
+        );
+        if !confirmed {
+            let stdin = std::io::stdin();
+            if !stdin.is_terminal() {
+                errln!(
+                    "discard {what}\nrefusing without confirmation: run it on a terminal, or \
+                     add --yes (`rcad-cli cloud discard {index} --yes`)"
+                );
+                return Some(Outcome::Usage);
+            }
+            errln!("discard queued version {what}");
+            crate::out::prompt("the version is lost for good; discard it? [y/N] ");
+            let mut answer = String::new();
+            if stdin.lock().read_line(&mut answer).is_err() || !is_yes(&answer) {
+                errln!("not discarded");
+                return Some(Outcome::Error);
+            }
+        }
+        let (events, outcome) = self.exec(Request::DiscardPending {
+            index,
+            document: entry.document.clone(),
+            blob: entry.blob,
+        });
+        let ok = !events.iter().any(|e| matches!(e, Event::Error { .. }));
+        if ok {
+            if self.json {
+                self.emit_json(json!({
+                    "event": "discarded", "index": index, "document": entry.document,
+                    "description": entry.description
+                }));
+            } else {
+                outln!("discarded {what}");
+            }
+        }
+        for e in &events {
+            // Text: the "discarded" line replaces the reprinted queue.
+            if !self.json && ok && matches!(e, Event::PendingQueue { .. }) {
+                continue;
+            }
+            self.print(e);
+        }
+        Some(if outcome == Outcome::Queued {
+            Outcome::Error
+        } else {
+            outcome
+        })
     }
 
     fn trash(&mut self, args: &[String], restore: bool) -> Option<Outcome> {
@@ -726,7 +992,7 @@ impl Cli {
             self.last_ready = Some(path.clone());
         }
         if self.json {
-            println!("{}", event_json(e));
+            crate::out::line(&event_json(e).to_string());
             return;
         }
         match e {
@@ -866,6 +1132,28 @@ impl Cli {
             } => errln!("error ({request}): {message}"),
         }
     }
+}
+
+/// `y` or `yes`, any case.
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// One share link as a line: id, version (or `latest`), expiry, download, creator.
+fn share_line(l: &proto::ShareLink) -> String {
+    format!(
+        "{}\t{}\t{}\t{}\tby {}",
+        l.id,
+        l.version.map_or("latest".to_string(), |v| format!("v{v}")),
+        l.expires_at
+            .map_or("no expiry".to_string(), |t| format!("expires {}", time(t))),
+        if l.allow_download {
+            "download"
+        } else {
+            "view only"
+        },
+        l.created_by
+    )
 }
 
 /// The `--thumbnail` PNG, checked (signature, size) before anything is sent.
@@ -1035,9 +1323,10 @@ fn event_json(e: &Event) -> serde_json::Value {
             "event": "document_ready", "path": path, "link": link_json(link),
             "read_only": read_only, "from_cache": from_cache
         }),
-        Event::VersionSaved { link, version } => {
-            json!({"event": "version_saved", "link": link_json(link), "version": to_json(version)})
-        }
+        Event::VersionSaved { link, version } => json!({
+            "event": "version_saved", "document": link.document, "link": link_json(link),
+            "version": to_json(version)
+        }),
         Event::Conflict {
             local_path,
             document,
@@ -1144,6 +1433,51 @@ mod tests {
         assert!(Opts::parse(&["--bogus".to_string()], &[], &[]).is_none());
         assert!(Opts::parse(&["-m".to_string()], &["-m"], &[]).is_none());
         assert_eq!(default_name(Path::new("/x/Bracket.rcad.json")), "Bracket");
+    }
+
+    #[test]
+    fn global_options_are_taken_from_anywhere() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (g, rest) = split_globals(&args(&[
+            "versions",
+            "--json",
+            "d1",
+            "--account",
+            "lab.local#bob",
+        ]))
+        .unwrap();
+        assert!(g.json);
+        assert_eq!(g.account, Some(("lab.local".into(), Some("bob".into()))));
+        assert_eq!(rest, args(&["versions", "d1"]));
+        let (g, _) = split_globals(&args(&["--account=https://x:8640/p", "whoami"])).unwrap();
+        assert_eq!(g.account, Some(("https://x:8640/p".into(), None)));
+        assert!(!g.json);
+        assert!(split_globals(&args(&["whoami", "--account"])).is_none());
+        assert!(split_globals(&args(&["--account=", "whoami"])).is_none());
+        assert!(split_globals(&args(&["--account=https://x#", "whoami"])).is_none());
+        assert!(is_global_option("--account=x") && !is_global_option("--yes"));
+    }
+
+    #[test]
+    fn confirmation_and_share_lines() {
+        assert!(is_yes("y\n") && is_yes(" YES ") && !is_yes("\n") && !is_yes("no"));
+        let mut l = proto::ShareLink {
+            id: "s1".into(),
+            document: "d1".into(),
+            version: None,
+            created_by: "ada".into(),
+            created_at: 0,
+            expires_at: Some(86_400),
+            allow_download: true,
+        };
+        assert_eq!(
+            share_line(&l),
+            "s1\tlatest\texpires 1970-01-02 00:00 UTC\tdownload\tby ada"
+        );
+        l.version = Some(3);
+        l.expires_at = None;
+        l.allow_download = false;
+        assert_eq!(share_line(&l), "s1\tv3\tno expiry\tview only\tby ada");
     }
 
     #[test]

@@ -18,14 +18,25 @@ impl Env {
     }
 
     fn cli(&self, args: &[&str], stdin: Option<&str>) -> Output {
+        let mut all = vec!["cloud"];
+        all.extend_from_slice(args);
+        self.raw(&all, stdin)
+    }
+
+    /// `rcad-cli ARGS` (no `cloud` added) with this environment's directories.
+    fn command(&self, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_rcad-cli"));
-        c.arg("cloud")
-            .args(args)
+        c.args(args)
             .env("HOME", self.dir.path())
             .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
             .env("XDG_CACHE_HOME", self.dir.path().join("cache"))
             .env_remove("RCAD_PASSWORD")
             .current_dir(self.dir.path());
+        c
+    }
+
+    fn raw(&self, args: &[&str], stdin: Option<&str>) -> Output {
+        let mut c = self.command(args);
         match stdin {
             Some(text) => {
                 use std::io::Write;
@@ -206,6 +217,16 @@ fn offline_save_queues_then_sync_sends() {
     let o = env.cli(&["save", "Shaft.rcad.json"], None);
     assert_eq!(code(&o), 5, "{}", text(&o));
     assert_eq!(code(&env.cli(&["sync"], None)), 5);
+    // whoami offline still names the account in use.
+    let o = env.cli(&["whoami"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains(&format!(
+            "{USER} on Test lab <http://127.0.0.1:{port}> (server unreachable)"
+        )),
+        "{}",
+        text(&o)
+    );
     // Read-only commands fail plainly while offline; pull falls back to the cached copy.
     assert_eq!(code(&env.cli(&["tree", PROJECT], None)), 1);
     let o = env.cli(&["pull", &doc], None);
@@ -251,13 +272,273 @@ fn queue_lists_and_discard_drops_a_queued_version() {
     let o = env.cli(&["discard", "3"], None);
     assert_eq!(code(&o), 1, "{}", text(&o));
     assert_eq!(code(&env.cli(&["discard", "x"], None)), 64);
-    let o = env.cli(&["--json", "discard", "0"], None);
+    // Not a terminal and no --yes: refused as a usage error, nothing dropped.
+    let o = env.cli(&["discard", "0"], None);
+    assert_eq!(code(&o), 64, "{}", text(&o));
+    assert!(text(&o).contains("--yes"), "{}", text(&o));
+    assert!(
+        String::from_utf8_lossy(&env.cli(&["queue"], None).stdout).contains("longer"),
+        "still queued"
+    );
+    let o = env.cli(&["discard", "0", "--yes", "--json"], None);
     assert_eq!(code(&o), 0, "{}", text(&o));
+    let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["event"], "discarded");
+    assert_eq!(lines[0]["document"], doc.as_str());
+    assert_eq!(lines[0]["description"], "longer");
+    assert_eq!(lines[1]["event"], "pending_queue");
+    assert_eq!(lines[1]["saves"].as_array().map(Vec::len), Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"two");
+}
+
+#[test]
+fn discard_with_yes_says_what_it_dropped() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Cam.rcad.json", b"one");
+    let doc = push(&env, &file);
+    drop(server.stop());
+    std::fs::write(&file, b"two").unwrap();
+    assert_eq!(
+        code(&env.cli(&["save", "Cam.rcad.json", "-m", "lobe"], None)),
+        5
+    );
+    let o = env.cli(&["discard", "-y", "0"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.starts_with(&format!("discarded 0: {doc} queued ")),
+        "{out}"
+    );
+    assert!(out.contains("lobe"), "{out}");
+    assert!(
+        env.cli(&["queue"], None).stdout.is_empty(),
+        "queue is empty"
+    );
+}
+
+#[test]
+fn closed_stdout_exits_quietly_without_a_panic() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Long.rcad.json", b"v1");
+    let doc = push(&env, &file);
+    {
+        // More output than a pipe buffers, so the write fails whatever the timing.
+        let mut st = server.state.lock().unwrap();
+        for i in 0..3000 {
+            st.save_as(&doc, "bob", format!("v{i}").as_bytes());
+        }
+    }
+    let mut child = env
+        .command(&["cloud", "versions", &doc])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // `| head -0`: the reader goes away before reading anything.
+    drop(child.stdout.take());
+    let o = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(code(&o), 141, "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+    assert!(err.is_empty(), "nothing on stderr: {err}");
+}
+
+#[test]
+fn push_prints_the_new_document_id() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    env.file("Hinge.rcad.json", b"one");
+    let o = env.cli(&["push", "Hinge.rcad.json", "--project", PROJECT], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    let id = out
+        .lines()
+        .find_map(|l| l.strip_prefix("document "))
+        .unwrap_or_else(|| panic!("no document line: {out}"))
+        .to_string();
+    let st = server.state.lock().unwrap();
+    assert_eq!(st.docs.len(), 1);
+    assert_eq!(st.docs[0].summary.id, id);
+}
+
+#[test]
+fn json_and_account_options_go_anywhere() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Plate.rcad.json", b"one");
+    let doc = push(&env, &file);
+    let first_json = |o: &Output| -> serde_json::Value {
+        let out = String::from_utf8_lossy(&o.stdout).to_string();
+        serde_json::from_str(out.lines().next().unwrap_or(""))
+            .unwrap_or_else(|e| panic!("{e}: {out}"))
+    };
+    // Before `cloud`, after `cloud`, after the command and after its arguments.
+    for args in [
+        vec!["--json", "cloud", "versions", &doc],
+        vec!["cloud", "--json", "versions", &doc],
+        vec!["cloud", "versions", "--json", &doc],
+        vec!["cloud", "versions", &doc, "--json"],
+        vec![
+            "--account",
+            &server.url,
+            "--json",
+            "cloud",
+            "versions",
+            &doc,
+        ],
+        vec![
+            "cloud",
+            "versions",
+            &doc,
+            "--json",
+            "--account",
+            &server.url,
+        ],
+    ] {
+        let o = env.raw(&args, None);
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        assert_eq!(first_json(&o)["event"], "detail", "{args:?}");
+    }
+    let acct = format!("--account={}#{USER}", server.url);
+    let o = env.cli(&["versions", &doc, &acct, "--json"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(code(&env.raw(&["--json"], None)), 64);
+    assert_eq!(code(&env.raw(&["--json", "run"], None)), 64);
+    assert_eq!(code(&env.cli(&["versions", &doc, "--account"], None)), 64);
+    assert_eq!(
+        code(&env.cli(&["versions", &doc, "--account=#ada"], None)),
+        64
+    );
+}
+
+#[test]
+fn accounts_use_and_one_command_account_override() {
+    let a = FakeServer::start();
+    let b = FakeServer::start();
+    let env = Env::new();
+    login(&env, &a.url);
+    login(&env, &b.url);
+    // The last sign-in is active.
+    let o = env.cli(&["accounts"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains(&format!("  {}\t{USER}\tTest lab", a.url)),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!("* {}\t{USER}\tTest lab", b.url)),
+        "{out}"
+    );
+    assert!(!out.contains("rcs_"), "no token: {out}");
+
+    // --account: this command only; the file's active account is unchanged.
+    let before = a.log().len();
+    let o = env.cli(&["--account", &a.url, "whoami"], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains(&a.url), "{}", text(&o));
+    assert!(a.log().len() > before, "request went to the named server");
+    let o = env.cli(&["whoami"], None);
+    assert!(text(&o).contains(&b.url), "{}", text(&o));
+    let o = env.cli(&["--account", "https://nowhere.example", "whoami"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("no account on"), "{}", text(&o));
+    assert_eq!(code(&env.cli(&["--account", &a.url, "accounts"], None)), 64);
+    assert_eq!(
+        code(&env.cli(&["--account", &a.url, "login", &a.url, USER], None)),
+        64
+    );
+
+    // use: switches the active account (the trailing slash is normalized away).
+    let o = env.cli(&["use", &format!("{}/", a.url), USER], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains(&format!("using {USER} on Test lab <{}>", a.url)),
+        "{}",
+        text(&o)
+    );
+    let o = env.cli(&["--json", "accounts"], None);
     let v: serde_json::Value =
         serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
-    assert_eq!(v["event"], "pending_queue");
-    assert_eq!(v["saves"].as_array().map(Vec::len), Some(0));
-    assert_eq!(std::fs::read(&file).unwrap(), b"two");
+    let list = v["accounts"].as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0]["server_url"], a.url.as_str());
+    assert_eq!(list[0]["active"], true);
+    assert_eq!(list[1]["active"], false);
+    assert!(list[0].get("token").is_none());
+    let o = env.cli(&["use", &a.url, "nobody"], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert_eq!(code(&env.cli(&["use"], None)), 64);
+
+    // logout with --account signs out of that account; the active one stays.
+    let o = env.cli(&["logout", "--account", &b.url], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&env.cli(&["accounts"], None).stdout).to_string();
+    assert_eq!(out.trim_end(), format!("* {}\t{USER}\tTest lab", a.url));
+}
+
+#[test]
+fn shares_lists_and_unshare_revokes() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("Gear.rcad.json", b"one");
+    let doc = push(&env, &file);
+    assert_eq!(
+        code(&env.cli(&["share", &doc, "--days", "7", "--download"], None)),
+        0
+    );
+    assert_eq!(code(&env.cli(&["share", &doc, "--version", "1"], None)), 0);
+    let o = env.cli(&["shares", &doc], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    assert!(
+        lines[0].contains("\tlatest\texpires 1970-01-08 00:00 UTC\tdownload\tby ada"),
+        "{out}"
+    );
+    assert!(
+        lines[1].contains("\tv1\tno expiry\tview only\tby ada"),
+        "{out}"
+    );
+    let first = lines[0].split('\t').next().unwrap().to_string();
+
+    let o = env.cli(&["unshare", &first], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains(&format!("revoked share link {first}")),
+        "{}",
+        text(&o)
+    );
+    assert!(
+        server
+            .log()
+            .iter()
+            .any(|l| l.ends_with(&format!("/shares/{first}")))
+    );
+    let o = env.cli(&["--json", "shares", &doc], None);
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).unwrap();
+    assert_eq!(v["event"], "shares");
+    assert_eq!(v["shares"].as_array().map(Vec::len), Some(1));
+    assert_eq!(v["shares"][0]["version"], 1);
+    // Revoking again: not found, with a hint.
+    let o = env.cli(&["unshare", &first], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("rcad-cli cloud shares"), "{}", text(&o));
+    assert_eq!(code(&env.cli(&["shares"], None)), 64);
+    assert_eq!(code(&env.cli(&["unshare", "a", "b"], None)), 64);
 }
 
 #[test]
