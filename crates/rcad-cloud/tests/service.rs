@@ -1721,3 +1721,126 @@ fn check_head_reports_the_current_head() {
         [Event::Offline { .. }]
     ));
 }
+
+#[test]
+fn share_links_are_listed_and_revoked() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (_, doc) = h.upload("Clamp", b"v1");
+    assert_eq!(
+        h.run(Request::LoadShares {
+            document: doc.clone()
+        }),
+        vec![Event::Shares {
+            document: doc.clone(),
+            shares: vec![]
+        }]
+    );
+    for download in [false, true] {
+        let ev = h.run(Request::CreateShare {
+            document: doc.clone(),
+            version: Some(1),
+            expires_in_days: Some(7),
+            allow_download: download,
+        });
+        assert!(matches!(ev.as_slice(), [Event::ShareCreated(_)]), "{ev:?}");
+    }
+    let shares = match h
+        .run(Request::LoadShares {
+            document: doc.clone(),
+        })
+        .as_slice()
+    {
+        [Event::Shares { shares, .. }] => shares.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(shares.len(), 2);
+    let ev = h.run(Request::RevokeShare {
+        document: doc.clone(),
+        share: shares[0].id.clone(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::Shares { shares: left, .. }]
+            if left.len() == 1 && left[0].id == shares[1].id),
+        "{ev:?}"
+    );
+    // Revoking again: the server's 404, reported as an error.
+    let ev = h.run(Request::RevokeShare {
+        document: doc.clone(),
+        share: shares[0].id.clone(),
+    });
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [Event::Error {
+                request: "revoke_share",
+                code: Some(ErrorCode::NotFound),
+                ..
+            }]
+        ),
+        "{ev:?}"
+    );
+}
+
+#[test]
+fn project_and_organization_activity_newest_first() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, doc) = h.upload("Lever", b"v1");
+    std::fs::write(&path, b"v2").unwrap();
+    assert!(matches!(
+        h.save(&path, false).as_slice(),
+        [Event::VersionSaved { .. }]
+    ));
+    // Activity of another project is not listed for this one.
+    server
+        .state
+        .lock()
+        .unwrap()
+        .activity
+        .push(proto::ActivityEntry {
+            at: 1,
+            actor: "bob".into(),
+            action: "version.create".into(),
+            summary: "elsewhere".into(),
+            project: Some("p-other".into()),
+            document: None,
+        });
+    let ev = h.run(Request::LoadActivity {
+        project: PROJECT.into(),
+    });
+    match ev.as_slice() {
+        [Event::Activity { project, entries }] => {
+            assert_eq!(project, PROJECT);
+            let summaries: Vec<_> = entries.iter().map(|e| e.summary.as_str()).collect();
+            assert_eq!(
+                summaries,
+                ["saved version 2 of Lever", "saved version 1 of Lever"]
+            );
+            assert!(
+                entries
+                    .iter()
+                    .all(|e| e.document.as_deref() == Some(doc.as_str()))
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        server
+            .log()
+            .iter()
+            .any(|l| l.contains("/activity?limit=100")),
+        "{:?}",
+        server.log()
+    );
+    let ev = h.run(Request::LoadOrgActivity {
+        org: fake_server::ORG.into(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::OrgActivity { entries, .. }]
+            if entries.len() == 3 && entries[0].summary == "elsewhere"),
+        "{ev:?}"
+    );
+}

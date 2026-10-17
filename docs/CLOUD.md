@@ -133,6 +133,12 @@ on each server:
 - **Newer version available.** `CheckHead` reads the document's head version; the app polls
   it for the open cloud document (see docs/UI.md) and offers to update an unmodified
   working copy.
+- **Activity.** `LoadActivity` reads a project's recent activity (up to 100 entries, newest
+  first: who, what, when, and the document it concerns); any project member may read it.
+  `LoadOrgActivity` reads the organization's, which only organization admins may. The app
+  shows both (docs/UI.md); `rcad-cli cloud activity PROJECT-ID` prints the project's.
+- **Share links in the app.** `LoadShares` lists a document's live links and `RevokeShare`
+  revokes one and answers with the links that remain.
 - **Sync.** Queued versions are sent in order.
   - The first conflict or lock stops the queue. That entry stays queued; resolve it by saving
     that file with force, which forces its queued versions too.
@@ -206,6 +212,7 @@ rcad-cli cloud versions <document-id>
 rcad-cli cloud share <document-id> [--version N] [--days 7] [--download]
 rcad-cli cloud shares <document-id>                    # id, version|latest, expiry, download, creator
 rcad-cli cloud unshare <share-id>                      # revoke a share link
+rcad-cli cloud activity <project-id>                   # recent activity, newest first
 rcad-cli cloud sync
 rcad-cli cloud queue                                   # versions queued while offline, INDEX first
 rcad-cli cloud discard <index> [--yes]                 # drop one (the local file is not changed)

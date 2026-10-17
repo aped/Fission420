@@ -819,3 +819,25 @@ fn save_and_push_take_an_optional_thumbnail() {
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
 }
+
+#[test]
+fn activity_lists_the_project_log() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("arm.rcad.json", b"v1");
+    push(&env, &file);
+    let o = env.cli(&["activity", PROJECT], None);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("version.create\tsaved version 1 of arm"),
+        "{}",
+        text(&o)
+    );
+    let o = env.cli(&["--json", "activity", PROJECT], None);
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().next().unwrap()).unwrap();
+    assert_eq!(v["event"], "activity");
+    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(code(&env.cli(&["activity"], None)), 64);
+}
