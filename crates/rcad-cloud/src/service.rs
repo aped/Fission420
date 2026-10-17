@@ -195,6 +195,24 @@ pub enum Request {
     LoadUsage {
         org: String,
     },
+    /// The document's share links (answer: [`Event::Shares`]).
+    LoadShares {
+        document: String,
+    },
+    /// Revoke a share link; answers with the document's remaining links.
+    RevokeShare {
+        document: String,
+        share: String,
+    },
+    /// A project's recent activity, newest first (answer: [`Event::Activity`]).
+    LoadActivity {
+        project: String,
+    },
+    /// An organization's recent activity (organization admins; answer:
+    /// [`Event::OrgActivity`]).
+    LoadOrgActivity {
+        org: String,
+    },
     RenameDocument {
         document: String,
         name: String,
@@ -422,6 +440,22 @@ impl std::fmt::Debug for Request {
                 .field("username", username)
                 .finish(),
             Request::LoadUsage { org } => f.debug_struct("LoadUsage").field("org", org).finish(),
+            Request::LoadShares { document } => f
+                .debug_struct("LoadShares")
+                .field("document", document)
+                .finish(),
+            Request::RevokeShare { document, share } => f
+                .debug_struct("RevokeShare")
+                .field("document", document)
+                .field("share", share)
+                .finish(),
+            Request::LoadActivity { project } => f
+                .debug_struct("LoadActivity")
+                .field("project", project)
+                .finish(),
+            Request::LoadOrgActivity { org } => {
+                f.debug_struct("LoadOrgActivity").field("org", org).finish()
+            }
             Request::RenameDocument { document, name } => f
                 .debug_struct("RenameDocument")
                 .field("document", document)
@@ -496,6 +530,10 @@ impl Request {
             Request::SetOrgMember { .. } => "set_org_member",
             Request::RemoveOrgMember { .. } => "remove_org_member",
             Request::LoadUsage { .. } => "load_usage",
+            Request::LoadShares { .. } => "load_shares",
+            Request::RevokeShare { .. } => "revoke_share",
+            Request::LoadActivity { .. } => "load_activity",
+            Request::LoadOrgActivity { .. } => "load_org_activity",
             Request::RenameDocument { .. } => "rename_document",
             Request::MoveDocument { .. } => "move_document",
             Request::TrashDocument { .. } => "trash_document",
@@ -594,12 +632,30 @@ pub enum Event {
         org: String,
         usage: proto::OrgUsage,
     },
+    /// A document's share links (answer to `LoadShares`, `RevokeShare`).
+    Shares {
+        document: String,
+        shares: Vec<proto::ShareLink>,
+    },
+    /// A project's activity, newest first.
+    Activity {
+        project: String,
+        entries: Vec<proto::ActivityEntry>,
+    },
+    /// An organization's activity, newest first.
+    OrgActivity {
+        org: String,
+        entries: Vec<proto::ActivityEntry>,
+    },
     Error {
         request: &'static str,
         code: Option<proto::ErrorCode>,
         message: String,
     },
 }
+
+/// How many activity entries `LoadActivity` and `LoadOrgActivity` ask for.
+pub const ACTIVITY_LIMIT: u32 = 100;
 
 /// Handle owned by the UI.
 pub struct CloudService {
@@ -1139,6 +1195,31 @@ impl Worker {
                 let s = self.session()?;
                 let usage = s.client.org_usage(&org)?;
                 emit(Event::Usage { org, usage });
+                Ok(())
+            }
+            Request::LoadShares { document } => {
+                let s = self.session()?;
+                let shares = s.client.shares(&document)?;
+                emit(Event::Shares { document, shares });
+                Ok(())
+            }
+            Request::RevokeShare { document, share } => {
+                let s = self.session()?;
+                s.client.delete_share(&share)?;
+                let shares = s.client.shares(&document)?;
+                emit(Event::Shares { document, shares });
+                Ok(())
+            }
+            Request::LoadActivity { project } => {
+                let s = self.session()?;
+                let entries = s.client.project_activity(&project, Some(ACTIVITY_LIMIT))?;
+                emit(Event::Activity { project, entries });
+                Ok(())
+            }
+            Request::LoadOrgActivity { org } => {
+                let s = self.session()?;
+                let entries = s.client.org_activity(&org, Some(ACTIVITY_LIMIT))?;
+                emit(Event::OrgActivity { org, entries });
                 Ok(())
             }
             Request::RenameDocument { document, name } => {

@@ -462,6 +462,16 @@ impl Client {
         self.get(&format!("/orgs/{}/activity{q}", seg(org)))
     }
 
+    /// A project's activity, newest first (any project member).
+    pub fn project_activity(
+        &self,
+        project: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<proto::ActivityEntry>, CloudError> {
+        let q = limit.map(|n| format!("?limit={n}")).unwrap_or_default();
+        self.get(&format!("/projects/{}/activity{q}", seg(project)))
+    }
+
     // -- Blobs ----------------------------------------------------------------------------------
 
     pub fn missing_blobs(

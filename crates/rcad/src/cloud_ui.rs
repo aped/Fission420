@@ -987,6 +987,7 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
+            Event::Shares { .. } | Event::Activity { .. } | Event::OrgActivity { .. } => {}
             Event::Thumbnail {
                 document,
                 version,

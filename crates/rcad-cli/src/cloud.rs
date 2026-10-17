@@ -88,6 +88,7 @@ usage: rcad-cli cloud [--json] [--account SERVER-URL[#USERNAME]] COMMAND
   versions DOCUMENT-ID
   share DOCUMENT-ID [--version N] [--days N] [--download]
   shares DOCUMENT-ID               list the document's share links
+  activity PROJECT-ID              the project's recent activity, newest first
   unshare SHARE-ID                 revoke a share link (it stops working at once)
   sync                             send versions queued while offline
   queue                            list versions queued while offline (INDEX first)
@@ -268,6 +269,9 @@ pub fn run(args: &[String]) -> ExitCode {
         }),
         "sync" => cli.simple(rest, 0, |_| Request::SyncPending),
         "queue" => cli.simple(rest, 0, |_| Request::LoadPending),
+        "activity" => cli.simple(rest, 1, |p| Request::LoadActivity {
+            project: p[0].clone(),
+        }),
         "discard" => cli.discard(rest),
         "push" => cli.push(rest),
         "save" => cli.save(rest),
@@ -1118,6 +1122,16 @@ impl Cli {
                     outln!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
                 }
             }
+            Event::Shares { shares, .. } => {
+                for l in shares {
+                    outln!("{}", share_line(l));
+                }
+            }
+            Event::Activity { entries, .. } | Event::OrgActivity { entries, .. } => {
+                for a in entries {
+                    outln!("{}\t{}\t{}\t{}", time(a.at), a.actor, a.action, a.summary);
+                }
+            }
             Event::Usage { usage, .. } => outln!(
                 "{} bytes used of {}; {} documents, {} versions",
                 usage.used_bytes,
@@ -1371,6 +1385,15 @@ fn event_json(e: &Event) -> serde_json::Value {
         }
         Event::Usage { org, usage } => {
             json!({"event": "usage", "org": org, "usage": to_json(usage)})
+        }
+        Event::Shares { document, shares } => {
+            json!({"event": "shares", "document": document, "shares": to_json(shares)})
+        }
+        Event::Activity { project, entries } => {
+            json!({"event": "activity", "project": project, "entries": to_json(entries)})
+        }
+        Event::OrgActivity { org, entries } => {
+            json!({"event": "org_activity", "org": org, "entries": to_json(entries)})
         }
         Event::Error {
             request,

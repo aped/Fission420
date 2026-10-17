@@ -52,6 +52,8 @@ pub struct State {
     pub fail_saves: Option<(u16, ErrorCode)>,
     /// Live share links (revoked ones are removed).
     pub shares: Vec<proto::ShareLink>,
+    /// Activity log, oldest first: (org, entry).
+    pub activity: Vec<proto::ActivityEntry>,
 }
 
 fn user(name: &str) -> proto::User {
@@ -116,6 +118,7 @@ impl State {
             },
             fail_saves: None,
             shares: Vec::new(),
+            activity: Vec::new(),
         }
     }
 
@@ -356,6 +359,25 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
             (204, Vec::new(), "application/json")
         }
         ("GET", ["orgs", _, "usage"]) => json(200, &st.usage),
+        ("GET", ["orgs", _, "activity"]) | ("GET", ["projects", _, "activity"]) => {
+            let limit = url
+                .split_once("limit=")
+                .and_then(|(_, n)| n.parse::<usize>().ok())
+                .unwrap_or(50);
+            let project = match segs.as_slice() {
+                ["projects", p, _] => Some(p.to_string()),
+                _ => None,
+            };
+            let list: Vec<_> = st
+                .activity
+                .iter()
+                .rev()
+                .filter(|a| project.is_none() || a.project == project)
+                .take(limit)
+                .cloned()
+                .collect();
+            json(200, &list)
+        }
         ("GET", ["projects", p, "members"]) => {
             let list: Vec<_> = st
                 .project_members
@@ -663,6 +685,15 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
             doc.versions.push(v.clone());
             doc.summary.head_version = v.number;
             doc.summary.has_thumbnail = v.thumbnail.is_some();
+            let entry = proto::ActivityEntry {
+                at: v.created_at,
+                actor: who.clone(),
+                action: "version.create".into(),
+                summary: format!("saved version {} of {}", v.number, doc.summary.name),
+                project: Some(doc.summary.project.clone()),
+                document: Some(doc.summary.id.clone()),
+            };
+            st.activity.push(entry);
             json(200, &v)
         }
         ("PATCH", ["documents", d, "versions", n]) => {
@@ -832,6 +863,19 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 allow_download: req.allow_download,
             };
             st.shares.push(link.clone());
+            let project = st
+                .docs
+                .iter()
+                .find(|x| x.summary.id == *d)
+                .map(|x| x.summary.project.clone());
+            st.activity.push(proto::ActivityEntry {
+                at: 7,
+                actor: who.clone(),
+                action: "share.create".into(),
+                summary: "created a share link".into(),
+                project,
+                document: Some(d.to_string()),
+            });
             json(
                 200,
                 &proto::CreateShareResponse {
