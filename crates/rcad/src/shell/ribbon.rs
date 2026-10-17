@@ -234,6 +234,8 @@ impl RcadApp {
             // the bar shares a centre line.
             ui.spacing_mut().interact_size.y = 24.0;
             ui.strong("R-CAD");
+            #[cfg(feature = "cloud")]
+            self.cloud_app_bar_toggle(ui);
             let file = ui.menu_button("File", |ui| self.file_menu(ui));
             file.response.named("File menu");
             ui.separator();
@@ -297,6 +299,8 @@ impl RcadApp {
                     ui.separator();
                     self.finish_sketch_button(ui);
                 }
+                #[cfg(feature = "cloud")]
+                self.cloud_chip_ui(ui);
             });
         });
     }
@@ -344,6 +348,21 @@ impl RcadApp {
         for id in [C::Save, C::SaveAs] {
             if self.cmd_button(ui, id) {
                 ui.close();
+            }
+        }
+        #[cfg(feature = "cloud")]
+        {
+            ui.separator();
+            for id in [
+                C::SaveVersion,
+                C::VersionHistory,
+                C::ShareLink,
+                C::CloudComments,
+                C::SyncNow,
+            ] {
+                if self.cmd_button(ui, id) {
+                    ui.close();
+                }
             }
         }
         ui.separator();
@@ -598,6 +617,10 @@ impl RcadApp {
                         "Dimensioning a model edge in the sketch editor projects that edge first",
                     )
                     .changed();
+                #[cfg(feature = "cloud")]
+                {
+                    changed |= self.cloud_prefs_ui(ui);
+                }
             });
         self.shell.show_prefs = open;
         if changed {

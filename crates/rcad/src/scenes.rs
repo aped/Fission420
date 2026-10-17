@@ -44,6 +44,10 @@ pub const SCENES: &[&str] = &[
     "edit_feature",
     "open_with_errors",
     "sketch_project",
+    #[cfg(feature = "cloud")]
+    "cloud_browse",
+    #[cfg(feature = "cloud")]
+    "cloud_history",
 ];
 
 /// `rel` (from the repository root) as scenes open it: relative to the
@@ -712,6 +716,35 @@ impl RcadApp {
             // A sketch on an extrude cap: the cap's edges auto-projected
             // (purple construction), the Project tool active with its
             // options, and a hole centre dimensioned to a projected corner.
+            // The Data panel against a sample server (no network): projects,
+            // folders and documents, or the open document's version history,
+            // with the cloud status chip on the application bar.
+            #[cfg(feature = "cloud")]
+            "cloud_browse" | "cloud_history" => {
+                let dir = std::env::temp_dir().join("r-cad-scene-cloud");
+                let doc = dir.join("Bracket.rcad.json");
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::copy(repo_path("examples/bracket.rcad.json"), &doc);
+                let history = name == "cloud_history";
+                vec![
+                    Cmd(Command::Open {
+                        path: doc,
+                        safe_mode: false,
+                    }),
+                    Ui(if history {
+                        |a: &mut RcadApp| {
+                            let p = a.summary.path.clone().unwrap_or_default();
+                            a.cloud_scene(p, true)
+                        }
+                    } else {
+                        |a: &mut RcadApp| {
+                            let p = a.summary.path.clone().unwrap_or_default();
+                            a.cloud_scene(p, false)
+                        }
+                    }),
+                    Ui(|a| a.set_view(rcad_viewport::ViewPreset::Iso)),
+                ]
+            }
             "sketch_project" => vec![
                 Cmd(Command::NewDocument),
                 Cmd(rect(40.0, 20.0, [0.0, 0.0], SketchPlane::WorldXY)),

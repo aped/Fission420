@@ -553,6 +553,9 @@ pub struct RcadApp {
     pending_new_sketch: bool,
     /// Shell view state (keymap layer, section focus requests).
     pub(crate) shell: crate::shell::ShellState,
+    /// Optional cloud tier (Data panel, cloud versions); idle without an account.
+    #[cfg(feature = "cloud")]
+    pub(crate) cloud: crate::cloud_ui::CloudUi,
 }
 
 impl RcadApp {
@@ -648,6 +651,8 @@ impl RcadApp {
             frame_ema: None,
             pending_new_sketch: false,
             shell: Default::default(),
+            #[cfg(feature = "cloud")]
+            cloud: Default::default(),
         }
     }
 
@@ -1358,6 +1363,8 @@ impl RcadApp {
             self.selected_body = None;
         }
         self.sketch_project_reply(&command, &response);
+        #[cfg(feature = "cloud")]
+        self.cloud_on_reply(&command, response.ok);
         // Continue a guarded action once its pre-save succeeded.
         if matches!(command, Command::Save { .. })
             && let Some(g) = self.after_save.take()
@@ -2285,6 +2292,8 @@ impl RcadApp {
         while let Some(r) = self.engine.poll() {
             self.handle_reply(r);
         }
+        #[cfg(feature = "cloud")]
+        self.cloud_tick();
         self.advance_demo();
         self.advance_scene();
         self.autosave_tick();
@@ -2322,6 +2331,19 @@ impl RcadApp {
         });
         egui::Panel::bottom("rcad_status").show(ui, |ui| self.status_bar(ui, busy));
         use crate::shell::prefs::{PANEL_MAX, PANEL_MIN};
+        // The Data panel sits left of the browser (Fusion's Data Panel).
+        #[cfg(feature = "cloud")]
+        if self.cloud.panel_open {
+            egui::Panel::left("rcad_cloud")
+                .resizable(true)
+                .default_size(240.0)
+                .max_size(PANEL_MAX)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("cloud_scroll")
+                        .show(ui, |ui| self.cloud_panel(ui));
+                });
+        }
         let browser = egui::Panel::left("rcad_browser")
             .resizable(true)
             .default_size(self.shell.prefs.browser_width.unwrap_or(260.0))
@@ -2423,6 +2445,8 @@ impl RcadApp {
         }
         self.sync_viewport_selection();
         self.confirm_ui(&ctx);
+        #[cfg(feature = "cloud")]
+        self.cloud_windows(&ctx);
         self.recovery_ui(&ctx);
         self.rename_ui(&ctx);
         self.help_ui(&ctx);
@@ -2447,6 +2471,10 @@ impl RcadApp {
     /// modelling commands.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
+        #[cfg(feature = "cloud")]
+        if self.cloud_modal_open() {
+            return;
+        }
         if ctx.egui_wants_keyboard_input()
             || self.confirm.is_some()
             || self.rename.is_some()

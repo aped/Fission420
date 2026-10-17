@@ -7,6 +7,8 @@
 pub mod app;
 pub mod assembly_ui;
 pub mod bodies;
+#[cfg(feature = "cloud")]
+pub mod cloud_ui;
 pub mod config_ui;
 pub mod dialogs;
 pub mod direct_edit_ui;
