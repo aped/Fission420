@@ -315,6 +315,8 @@ pub struct CloudUi {
     queue_asked: Option<usize>,
     /// Save to Cloud Project… waits for a first local save (Save As).
     save_to_cloud_after_save: bool,
+    /// Code of the error shown in the Members or Organization window (probe).
+    admin_error_code: Option<String>,
 }
 
 /// Panel actions collected while drawing and applied afterwards.
@@ -642,7 +644,13 @@ impl RcadApp {
                     "role": project_role_name(x.role),
                 }))
                 .collect::<Vec<_>>()),
+            "member_roles": c.members.as_ref().map(|(_, m)| m
+                .iter()
+                .map(|x| (x.user.username.clone(), serde_json::json!(project_role_name(x.role))))
+                .collect::<serde_json::Map<_, _>>()),
             "org_members_listed": c.org_members.as_ref().map_or(0, |(_, m)| m.len()),
+            "usage_loaded": c.usage.is_some(),
+            "admin_error_code": c.admin_error_code,
             "usage_bytes": c.usage.as_ref().map(|(_, u)| u.used_bytes),
             "admin_error": match &c.dialog {
                 Some(CloudDialog::Members { error, .. } | CloudDialog::Organization { error, .. }) => error.clone(),
@@ -1096,10 +1104,15 @@ impl RcadApp {
             Event::ProjectMembers { project, members } => {
                 if let Some(CloudDialog::Members { error, .. }) = &mut c.dialog {
                     *error = None;
+                    c.admin_error_code = None;
                 }
                 c.members = Some((project, members));
             }
             Event::OrgMembers { org, members } => {
+                if let Some(CloudDialog::Organization { error, .. }) = &mut c.dialog {
+                    *error = None;
+                    c.admin_error_code = None;
+                }
                 c.org_members = Some((org, members));
             }
             Event::Usage { org, usage } => {

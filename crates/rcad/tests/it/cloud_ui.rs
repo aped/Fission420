@@ -818,6 +818,7 @@ fn members_dialog_edits_roles_and_explains_refusals_inline() {
     settle(&mut c.h);
     assert_eq!(probe(&c)["members_listed"], 1);
     assert_eq!(probe(&c)["members"][0]["role"], "Editor");
+    assert_eq!(probe(&c)["member_roles"]["bob"], "Editor");
 
     // Adding someone outside the organization: the server's 404 is explained in the window.
     type_into(&mut c.h, "Member username", "carol");
@@ -842,6 +843,7 @@ fn members_dialog_edits_roles_and_explains_refusals_inline() {
         .unwrap_or_default()
         .to_string();
     assert!(err.contains("member of the organization first"), "{err}");
+    assert_eq!(probe(&c)["admin_error_code"], "not_found");
     assert!(
         c.h.query_by_label_contains("member of the organization first")
             .is_some()
@@ -863,6 +865,7 @@ fn members_dialog_edits_roles_and_explains_refusals_inline() {
         }]
     );
     assert!(probe(&c)["admin_error"].is_null(), "a new change clears it");
+    assert!(probe(&c)["admin_error_code"].is_null());
     click(&mut c.h, "Remove bob");
     assert_eq!(
         drain(&c.req),

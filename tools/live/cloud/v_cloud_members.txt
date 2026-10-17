@@ -1,0 +1,54 @@
+# keymap: fusion
+# Members and organization administration against a running R-CAD server (not
+# part of the default walkthrough): http://127.0.0.1:18640 with users alice
+# (password alice-pass-123, owner of organization Home) and bob (a member of
+# Home), and project Parts already present. Alice adds bob to Parts as an
+# editor through the Members window, sees a refusal for a user outside the
+# organization explained in the window, and opens the Organization window.
+clickw Data panel
+clickw Connect to server…
+typew Server URL | http://127.0.0.1:18640
+typew Username | alice
+typew Password | alice-pass-123
+clickw Connect
+sleep 1500
+expect cloud.signed_in true
+expect cloud.user alice
+clickw Project Parts
+sleep 800
+clickw Members…
+sleep 800
+expect cloud.dialog_kind members
+# The new member's role defaults to Editor.
+typew Member username | bob
+clickw Add member
+sleep 800
+expect cloud.member_roles.bob Editor
+shot
+# Remove and add again: the window follows the server's list each time.
+clickw Remove bob
+sleep 800
+expect cloud.member_roles.bob null
+typew Member username | bob
+clickw Add member
+sleep 800
+expect cloud.member_roles.bob Editor
+# Someone who is not in the organization: the server answers 404 and the
+# window explains that they must join the organization first.
+typew Member username | nobody-here
+clickw Add member
+sleep 800
+expect cloud.admin_error_code not_found
+expect cloud.dialog_kind members
+shot
+clickw Close members
+expect cloud.dialog false
+# Alice owns Home: the Organization window lists members and storage.
+clickw Organization…
+sleep 1000
+expect cloud.dialog_kind organization
+expect cloud.org_members_listed 2
+expect cloud.usage_loaded true
+shot
+clickw Close organization
+expect cloud.dialog false

@@ -125,6 +125,7 @@ impl RcadApp {
 
     pub(super) fn cloud_open_members(&mut self, project: String) {
         self.cloud.members = None;
+        self.cloud.admin_error_code = None;
         self.cloud.dialog = Some(CloudDialog::Members {
             project: project.clone(),
             username: String::new(),
@@ -136,6 +137,7 @@ impl RcadApp {
 
     pub(super) fn cloud_open_organization(&mut self, org: String) {
         self.cloud.org_members = None;
+        self.cloud.admin_error_code = None;
         self.cloud.usage = None;
         self.cloud.dialog = Some(CloudDialog::Organization {
             org: org.clone(),
@@ -155,7 +157,10 @@ impl RcadApp {
         code: Option<ErrorCode>,
         message: &str,
     ) -> bool {
-        match &mut self.cloud.dialog {
+        let code_name = code
+            .and_then(|c| serde_json::to_value(c).ok())
+            .and_then(|v| v.as_str().map(String::from));
+        let shown = match &mut self.cloud.dialog {
             Some(CloudDialog::Members { error, .. }) if member_request(request) => {
                 *error = Some(member_error_text(request, code, message));
                 true
@@ -165,7 +170,11 @@ impl RcadApp {
                 true
             }
             _ => false,
+        };
+        if shown {
+            self.cloud.admin_error_code = code_name;
         }
+        shown
     }
 
     /// The Members window of a project.
@@ -310,6 +319,7 @@ impl RcadApp {
             });
         if !sends.is_empty() {
             error = None;
+            self.cloud.admin_error_code = None;
         }
         if matches!(self.cloud.dialog, Some(CloudDialog::Members { .. })) {
             self.cloud.dialog = if close {
@@ -487,6 +497,7 @@ impl RcadApp {
             });
         if !sends.is_empty() {
             error = None;
+            self.cloud.admin_error_code = None;
         }
         if matches!(self.cloud.dialog, Some(CloudDialog::Organization { .. })) {
             self.cloud.dialog = if close {
