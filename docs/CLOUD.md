@@ -97,9 +97,22 @@ on each server:
     the file do not change what is sent.
   - If a save's answer was lost (connection dropped after the server stored it), the replay
     finds the head already holding the same bytes and counts it as saved.
+  - A version can carry a thumbnail: a PNG of at most 1 MiB (the app captures the 3D view;
+    `rcad-cli cloud save|push --thumbnail FILE.png` takes one). It is checked (PNG
+    signature, size) before anything is sent, stored in the blob cache next to the
+    document snapshot (so a queued save keeps it), uploaded with the same missing/upload
+    steps and named in the version. A queued save whose thumbnail snapshot has gone from
+    the cache is saved without one.
   - 422 `hash_mismatch` when creating the version means the server no longer has the blob
     (for example, its garbage collection removed it after the upload check). The blob is
     uploaded again from the blob cache and the save retried once; a second refusal is final.
+- **Thumbnails.** `LoadThumbnail` reads the document detail for the thumbnail's hash and
+  answers from the blob cache when it has that hash; otherwise it downloads
+  `/versions/{n}/thumbnail`, capped at 1 MiB, and accepts it only with the PNG signature
+  and the right hash. A version without a thumbnail answers with none (no error).
+- **Newer version available.** `CheckHead` reads the document's head version; the app polls
+  it for the open cloud document (see docs/UI.md) and offers to update an unmodified
+  working copy.
 - **Sync.** Queued versions are sent in order.
   - The first conflict or lock stops the queue. That entry stays queued; resolve it by saving
     that file with force, which forces its queued versions too.
@@ -156,8 +169,8 @@ rcad-cli cloud whoami
 rcad-cli cloud orgs
 rcad-cli cloud projects <org-id>
 rcad-cli cloud tree <project-id>
-rcad-cli cloud push Bracket.rcad.json --project <id> [--folder <id>] [--name "Bracket"]
-rcad-cli cloud save Bracket.rcad.json -m "thicker web" [--milestone "Prototype A"] [--force]
+rcad-cli cloud push Bracket.rcad.json --project <id> [--folder <id>] [--name "Bracket"] [--thumbnail t.png]
+rcad-cli cloud save Bracket.rcad.json -m "thicker web" [--milestone "Prototype A"] [--force] [--thumbnail t.png]
 rcad-cli cloud pull <document-id> [--version N] [--out copy.rcad.json]
 rcad-cli cloud versions <document-id>
 rcad-cli cloud share <document-id> [--version N] [--days 7] [--download]
