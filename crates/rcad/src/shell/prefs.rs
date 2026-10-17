@@ -76,6 +76,11 @@ pub struct Prefs {
     /// "auto project edges on reference"; off by default here.
     #[serde(default)]
     pub auto_project_on_reference: bool,
+    /// Cloud documents: editing one asks the server for its edit lock and
+    /// saving a version releases it. Kept in builds without the cloud
+    /// feature so their saves do not drop it.
+    #[serde(default = "yes")]
+    pub cloud_auto_lock: bool,
 }
 
 fn yes() -> bool {
@@ -94,6 +99,7 @@ impl Default for Prefs {
             recent: vec![],
             auto_project_face_edges: true,
             auto_project_on_reference: false,
+            cloud_auto_lock: true,
         }
     }
 }

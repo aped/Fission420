@@ -360,6 +360,10 @@ fn write_probe(path: &std::path::Path, app: &RcadApp, last: &mut String) {
         })
         .collect();
     let assembly = format!("{assembly},\"bodies\":{{{}}}", body_state.join(","));
+    #[cfg(feature = "cloud")]
+    let assembly = format!("{assembly},\"cloud\":{}", app.cloud_probe());
+    #[cfg(not(feature = "cloud"))]
+    let assembly = format!("{assembly},\"cloud\":null");
     static FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let doc = format!(
@@ -497,6 +501,9 @@ fn main() -> ExitCode {
             // the recovery directory.
             if args.scene.is_none() && !args.demo && args.demo_place.is_none() {
                 app.enable_autosave();
+                // Starts nothing unless an account is configured.
+                #[cfg(feature = "cloud")]
+                app.enable_cloud();
             }
             if args.demo {
                 app.start_demo(std::env::temp_dir().join("r-cad-demo"));

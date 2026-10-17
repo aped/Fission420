@@ -330,6 +330,8 @@ impl RcadApp {
         for p in std::mem::take(&mut self.autosave.dropped) {
             remove_copy(&p);
         }
+        #[cfg(feature = "cloud")]
+        self.cloud_shutdown();
     }
 
     /// "Recover unsaved work" window (copies found at start-up).

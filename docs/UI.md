@@ -158,3 +158,58 @@ external exchange"; tests `crates/rcad/tests/import_cancel_ui.rs`, `stale_state.
 * **Glyphs:** `tests/it/glyphs.rs` fails on any character in the app's string literals that the UI
   font cannot draw (it would show as an empty box).
 UI tests: `crates/rcad/tests/it/first_run_ui.rs`, `edit_feature_ui.rs`, `glyphs.rs`, `polish_ui.rs`, `value_labels.rs`.
+
+## Cloud (optional server tier)
+
+R-CAD is complete without a server. The `cloud` feature of the `rcad` crate (on by default;
+`cargo build -p rcad --no-default-features` leaves it out entirely) adds a client for an R-CAD
+sync server: organizations, projects, document versions, edit locks, share links and comments.
+The workflow follows Fusion's Data Panel where that fits a local-first app.
+
+* **Nothing without an account.** At startup the app reads only the account file
+  (`<config>/r-cad/cloud.json`). With no account it starts no service thread, opens no socket,
+  writes no cache and shows no prompt. Scripted runs (`--scene`, `--demo`) never read it.
+* **Data panel** (application bar **Data**, left of File): a column left of the browser.
+  Signed out, it explains what a server adds and offers **Connect to server…** (server URL,
+  username, password; the password field is masked, Enter connects, Esc cancels, errors show in
+  the dialog and the message log). Signed in: server name, user, **Refresh**, **Sign out**, the
+  organization selector, then three sections. **Browse** lists projects (**New project…**), and a
+  selected project's folders and documents with their latest version, who saved it and a lock
+  mark (**New folder…**, **Upload current document…**, **Open** or double-click). **History**
+  and **Comments** belong to the open cloud document.
+* **Working copies.** Opening a cloud document downloads it into the cache and opens that file
+  through the normal Open path (with the unsaved-changes guard). A cloud document is an
+  ordinary local file: Save, autosave and recovery work as for any document, offline too.
+* **Status chip** (right side of the application bar, only for a cloud document):
+  `☁ Bracket v3 · Synced`, `Modified` (local edits since v3), `Offline · 2 pending`,
+  `Conflict`, `Locked by sam` or `Read-only`. Clicking it opens the version history (and retries
+  queued versions when offline).
+* **File menu:** **Save Version to Cloud…** (description and optional milestone; unsaved changes
+  are saved locally first), **Version History**, **Share Link…** (expiry in days, empty = never;
+  allow download; latest or a fixed version; the URL is shown once with **Copy**), **Comments**
+  and **Sync Now** (versions saved while the server was unreachable). They are registry commands
+  (command search finds them) and are disabled with a reason until they apply.
+* **Version history:** newest first, with author, UTC date and age, description and a star for
+  milestones. **Open vN** opens a read-only copy (Save Version is disabled for it), **Promote vN**
+  asks before making that version the latest, and milestones can be set or cleared.
+* **Conflicts:** when someone saved a newer version since the one the edit started from, a window
+  says so and offers to save as the next version anyway, to save as a new document
+  (`<name> (copy)`) or to cancel. The local file is never touched.
+* **Edit lock** (Fusion's reservation, simplified): with Preferences ▸ Cloud ▸ "Lock cloud
+  documents while I edit them" (default on), the first edit of a cloud document asks for its lock;
+  saving a version, opening another document or quitting releases it. A lock held by someone else
+  is only shown (chip and message log): local editing and local saving always work, and Save
+  Version fails until the lock is released.
+* **Messages:** every service error is logged as `Cloud: <message>` (errors from background work
+  such as refreshing or locking do not raise the error banner). Tokens and passwords are never
+  logged.
+* **Layout:** the Data panel narrows the 3D view rather than covering it; at 1280 px wide with
+  the panel open the view keeps at least 380 px and the application bar stays one row.
+
+Code `crates/rcad/src/cloud_ui.rs` (the calls that construct `rcad-cloud` objects are in its
+`adapter` module); screenshot scenes `cloud_browse` and `cloud_history` (a sample server's
+events, no network); UI tests `crates/rcad/tests/it/cloud_ui.rs` drive the widgets against a
+detached service, asserting the requests sent and the state after injected events. The live
+script `tools/live/cloud/u_cloud_roundtrip.txt` runs against a real server and is not part of the
+default walkthrough. The live-test probe reports the cloud state under `doc.cloud` (`signed_in`,
+`linked`, `version`, `state`, `pending`, `versions_listed`, `share_url`, …).

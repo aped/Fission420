@@ -35,6 +35,19 @@ pub enum CmdId {
     Help,
     About,
     Quit,
+    // Cloud (optional server tier)
+    #[cfg(feature = "cloud")]
+    DataPanel,
+    #[cfg(feature = "cloud")]
+    SaveVersion,
+    #[cfg(feature = "cloud")]
+    VersionHistory,
+    #[cfg(feature = "cloud")]
+    ShareLink,
+    #[cfg(feature = "cloud")]
+    CloudComments,
+    #[cfg(feature = "cloud")]
+    SyncNow,
     // View
     Fit,
     Section,
@@ -447,6 +460,43 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [k(Key::S)], classic: [],
         places: [Place::AppBar], mm: None,
         enabled: always, run: |a| a.open_command_search()),
+    // ----- Cloud (optional server tier) -----
+    #[cfg(feature = "cloud")]
+    def!(DataPanel, "Data panel", Generic,
+        "Projects and documents on an R-CAD server (optional; R-CAD works fully offline)",
+        fusion: [], classic: [],
+        places: [Place::AppBar], mm: None,
+        enabled: always, run: |a| a.toggle_data_panel()),
+    #[cfg(feature = "cloud")]
+    def!(SaveVersion, "Save Version to Cloud…", Save,
+        "Save the open cloud document as a new version on the server (saves locally first)",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_save_version_blocker(), run: |a| a.cloud_save_version_dialog()),
+    #[cfg(feature = "cloud")]
+    def!(VersionHistory, "Version History", Generic,
+        "Versions of the open cloud document: open read-only, promote, milestones",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_linked_blocker(), run: |a| a.cloud_version_history()),
+    #[cfg(feature = "cloud")]
+    def!(ShareLink, "Share Link…", Generic,
+        "A link to the open cloud document for people without an account",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_linked_blocker(), run: |a| a.cloud_share_dialog()),
+    #[cfg(feature = "cloud")]
+    def!(CloudComments, "Comments", Generic,
+        "Comments on the open cloud document",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_linked_blocker(), run: |a| a.cloud_comments()),
+    #[cfg(feature = "cloud")]
+    def!(SyncNow, "Sync Now", Generic,
+        "Send the versions saved while the server was unreachable",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_sync_blocker(), run: |a| a.cloud_sync_now()),
     // ----- View -----
     def!(Fit, "Fit view", View, "Fit the model in the view (in a sketch: look at the sketch)",
         fusion: [k(Key::F6)], classic: [k(Key::F)],
@@ -877,6 +927,18 @@ mod tests {
         CmdId::Help,
         CmdId::About,
         CmdId::Quit,
+        #[cfg(feature = "cloud")]
+        CmdId::DataPanel,
+        #[cfg(feature = "cloud")]
+        CmdId::SaveVersion,
+        #[cfg(feature = "cloud")]
+        CmdId::VersionHistory,
+        #[cfg(feature = "cloud")]
+        CmdId::ShareLink,
+        #[cfg(feature = "cloud")]
+        CmdId::CloudComments,
+        #[cfg(feature = "cloud")]
+        CmdId::SyncNow,
         CmdId::Fit,
         CmdId::Section,
         CmdId::ViewTop,

@@ -2412,6 +2412,7 @@ dependencies = [
  "eframe",
  "egui_kittest",
  "image",
+ "rcad-cloud",
  "rcad-commands",
  "rcad-document",
  "rcad-exchange",

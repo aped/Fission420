@@ -9,6 +9,8 @@
 mod assembly_tree_ui;
 mod assembly_ui;
 mod browser_tree_ui;
+#[cfg(feature = "cloud")]
+mod cloud_ui;
 mod command_registry_ui;
 mod config_table_ui;
 mod dialog_click;

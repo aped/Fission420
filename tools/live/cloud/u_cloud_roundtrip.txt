@@ -1,0 +1,60 @@
+# keymap: fusion
+# Cloud round trip against a running R-CAD server (not part of the default
+# walkthrough, which needs no server): http://127.0.0.1:18640 with user alice /
+# alice-pass-123, organization Home and project Parts already present. Sign in
+# through the Data panel, upload a copy of the bracket example, edit it, save
+# version 2, list the history and create a share link.
+key ctrl+o
+typew File path | @ROOT@/examples/bracket.rcad.json
+clickw OK
+wait_idle
+# Work on a copy so the repository's example is never modified.
+key ctrl+shift+s
+typew File path | @OUT@/bracket.rcad.json
+clickw OK
+wait_idle
+clickw Data panel
+clickw Connect to server…
+typew Server URL | http://127.0.0.1:18640
+typew Username | alice
+typew Password | alice-pass-123
+clickw Connect
+sleep 1500
+expect cloud.signed_in true
+expect cloud.user alice
+clickw Project Parts
+sleep 800
+clickw Upload current document…
+clickw Upload
+sleep 1500
+expect cloud.linked true
+expect cloud.version 1
+expect cloud.state synced
+shot
+# An edit: rename the first feature in the browser (F2 on the selection would
+# also do); any document change marks the working copy modified.
+clickw Bracket outline
+clickw Rename…
+key ctrl+a
+type Outline v2
+key Return
+wait_idle
+expect cloud.state modified
+clickw File menu
+clickw Save Version to Cloud…
+typew Version description | renamed outline
+clickw Save Version
+sleep 1500
+expect cloud.version 2
+expect cloud.state synced
+clickw File menu
+clickw Version History
+sleep 1000
+expect cloud.versions_listed 2
+shot
+clickw File menu
+clickw Share Link…
+clickw Create link
+sleep 1000
+expect cloud.has_share_url true
+shot
