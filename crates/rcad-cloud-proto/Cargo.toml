@@ -1,0 +1,16 @@
+[package]
+name = "rcad-cloud-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "Wire types of the optional R-CAD sync server protocol (open, implementable by any server)"
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -2439,6 +2439,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcad-cloud"
+version = "1.0.0"
+dependencies = [
+ "rcad-cloud-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rcad-cloud-proto"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rcad-commands"
 version = "1.0.0"
 dependencies = [

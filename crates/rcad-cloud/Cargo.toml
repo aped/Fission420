@@ -1,0 +1,19 @@
+[package]
+name = "rcad-cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+description = "Optional client for an R-CAD sync server: accounts, local cache, versions, sharing"
+
+[dependencies]
+rcad-cloud-proto = { path = "../rcad-cloud-proto" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
