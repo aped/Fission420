@@ -1493,3 +1493,231 @@ fn two_workers_queueing_at_once_lose_no_save() {
     });
     assert_eq!(h.cache().pending().unwrap().len(), 6 * 5);
 }
+
+/// A minimal "PNG" for the protocol checks (signature plus distinct bytes).
+fn png(tag: &str) -> Vec<u8> {
+    let mut v = rcad_cloud::client::PNG_SIGNATURE.to_vec();
+    v.extend_from_slice(tag.as_bytes());
+    v
+}
+
+fn save_with_thumbnail(h: &mut Harness, path: &Path, thumbnail: Vec<u8>) -> Vec<Event> {
+    h.run(Request::SaveVersion {
+        local_path: path.to_path_buf(),
+        description: "with picture".into(),
+        milestone: None,
+        force: false,
+        thumbnail: Some(thumbnail),
+    })
+}
+
+#[test]
+fn a_version_thumbnail_is_uploaded_named_and_loaded_from_the_cache() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    // Upload with a thumbnail.
+    let path = h.file("Bracket.rcad.json", b"v1");
+    let ev = h.run(Request::UploadNew {
+        local_path: path.clone(),
+        project: PROJECT.into(),
+        folder: None,
+        name: "Bracket".into(),
+        thumbnail: Some(png("one")),
+    });
+    let (doc, v1) = match ev.as_slice() {
+        [Event::VersionSaved { link, version }] => (link.document.clone(), version.clone()),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(v1.thumbnail, Some(rcad_cloud::blob_hash(&png("one"))));
+    std::fs::write(&path, b"v2").unwrap();
+    let ev = save_with_thumbnail(&mut h, &path, png("two"));
+    assert!(
+        matches!(ev.as_slice(), [Event::VersionSaved { version, .. }]
+            if version.thumbnail == Some(rcad_cloud::blob_hash(&png("two")))),
+        "{ev:?}"
+    );
+    {
+        let st = server.state.lock().unwrap();
+        let d = st.docs.iter().find(|d| d.summary.id == doc).unwrap();
+        assert!(d.summary.has_thumbnail);
+        assert!(st.blobs.contains_key(&rcad_cloud::blob_hash(&png("two"))));
+    }
+    // A plain save has none, and the head flag follows.
+    std::fs::write(&path, b"v3").unwrap();
+    assert!(
+        matches!(h.save(&path, false).as_slice(), [Event::VersionSaved { version, .. }]
+        if version.thumbnail.is_none())
+    );
+
+    // Loading: version 2 from the server, v3 has none. The thumbnail saved from this
+    // machine is already in the blob cache, so no download is needed for it.
+    let ev = h.run(Request::LoadThumbnail {
+        document: doc.clone(),
+        version: 2,
+    });
+    assert_eq!(
+        ev,
+        vec![Event::Thumbnail {
+            document: doc.clone(),
+            version: 2,
+            png: Some(png("two")),
+        }]
+    );
+    let thumb_gets = |s: &FakeServer| s.log().iter().filter(|l| l.ends_with("/thumbnail")).count();
+    assert_eq!(thumb_gets(&server), 0, "served from the blob cache");
+    let ev = h.run(Request::LoadThumbnail {
+        document: doc.clone(),
+        version: 3,
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::Thumbnail { png: None, .. }]),
+        "{ev:?}"
+    );
+
+    // Another machine (empty cache) downloads it once, then uses its cache.
+    let mut other = Harness::new();
+    other.sign_in(&server.url);
+    for _ in 0..2 {
+        let ev = other.run(Request::LoadThumbnail {
+            document: doc.clone(),
+            version: 1,
+        });
+        assert!(
+            matches!(ev.as_slice(), [Event::Thumbnail { png: Some(p), .. }] if *p == png("one")),
+            "{ev:?}"
+        );
+    }
+    assert_eq!(thumb_gets(&server), 1);
+}
+
+#[test]
+fn bad_thumbnails_are_refused_on_both_sides() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, doc) = h.upload("Plate", b"v1");
+    std::fs::write(&path, b"v2").unwrap();
+    let versions_posted = |s: &FakeServer| {
+        s.log()
+            .iter()
+            .filter(|l| l.starts_with("POST") && l.ends_with("/versions"))
+            .count()
+    };
+    let before = versions_posted(&server);
+    // Not a PNG, and too large: refused before anything is sent.
+    for bad in [
+        b"GIF89a not a png".to_vec(),
+        png(&"x".repeat(proto::MAX_THUMBNAIL_BYTES as usize)),
+    ] {
+        let ev = save_with_thumbnail(&mut h, &path, bad);
+        assert!(
+            matches!(
+                ev.as_slice(),
+                [Event::Error {
+                    request: "save_version",
+                    code: None,
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+    }
+    assert_eq!(versions_posted(&server), before);
+    assert!(h.cache().pending().unwrap().is_empty());
+
+    // A server that serves a non-PNG or oversized thumbnail: an error, nothing cached.
+    let ev = save_with_thumbnail(&mut h, &path, png("real"));
+    assert!(
+        matches!(ev.as_slice(), [Event::VersionSaved { .. }]),
+        "{ev:?}"
+    );
+    let mut other = Harness::new();
+    other.sign_in(&server.url);
+    for served in [
+        b"<html>not an image</html>".to_vec(),
+        png(&"y".repeat(proto::MAX_THUMBNAIL_BYTES as usize + 10)),
+        png("different bytes"),
+    ] {
+        server.state.lock().unwrap().thumbnail_override = Some(served);
+        let ev = other.run(Request::LoadThumbnail {
+            document: doc.clone(),
+            version: 2,
+        });
+        assert!(
+            matches!(
+                ev.as_slice(),
+                [Event::Error {
+                    request: "load_thumbnail",
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+        assert!(!other.cache().has_blob(&rcad_cloud::blob_hash(&png("real"))));
+    }
+}
+
+#[test]
+fn a_queued_save_keeps_its_thumbnail() {
+    let server = FakeServer::start();
+    let port = server.port;
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, _doc) = h.upload("Hinge", b"v1");
+    let state = server.stop();
+    std::fs::write(&path, b"v2").unwrap();
+    assert_eq!(
+        save_with_thumbnail(&mut h, &path, png("offline")),
+        vec![Event::Offline { pending: 1 }]
+    );
+    let queued = h.cache().pending().unwrap();
+    assert_eq!(
+        queued[0].thumbnail,
+        Some(rcad_cloud::blob_hash(&png("offline")))
+    );
+    assert!(h.cache().has_blob(&rcad_cloud::blob_hash(&png("offline"))));
+    let server = FakeServer::start_on(port, state);
+    let ev = h.run(Request::SyncPending);
+    assert!(
+        matches!(ev.as_slice(), [Event::VersionSaved { version, .. }, Event::Synced { pending: 0 }]
+            if version.thumbnail == Some(rcad_cloud::blob_hash(&png("offline")))),
+        "{ev:?}"
+    );
+    // If the thumbnail snapshot is gone from the cache, the version is still saved.
+    let state = server.stop();
+    std::fs::write(&path, b"v3").unwrap();
+    save_with_thumbnail(&mut h, &path, png("lost"));
+    let c = h.cache();
+    std::fs::remove_file(c.blob_path(&rcad_cloud::blob_hash(&png("lost"))).unwrap()).unwrap();
+    let _server = FakeServer::start_on(port, state);
+    let ev = h.run(Request::SyncPending);
+    assert!(
+        matches!(ev.as_slice(), [Event::VersionSaved { version, .. }, Event::Synced { pending: 0 }]
+            if version.number == 3 && version.thumbnail.is_none()),
+        "{ev:?}"
+    );
+}
+
+#[test]
+fn check_head_reports_the_current_head() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (_, doc) = h.upload("Axle", b"v1");
+    server.state.lock().unwrap().save_as(&doc, "bob", b"bob's");
+    assert_eq!(
+        h.run(Request::CheckHead {
+            document: doc.clone()
+        }),
+        vec![Event::Head {
+            document: doc.clone(),
+            head_version: 2
+        }]
+    );
+    drop(server);
+    assert!(matches!(
+        h.run(Request::CheckHead { document: doc }).as_slice(),
+        [Event::Offline { .. }]
+    ));
+}

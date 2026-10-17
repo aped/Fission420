@@ -485,3 +485,56 @@ fn concurrent_cli_processes_queue_every_save() {
         "{v}"
     );
 }
+
+#[test]
+fn save_and_push_take_an_optional_thumbnail() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let mut png = rcad_cloud::client::PNG_SIGNATURE.to_vec();
+    png.extend_from_slice(b"thumb");
+    let thumb = env.file("t.png", &png);
+    let not_png = env.file("t.gif", b"GIF89a");
+    let file = env.file("part.rcad.json", b"v1");
+    let o = env.cli(
+        &[
+            "--json",
+            "push",
+            file.to_str().unwrap(),
+            "--project",
+            PROJECT,
+            "--thumbnail",
+            thumb.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().next().unwrap()).unwrap();
+    assert_eq!(v["version"]["thumbnail"], rcad_cloud::blob_hash(&png));
+    std::fs::write(&file, b"v2").unwrap();
+    let posts = |s: &FakeServer| s.log().iter().filter(|l| l.ends_with("/versions")).count();
+    let before = posts(&server);
+    let o = env.cli(
+        &[
+            "save",
+            file.to_str().unwrap(),
+            "--thumbnail",
+            not_png.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("not a PNG"), "{}", text(&o));
+    assert_eq!(posts(&server), before, "nothing sent");
+    let o = env.cli(
+        &[
+            "save",
+            file.to_str().unwrap(),
+            "--thumbnail",
+            thumb.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+}
