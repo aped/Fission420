@@ -39,6 +39,8 @@ pub struct State {
     /// Answer this many version saves by deleting the referenced blob and failing with 422
     /// `hash_mismatch` (a garbage collection racing the save).
     pub drop_blob_on_save: u32,
+    /// Serve these bytes for every thumbnail instead of the stored PNG.
+    pub thumbnail_override: Option<Vec<u8>>,
     pub logins: Vec<proto::LoginRequest>,
     /// Documents in the trash.
     pub trash: Vec<Doc>,
@@ -90,6 +92,7 @@ impl State {
             tamper_content: false,
             inflate_content: 0,
             drop_blob_on_save: 0,
+            thumbnail_override: None,
             logins: Vec::new(),
             trash: Vec::new(),
             org_members: vec![
@@ -138,7 +141,9 @@ impl State {
             milestone: None,
             promoted_from: None,
             generator: String::new(),
+            thumbnail: None,
         });
+        d.summary.has_thumbnail = false;
         d.summary.head_version = n;
         n
     }
@@ -573,6 +578,7 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 updated_at: 1,
                 updated_by: who.clone(),
                 lock: None,
+                has_thumbnail: false,
             };
             st.docs.push(Doc {
                 summary: summary.clone(),
@@ -601,6 +607,18 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 return err(422, ErrorCode::HashMismatch, "blob missing");
             }
             let blob_len = st.blobs[&req.blob].len() as u64;
+            if let Some(t) = &req.thumbnail {
+                match st.blobs.get(t) {
+                    None => return err(422, ErrorCode::HashMismatch, "thumbnail blob missing"),
+                    Some(png)
+                        if png.len() as u64 > proto::MAX_THUMBNAIL_BYTES
+                            || !png.starts_with(b"\x89PNG\r\n\x1a\n") =>
+                    {
+                        return err(400, ErrorCode::BadRequest, "thumbnail is not a PNG");
+                    }
+                    Some(_) => {}
+                }
+            }
             let Some(doc) = st.doc_mut(d) else {
                 return err(404, ErrorCode::NotFound, "no document");
             };
@@ -637,9 +655,11 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 milestone: req.milestone,
                 promoted_from: None,
                 generator: req.generator,
+                thumbnail: req.thumbnail,
             };
             doc.versions.push(v.clone());
             doc.summary.head_version = v.number;
+            doc.summary.has_thumbnail = v.thumbnail.is_some();
             json(200, &v)
         }
         ("PATCH", ["documents", d, "versions", n]) => {
@@ -682,7 +702,25 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
             };
             doc.versions.push(v.clone());
             doc.summary.head_version = v.number;
+            doc.summary.has_thumbnail = v.thumbnail.is_some();
             json(200, &v)
+        }
+        ("GET", ["documents", d, "versions", n, "thumbnail"]) => {
+            let n: u64 = n.parse().unwrap_or(0);
+            let Some(t) = st
+                .docs
+                .iter()
+                .find(|x| x.summary.id == *d)
+                .and_then(|doc| doc.versions.iter().find(|v| v.number == n))
+                .and_then(|v| v.thumbnail.clone())
+            else {
+                return err(404, ErrorCode::NotFound, "no thumbnail");
+            };
+            let mut bytes = st.blobs.get(&t).cloned().unwrap_or_default();
+            if let Some(body) = st.thumbnail_override.clone() {
+                bytes = body;
+            }
+            (200, bytes, "image/png")
         }
         ("GET", ["documents", d, "versions", n, "content"]) => {
             let n: u64 = n.parse().unwrap_or(0);

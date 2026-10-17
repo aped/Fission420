@@ -113,6 +113,7 @@ fn version(n: u64, milestone: Option<&str>) -> proto::Version {
         milestone: milestone.map(String::from),
         promoted_from: None,
         generator: String::new(),
+        thumbnail: None,
     }
 }
 
@@ -126,6 +127,7 @@ fn summary(head: u64) -> proto::DocumentSummary {
         updated_at: 1_792_224_300,
         updated_by: "alice".into(),
         lock: None,
+        has_thumbnail: false,
     }
 }
 

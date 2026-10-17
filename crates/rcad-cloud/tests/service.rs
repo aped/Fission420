@@ -101,6 +101,7 @@ fn server_doc(server: &FakeServer, name: &str, bytes: &[u8]) -> String {
             updated_at: 1,
             updated_by: "bob".into(),
             lock: None,
+            has_thumbnail: false,
         },
         versions: Vec::new(),
         lock: None,

@@ -165,6 +165,7 @@ fn signed_in_with_a_project(
             updated_at: 1,
             updated_by: "alice".into(),
             lock: None,
+            has_thumbnail: false,
         }],
         trash: vec![],
     }))

@@ -729,6 +729,7 @@ impl RcadApp {
                     since: t0,
                     expires_at: t0 + 900,
                 }),
+                has_thumbnail: false,
             }
         };
         let version =
@@ -742,6 +743,7 @@ impl RcadApp {
                 milestone: milestone.map(String::from),
                 promoted_from: None,
                 generator: String::new(),
+                thumbnail: None,
             };
         let events = vec![
             Event::SignedIn {
