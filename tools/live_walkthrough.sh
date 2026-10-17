@@ -12,6 +12,9 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/artifacts/live_walkthrough}
+# Absolute: the app ignores a relative XDG_CONFIG_HOME/XDG_CACHE_HOME and would fall back
+# to the user's own preferences and cloud cache.
+mkdir -p "$OUT" && OUT=$(cd "$OUT" && pwd)
 FILTER=${2:-}
 APP=${CARGO_TARGET_DIR:-$ROOT/target}/release/rcad
 [ -x "$APP" ] || { echo "build first: cargo build --release -p rcad"; exit 2; }
