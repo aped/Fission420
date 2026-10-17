@@ -1558,6 +1558,7 @@ impl Worker {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn upload_new(
         &self,
         s: &Session,
@@ -1611,6 +1612,7 @@ impl Worker {
         self.push_or_queue(s, &link, save, emit)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn save_version(
         &self,
         s: &Session,
