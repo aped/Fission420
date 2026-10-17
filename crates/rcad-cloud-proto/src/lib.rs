@@ -63,7 +63,7 @@
 //! DELETE /api/v1/documents/{doc}/lock                   → 204 (holder, or project admin breaks it)
 //! GET    /api/v1/documents/{doc}/comments               → Vec<Comment>          (viewer)
 //! POST   /api/v1/documents/{doc}/comments CreateCommentRequest → Comment        (commenter)
-//! PATCH  /api/v1/comments/{comment}    UpdateCommentRequest → Comment           (author or project admin)
+//! PATCH  /api/v1/comments/{comment}    UpdateCommentRequest → Comment           (body: author; resolve: author or editor+)
 //! GET    /api/v1/documents/{doc}/shares                 → Vec<ShareLink>        (editor)
 //! POST   /api/v1/documents/{doc}/shares CreateShareRequest → CreateShareResponse (editor)
 //! DELETE /api/v1/shares/{share}                         → 204                   (editor)

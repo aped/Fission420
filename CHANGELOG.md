@@ -5,6 +5,19 @@ the native document format has its own version number (`"version"` in `*.rcad.js
 which format versions a build reads and writes is listed in
 [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md).
 
+## [Unreleased]
+
+### Added
+
+- **Optional sync server client.** R-CAD stays complete offline with no account; adding an
+  account for a self-hosted server (protocol in `crates/rcad-cloud-proto`, documented routes,
+  JSON over HTTPS) adds a Data panel with organizations, projects and folders, Save Version
+  (numbered server versions, milestones, conflict detection against the version you started
+  from), Version History (open read-only, promote), edit locks taken on the first edit,
+  share links, comments, and an offline queue that uploads saved versions later.
+  `rcad-cli cloud` does the same from scripts. Builds without the `cloud` feature contain
+  none of it. See `docs/CLOUD.md`.
+
 ## [1.0.0] - 2026-10-15
 
 First stable release. From 1.0 on, the command API (`docs/COMMANDS.md`), the CLI and the

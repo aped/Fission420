@@ -58,6 +58,7 @@ R-CAD is a small, inspectable modeler that does a few things properly:
 | **Mesh** | Mesh diagnosis (boundaries, non-manifold, orientation, duplicates, components, bounded self-intersection check), repair, transform/unit conversion, plane cut with caps, decimation with measured deviation |
 | **Print export** | STL / 3MF with chord control, separate objects with their own transforms, place-on-bed by face, side-by-side layout, bed-fit check (Bambu Lab P1S preset), closed/manifold mesh verification |
 | **Interchange** | STEP import/export (exact B-rep subset, assemblies, surface bodies), STL and 3MF import/export, DXF and SVG sketch import/export. See [`docs/FORMAT_SUPPORT.md`](docs/FORMAT_SUPPORT.md) |
+| **Optional sync server** | Off unless you add an account: connect to a self-hosted R-CAD server for organizations, shared projects, server-side versions with milestones and conflict detection, edit locks, share links and comments. Documents stay ordinary local files; saves made offline upload later. See [`docs/CLOUD.md`](docs/CLOUD.md) |
 | **Native format** | Versioned `.rcad.json` (v9; older versions written when newer features are unused) with automatic migration from every earlier version and atomic saves that never destroy the previous file |
 
 ## Screenshots
@@ -162,6 +163,9 @@ flowchart LR
     exchange["rcad-exchange<br/><sub>STL, 3MF, DXF, SVG</sub>"] --> sketch
     kernel["rcad-kernel<br/><sub>B-rep ops, validation,<br/>tessellation, STEP</sub>"] --> truck[("Truck")]
     sketch["rcad-sketch<br/><sub>entities, constraints, solver</sub>"]
+    app -. "optional" .-> cloud["rcad-cloud<br/><sub>sync client, cache</sub>"]
+    cli -.-> cloud
+    cloud --> proto["rcad-cloud-proto<br/><sub>open wire types</sub>"]
 ```
 
 Geometry and document crates build and run without a window or GPU. Decisions are recorded
@@ -218,6 +222,7 @@ The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | [`docs/TOLERANCES.md`](docs/TOLERANCES.md) | every tolerance and why |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | release archives, building from source |
 | [`docs/UI.md`](docs/UI.md) | desktop app layout, menus and dialogs |
+| [`docs/CLOUD.md`](docs/CLOUD.md) | the optional sync server: what it adds, guarantees for offline use, client cache, CLI |
 | [`docs/CI.md`](docs/CI.md) | CI pipeline, gating, toolchain pin, release archives |
 | [`docs/ASSEMBLIES.md`](docs/ASSEMBLIES.md), [`docs/DRAWINGS.md`](docs/DRAWINGS.md), [`docs/SHEET_METAL.md`](docs/SHEET_METAL.md), [`docs/MATERIALS.md`](docs/MATERIALS.md) | assemblies, drawings, sheet metal, materials (supported subsets) |
 | [`docs/adr/`](docs/adr) | architecture decisions |
