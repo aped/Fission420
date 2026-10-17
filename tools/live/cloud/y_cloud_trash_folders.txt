@@ -1,0 +1,78 @@
+# keymap: fusion
+# Folders, rename, move and trash against a running R-CAD server (not part of the
+# default walkthrough): http://127.0.0.1:18640 with user alice / alice-pass-123,
+# organization Home and project Parts already present. Creates folder Fixtures,
+# uploads a copy of the bracket example into it as FixturePlate, renames it to
+# FixturePlate2, moves it to the project root, moves it to the trash and restores it.
+key ctrl+o
+typew File path | @ROOT@/examples/bracket.rcad.json
+clickw OK
+wait_idle
+key ctrl+shift+s
+typew File path | @OUT@/plate.rcad.json
+clickw OK
+wait_idle
+clickw Data panel
+clickw Connect to server…
+typew Server URL | http://127.0.0.1:18640
+typew Username | alice
+typew Password | alice-pass-123
+clickw Connect
+sleep 1500
+expect cloud.signed_in true
+clickw Project Parts
+sleep 800
+clickw New folder…
+expect cloud.dialog_kind new_folder
+typew Folder name | Fixtures
+clickw Create folder
+sleep 1000
+expect cloud.dialog false
+expect cloud.folders_listed 1
+# Upload into the new folder (chosen in the dialog's folder list).
+clickw Upload current document…
+typew Document name | FixturePlate
+clickw Folder list: Folder
+clickw Folder: Fixtures
+clickw Upload
+sleep 1500
+expect cloud.linked true
+expect cloud.document FixturePlate
+expect cloud.document_folders.FixturePlate Fixtures
+shot
+# Rename.
+clickw Document FixturePlate
+clickw Rename document…
+expect cloud.dialog_kind rename_document
+typew New name | FixturePlate2
+clickw Rename document
+sleep 1000
+expect cloud.document_folders.FixturePlate null
+expect cloud.document_folders.FixturePlate2 Fixtures
+expect cloud.document FixturePlate2
+# Move to the project root.
+clickw Document FixturePlate2
+clickw Move document…
+expect cloud.dialog_kind move_document
+clickw Folder list: Move to
+clickw Move to: (project root)
+clickw Move document
+sleep 1000
+expect cloud.document_folders.FixturePlate2 /
+# Trash, then restore from the trash list.
+clickw Document FixturePlate2
+clickw Move document to trash…
+expect cloud.dialog_kind trash_document
+clickw Confirm move to trash
+sleep 1000
+expect cloud.trash_listed 1
+expect cloud.document_folders.FixturePlate2 null
+clickw Trash
+sleep 500
+expect cloud.show_trash true
+shot
+clickw Restore FixturePlate2
+sleep 1000
+expect cloud.trash_listed 0
+expect cloud.document_folders.FixturePlate2 /
+shot
