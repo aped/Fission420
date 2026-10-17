@@ -125,3 +125,60 @@ fn gpu_renders_selection_hover_edges_and_grid() {
     save_ppm("top_dimmed_grid.ppm", &px3, w, h);
     assert!(vp.grid_spacing() * vp.pixels_per_mm() >= MIN_CELL_PX);
 }
+
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn gpu_thumbnail_is_clean_fitted_and_leaves_the_view_alone() {
+    let Some(rs) = render_state() else {
+        eprintln!("no wgpu adapter; skipping");
+        return;
+    };
+    let mut vp = Viewport::with_render_state(&rs);
+    assert!(vp.render_thumbnail(64).is_none(), "no mesh, no thumbnail");
+    let mesh = box_mesh([-40.0, -30.0, 0.0], [40.0, 30.0, 25.0]);
+    vp.set_mesh(&mesh).expect("mesh");
+    // Everything a thumbnail must not show: selection, hover, dimming, a section,
+    // a zoomed-in top view of one corner.
+    vp.set_selection(&[5]);
+    vp.set_highlight(Some(1));
+    vp.set_dimmed(true);
+    vp.set_section(Some(SectionPlane {
+        normal: [1.0, 0.0, 0.0],
+        offset: 0.0,
+    }));
+    vp.set_view(ViewPreset::Top);
+    vp.fit_to([40.0, 30.0, 25.0], 2.0);
+    let before = vp.camera.clone();
+    let px = vp.render_thumbnail(256).expect("thumbnail");
+    assert_eq!(px.len(), 256 * 256 * 4);
+    save_ppm("thumbnail.ppm", &px, 256, 256);
+    assert_eq!(vp.camera, before, "the window's camera is untouched");
+    let count = |pred: &dyn Fn([u8; 3]) -> bool| {
+        px.as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|c| pred([c[0], c[1], c[2]]))
+            .count()
+    };
+    // Identical to the thumbnail of an undecorated view of the same mesh.
+    let mut plain = Viewport::with_render_state(&rs);
+    plain.set_mesh(&mesh).expect("mesh");
+    assert!(
+        plain.render_thumbnail(256).expect("plain") == px,
+        "selection, hover, dimming, section and camera must not show"
+    );
+    // Light backdrop in the corners, the body (whole, not sectioned) in the middle
+    // and on both sides of the section plane.
+    let bg = |c: [u8; 3]| c.iter().all(|&v| v > 200);
+    for (x, y) in [(1, 1), (254, 1), (1, 254), (254, 254)] {
+        assert!(bg(pixel(&px, 256, x, y)), "corner {x},{y}");
+    }
+    let cam = vp.thumbnail_camera().unwrap();
+    for p in [[-20.0, 0.0, 25.0], [20.0, 0.0, 25.0]] {
+        let [x, y] = cam.project(p, 256.0, 256.0).unwrap();
+        assert!(!bg(pixel(&px, 256, x as u32, y as u32)), "body at {p:?}");
+    }
+    // The body fills a good part of the square.
+    let body = count(&|c| !c.iter().all(|&v| v > 200));
+    assert!(body > 256 * 256 / 5, "body pixels: {body}");
+}

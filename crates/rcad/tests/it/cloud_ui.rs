@@ -1548,39 +1548,23 @@ fn thumbnails_load_once_and_show_in_rows_and_history() {
 }
 
 #[test]
-fn a_version_save_waiting_for_its_thumbnail_is_still_sent() {
+fn a_version_save_without_a_gpu_view_goes_out_at_once_without_a_thumbnail() {
     let mut c = opened([1400.0, 900.0]);
     c.h.state_mut().set_cloud_thumbnail_capture(true);
     drain(&c.req);
     file_menu(&mut c.h, "Save Version to Cloud…");
     type_into(&mut c.h, "Version description", "with a picture");
     click(&mut c.h, "Save Version");
-    // The request waits for the screenshot, or goes without one after a
-    // short timeout when the renderer cannot take one.
-    let start = Instant::now();
-    let sent = loop {
-        let _ = c.h.try_run();
-        let sent = drain(&c.req);
-        if !sent.is_empty() {
-            break sent;
-        }
-        assert!(start.elapsed() < Duration::from_secs(10), "never sent");
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    match sent.as_slice() {
+    // The thumbnail is rendered offscreen in the same frame; the test harness has
+    // no GPU view, so the request goes out immediately, without one.
+    match drain(&c.req).as_slice() {
         [
             Request::SaveVersion {
                 description,
-                thumbnail,
+                thumbnail: None,
                 ..
             },
-        ] => {
-            assert_eq!(description, "with a picture");
-            if let Some(png) = thumbnail {
-                assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
-                assert!(png.len() as u64 <= proto::MAX_THUMBNAIL_BYTES);
-            }
-        }
+        ] => assert_eq!(description, "with a picture"),
         other => panic!("{other:?}"),
     }
 }

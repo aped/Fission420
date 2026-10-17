@@ -335,11 +335,9 @@ pub struct CloudUi {
     save_to_cloud_after_save: bool,
     /// Code of the error shown in the Members or Organization window (probe).
     admin_error_code: Option<String>,
-    /// Screenshots of the 3D view become version thumbnails (interactive app
-    /// only; tests and headless runs send versions without one).
+    /// Versions saved or uploaded get a thumbnail rendered from the model
+    /// (interactive app only; tests opt in, and without a GPU view there is none).
     capture_thumbnails: bool,
-    /// A version save or upload waiting for its thumbnail screenshot.
-    shot: Option<ShotWait>,
     /// Thumbnails asked for, by (document, version): never asked twice.
     thumb_asked: HashSet<ThumbKey>,
     /// Thumbnail PNGs received and not yet turned into textures.
@@ -361,16 +359,6 @@ type ThumbKey = (String, u64);
 /// How often the open cloud document's head (and, with the Data panel open,
 /// the project list) is polled.
 pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
-/// How long a save waits for its thumbnail screenshot before it is sent
-/// without one.
-const SHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
-
-/// A request waiting for the thumbnail screenshot.
-struct ShotWait {
-    request: Request,
-    started: std::time::Instant,
-    requested: bool,
-}
 
 /// Panel actions collected while drawing and applied afterwards.
 enum Action {
@@ -920,7 +908,6 @@ impl RcadApp {
             self.cloud_event(e);
         }
         self.cloud_thumbnail_textures(ctx);
-        self.cloud_shot_tick(ctx);
         self.cloud_poll(ctx);
         if self.cloud.save_to_cloud_after_save
             && self.dialog.is_none()
@@ -1681,63 +1668,27 @@ impl RcadApp {
         }
     }
 
-    /// Send a version save or upload, with a thumbnail of the 3D view when
-    /// the app can take screenshots: the request waits (at most
-    /// [`SHOT_TIMEOUT`]) for the screenshot, then goes out with or without it.
-    fn cloud_send_with_thumbnail(&mut self, request: Request) {
-        if !self.cloud.capture_thumbnails || self.view_rect.is_none() {
-            return self.cloud_send(request);
+    /// Send a version save or upload with a thumbnail of the model when the
+    /// app has a GPU view: a clean offscreen render (fitted isometric view, no
+    /// sketches, dimensions, selection, hover, section or other overlays; see
+    /// `rcad_viewport::Viewport::render_thumbnail`). The window's view is not
+    /// changed, so nothing flickers. Without a view or a body the request goes
+    /// out without a thumbnail.
+    fn cloud_send_with_thumbnail(&mut self, mut request: Request) {
+        if self.cloud.capture_thumbnails {
+            let side = 2 * thumb::THUMBNAIL_PX;
+            let png = self
+                .viewport
+                .as_ref()
+                .and_then(|vp| vp.render_thumbnail(side))
+                .and_then(|rgba| thumb::thumbnail_png(&rgba, side));
+            if let Request::SaveVersion { thumbnail, .. } | Request::UploadNew { thumbnail, .. } =
+                &mut request
+            {
+                *thumbnail = png;
+            }
         }
-        // One at a time: an older waiting request goes out without a thumbnail.
-        if let Some(old) = self.cloud.shot.take() {
-            self.cloud_send(old.request);
-        }
-        self.cloud.shot = Some(ShotWait {
-            request,
-            started: std::time::Instant::now(),
-            requested: false,
-        });
-    }
-
-    /// Drive a waiting thumbnail screenshot (see [`Self::cloud_send_with_thumbnail`]).
-    fn cloud_shot_tick(&mut self, ctx: &egui::Context) {
-        let Some(wait) = self.cloud.shot.as_mut() else {
-            return;
-        };
-        ctx.request_repaint();
-        if !wait.requested {
-            wait.requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
-                thumb::ThumbnailShot,
-            )));
-            return;
-        }
-        let image = ctx.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                egui::Event::Screenshot {
-                    image, user_data, ..
-                } if thumb::is_thumbnail_shot(user_data) => Some(image.clone()),
-                _ => None,
-            })
-        });
-        let timed_out = wait.started.elapsed() > SHOT_TIMEOUT;
-        if image.is_none() && !timed_out {
-            return;
-        }
-        let Some(mut wait) = self.cloud.shot.take() else {
-            return;
-        };
-        let ppp = ctx.pixels_per_point();
-        let crop = self
-            .view_rect
-            .map(|r| [r.min.x * ppp, r.min.y * ppp, r.max.x * ppp, r.max.y * ppp]);
-        let png = image.and_then(|img| thumb::thumbnail_png(&img, crop));
-        if let Request::SaveVersion { thumbnail, .. } | Request::UploadNew { thumbnail, .. } =
-            &mut wait.request
-        {
-            *thumbnail = png;
-        }
-        self.cloud_send(wait.request);
+        self.cloud_send(request);
     }
 
     /// Turn received thumbnail PNGs into textures.

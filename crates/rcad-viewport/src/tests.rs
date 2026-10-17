@@ -603,3 +603,36 @@ fn hover_pick_timing() {
         build * 1e3
     );
 }
+
+#[test]
+fn thumbnail_camera_is_isometric_and_frames_every_corner() {
+    for (min, max) in [
+        ([-40.0, -30.0, 0.0], [40.0, 30.0, 25.0]),
+        ([100.0, 200.0, -5.0], [101.0, 260.0, 5.0]),
+        ([-500.0, -2.0, -2.0], [500.0, 2.0, 2.0]),
+    ] {
+        let b = Aabb { min, max };
+        let cam = thumbnail_camera_for(b);
+        let (yaw, pitch) = ViewPreset::Iso.yaw_pitch();
+        let tau = std::f32::consts::TAU;
+        assert!(
+            (cam.yaw - yaw.rem_euclid(tau)).abs() < 1e-5,
+            "{} {yaw}",
+            cam.yaw
+        );
+        assert!((cam.pitch - pitch).abs() < 1e-6);
+        assert_eq!(cam.target, b.center());
+        for i in 0..8 {
+            let corner = [
+                if i & 1 == 0 { min[0] } else { max[0] },
+                if i & 2 == 0 { min[1] } else { max[1] },
+                if i & 4 == 0 { min[2] } else { max[2] },
+            ];
+            let [x, y] = cam.project(corner, 256.0, 256.0).expect("in front");
+            assert!(
+                (0.0..=256.0).contains(&x) && (0.0..=256.0).contains(&y),
+                "{corner:?} -> {x},{y}"
+            );
+        }
+    }
+}

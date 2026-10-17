@@ -433,52 +433,187 @@ impl Gpu {
     }
 }
 
+impl Gpu {
+    /// Render the current mesh once into a private `size` target, with `flags` in place
+    /// of the mesh's flag buffer and `edges` in place of the edge and grid lines, and read
+    /// the result back as tightly packed RGBA8 (blocks until the GPU is done). The view
+    /// shown in the window is not touched. None when there is no mesh, the flag count
+    /// does not match it, or the GPU work fails.
+    pub fn render_offscreen(
+        &self,
+        size: [u32; 2],
+        uniforms: &Uniforms,
+        clear: [f64; 3],
+        flags: &[u32],
+        edges: &[LineVertex],
+    ) -> Option<Vec<u8>> {
+        let (mesh, n) = self.mesh_buf.as_ref()?;
+        if u32::try_from(flags.len()).ok()? != *n {
+            return None;
+        }
+        let device = &self.render_state.device;
+        let queue = &self.render_state.queue;
+        let max_dim = device.limits().max_texture_dimension_2d;
+        let [w, h] = size;
+        if w == 0 || h == 0 || w > max_dim || h > max_dim {
+            return None;
+        }
+        let extent = wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        };
+        let make = |label, format, samples, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+        let resolve_tex = make(
+            "rcad_offscreen_color",
+            COLOR_FORMAT,
+            1,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        );
+        let resolve_view = view(&resolve_tex);
+        let msaa_view = (self.sample_count > 1).then(|| {
+            view(&make(
+                "rcad_offscreen_msaa",
+                COLOR_FORMAT,
+                self.sample_count,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            ))
+        });
+        let depth_view = view(&make(
+            "rcad_offscreen_depth",
+            DEPTH_FORMAT,
+            self.sample_count,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ));
+        let (flag_buf, _) = upload(device, "rcad_offscreen_flags", flags)?;
+        let edge_buf = upload(device, "rcad_offscreen_edges", edges);
+        // The shared uniform buffer is rewritten by the next window frame before it
+        // renders, so borrowing it here does not disturb the visible view.
+        queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(uniforms));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("rcad_offscreen_encoder"),
+        });
+        {
+            let (color, resolve_target) = match &msaa_view {
+                Some(msaa) => (msaa, Some(&resolve_view)),
+                None => (&resolve_view, None),
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("rcad_offscreen_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color,
+                    depth_slice: None,
+                    resolve_target,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear[0],
+                            g: clear[1],
+                            b: clear[2],
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_pipeline(&self.mesh_pipeline);
+            pass.set_vertex_buffer(0, mesh.slice(..));
+            pass.set_vertex_buffer(1, flag_buf.slice(..));
+            pass.draw(0..*n, 0..1);
+            if let Some((buf, count)) = &edge_buf {
+                pass.set_pipeline(&self.line_pipeline);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..*count, 0..1);
+            }
+        }
+        queue.submit(Some(encoder.finish()));
+        read_texture(device, queue, &resolve_tex, [w, h])
+    }
+}
+
+/// Copy `texture` (RGBA8, `size`) back to the CPU as tightly packed rows.
+fn read_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    [w, h]: [u32; 2],
+) -> Option<Vec<u8>> {
+    let row = (w * 4).div_ceil(256) * 256;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rcad_readback"),
+        size: u64::from(row) * u64::from(h),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(enc.finish()));
+    buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+    let data = buf.slice(..).get_mapped_range().ok()?.to_vec();
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h as usize {
+        let start = y * row as usize;
+        out.extend_from_slice(data.get(start..start + (w * 4) as usize)?);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 impl Gpu {
     /// Copy the last rendered frame back to the CPU as tightly packed RGBA8.
     pub fn read_back(&self) -> Option<(Vec<u8>, [u32; 2])> {
         let t = self.target.as_ref()?;
-        let [w, h] = t.size;
-        let device = &self.render_state.device;
-        let row = (w * 4).div_ceil(256) * 256;
-        let buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("rcad_readback"),
-            size: u64::from(row) * u64::from(h),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut enc = device.create_command_encoder(&Default::default());
-        enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &t.resolve_tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buf,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(row),
-                    rows_per_image: Some(h),
-                },
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.render_state.queue.submit(Some(enc.finish()));
-        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
-        let data = buf.slice(..).get_mapped_range().ok()?.to_vec();
-        let mut out = Vec::with_capacity((w * h * 4) as usize);
-        for y in 0..h as usize {
-            let start = y * row as usize;
-            out.extend_from_slice(data.get(start..start + (w * 4) as usize)?);
-        }
-        Some((out, [w, h]))
+        let px = read_texture(
+            &self.render_state.device,
+            &self.render_state.queue,
+            &t.resolve_tex,
+            t.size,
+        )?;
+        Some((px, t.size))
     }
 }
 
