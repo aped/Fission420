@@ -22,6 +22,7 @@
 //! ```text
 //! GET    /api/v1/info                                   → ServerInfo            (no auth)
 //! POST   /api/v1/auth/login            LoginRequest     → LoginResponse         (no auth)
+//! POST   /api/v1/auth/oidc/exchange    OidcExchangeRequest → LoginResponse      (no auth; when ServerInfo.oidc is set)
 //! POST   /api/v1/auth/logout                            → 204
 //! GET    /api/v1/me                                     → Me
 //! POST   /api/v1/tokens                CreateTokenRequest → CreateTokenResponse (personal access token)
@@ -196,6 +197,36 @@ pub struct ServerInfo {
     pub org_creation: bool,
     /// Largest blob accepted, in bytes.
     pub max_blob_bytes: u64,
+    /// Single sign-on through an OpenID Connect provider, when configured.
+    #[serde(default)]
+    pub oidc: Option<OidcInfo>,
+}
+
+/// How a desktop client signs in through the server's OpenID Connect provider: authorization
+/// code flow with PKCE (S256) and a loopback redirect (RFC 8252,
+/// `http://127.0.0.1:<port>/callback`), then [`OidcExchangeRequest`] to the server, which
+/// redeems the code with the provider, validates the ID token and returns a session token.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OidcInfo {
+    /// Button label ("Sign in with Pocket ID").
+    pub display_name: String,
+    /// The provider's authorization endpoint (from its discovery document).
+    pub authorization_endpoint: String,
+    pub client_id: String,
+    /// Space-separated scopes to request (includes `openid`).
+    pub scopes: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OidcExchangeRequest {
+    pub code: String,
+    /// PKCE verifier whose S256 challenge was sent in the authorization request.
+    pub code_verifier: String,
+    /// The exact redirect URI used in the authorization request.
+    pub redirect_uri: String,
+    /// The `nonce` sent in the authorization request; the ID token must carry it.
+    pub nonce: String,
+    pub device_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

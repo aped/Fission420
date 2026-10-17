@@ -76,6 +76,7 @@ impl State {
                 local_login: true,
                 org_creation: false,
                 max_blob_bytes: 1 << 30,
+                oidc: None,
             },
             tokens: HashMap::new(),
             docs: Vec::new(),
