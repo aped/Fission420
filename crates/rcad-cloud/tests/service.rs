@@ -961,3 +961,297 @@ fn tls_is_configured_and_a_failed_handshake_counts_as_offline() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn member_and_organization_requests_answer_with_the_reloaded_list() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let ev = h.run(Request::LoadProjectMembers {
+        project: PROJECT.into(),
+    });
+    assert_eq!(
+        ev,
+        vec![Event::ProjectMembers {
+            project: PROJECT.into(),
+            members: vec![]
+        }]
+    );
+    let ev = h.run(Request::SetProjectMember {
+        project: PROJECT.into(),
+        username: "bob".into(),
+        role: proto::ProjectRole::Editor,
+    });
+    match ev.as_slice() {
+        [Event::ProjectMembers { project, members }] => {
+            assert_eq!(project, PROJECT);
+            assert_eq!(members.len(), 1);
+            assert_eq!(members[0].user.username, "bob");
+            assert_eq!(members[0].role, proto::ProjectRole::Editor);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Someone outside the organization cannot be added (the server answers 404).
+    let ev = h.run(Request::SetProjectMember {
+        project: PROJECT.into(),
+        username: "carol".into(),
+        role: proto::ProjectRole::Viewer,
+    });
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [Event::Error {
+                request: "set_project_member",
+                code: Some(ErrorCode::NotFound),
+                ..
+            }]
+        ),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::SetProjectMember {
+        project: PROJECT.into(),
+        username: "bob".into(),
+        role: proto::ProjectRole::Viewer,
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::ProjectMembers { members, .. }]
+            if members.len() == 1 && members[0].role == proto::ProjectRole::Viewer),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::RemoveProjectMember {
+        project: PROJECT.into(),
+        username: "bob".into(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::ProjectMembers { members, .. }] if members.is_empty()),
+        "{ev:?}"
+    );
+
+    let ev = h.run(Request::LoadOrgMembers {
+        org: fake_server::ORG.into(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::OrgMembers { org, members }]
+            if org == fake_server::ORG && members.len() == 2),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::SetOrgMember {
+        org: fake_server::ORG.into(),
+        username: "carol".into(),
+        role: proto::OrgRole::Guest,
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::OrgMembers { members, .. }]
+            if members.iter().any(|m| m.user.username == "carol" && m.role == proto::OrgRole::Guest)),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::RemoveOrgMember {
+        org: fake_server::ORG.into(),
+        username: "carol".into(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::OrgMembers { members, .. }] if members.len() == 2),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::LoadUsage {
+        org: fake_server::ORG.into(),
+    });
+    match ev.as_slice() {
+        [Event::Usage { org, usage }] => {
+            assert_eq!(org, fake_server::ORG);
+            assert_eq!((usage.used_bytes, usage.quota_bytes), (1_000, Some(10_000)));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn document_and_folder_management_reload_the_tree() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, doc) = h.upload("Bracket", b"one");
+    h.upload("Plate", b"two");
+    let ev = h.run(Request::CreateFolder {
+        project: PROJECT.into(),
+        parent: None,
+        name: "Brackets".into(),
+    });
+    let folder = match ev.as_slice() {
+        [Event::Tree(t)] => t.folders[0].id.clone(),
+        other => panic!("{other:?}"),
+    };
+    let tree = |ev: Vec<Event>| match ev.as_slice() {
+        [Event::Tree(t)] => t.clone(),
+        other => panic!("{other:?}"),
+    };
+
+    let t = tree(h.run(Request::MoveDocument {
+        document: doc.clone(),
+        folder: Some(folder.clone()),
+    }));
+    let d = t.documents.iter().find(|d| d.id == doc).unwrap();
+    assert_eq!(d.folder.as_deref(), Some(folder.as_str()));
+
+    let t = tree(h.run(Request::RenameDocument {
+        document: doc.clone(),
+        name: "Wall bracket".into(),
+    }));
+    assert!(t.documents.iter().any(|d| d.name == "Wall bracket"));
+    // The local link follows the new name.
+    let link = h.cache().link_for_path(&path).unwrap().unwrap();
+    assert_eq!(link.document_name, "Wall bracket");
+    // Names are unique in a project.
+    let ev = h.run(Request::RenameDocument {
+        document: doc.clone(),
+        name: "plate".into(),
+    });
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [Event::Error {
+                request: "rename_document",
+                code: Some(ErrorCode::AlreadyExists),
+                ..
+            }]
+        ),
+        "{ev:?}"
+    );
+
+    // A folder with content cannot be deleted.
+    let ev = h.run(Request::DeleteFolder {
+        project: PROJECT.into(),
+        folder: folder.clone(),
+    });
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [Event::Error {
+                request: "delete_folder",
+                code: Some(ErrorCode::NotEmpty),
+                ..
+            }]
+        ),
+        "{ev:?}"
+    );
+    let t = tree(h.run(Request::RenameFolder {
+        project: PROJECT.into(),
+        folder: folder.clone(),
+        name: "Mounts".into(),
+    }));
+    assert_eq!(t.folders[0].name, "Mounts");
+
+    let t = tree(h.run(Request::TrashDocument {
+        project: PROJECT.into(),
+        document: doc.clone(),
+    }));
+    assert!(t.documents.iter().all(|d| d.id != doc));
+    assert!(t.trash.iter().any(|d| d.id == doc));
+    // Still not empty: trashed documents keep their folder until restored.
+    let ev = h.run(Request::DeleteFolder {
+        project: PROJECT.into(),
+        folder: folder.clone(),
+    });
+    assert!(matches!(ev.as_slice(), [Event::Error { .. }]), "{ev:?}");
+
+    let t = tree(h.run(Request::RestoreDocument {
+        document: doc.clone(),
+    }));
+    assert!(t.documents.iter().any(|d| d.id == doc));
+    assert!(t.trash.is_empty());
+    tree(h.run(Request::MoveDocument {
+        document: doc.clone(),
+        folder: None,
+    }));
+    let t = tree(h.run(Request::DeleteFolder {
+        project: PROJECT.into(),
+        folder,
+    }));
+    assert!(t.folders.is_empty());
+}
+
+#[test]
+fn a_blocked_queue_entry_can_be_discarded() {
+    let server = FakeServer::start();
+    let port = server.port;
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, doc) = h.upload("Shaft", b"v1");
+    let state = server.stop();
+    std::fs::write(&path, b"v2").unwrap();
+    assert_eq!(h.save(&path, false), vec![Event::Offline { pending: 1 }]);
+    std::fs::write(&path, b"v3").unwrap();
+    assert_eq!(h.save(&path, false), vec![Event::Offline { pending: 2 }]);
+
+    // Back online, but the organization is over its quota: the queue stays blocked.
+    state.lock().unwrap().fail_saves = Some((507, ErrorCode::QuotaExceeded));
+    let server = FakeServer::start_on(port, state);
+    let ev = h.run(Request::SyncPending);
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [
+                Event::Error {
+                    request: "sync_pending",
+                    code: Some(ErrorCode::QuotaExceeded),
+                    ..
+                },
+                Event::Synced { pending: 2 }
+            ]
+        ),
+        "{ev:?}"
+    );
+    let queue = match h.run(Request::LoadPending).as_slice() {
+        [Event::PendingQueue { saves }] => saves.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue[0].blob, rcad_cloud::blob_hash(b"v2"));
+    assert_eq!(queue[0].document, doc);
+
+    // A stale listing (wrong blob at that position) discards nothing.
+    let ev = h.run(Request::DiscardPending {
+        index: 0,
+        document: doc.clone(),
+        blob: queue[1].blob.clone(),
+    });
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [
+                Event::PendingQueue { saves },
+                Event::Error {
+                    request: "discard_pending",
+                    ..
+                }
+            ] if saves.len() == 2
+        ),
+        "{ev:?}"
+    );
+    let ev = h.run(Request::DiscardPending {
+        index: 0,
+        document: doc.clone(),
+        blob: queue[0].blob.clone(),
+    });
+    assert!(
+        matches!(ev.as_slice(), [Event::PendingQueue { saves }]
+            if saves.len() == 1 && saves[0].blob == rcad_cloud::blob_hash(b"v3")),
+        "{ev:?}"
+    );
+    // The snapshot stays in the blob cache and the file is untouched.
+    assert!(h.cache().has_blob(&rcad_cloud::blob_hash(b"v2")));
+    assert_eq!(std::fs::read(&path).unwrap(), b"v3");
+
+    server.state.lock().unwrap().fail_saves = None;
+    let ev = h.run(Request::SyncPending);
+    match ev.as_slice() {
+        [
+            Event::VersionSaved { version, .. },
+            Event::Synced { pending: 0 },
+        ] => {
+            assert_eq!(version.number, 2);
+            assert_eq!(version.blob, rcad_cloud::blob_hash(b"v3"));
+        }
+        other => panic!("{other:?}"),
+    }
+}

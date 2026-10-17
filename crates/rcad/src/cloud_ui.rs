@@ -934,6 +934,10 @@ impl RcadApp {
                     self.cloud_log(false, format!("back online ({pending} version(s) waiting)"));
                 }
             }
+            Event::PendingQueue { .. }
+            | Event::ProjectMembers { .. }
+            | Event::OrgMembers { .. }
+            | Event::Usage { .. } => {}
             Event::Error {
                 request,
                 code,

@@ -24,6 +24,11 @@
 //!   untouched. `SaveVersion { force: true }` forces the document's queued saves too.
 //! * A conflict whose server head already holds exactly the bytes being saved (a save whose
 //!   answer was lost to a dropped connection) is treated as saved.
+//! * `LoadPending` and `DiscardPending` work on the local queue only (no network); both answer
+//!   with `PendingQueue`. Discarding never touches the file or the blob cache.
+//! * Member and organization changes answer with the reloaded list (`ProjectMembers`,
+//!   `OrgMembers`); document and folder changes (rename, move, trash, restore) answer with the
+//!   reloaded `Tree`. Renaming a document also renames it in the local links.
 use crate::cache::{Link, PendingSave, ServerCache};
 use crate::client::Client;
 use crate::config::{Account, CloudConfig};
@@ -122,6 +127,72 @@ pub enum Request {
     },
     /// Retry versions queued while offline.
     SyncPending,
+    /// Report the offline queue ([`Event::PendingQueue`]); local only.
+    LoadPending,
+    /// Drop the queued save at `index` (its snapshot stays in the blob cache; the file is
+    /// untouched). `document` and `blob` must match the entry, so a queue that changed since
+    /// the UI listed it is not edited by position alone. Local only.
+    DiscardPending {
+        index: usize,
+        document: String,
+        blob: proto::BlobHash,
+    },
+    LoadProjectMembers {
+        project: String,
+    },
+    /// Add a member or change their role (project admin).
+    SetProjectMember {
+        project: String,
+        username: String,
+        role: proto::ProjectRole,
+    },
+    RemoveProjectMember {
+        project: String,
+        username: String,
+    },
+    LoadOrgMembers {
+        org: String,
+    },
+    /// Add a member or change their role (organization admin).
+    SetOrgMember {
+        org: String,
+        username: String,
+        role: proto::OrgRole,
+    },
+    RemoveOrgMember {
+        org: String,
+        username: String,
+    },
+    LoadUsage {
+        org: String,
+    },
+    RenameDocument {
+        document: String,
+        name: String,
+    },
+    /// Move a document to `folder` (None: the project root).
+    MoveDocument {
+        document: String,
+        folder: Option<String>,
+    },
+    /// Move a document to the project's trash (restorable).
+    TrashDocument {
+        project: String,
+        document: String,
+    },
+    RestoreDocument {
+        document: String,
+    },
+    RenameFolder {
+        project: String,
+        folder: String,
+        name: String,
+    },
+    /// Delete an empty folder.
+    DeleteFolder {
+        project: String,
+        folder: String,
+    },
 }
 
 /// Like a derived `Debug`, except that the sign-in password is never printed.
@@ -258,6 +329,89 @@ impl std::fmt::Debug for Request {
                 .field("resolved", resolved)
                 .finish(),
             Request::SyncPending => f.write_str("SyncPending"),
+            Request::LoadPending => f.write_str("LoadPending"),
+            Request::DiscardPending {
+                index,
+                document,
+                blob,
+            } => f
+                .debug_struct("DiscardPending")
+                .field("index", index)
+                .field("document", document)
+                .field("blob", blob)
+                .finish(),
+            Request::LoadProjectMembers { project } => f
+                .debug_struct("LoadProjectMembers")
+                .field("project", project)
+                .finish(),
+            Request::SetProjectMember {
+                project,
+                username,
+                role,
+            } => f
+                .debug_struct("SetProjectMember")
+                .field("project", project)
+                .field("username", username)
+                .field("role", role)
+                .finish(),
+            Request::RemoveProjectMember { project, username } => f
+                .debug_struct("RemoveProjectMember")
+                .field("project", project)
+                .field("username", username)
+                .finish(),
+            Request::LoadOrgMembers { org } => {
+                f.debug_struct("LoadOrgMembers").field("org", org).finish()
+            }
+            Request::SetOrgMember {
+                org,
+                username,
+                role,
+            } => f
+                .debug_struct("SetOrgMember")
+                .field("org", org)
+                .field("username", username)
+                .field("role", role)
+                .finish(),
+            Request::RemoveOrgMember { org, username } => f
+                .debug_struct("RemoveOrgMember")
+                .field("org", org)
+                .field("username", username)
+                .finish(),
+            Request::LoadUsage { org } => f.debug_struct("LoadUsage").field("org", org).finish(),
+            Request::RenameDocument { document, name } => f
+                .debug_struct("RenameDocument")
+                .field("document", document)
+                .field("name", name)
+                .finish(),
+            Request::MoveDocument { document, folder } => f
+                .debug_struct("MoveDocument")
+                .field("document", document)
+                .field("folder", folder)
+                .finish(),
+            Request::TrashDocument { project, document } => f
+                .debug_struct("TrashDocument")
+                .field("project", project)
+                .field("document", document)
+                .finish(),
+            Request::RestoreDocument { document } => f
+                .debug_struct("RestoreDocument")
+                .field("document", document)
+                .finish(),
+            Request::RenameFolder {
+                project,
+                folder,
+                name,
+            } => f
+                .debug_struct("RenameFolder")
+                .field("project", project)
+                .field("folder", folder)
+                .field("name", name)
+                .finish(),
+            Request::DeleteFolder { project, folder } => f
+                .debug_struct("DeleteFolder")
+                .field("project", project)
+                .field("folder", folder)
+                .finish(),
         }
     }
 }
@@ -287,6 +441,21 @@ impl Request {
             Request::AddComment { .. } => "add_comment",
             Request::ResolveComment { .. } => "resolve_comment",
             Request::SyncPending => "sync_pending",
+            Request::LoadPending => "load_pending",
+            Request::DiscardPending { .. } => "discard_pending",
+            Request::LoadProjectMembers { .. } => "load_project_members",
+            Request::SetProjectMember { .. } => "set_project_member",
+            Request::RemoveProjectMember { .. } => "remove_project_member",
+            Request::LoadOrgMembers { .. } => "load_org_members",
+            Request::SetOrgMember { .. } => "set_org_member",
+            Request::RemoveOrgMember { .. } => "remove_org_member",
+            Request::LoadUsage { .. } => "load_usage",
+            Request::RenameDocument { .. } => "rename_document",
+            Request::MoveDocument { .. } => "move_document",
+            Request::TrashDocument { .. } => "trash_document",
+            Request::RestoreDocument { .. } => "restore_document",
+            Request::RenameFolder { .. } => "rename_folder",
+            Request::DeleteFolder { .. } => "delete_folder",
         }
     }
 }
@@ -349,6 +518,23 @@ pub enum Event {
     /// Queue state after a sync attempt.
     Synced {
         pending: usize,
+    },
+    /// The offline queue, oldest first (answer to `LoadPending` and `DiscardPending`).
+    PendingQueue {
+        saves: Vec<PendingSave>,
+    },
+    /// Explicit members of a project (org admins are project admins without being listed).
+    ProjectMembers {
+        project: String,
+        members: Vec<proto::ProjectMember>,
+    },
+    OrgMembers {
+        org: String,
+        members: Vec<proto::OrgMember>,
+    },
+    Usage {
+        org: String,
+        usage: proto::OrgUsage,
     },
     Error {
         request: &'static str,
@@ -764,7 +950,170 @@ impl Worker {
                 let s = self.session()?;
                 self.sync_pending(&s, None, emit)
             }
+            Request::LoadPending => {
+                let cache = self.cache()?.ok_or(CloudError::NotSignedIn)?;
+                emit(Event::PendingQueue {
+                    saves: cache.pending()?,
+                });
+                Ok(())
+            }
+            Request::DiscardPending {
+                index,
+                document,
+                blob,
+            } => {
+                let cache = self.cache()?.ok_or(CloudError::NotSignedIn)?;
+                let mut queue = cache.pending()?;
+                match queue.get(index) {
+                    Some(p) if p.document == document && p.blob == blob => {
+                        queue.remove(index);
+                        cache.set_pending(&queue)?;
+                    }
+                    _ => {
+                        emit(Event::PendingQueue { saves: queue });
+                        return Err(CloudError::Invalid(
+                            "the queue changed since it was listed; nothing was discarded".into(),
+                        ));
+                    }
+                }
+                emit(Event::PendingQueue { saves: queue });
+                Ok(())
+            }
+            Request::LoadProjectMembers { project } => {
+                let s = self.session()?;
+                let members = s.client.project_members(&project)?;
+                emit(Event::ProjectMembers { project, members });
+                Ok(())
+            }
+            Request::SetProjectMember {
+                project,
+                username,
+                role,
+            } => {
+                let s = self.session()?;
+                s.client.set_project_member(
+                    &project,
+                    &proto::SetProjectMemberRequest { username, role },
+                )?;
+                let members = s.client.project_members(&project)?;
+                emit(Event::ProjectMembers { project, members });
+                Ok(())
+            }
+            Request::RemoveProjectMember { project, username } => {
+                let s = self.session()?;
+                s.client.remove_project_member(&project, &username)?;
+                let members = s.client.project_members(&project)?;
+                emit(Event::ProjectMembers { project, members });
+                Ok(())
+            }
+            Request::LoadOrgMembers { org } => {
+                let s = self.session()?;
+                let members = s.client.org_members(&org)?;
+                emit(Event::OrgMembers { org, members });
+                Ok(())
+            }
+            Request::SetOrgMember {
+                org,
+                username,
+                role,
+            } => {
+                let s = self.session()?;
+                s.client
+                    .set_org_member(&org, &proto::SetOrgMemberRequest { username, role })?;
+                let members = s.client.org_members(&org)?;
+                emit(Event::OrgMembers { org, members });
+                Ok(())
+            }
+            Request::RemoveOrgMember { org, username } => {
+                let s = self.session()?;
+                s.client.remove_org_member(&org, &username)?;
+                let members = s.client.org_members(&org)?;
+                emit(Event::OrgMembers { org, members });
+                Ok(())
+            }
+            Request::LoadUsage { org } => {
+                let s = self.session()?;
+                let usage = s.client.org_usage(&org)?;
+                emit(Event::Usage { org, usage });
+                Ok(())
+            }
+            Request::RenameDocument { document, name } => {
+                let s = self.session()?;
+                let summary = s.client.update_document(
+                    &document,
+                    &proto::UpdateDocumentRequest {
+                        name: Some(name),
+                        folder: None,
+                    },
+                )?;
+                self.rename_links(&s, &summary)?;
+                emit(Event::Tree(s.client.tree(&summary.project)?));
+                Ok(())
+            }
+            Request::MoveDocument { document, folder } => {
+                let s = self.session()?;
+                let summary = s.client.update_document(
+                    &document,
+                    &proto::UpdateDocumentRequest {
+                        name: None,
+                        folder: Some(folder),
+                    },
+                )?;
+                emit(Event::Tree(s.client.tree(&summary.project)?));
+                Ok(())
+            }
+            Request::TrashDocument { project, document } => {
+                let s = self.session()?;
+                s.client.delete_document(&document)?;
+                emit(Event::Tree(s.client.tree(&project)?));
+                Ok(())
+            }
+            Request::RestoreDocument { document } => {
+                let s = self.session()?;
+                let summary = s.client.restore_document(&document)?;
+                emit(Event::Tree(s.client.tree(&summary.project)?));
+                Ok(())
+            }
+            Request::RenameFolder {
+                project,
+                folder,
+                name,
+            } => {
+                let s = self.session()?;
+                s.client.update_folder(
+                    &folder,
+                    &proto::UpdateFolderRequest {
+                        name: Some(name),
+                        parent: None,
+                    },
+                )?;
+                emit(Event::Tree(s.client.tree(&project)?));
+                Ok(())
+            }
+            Request::DeleteFolder { project, folder } => {
+                let s = self.session()?;
+                s.client.delete_folder(&folder)?;
+                emit(Event::Tree(s.client.tree(&project)?));
+                Ok(())
+            }
         }
+    }
+
+    /// Keep the cached document name of links to a renamed document current.
+    fn rename_links(
+        &self,
+        s: &Session,
+        summary: &proto::DocumentSummary,
+    ) -> Result<(), CloudError> {
+        for link in s.cache.links()? {
+            if link.document == summary.id && link.document_name != summary.name {
+                s.cache.upsert_link(Link {
+                    document_name: summary.name.clone(),
+                    ..link
+                })?;
+            }
+        }
+        Ok(())
     }
 
     fn sign_in(
