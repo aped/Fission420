@@ -173,7 +173,7 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   Signed out, it explains what a server adds and offers **Connect to server…** (server URL,
   username, password; the password field is masked, Enter connects, Esc cancels, errors show in
   the dialog and the message log). Signed in: server name, user, **Refresh**, **Sign out**, the
-  organization selector (with **Organization…** for organization administrators), then three
+  organization selector (with **Organization…** for organization administrators), then four
   sections. **Browse** lists projects (**New project…**), and a selected project's folders and
   documents with their latest version, who saved it and a lock mark (**New folder…**,
   **Upload current document…**, **Open** or double-click). Clicking a folder selects it (click
@@ -182,6 +182,9 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   **Move…** (folder combo) and **Move to trash…** (with confirmation); **Trash (N)** switches to
   the project's trash with **Restore** per document. Controls an editor needs are disabled for
   viewers and commenters. **History** and **Comments** belong to the open cloud document.
+  **Activity** lists the selected project's recent activity, newest first (what happened, who,
+  when; at most 100 entries); an entry about a document opens it when clicked. It loads when
+  the section is shown and refreshes every 60 s while it stays shown.
 * **Members** (**Members…** next to the project name, for everyone who can see the project):
   the explicit members and their roles. Project administrators get a role combo and **Remove**
   per member and **Add member** (username and role, default Editor). The server's refusals show
@@ -189,7 +192,9 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   must be a member of the organization first").
 * **Organization…** (organization Admins and Owners): storage used against the quota (a bar,
   or "no quota"), document and version counts, and the members with role combos, **Remove** and
-  **Add to organization**. Owners assign every role; Admins manage Guests and Members.
+  **Add to organization**. Owners assign every role; Admins manage Guests and Members. Its
+  **Recent activity** list shows the whole organization's activity (clicking a document entry
+  opens that document and closes the window); **Reload** refreshes it with the members.
 * **Offline queue:** while versions wait to be sent the panel shows the count with **Sync now**
   and a **Queued versions** list (document, description, when it was queued). **Discard** asks
   for confirmation and then drops that version from the queue; the local file is not changed.
@@ -228,7 +233,9 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   locally before the upload. The file becomes the cloud document's working copy.
   **Save Version to Cloud…** (description and optional milestone; unsaved changes
   are saved locally first), **Version History**, **Share Link…** (expiry in days, empty = never;
-  allow download; latest or a fixed version; the URL is shown once with **Copy**), **Comments**
+  allow download; latest or a fixed version; the URL is shown once with **Copy**; below, the
+  document's existing links with version, expiry, download and creator, each with **Revoke…**,
+  which asks before the link stops working), **Comments**
   and **Sync Now** (versions saved while the server was unreachable). They are registry commands
   (command search finds them) and are disabled with a reason until they apply.
 * **Version history:** newest first, with author, UTC date and age, description and a star for
@@ -242,6 +249,13 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   saving a version, opening another document or quitting releases it. A lock held by someone else
   is only shown (chip and message log): local editing and local saving always work, and Save
   Version fails until the lock is released.
+* **Upload a version on every save** (Preferences ▸ Cloud, default off; Fusion saves every
+  save as a version): when on, a successful local save of a cloud document's working copy also
+  saves it as a new version described "Saved from R-CAD", with the model thumbnail. It goes
+  through the same path as Save Version: a newer version on the server opens the conflict
+  window, and offline the version is queued. Read-only copies of older versions and documents
+  that are not on the server are never uploaded, and the local save that Save Version or an
+  upload makes first does not add a second version.
 * **Messages:** every service error is logged as `Cloud: <message>` (errors from background work
   such as refreshing or locking do not raise the error banner). Tokens and passwords are never
   logged.
@@ -264,7 +278,8 @@ project Parts). The live-test probe reports the cloud state under `doc.cloud` (`
 `selected_document`, `selected_folder`, `documents_listed`, `folders_listed`, `trash_listed`,
 `members_listed`, `member_roles` (username → role), `org_members_listed`, `usage_loaded`,
 `usage_bytes`, `admin_error`, `admin_error_code`, `queue_listed`, `server_head`,
-`thumbnails_loaded`, …; `state` adds `update_available` and `newer_on_server`). Thumbnail
+`thumbnails_loaded`, `shares_listed`, `activity_listed`, `org_activity_listed`, …; `state` adds `update_available` and `newer_on_server`). Thumbnail
 cropping and decoding are in `crates/rcad/src/cloud_ui/thumb.rs`. The administration
-windows are in `crates/rcad/src/cloud_ui/admin.rs`; the navigation bar layout test is
+windows are in `crates/rcad/src/cloud_ui/admin.rs`, the activity and share link lists in
+`crates/rcad/src/cloud_ui/activity.rs`; the navigation bar layout test is
 `crates/rcad/tests/it/toolbar_layout.rs`.

@@ -513,9 +513,14 @@ fn share_dialog_creates_a_link_and_shows_the_url() {
     file_menu(&mut c.h, "Share Link…");
     assert_eq!(
         drain(&c.req),
-        vec![Request::LoadDetail {
-            document: "d1".into()
-        }]
+        vec![
+            Request::LoadShares {
+                document: "d1".into()
+            },
+            Request::LoadDetail {
+                document: "d1".into()
+            }
+        ]
     );
     click(&mut c.h, "Create link");
     assert_eq!(
@@ -546,6 +551,13 @@ fn share_dialog_creates_a_link_and_shows_the_url() {
     assert_eq!(c.h.state().cloud_share_url(), Some(url));
     assert_eq!(c.h.get_by_label("Share URL").value().as_deref(), Some(url));
     assert!(c.h.query_by_label("Copy").is_some());
+    // The list of links is reloaded to include the new one.
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadShares {
+            document: "d1".into()
+        }]
+    );
 }
 
 #[test]
@@ -975,7 +987,8 @@ fn organization_window_for_owners_lists_members_and_storage() {
         drain(&c.req),
         vec![
             Request::LoadOrgMembers { org: "o1".into() },
-            Request::LoadUsage { org: "o1".into() }
+            Request::LoadUsage { org: "o1".into() },
+            Request::LoadOrgActivity { org: "o1".into() }
         ]
     );
     c.ev.send(Event::OrgMembers {
@@ -1616,4 +1629,270 @@ fn comments_are_counted_for_the_probe() {
             resolved: true,
         }]
     );
+}
+
+fn share_link(id: &str, version: Option<u64>) -> proto::ShareLink {
+    proto::ShareLink {
+        id: id.into(),
+        document: "d1".into(),
+        version,
+        created_by: "alice".into(),
+        created_at: 1_792_224_300,
+        expires_at: version.map(|_| 1_792_224_300 + 7 * 86_400),
+        allow_download: version.is_none(),
+    }
+}
+
+#[test]
+fn share_dialog_lists_links_and_revokes_after_confirmation() {
+    let mut c = opened([1400.0, 900.0]);
+    file_menu(&mut c.h, "Share Link…");
+    drain(&c.req);
+    assert_eq!(probe(&c)["shares_listed"], 0);
+    c.ev.send(Event::Shares {
+        document: "d1".into(),
+        shares: vec![share_link("s1", Some(2)), share_link("s2", None)],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["shares_listed"], 2);
+    assert!(c.h.query_by_label_contains("v2 · expires 2026-").is_some());
+    assert!(
+        c.h.query_by_label_contains("latest version · never expires · download allowed · by alice")
+            .is_some()
+    );
+    // Revoke asks first; Keep backs out without a request.
+    click(&mut c.h, "Revoke share link 2");
+    assert!(drain(&c.req).is_empty());
+    click(&mut c.h, "Keep link");
+    assert!(c.h.query_by_label("Confirm revoke").is_none());
+    click(&mut c.h, "Revoke share link 2");
+    click(&mut c.h, "Confirm revoke");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RevokeShare {
+            document: "d1".into(),
+            share: "s2".into(),
+        }]
+    );
+    c.ev.send(Event::Shares {
+        document: "d1".into(),
+        shares: vec![share_link("s1", Some(2))],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["shares_listed"], 1);
+    assert!(c.h.query_by_label("Confirm revoke").is_none());
+    // A failed revoke is shown (not a background request).
+    c.ev.send(Event::Error {
+        request: "revoke_share",
+        code: Some(proto::ErrorCode::Forbidden),
+        message: "only the link's creator or a project admin can revoke it".into(),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(
+        c.h.state()
+            .diagnostics()
+            .iter()
+            .any(|d| d.error && d.text.contains("only the link's creator"))
+    );
+}
+
+fn entry(summary: &str, document: Option<&str>) -> proto::ActivityEntry {
+    proto::ActivityEntry {
+        at: 1_792_224_300,
+        actor: "bob".into(),
+        action: "version.create".into(),
+        summary: summary.into(),
+        project: Some("p1".into()),
+        document: document.map(String::from),
+    }
+}
+
+#[test]
+fn activity_section_lists_the_project_and_opens_documents() {
+    let mut c = signed_in([1400.0, 900.0]);
+    click(&mut c.h, "Data panel");
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![project()],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Project Parts");
+    drain(&c.req);
+    click(&mut c.h, "Activity section");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadActivity {
+            project: "p1".into()
+        }]
+    );
+    c.ev.send(Event::Activity {
+        project: "p1".into(),
+        entries: vec![
+            entry("saved version 4 of Bracket", Some("d1")),
+            entry("added carol to Parts", None),
+        ],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["activity_listed"], 2);
+    assert!(
+        c.h.query_by_label_contains("added carol to Parts")
+            .is_some()
+    );
+    click(&mut c.h, "Activity entry 1");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::OpenDocument {
+            document: "d1".into()
+        }]
+    );
+    // Refreshed with the poll while the section is shown.
+    c.h.state_mut().cloud_expire_poll_timer();
+    settle(&mut c.h);
+    assert!(drain(&c.req).contains(&Request::LoadActivity {
+        project: "p1".into()
+    }));
+    // Not when another section is shown.
+    click(&mut c.h, "Browse section");
+    drain(&c.req);
+    c.h.state_mut().cloud_expire_poll_timer();
+    settle(&mut c.h);
+    assert!(
+        !drain(&c.req)
+            .iter()
+            .any(|r| matches!(r, Request::LoadActivity { .. }))
+    );
+}
+
+#[test]
+fn organization_window_shows_activity_for_admins() {
+    let mut c = signed_in([1400.0, 900.0]);
+    let mut owner = me();
+    owner.orgs[0].my_role = proto::OrgRole::Admin;
+    c.ev.send(Event::SignedIn {
+        server_url: "http://127.0.0.1:18640".into(),
+        server_name: "Home lab".into(),
+        me: owner,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Data panel");
+    drain(&c.req);
+    click(&mut c.h, "Organization…");
+    assert!(drain(&c.req).contains(&Request::LoadOrgActivity { org: "o1".into() }));
+    c.ev.send(Event::OrgActivity {
+        org: "o1".into(),
+        entries: vec![entry("saved version 2 of Hinge", Some("d9"))],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["org_activity_listed"], 1);
+    click(&mut c.h, "Organization activity entry 1");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::OpenDocument {
+            document: "d9".into()
+        }]
+    );
+    assert!(c.h.state().cloud_dialog().is_none(), "the window closes");
+}
+
+/// Save the open document locally (as Ctrl+S would) and return the requests sent.
+fn save_locally(c: &mut Cloud, path: &Path) -> Vec<Request> {
+    drain(&c.req);
+    c.h.state_mut().request(Command::Save {
+        path: path.to_path_buf(),
+    });
+    settle(&mut c.h);
+    settle(&mut c.h);
+    drain(&c.req)
+}
+
+fn version_saves(reqs: &[Request]) -> Vec<&Request> {
+    reqs.iter()
+        .filter(|r| matches!(r, Request::SaveVersion { .. }))
+        .collect()
+}
+
+#[test]
+fn version_on_save_is_off_by_default_and_uploads_linked_saves_when_on() {
+    let mut c = opened([1400.0, 900.0]);
+    let doc = c.doc.clone();
+    edit(&mut c);
+    assert!(
+        version_saves(&save_locally(&mut c, &doc)).is_empty(),
+        "off by default"
+    );
+    click(&mut c.h, "Preferences");
+    click(&mut c.h, "Pref cloud version on save");
+    h_close_prefs(&mut c);
+    edit(&mut c);
+    let sent = save_locally(&mut c, &doc);
+    match version_saves(&sent).as_slice() {
+        [
+            Request::SaveVersion {
+                local_path,
+                description,
+                milestone: None,
+                force: false,
+                ..
+            },
+        ] => {
+            assert_eq!(local_path, &doc);
+            assert_eq!(description, "Saved from R-CAD");
+        }
+        other => panic!("{other:?}"),
+    }
+    // A version save that saves locally first sends one version, not two.
+    edit(&mut c);
+    file_menu(&mut c.h, "Save Version to Cloud…");
+    type_into(&mut c.h, "Version description", "by hand");
+    drain(&c.req);
+    click(&mut c.h, "Save Version");
+    settle(&mut c.h);
+    settle(&mut c.h);
+    let sent = drain(&c.req);
+    match version_saves(&sent).as_slice() {
+        [Request::SaveVersion { description, .. }] => assert_eq!(description, "by hand"),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn h_close_prefs(c: &mut Cloud) {
+    c.h.key_press(Key::Escape);
+    settle(&mut c.h);
+}
+
+#[test]
+fn version_on_save_never_uploads_unlinked_or_read_only_documents() {
+    let mut c = signed_in([1400.0, 900.0]);
+    click(&mut c.h, "Preferences");
+    click(&mut c.h, "Pref cloud version on save");
+    h_close_prefs(&mut c);
+    // An ordinary local document.
+    let doc = c.doc.clone();
+    c.h.state_mut().request(Command::Open {
+        path: doc.clone(),
+        safe_mode: false,
+    });
+    settle(&mut c.h);
+    settle(&mut c.h);
+    edit(&mut c);
+    assert!(version_saves(&save_locally(&mut c, &doc)).is_empty());
+    // A read-only copy of an older version.
+    c.ev.send(Event::DocumentReady {
+        path: doc.clone(),
+        link: link(&doc, 2),
+        read_only: true,
+        from_cache: false,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    settle(&mut c.h);
+    edit(&mut c);
+    assert!(version_saves(&save_locally(&mut c, &doc)).is_empty());
 }

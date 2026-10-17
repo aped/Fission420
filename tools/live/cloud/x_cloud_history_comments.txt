@@ -113,3 +113,9 @@ sleep 1000
 expect cloud.comments_listed 1
 expect cloud.comments_resolved 1
 shot
+# The project's activity lists these saves (other scripts add entries too, so
+# only "between 1 and 100", the number asked for, is checked).
+clickw Activity section
+sleep 1000
+expect cloud.activity_listed 50.5 49.5
+shot

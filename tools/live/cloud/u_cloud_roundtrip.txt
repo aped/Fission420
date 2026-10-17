@@ -57,4 +57,10 @@ clickw Share Link…
 clickw Create link
 sleep 1000
 expect cloud.has_share_url true
+# The dialog lists the document's links; revoke the new one (asks first).
+expect cloud.shares_listed 1
 shot
+clickw Revoke share link 1
+clickw Confirm revoke
+sleep 1000
+expect cloud.shares_listed 0

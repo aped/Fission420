@@ -81,6 +81,10 @@ pub struct Prefs {
     /// feature so their saves do not drop it.
     #[serde(default = "yes")]
     pub cloud_auto_lock: bool,
+    /// Cloud documents: a successful local save of a linked working copy also
+    /// saves it as a new version on the server. Off by default.
+    #[serde(default)]
+    pub cloud_version_on_save: bool,
 }
 
 fn yes() -> bool {
@@ -100,6 +104,7 @@ impl Default for Prefs {
             auto_project_face_edges: true,
             auto_project_on_reference: false,
             cloud_auto_lock: true,
+            cloud_version_on_save: false,
         }
     }
 }

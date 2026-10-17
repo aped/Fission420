@@ -30,6 +30,7 @@ use rcad_commands::Command;
 use crate::app::{Guarded, RcadApp};
 use crate::probe::Probe as _;
 
+mod activity;
 mod admin;
 pub mod thumb;
 pub use admin::{fmt_bytes, member_error_text, org_role_name, project_role_name};
@@ -105,6 +106,8 @@ pub enum CloudDialog {
         allow_download: bool,
         version: Option<u64>,
         sent: bool,
+        /// Share link waiting for the user to confirm its revocation.
+        revoke: Option<String>,
     },
     Promote {
         document: String,
@@ -206,6 +209,8 @@ pub enum Section {
     Browse,
     History,
     Comments,
+    /// The selected project's recent activity.
+    Activity,
 }
 
 /// State of the open cloud-linked document, as the chip shows it.
@@ -313,6 +318,14 @@ pub struct CloudUi {
     comments: Option<(String, Vec<proto::Comment>)>,
     comment_draft: String,
     share_url: Option<String>,
+    /// Share links of a document, as last loaded.
+    shares: Option<(String, Vec<proto::ShareLink>)>,
+    /// A project's activity (newest first), as last loaded.
+    activity: Option<(String, Vec<proto::ActivityEntry>)>,
+    /// When `activity` arrived (the poll refreshes it a full interval later).
+    activity_at: Option<std::time::Instant>,
+    /// An organization's activity (newest first), as last loaded.
+    org_activity: Option<(String, Vec<proto::ActivityEntry>)>,
     dialog: Option<CloudDialog>,
     after_save: Option<AfterSave>,
     /// Description and milestone of the last version save (resent on "save anyway").
@@ -355,6 +368,10 @@ pub struct CloudUi {
 
 /// A version of a document: (document id, version number).
 type ThumbKey = (String, u64);
+
+/// Description of the versions the "Upload a version on every save"
+/// preference saves.
+pub const VERSION_ON_SAVE_DESCRIPTION: &str = "Saved from R-CAD";
 
 /// How often the open cloud document's head (and, with the Data panel open,
 /// the project list) is polled.
@@ -555,6 +572,9 @@ fn background(request: &str) -> bool {
             | "load_usage"
             | "load_thumbnail"
             | "check_head"
+            | "load_shares"
+            | "load_activity"
+            | "load_org_activity"
     )
 }
 
@@ -614,6 +634,7 @@ impl RcadApp {
     /// Make the next update-available poll due now (tests: no 60 s wait).
     pub fn cloud_expire_poll_timer(&mut self) {
         self.cloud.poll_due = None;
+        self.cloud.activity_at = None;
     }
     /// Whether a thumbnail texture of `version` of `document` is loaded.
     pub fn cloud_thumbnail_loaded(&self, document: &str, version: u64) -> bool {
@@ -691,7 +712,7 @@ impl RcadApp {
     pub fn cloud_probe(&self) -> serde_json::Value {
         let c = &self.cloud;
         let link = self.cloud_link();
-        serde_json::json!({
+        let mut probe = serde_json::json!({
             "running": c.service.is_some(),
             "panel": c.panel_open,
             "signed_in": c.account.is_some(),
@@ -764,7 +785,12 @@ impl RcadApp {
                     (d.name.clone(), serde_json::json!(folder.unwrap_or_else(|| "/".into())))
                 })
                 .collect::<serde_json::Map<_, _>>()),
-        })
+        });
+        // Added separately: one json! literal of this size hits the macro recursion limit.
+        probe["shares_listed"] = c.shares.as_ref().map_or(0, |(_, l)| l.len()).into();
+        probe["activity_listed"] = c.activity.as_ref().map_or(0, |(_, l)| l.len()).into();
+        probe["org_activity_listed"] = c.org_activity.as_ref().map_or(0, |(_, l)| l.len()).into();
+        probe
     }
 
     pub(crate) fn cloud_modal_open(&self) -> bool {
@@ -987,7 +1013,23 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
-            Event::Shares { .. } | Event::Activity { .. } | Event::OrgActivity { .. } => {}
+            Event::Shares { document, shares } => {
+                if let Some(CloudDialog::Share { revoke, .. }) = &mut c.dialog
+                    && revoke
+                        .as_ref()
+                        .is_some_and(|id| !shares.iter().any(|l| l.id == *id))
+                {
+                    *revoke = None;
+                }
+                c.shares = Some((document, shares));
+            }
+            Event::Activity { project, entries } => {
+                c.activity = Some((project, entries));
+                c.activity_at = Some(std::time::Instant::now());
+            }
+            Event::OrgActivity { org, entries } => {
+                c.org_activity = Some((org, entries));
+            }
             Event::Thumbnail {
                 document,
                 version,
@@ -1205,6 +1247,8 @@ impl RcadApp {
                 if let Some(CloudDialog::Share { sent, .. }) = &mut c.dialog {
                     *sent = false;
                 }
+                let document = r.link.document;
+                self.cloud_send(Request::LoadShares { document });
             }
             Event::Comments { document, comments } => {
                 c.comments = Some((document, comments));
@@ -1312,6 +1356,9 @@ impl RcadApp {
             None => false,
         };
         if !waiting {
+            if ok {
+                self.cloud_version_on_save(path);
+            }
             return;
         }
         let Some(next) = self.cloud.after_save.take() else {
@@ -1349,6 +1396,33 @@ impl RcadApp {
                 thumbnail: None,
             }),
         }
+    }
+
+    /// Preference "Upload a version on every save": a successful local save
+    /// of a linked, editable working copy also saves it as a version (with
+    /// the clean thumbnail). Conflicts and offline queueing work as for Save
+    /// Version. Saves that a version save or an upload waits for never get
+    /// here, so nothing is sent twice.
+    fn cloud_version_on_save(&mut self, path: &Path) {
+        if !self.shell.prefs.cloud_version_on_save || self.cloud.account.is_none() {
+            return;
+        }
+        if self.cloud.read_only.contains(path) {
+            return;
+        }
+        let Some(link) = self.cloud.link_for(path) else {
+            return;
+        };
+        let local_path = link.local_path.clone();
+        let description = VERSION_ON_SAVE_DESCRIPTION.to_string();
+        self.cloud.last_version = Some((description.clone(), None));
+        self.cloud_send_with_thumbnail(Request::SaveVersion {
+            local_path,
+            description,
+            milestone: None,
+            force: false,
+            thumbnail: None,
+        });
     }
 
     // ----- commands (registry) -----
@@ -1439,11 +1513,16 @@ impl RcadApp {
             return;
         };
         self.cloud.share_url = None;
+        self.cloud.shares = None;
         self.cloud.dialog = Some(CloudDialog::Share {
             days: "7".into(),
             allow_download: true,
             version: None,
             sent: false,
+            revoke: None,
+        });
+        self.cloud_send(Request::LoadShares {
+            document: doc.clone(),
         });
         if self
             .cloud
@@ -1760,7 +1839,17 @@ impl RcadApp {
             .org
             .clone()
             .filter(|_| self.cloud.panel_open && self.cloud.tree.is_some());
-        if doc.is_none() && org.is_none() {
+        // Only a refresh: the first load comes from showing the section.
+        let activity = self.cloud.project.clone().filter(|p| {
+            self.cloud.panel_open
+                && self.cloud.section == Section::Activity
+                && self.cloud.activity.as_ref().is_some_and(|(q, _)| q == p)
+                && self
+                    .cloud
+                    .activity_at
+                    .is_none_or(|t| now.duration_since(t) >= POLL_INTERVAL)
+        });
+        if doc.is_none() && org.is_none() && activity.is_none() {
             return;
         }
         self.cloud.poll_due = Some(now + POLL_INTERVAL);
@@ -1770,6 +1859,9 @@ impl RcadApp {
         }
         if let Some(org) = org {
             self.cloud_send(Request::ListProjects { org });
+        }
+        if let Some(project) = activity {
+            self.cloud_send(Request::LoadActivity { project });
         }
     }
 
@@ -1977,11 +2069,13 @@ impl RcadApp {
                 actions.push(Action::Organization(org));
             }
         });
-        ui.horizontal(|ui| {
+        // Wrapped: four section buttons must not widen the panel.
+        ui.horizontal_wrapped(|ui| {
             for (s, label) in [
                 (Section::Browse, "Browse"),
                 (Section::History, "History"),
                 (Section::Comments, "Comments"),
+                (Section::Activity, "Activity"),
             ] {
                 if ui
                     .add(egui::Button::selectable(c.section == s, label))
@@ -1997,6 +2091,46 @@ impl RcadApp {
             Section::Browse => self.cloud_browse_ui(ui, actions),
             Section::History => self.cloud_history_ui(ui, actions),
             Section::Comments => self.cloud_comments_ui(ui, actions),
+            Section::Activity => self.cloud_activity_ui(ui, actions),
+        }
+    }
+
+    /// The selected project's recent activity, newest first.
+    fn cloud_activity_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let c = &self.cloud;
+        let Some(project) = c.project.clone() else {
+            ui.weak("Choose a project to see its activity.");
+            return;
+        };
+        let entries = c
+            .activity
+            .as_ref()
+            .filter(|(p, _)| *p == project)
+            .map(|(_, e)| e.clone());
+        ui.horizontal(|ui| {
+            ui.strong("Recent activity");
+            if ui
+                .small_button("⟳")
+                .named("Reload activity")
+                .on_hover_text("Reload")
+                .clicked()
+            {
+                actions.push(Action::Send(Request::LoadActivity {
+                    project: project.clone(),
+                }));
+            }
+        });
+        match entries {
+            None => {
+                ui.weak("Loading…");
+            }
+            Some(list) => {
+                // The panel itself scrolls.
+                if let Some(doc) = activity::activity_list(ui, &list, now_secs(), "Activity entry")
+                {
+                    actions.push(Action::Open(doc));
+                }
+            }
         }
     }
 
@@ -2472,6 +2606,11 @@ impl RcadApp {
                                 self.cloud_send(Request::LoadComments { document: doc });
                             }
                         }
+                        Section::Activity => {
+                            if let Some(project) = self.cloud.project.clone() {
+                                self.cloud_send(Request::LoadActivity { project });
+                            }
+                        }
                         Section::Browse => {}
                     }
                 }
@@ -2554,6 +2693,13 @@ impl RcadApp {
             .as_ref()
             .map_or(0, |det| det.document.head_version);
         let share_url = self.cloud.share_url.clone();
+        let shares = self
+            .cloud
+            .shares
+            .as_ref()
+            .filter(|(doc, _)| Some(doc) == self.cloud_target_doc().as_ref())
+            .map(|(_, l)| l.clone());
+        let mut revoke_send: Option<String> = None;
         let title = match &d {
             CloudDialog::SignIn { .. } => "Connect to server",
             CloudDialog::NewProject { .. } => "New project",
@@ -2690,6 +2836,7 @@ impl RcadApp {
                         allow_download,
                         version,
                         sent,
+                        revoke,
                     } => {
                         field(ui, "Expires after (days)", days, false);
                         crate::form::check(ui, allow_download, "Allow download");
@@ -2707,6 +2854,45 @@ impl RcadApp {
                                 .named("Share URL");
                             if ui.button("Copy").probe("Copy").clicked() {
                                 ui.ctx().copy_text(url.clone());
+                            }
+                        }
+                        ui.separator();
+                        ui.strong("Existing links");
+                        match &shares {
+                            None => {
+                                ui.weak("Loading…");
+                            }
+                            Some(list) if list.is_empty() => {
+                                ui.weak("None.");
+                            }
+                            Some(list) => {
+                                for (i, l) in list.iter().enumerate() {
+                                    let n = i + 1;
+                                    ui.horizontal(|ui| {
+                                        ui.label(activity::share_line(l))
+                                            .probe(&format!("Share link {n}"));
+                                        if revoke.as_deref() == Some(l.id.as_str()) {
+                                            ui.label("Revoke? It stops working at once.");
+                                            if ui
+                                                .small_button("Revoke")
+                                                .named("Confirm revoke")
+                                                .clicked()
+                                            {
+                                                revoke_send = Some(l.id.clone());
+                                            }
+                                            if ui.small_button("Keep").named("Keep link").clicked()
+                                            {
+                                                *revoke = None;
+                                            }
+                                        } else if ui
+                                            .small_button("Revoke…")
+                                            .named(&format!("Revoke share link {n}"))
+                                            .clicked()
+                                        {
+                                            *revoke = Some(l.id.clone());
+                                        }
+                                    });
+                                }
                             }
                         }
                         ui.horizontal(|ui| {
@@ -2859,6 +3045,9 @@ impl RcadApp {
         // Keep edits made this frame unless the dialog was replaced meanwhile.
         if self.cloud.dialog.is_some() {
             self.cloud.dialog = Some(d.clone());
+        }
+        if let (Some(share), Some(document)) = (revoke_send, self.cloud_target_doc()) {
+            self.cloud_send(Request::RevokeShare { document, share });
         }
         if cancel {
             self.cloud.dialog = None;
@@ -3107,6 +3296,16 @@ impl RcadApp {
              releases it. Others can still open it; local editing is never blocked.",
         )
         .changed()
+            | ui.checkbox(
+                &mut self.shell.prefs.cloud_version_on_save,
+                "Upload a version on every save",
+            )
+            .named("Pref cloud version on save")
+            .on_hover_text(
+                "Saving a cloud document locally also saves it as a new version on the \
+                 server (described \"Saved from R-CAD\"). Offline, the version is queued.",
+            )
+            .changed()
     }
 }
 

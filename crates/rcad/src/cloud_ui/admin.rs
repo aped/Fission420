@@ -139,6 +139,8 @@ impl RcadApp {
         self.cloud.org_members = None;
         self.cloud.admin_error_code = None;
         self.cloud.usage = None;
+        self.cloud.org_activity = None;
+        let admin = self.cloud_org_role(&org) >= Some(OrgRole::Admin);
         self.cloud.dialog = Some(CloudDialog::Organization {
             org: org.clone(),
             username: String::new(),
@@ -146,7 +148,10 @@ impl RcadApp {
             error: None,
         });
         self.cloud_send(Request::LoadOrgMembers { org: org.clone() });
-        self.cloud_send(Request::LoadUsage { org });
+        self.cloud_send(Request::LoadUsage { org: org.clone() });
+        if admin {
+            self.cloud_send(Request::LoadOrgActivity { org });
+        }
     }
 
     /// Show a failed member or organization request in its open window.
@@ -381,6 +386,12 @@ impl RcadApp {
             .as_ref()
             .map(|a| a.me.user.username.clone())
             .unwrap_or_default();
+        let activity = self
+            .cloud
+            .org_activity
+            .as_ref()
+            .filter(|(o, _)| *o == org)
+            .map(|(_, a)| a.clone());
         let mut sends: Vec<Request> = vec![];
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         egui::Window::new(format!("Organization: {name}"))
@@ -395,6 +406,31 @@ impl RcadApp {
                         ui.weak("Loading…");
                     }
                     Some(u) => usage_ui(ui, u),
+                }
+                if admin {
+                    ui.separator();
+                    ui.strong("Recent activity");
+                    match &activity {
+                        None => {
+                            ui.weak("Loading…");
+                        }
+                        Some(list) => {
+                            egui::ScrollArea::vertical()
+                                .id_salt("cloud_org_activity")
+                                .max_height(160.0)
+                                .show(ui, |ui| {
+                                    if let Some(document) = super::activity::activity_list(
+                                        ui,
+                                        list,
+                                        now_secs(),
+                                        "Organization activity entry",
+                                    ) {
+                                        sends.push(Request::OpenDocument { document });
+                                        close = true;
+                                    }
+                                });
+                        }
+                    }
                 }
                 ui.separator();
                 ui.strong("Members");
@@ -491,6 +527,9 @@ impl RcadApp {
                     if ui.button("Reload").named("Reload organization").clicked() {
                         sends.push(Request::LoadOrgMembers { org: org.clone() });
                         sends.push(Request::LoadUsage { org: org.clone() });
+                        if admin {
+                            sends.push(Request::LoadOrgActivity { org: org.clone() });
+                        }
                     }
                     close |= ui.button("Close").named("Close organization").clicked();
                 });
