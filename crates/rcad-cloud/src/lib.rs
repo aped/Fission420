@@ -14,9 +14,20 @@
 pub mod cache;
 pub mod client;
 pub mod config;
+mod fsutil;
 pub mod service;
 
 pub use rcad_cloud_proto as proto;
+
+/// Lowercase hex BLAKE3 hash of `bytes` (a [`proto::BlobHash`]).
+pub fn blob_hash(bytes: &[u8]) -> proto::BlobHash {
+    blake3::hash(bytes).to_hex().to_string()
+}
+
+/// `R-CAD <version>`: the HTTP User-Agent and the `generator` of saved versions.
+pub fn generator() -> String {
+    format!("R-CAD {}", env!("CARGO_PKG_VERSION"))
+}
 
 /// Errors of the cloud client. `Api` carries the server's structured error.
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +43,10 @@ pub enum CloudError {
     Io(#[from] std::io::Error),
     #[error("not signed in")]
     NotSignedIn,
+    /// The request cannot be carried out with the local state (e.g. the file is not linked
+    /// to a cloud document); no request reached the server.
+    #[error("{0}")]
+    Invalid(String),
 }
 
 impl CloudError {

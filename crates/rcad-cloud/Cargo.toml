@@ -14,6 +14,13 @@ rcad-cloud-proto = { path = "../rcad-cloud-proto" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# BLAKE3 blob hashes; `pure` keeps the build free of assembly and C.
+blake3 = { version = "1.8", default-features = false, features = ["std", "pure"] }
+# Blocking HTTP client: rustls with the ring provider and the operating system's certificate
+# verifier (no bundled Mozilla root list).
+ureq = { version = "3.3", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+tiny_http = "0.12"
