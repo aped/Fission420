@@ -2076,3 +2076,76 @@ fn version_on_save_never_uploads_unlinked_or_read_only_documents() {
     edit(&mut c);
     assert!(version_saves(&save_locally(&mut c, &doc)).is_empty());
 }
+
+#[test]
+fn hostile_activity_text_is_one_short_line_per_entry() {
+    let mut c = signed_in([1400.0, 900.0]);
+    click(&mut c.h, "Data panel");
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![project()],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Project Parts");
+    click(&mut c.h, "Activity section");
+    drain(&c.req);
+    let mut entries = vec![entry(
+        "saved v2\nmallory deleted the project\u{202E}gnp.exe",
+        None,
+    )];
+    entries.push(entry(&"y".repeat(100_000), None));
+    // Far more entries than are ever listed.
+    entries.extend((0..2000).map(|i| entry(&format!("bulk {i}"), None)));
+    c.ev.send(Event::Activity {
+        project: "p1".into(),
+        entries,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(
+        c.h.query_by_label_contains("saved v2 mallory deleted the project gnp.exe")
+            .is_some()
+    );
+    assert!(c.h.query_by_label_contains("\n").is_none());
+    let long = format!("{}…", "y".repeat(200));
+    assert!(c.h.query_by_label(&long).is_some());
+    // Entry 500 (two hostile ones, then bulk 0..) is the last one listed.
+    assert!(c.h.query_by_label("bulk 497").is_some());
+    assert!(c.h.query_by_label("bulk 498").is_none());
+}
+
+#[test]
+fn the_thumbnail_cache_is_bounded() {
+    let mut c = opened([1400.0, 900.0]);
+    for v in 1..=70u64 {
+        c.ev.send(Event::Thumbnail {
+            document: "d1".into(),
+            version: v,
+            png: Some(tiny_png()),
+        })
+        .unwrap();
+    }
+    settle(&mut c.h);
+    settle(&mut c.h);
+    let loaded = (1..=70u64)
+        .filter(|&v| c.h.state().cloud_thumbnail_loaded("d1", v))
+        .count();
+    assert_eq!(loaded, 64);
+    // The oldest went first.
+    assert!(!c.h.state().cloud_thumbnail_loaded("d1", 1));
+    assert!(c.h.state().cloud_thumbnail_loaded("d1", 70));
+    // An oversized thumbnail decodes to nothing (and off the UI thread).
+    let mut big = Vec::new();
+    image::DynamicImage::ImageLuma8(image::GrayImage::new(4096, 4096))
+        .write_to(&mut std::io::Cursor::new(&mut big), image::ImageFormat::Png)
+        .unwrap();
+    c.ev.send(Event::Thumbnail {
+        document: "d1".into(),
+        version: 99,
+        png: Some(big),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(!c.h.state().cloud_thumbnail_loaded("d1", 99));
+}

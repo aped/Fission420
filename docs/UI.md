@@ -238,6 +238,17 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
   panel show the latest version's thumbnail small, and the version history shows each
   version's thumbnail larger. Thumbnails are fetched once per version, when first shown, and
   kept for the session; one that does not decode as a PNG is simply not shown.
+  Thumbnails are decoded on a background thread; a PNG wider or taller than 1024 px (read
+  from its header before decoding) or needing more than 8 MiB to decode is not shown, and
+  at most 64 thumbnail textures are kept (the oldest is dropped and fetched again from the
+  local cache when shown again).
+* **Server text:** activity entries, comments and share links are shown with control and
+  bidirectional-override characters replaced by spaces (comment bodies keep their line
+  breaks), names and summaries cut at 200 characters and comments at 4000, and at most 500
+  rows per list.
+* **One account per session:** the app keeps the account it started with (or last signed
+  in with) even if `rcad-cli cloud use` changes the active account in the account file, and
+  shows and checks only that account's linked files. Signing in from the app switches.
 * **File menu:** **Save to Cloud Project…** for an open document that is not on the server
   (Fusion's first Save into a project): pick a project you can edit, a folder and a name; a
   document never saved locally goes through Save As first, and unsaved changes are saved

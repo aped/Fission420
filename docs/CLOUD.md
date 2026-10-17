@@ -295,6 +295,15 @@ rcad-cli cloud logout
 
 ## Security notes
 
+- The desktop app's background service keeps one account for the session
+  (`Worker::pin_account`): another program changing the account file's active account does
+  not redirect it; only a sign-in through the app does, and signing out ends the session.
+  The app lists and checks only the links of that account (its own cache directory,
+  filtered to its server). `rcad-cli` follows the file (or `--account`).
+- Thumbnails from the server are size-checked from the PNG header (at most 1024 px either
+  way) and decoded with an 8 MiB allocation limit on a background thread; the app keeps at
+  most 64 thumbnail textures.
+
 - Use `https://` server URLs. A home lab behind `tailscale serve` or a reverse proxy with a
   real certificate works as is: certificates are checked by the operating system's verifier
   (rustls with `rustls-platform-verifier`), so a locally trusted CA works too.

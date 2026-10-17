@@ -357,6 +357,10 @@ pub struct CloudUi {
     thumb_png: Vec<(ThumbKey, Option<Vec<u8>>)>,
     /// Thumbnail textures (None: the version has none, or it did not decode).
     thumbs: HashMap<ThumbKey, Option<egui::TextureHandle>>,
+    /// Insertion order of `thumbs`, oldest first (the cache keeps [`MAX_THUMB_TEXTURES`]).
+    thumb_order: std::collections::VecDeque<ThumbKey>,
+    /// Background PNG decoding (started on the first thumbnail).
+    thumb_decoder: Option<thumb::Decoder>,
     /// Head versions on the server, as last polled.
     heads: HashMap<String, u64>,
     /// When the next update-available poll is due (None: now).
@@ -384,6 +388,10 @@ pub struct CloudUi {
 
 /// How long the server URL must stay unchanged before its info is fetched.
 pub const INFO_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// Most thumbnail textures kept; the oldest is dropped (and fetched again from
+/// the local blob cache if it is shown again).
+pub const MAX_THUMB_TEXTURES: usize = 64;
 
 /// A version of a document: (document id, version number).
 type ThumbKey = (String, u64);
@@ -420,6 +428,29 @@ enum Action {
 }
 
 impl CloudUi {
+    /// Cache a thumbnail texture, dropping the oldest beyond [`MAX_THUMB_TEXTURES`]
+    /// (a dropped one may be asked for again).
+    fn insert_thumb(&mut self, key: ThumbKey, tex: Option<egui::TextureHandle>) {
+        if self.thumbs.insert(key.clone(), tex).is_none() {
+            self.thumb_order.push_back(key);
+        }
+        while self.thumb_order.len() > MAX_THUMB_TEXTURES {
+            if let Some(old) = self.thumb_order.pop_front() {
+                self.thumbs.remove(&old);
+                self.thumb_asked.remove(&old);
+            }
+        }
+    }
+
+    /// Forget everything tied to the previous account's documents.
+    fn forget_account_state(&mut self) {
+        self.thumbs.clear();
+        self.thumb_order.clear();
+        self.thumb_asked.clear();
+        self.thumb_png.clear();
+        self.heads.clear();
+    }
+
     /// The server state was just seen: the next poll waits a full interval.
     fn poll_next_interval(&mut self) {
         self.poll_due = Some(std::time::Instant::now() + POLL_INTERVAL);
@@ -534,21 +565,13 @@ fn now_secs() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-/// Links of every server from the cache (`<root>/<server>/links.json`).
-fn load_links(root: &Path) -> Vec<Link> {
-    let Ok(dirs) = std::fs::read_dir(root) else {
-        return vec![];
-    };
-    let mut out = vec![];
-    for d in dirs.flatten() {
-        let p = d.path().join("links.json");
-        if let Ok(t) = std::fs::read_to_string(&p)
-            && let Ok(v) = serde_json::from_str::<Vec<Link>>(&t)
-        {
-            out.extend(v);
-        }
-    }
-    out
+/// Links of one account only: its own cache directory, filtered to its server.
+/// Files linked under other accounts are never shown or checked against this
+/// account's server.
+fn load_links(root: &Path, server_url: &str, username: &str) -> Vec<Link> {
+    rcad_cloud::cache::ServerCache::new(root, server_url, username)
+        .links()
+        .unwrap_or_default()
 }
 
 /// A labelled single-line text field (accessible name and probe key: the label).
@@ -625,8 +648,11 @@ impl RcadApp {
     /// Use `service` (the started service, or a detached one in tests): load
     /// the known links and ask for the account state.
     pub fn attach_cloud_service(&mut self, service: CloudService) {
-        if let Some(root) = &self.cloud.cache_root {
-            self.cloud.links = load_links(root);
+        if let (Some(root), Some(config)) = (&self.cloud.cache_root, &self.cloud.config_path)
+            && let Ok(cfg) = rcad_cloud::config::CloudConfig::load(config)
+            && let Some(a) = cfg.active_account()
+        {
+            self.cloud.links = load_links(root, &a.server_url, &a.username);
         }
         service.send(Request::Refresh);
         self.cloud.service = Some(service);
@@ -1243,6 +1269,19 @@ impl RcadApp {
                     c.org = me.orgs.first().map(|o| o.id.clone());
                 }
                 let user = me.user.username.clone();
+                let changed = c
+                    .account
+                    .as_ref()
+                    .is_none_or(|a| a.server_url != server_url || a.me.user.username != user);
+                if changed {
+                    // Another account (or the first): its own links, nothing of the last one's.
+                    if !first {
+                        c.forget_account_state();
+                    }
+                    if let Some(root) = &c.cache_root {
+                        c.links = load_links(root, &server_url, &user);
+                    }
+                }
                 c.account = Some(Account {
                     server_url,
                     server_name: server_name.clone(),
@@ -1975,18 +2014,46 @@ impl RcadApp {
         self.cloud_send(request);
     }
 
-    /// Turn received thumbnail PNGs into textures.
+    /// Hand received thumbnail PNGs to the background decoder and turn decoded
+    /// images into textures. Decoding never runs on the UI thread.
     fn cloud_thumbnail_textures(&mut self, ctx: &egui::Context) {
-        for ((doc, version), png) in std::mem::take(&mut self.cloud.thumb_png) {
-            let tex = png.as_deref().and_then(thumb::decode_png).map(|img| {
+        for (key, png) in std::mem::take(&mut self.cloud.thumb_png) {
+            match png {
+                Some(png) => self
+                    .cloud
+                    .thumb_decoder
+                    .get_or_insert_with(thumb::Decoder::start)
+                    .submit(key, png),
+                None => self.cloud.insert_thumb(key, None),
+            }
+        }
+        let Some(decoder) = self.cloud.thumb_decoder.as_mut() else {
+            return;
+        };
+        let done = decoder.finished();
+        if decoder.pending() > 0 {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        for ((doc, version), img) in done {
+            let tex = img.map(|img| {
                 ctx.load_texture(
                     format!("cloud-thumb-{doc}-{version}"),
                     img,
                     egui::TextureOptions::LINEAR,
                 )
             });
-            self.cloud.thumbs.insert((doc, version), tex);
+            self.cloud.insert_thumb((doc, version), tex);
         }
+    }
+
+    /// Thumbnails received but not decoded yet (tests wait for them).
+    pub(crate) fn cloud_thumbnails_pending(&self) -> bool {
+        !self.cloud.thumb_png.is_empty()
+            || self
+                .cloud
+                .thumb_decoder
+                .as_ref()
+                .is_some_and(|d| d.pending() > 0)
     }
 
     /// Update-available polling: while signed in, every [`POLL_INTERVAL`]
@@ -2704,17 +2771,25 @@ impl RcadApp {
             ui.weak("No comments yet.");
         }
         let now = now_secs();
-        for (i, cm) in comments.iter().enumerate() {
+        for (i, cm) in comments.iter().take(activity::MAX_ROWS).enumerate() {
             ui.group(|ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong(&cm.author);
+                    ui.strong(activity::display_text(
+                        &cm.author,
+                        activity::MAX_LINE_CHARS,
+                        false,
+                    ));
                     ui.weak(format!(
                         "v{} · {}",
                         cm.version,
                         fmt_time(cm.created_at, now)
                     ));
                 });
-                ui.label(&cm.body);
+                ui.label(activity::display_text(
+                    &cm.body,
+                    activity::MAX_BODY_CHARS,
+                    true,
+                ));
                 let mut resolved = cm.resolved;
                 if ui
                     .checkbox(&mut resolved, "Resolved")
@@ -3096,7 +3171,7 @@ impl RcadApp {
                                 ui.weak("None.");
                             }
                             Some(list) => {
-                                for (i, l) in list.iter().enumerate() {
+                                for (i, l) in list.iter().take(activity::MAX_ROWS).enumerate() {
                                     let n = i + 1;
                                     ui.horizontal(|ui| {
                                         ui.label(activity::share_line(l))
@@ -3548,6 +3623,32 @@ impl RcadApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_active_accounts_links_are_loaded() {
+        let root = tempfile::tempdir().unwrap();
+        let link = |server: &str, file: &str| Link {
+            local_path: root.path().join(file),
+            server_url: server.into(),
+            org: "o".into(),
+            project: "p".into(),
+            document: "d1".into(),
+            document_name: file.into(),
+            base_version: 1,
+            base_blob: None,
+        };
+        let a = rcad_cloud::cache::ServerCache::new(root.path(), "https://a.example", "ada");
+        let b = rcad_cloud::cache::ServerCache::new(root.path(), "https://b.example", "bob");
+        a.upsert_link(link("https://a.example", "a.rcad.json"))
+            .unwrap();
+        b.upsert_link(link("https://b.example", "b.rcad.json"))
+            .unwrap();
+        let mine = load_links(root.path(), "https://a.example", "ada");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].server_url, "https://a.example");
+        // Another user on the same server sees none of them.
+        assert!(load_links(root.path(), "https://a.example", "eve").is_empty());
+    }
+
     use super::*;
 
     #[test]

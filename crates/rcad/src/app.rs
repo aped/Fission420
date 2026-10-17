@@ -710,6 +710,15 @@ impl RcadApp {
             && self.scene_steps.is_empty()
             && self.scene_hold.is_none_or(|t| Instant::now() >= t)
             && !self.summary.measuring
+            && !self.cloud_decoding()
+    }
+    #[cfg(feature = "cloud")]
+    fn cloud_decoding(&self) -> bool {
+        self.cloud_thumbnails_pending()
+    }
+    #[cfg(not(feature = "cloud"))]
+    fn cloud_decoding(&self) -> bool {
+        false
     }
     pub fn feature_by_name(&self, name: &str) -> Option<&FeatureSummary> {
         self.summary.features.iter().find(|f| f.name == name)
