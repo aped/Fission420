@@ -697,6 +697,35 @@ impl Cli {
                 "server unreachable; {pending} version(s) queued (run `rcad-cli cloud sync` later)"
             ),
             Event::Synced { pending } => println!("pending versions: {pending}"),
+            Event::PendingQueue { saves } => {
+                for (i, p) in saves.iter().enumerate() {
+                    println!(
+                        "{i}\t{}\t{}\t{}",
+                        p.document,
+                        time(p.queued_at),
+                        p.description
+                    );
+                }
+            }
+            Event::ProjectMembers { members, .. } => {
+                for m in members {
+                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                }
+            }
+            Event::OrgMembers { members, .. } => {
+                for m in members {
+                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                }
+            }
+            Event::Usage { usage, .. } => println!(
+                "{} bytes used of {}; {} documents, {} versions",
+                usage.used_bytes,
+                usage
+                    .quota_bytes
+                    .map_or("no quota".to_string(), |q| format!("{q} bytes")),
+                usage.documents,
+                usage.versions
+            ),
             Event::Error {
                 request, message, ..
             } => eprintln!("error ({request}): {message}"),
@@ -873,6 +902,16 @@ fn event_json(e: &Event) -> serde_json::Value {
         }
         Event::Offline { pending } => json!({"event": "offline", "pending": pending}),
         Event::Synced { pending } => json!({"event": "synced", "pending": pending}),
+        Event::PendingQueue { saves } => json!({"event": "pending_queue", "saves": to_json(saves)}),
+        Event::ProjectMembers { project, members } => {
+            json!({"event": "project_members", "project": project, "members": to_json(members)})
+        }
+        Event::OrgMembers { org, members } => {
+            json!({"event": "org_members", "org": org, "members": to_json(members)})
+        }
+        Event::Usage { org, usage } => {
+            json!({"event": "usage", "org": org, "usage": to_json(usage)})
+        }
         Event::Error {
             request,
             code,

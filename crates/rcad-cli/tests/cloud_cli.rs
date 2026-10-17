@@ -294,25 +294,6 @@ fn members_and_trash_reach_their_routes() {
         "{:?}",
         server.log()
     );
-    if text(&o).contains("no route") {
-        // A fake server without the member and trash routes: only the requests are checked.
-        let file = env.file("Plate.rcad.json", b"one");
-        let doc = push(&env, &file);
-        let _ = env.cli(&["trash", &doc], None);
-        let _ = env.cli(&["restore", &doc], None);
-        let _ = env.cli(&["members", PROJECT], None);
-        let _ = env.cli(&["member", "remove", PROJECT, "bob"], None);
-        let log = server.log();
-        for want in [
-            format!("DELETE /api/v1/documents/{doc}"),
-            format!("POST /api/v1/documents/{doc}/restore"),
-            format!("GET /api/v1/projects/{PROJECT}/members"),
-            format!("DELETE /api/v1/projects/{PROJECT}/members/bob"),
-        ] {
-            assert!(log.contains(&want), "{want} not in {log:?}");
-        }
-        return;
-    }
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(text(&o).contains("bob is editor"), "{}", text(&o));
     let o = env.cli(&["members", PROJECT], None);
