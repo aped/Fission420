@@ -30,13 +30,19 @@ The client side is the `rcad-cloud` crate (used by the app and by `rcad-cli clou
 
 Accounts: `$XDG_CONFIG_HOME/r-cad/cloud.json` (else `~/.config/r-cad/cloud.json`), next to
 `prefs.json`. Versioned JSON (`"version": 1`) holding each account's server URL, server
-name, username and bearer token. The file is written atomically, with mode 0600 on Unix.
-Signing out revokes the token on the server (best effort) and removes it from the file.
+name, username, bearer token and the server's download size limit. The file is written
+atomically, with mode 0600 on Unix. Signing out revokes the token on the server (best effort)
+and removes that account from the file.
 
-Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one directory per server:
+Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one directory per account
+on each server:
 
 ```text
-<host>_<port>/                       the server URL's host, port and path, sanitized
+<host>_<port>-<user>-<hash>/         host, port and path sanitized, the username, and 16 hex
+                                     digits of BLAKE3 over the URL (scheme included) and the
+                                     username: http:// and https:// on one host, and two
+                                     accounts on one server, never share a directory
+  .lock                              advisory lock (see below)
   links.json                         local working file -> document, base version, base hash
   pending.json                       versions saved while offline, in order
   blobs/<aa>/<hash>                  content-addressed copies of downloaded/uploaded versions
@@ -45,6 +51,18 @@ Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one director
 ```
 
 - Every file is replaced atomically (temporary file in the same directory, then rename).
+- The app and `rcad-cli cloud` may run at the same time. Every read-modify-write of
+  `links.json` and `pending.json` holds an exclusive advisory lock on the directory's `.lock`
+  (`flock` on Unix, `LockFileEx` on Windows, through `std::fs::File::lock`), and every change
+  of `cloud.json` holds one on `.cloud.json.lock` next to it. The lock is held only for the
+  local read and write, never during a network request. A sync re-reads the queue before each
+  entry and removes sent entries by value, so a version queued by the other process while a
+  long upload runs is kept (and sent too) instead of being overwritten by a stale copy.
+- Links record their server URL, and only links of the cache's own server are used.
+- Caches written by earlier builds were keyed by host only. On first use, the old directory
+  is taken over by the first account opened on that server, provided every link in it names
+  this exact server URL (scheme included). Otherwise it is left alone and its documents are
+  downloaded again; its queued versions are not sent from there.
 - Document names and ids come from the server. They are reduced to a single safe file-name
   component: no separators, drive prefixes, control characters, Windows-forbidden characters
   or device names, no leading dots, at most 96 bytes. A hostile name cannot leave the cache
@@ -58,7 +76,13 @@ Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one director
 
 - **Sign in.** The client first reads `GET /api/v1/info`. A server that is not an R-CAD
   server, or that speaks another protocol version, is refused before the password is sent.
-  The token's device name is `R-CAD on <hostname>`.
+  The token's device name is `R-CAD on <hostname>`. Plain `http://` needs consent unless the
+  host is on a local network (see Security notes).
+- **Download limits.** A version is downloaded only if its declared size is within the
+  server's advertised `max_blob_bytes` (recorded at sign-in; 1 GiB for accounts added by
+  earlier builds). The download stops as soon as the server sends more bytes than the
+  version's declared size, and the partial file is deleted. In-memory downloads (share link
+  content) are capped at 1 GiB.
 - **Open.** The head version is taken from the blob cache if present, otherwise downloaded and
   verified. It is then written to the working copy, and the link moves to the head.
   - Working copy modified (its hash differs from the link's base hash): it is kept and
@@ -73,6 +97,9 @@ Cache: `$XDG_CACHE_HOME/r-cad/cloud` (else `~/.cache/r-cad/cloud`), one director
     the file do not change what is sent.
   - If a save's answer was lost (connection dropped after the server stored it), the replay
     finds the head already holding the same bytes and counts it as saved.
+  - 422 `hash_mismatch` when creating the version means the server no longer has the blob
+    (for example, its garbage collection removed it after the upload check). The blob is
+    uploaded again from the blob cache and the save retried once; a second refusal is final.
 - **Sync.** Queued versions are sent in order.
   - The first conflict or lock stops the queue. That entry stays queued; resolve it by saving
     that file with force, which forces its queued versions too.
@@ -123,7 +150,8 @@ disable controls, and shows the server's refusals.
 command line also signs in the app.
 
 ```text
-rcad-cli cloud login https://cad.example.net ada      # password: $RCAD_PASSWORD or one stdin line
+rcad-cli cloud login https://cad.example.net ada      # password: $RCAD_PASSWORD, prompt or stdin
+rcad-cli cloud login http://cad.example.net ada --allow-insecure-http
 rcad-cli cloud whoami
 rcad-cli cloud orgs
 rcad-cli cloud projects <org-id>
@@ -146,6 +174,15 @@ rcad-cli cloud restore <document-id>
 rcad-cli cloud logout
 ```
 
+- `login` takes the password from `$RCAD_PASSWORD`, else from a prompt with echo off when
+  stdin is a terminal, else from one line of stdin. Plain `http://` to a host that is not on
+  a local network is refused before the password is read unless `--allow-insecure-http` is
+  given (a warning is printed then).
+- Text output escapes control characters, escape sequences and bidirectional-override
+  characters in everything it prints (names, descriptions, comments, usernames, lock holders,
+  server error messages), as `\u{1b}` and so on, so a hostile string cannot drive the
+  terminal (colour, cursor, title or clipboard sequences) or forge output lines. `--json`
+  output carries the exact strings, escaped by the JSON encoder.
 - `pull` without `--out` prints the path of the linked working copy: edit it and `save` it.
 - `pull --out` writes an unlinked copy.
 - `--json` prints one JSON object per event.
@@ -167,8 +204,16 @@ rcad-cli cloud logout
 - Use `https://` server URLs. A home lab behind `tailscale serve` or a reverse proxy with a
   real certificate works as is: certificates are checked by the operating system's verifier
   (rustls with `rustls-platform-verifier`), so a locally trusted CA works too.
-- Plain `http://` is accepted for trusted networks only. The password at sign-in and the
-  bearer token on every request then travel unencrypted.
+- Plain `http://` is meant for trusted networks only: the password at sign-in, the bearer
+  token on every request and the documents travel unencrypted. Signing in over `http://`
+  works without asking only when the host is a loopback name or address, a private
+  (10/8, 172.16/12, 192.168/16), link-local (169.254/16) or carrier-grade NAT (100.64/10,
+  used by Tailscale) IPv4 address, a unique-local or link-local IPv6 address, or a name under
+  `.local`, `.lan`, `.internal`, `.home.arpa`, `.localhost` or `.ts.net`. Any other host
+  (single-label names included, since a DNS search domain can resolve them publicly) needs
+  explicit consent: `--allow-insecure-http` on the command line, or ticking **Allow
+  unencrypted connection** in the sign-in dialog, which shows a warning. The check happens at
+  sign-in; accounts added earlier keep working.
 - The client honours the standard proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`,
   `NO_PROXY`).
 - The client follows no redirects. A server that redirects, for example from http to https,

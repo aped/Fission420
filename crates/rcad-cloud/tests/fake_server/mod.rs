@@ -32,8 +32,13 @@ pub struct State {
     pub projects: Vec<proto::Project>,
     pub log: Vec<String>,
     pub next_id: u64,
-    /// Serve content with one extra byte (hash mismatch).
+    /// Serve content with its last byte changed (hash mismatch, same size).
     pub tamper_content: bool,
+    /// Serve content with this many extra bytes beyond the version's declared size.
+    pub inflate_content: usize,
+    /// Answer this many version saves by deleting the referenced blob and failing with 422
+    /// `hash_mismatch` (a garbage collection racing the save).
+    pub drop_blob_on_save: u32,
     pub logins: Vec<proto::LoginRequest>,
     /// Documents in the trash.
     pub trash: Vec<Doc>,
@@ -83,6 +88,8 @@ impl State {
             log: Vec::new(),
             next_id: 1,
             tamper_content: false,
+            inflate_content: 0,
+            drop_blob_on_save: 0,
             logins: Vec::new(),
             trash: Vec::new(),
             org_members: vec![
@@ -586,6 +593,10 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
             if let Some((status, code)) = st.fail_saves {
                 return err(status, code, "save refused");
             }
+            if st.drop_blob_on_save > 0 {
+                st.drop_blob_on_save -= 1;
+                st.blobs.remove(&req.blob);
+            }
             if !st.blobs.contains_key(&req.blob) {
                 return err(422, ErrorCode::HashMismatch, "blob missing");
             }
@@ -676,6 +687,7 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
         ("GET", ["documents", d, "versions", n, "content"]) => {
             let n: u64 = n.parse().unwrap_or(0);
             let tamper = st.tamper_content;
+            let inflate = st.inflate_content;
             let Some(v) = st
                 .docs
                 .iter()
@@ -685,9 +697,10 @@ fn route(st: &mut State, method: &str, url: &str, auth: Option<&str>, body: &[u8
                 return err(404, ErrorCode::NotFound, "no version");
             };
             let mut bytes = st.blobs.get(&v.blob).cloned().unwrap_or_default();
-            if tamper {
-                bytes.push(b'!');
+            if tamper && let Some(last) = bytes.last_mut() {
+                *last ^= 0x20;
             }
+            bytes.extend(std::iter::repeat_n(b'x', inflate));
             (200, bytes, "application/octet-stream")
         }
         ("POST", ["documents", d, "lock"]) => {

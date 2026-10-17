@@ -260,6 +260,7 @@ fn sign_in_dialog_sends_the_entered_fields_and_shows_errors() {
             server_url: "http://127.0.0.1:18640".into(),
             username: "alice".into(),
             password: "alice-pass-123".into(),
+            allow_insecure_http: false,
         }]
     );
     ev.send(Event::Error {
@@ -300,6 +301,48 @@ fn sign_in_dialog_sends_the_entered_fields_and_shows_errors() {
     );
     click(&mut h, "Sign out");
     assert_eq!(drain(&req), vec![Request::SignOut]);
+}
+
+#[test]
+fn plain_http_to_a_public_host_needs_the_unencrypted_checkbox() {
+    let (svc, req, _ev) = CloudService::detached();
+    let mut h = harness([1400.0, 900.0]);
+    h.state_mut().attach_cloud_service(svc);
+    drain(&req);
+    click(&mut h, "Data panel");
+    click(&mut h, "Connect to server…");
+    // A local address shows no warning and needs no consent.
+    type_into(&mut h, "Server URL", "http://192.168.1.20:8080");
+    settle(&mut h);
+    assert!(h.query_by_label("Allow unencrypted connection").is_none());
+    type_into(&mut h, "Server URL", "http://cad.example");
+    type_into(&mut h, "Username", "alice");
+    type_into(&mut h, "Password", "alice-pass-123");
+    settle(&mut h);
+    assert!(h.query_by_label("Allow unencrypted connection").is_some());
+    assert!(
+        h.query_by_label_contains("travel unencrypted").is_some(),
+        "the warning is shown"
+    );
+    // Without the tick nothing is sent.
+    click(&mut h, "Connect");
+    assert!(drain(&req).is_empty());
+    assert!(
+        h.query_by_label_contains("would not be encrypted")
+            .is_some(),
+        "explains why"
+    );
+    click(&mut h, "Allow unencrypted connection");
+    click(&mut h, "Connect");
+    assert_eq!(
+        drain(&req),
+        vec![Request::SignIn {
+            server_url: "http://cad.example".into(),
+            username: "alice".into(),
+            password: "alice-pass-123".into(),
+            allow_insecure_http: true,
+        }]
+    );
 }
 
 #[test]

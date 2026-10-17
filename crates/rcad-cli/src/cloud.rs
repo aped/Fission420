@@ -10,19 +10,67 @@
 //!
 //! Exit codes: 0 ok, 1 error, 3 version conflict, 4 locked by another user, 5 server
 //! unreachable and the version was queued (`rcad-cli cloud sync` sends it later), 64 usage.
+//!
+//! Text output passes through [`term_safe`]: names, descriptions, comments, usernames and
+//! error messages come from the server (and other users), so control characters, escape
+//! sequences and bidirectional-override characters are shown escaped instead of reaching
+//! the terminal. `--json` output is plain JSON from serde.
 use rcad_cloud::CloudError;
 use rcad_cloud::cache::Link;
 use rcad_cloud::client::Client;
 use rcad_cloud::proto;
 use rcad_cloud::service::{Event, Request, Worker};
 use serde_json::json;
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// `s` with every character that could control a terminal shown as a `\u{..}` escape: C0
+/// controls except tab (so also newlines, which could forge extra output lines), DEL, C1
+/// controls (8-bit CSI and OSC included) and the bidirectional controls that reorder what
+/// is displayed (U+061C, U+200E, U+200F, U+202A..U+202E, U+2066..U+2069).
+pub(crate) fn term_safe(s: &str) -> std::borrow::Cow<'_, str> {
+    fn bad(c: char) -> bool {
+        (c.is_control() && c != '\t')
+            || matches!(
+                c,
+                '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+            )
+    }
+    if !s.chars().any(bad) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 16);
+    for c in s.chars() {
+        if bad(c) {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// `println!` for text output, through [`term_safe`].
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        println!("{}", term_safe(&format!($($arg)*)))
+    };
+}
+
+/// `eprintln!` for text output, through [`term_safe`].
+macro_rules! errln {
+    ($($arg:tt)*) => {
+        eprintln!("{}", term_safe(&format!($($arg)*)))
+    };
+}
+
 const USAGE: &str = "\
 usage: rcad-cli cloud [--json] COMMAND
-  login SERVER-URL USERNAME        password from $RCAD_PASSWORD or one line of stdin
+  login SERVER-URL USERNAME [--allow-insecure-http]
+                                   password from $RCAD_PASSWORD, a no-echo prompt on a
+                                   terminal, or one line of stdin; plain http:// to a host
+                                   not on a local network needs --allow-insecure-http
   logout
   whoami
   orgs
@@ -121,7 +169,7 @@ pub fn run(args: &[String]) -> ExitCode {
         rcad_cloud::config::default_path(),
         rcad_cloud::cache::default_root(),
     ) else {
-        eprintln!("cannot locate the configuration directory (set HOME or XDG_CONFIG_HOME)");
+        errln!("cannot locate the configuration directory (set HOME or XDG_CONFIG_HOME)");
         return ExitCode::FAILURE;
     };
     let mut cli = Cli {
@@ -222,21 +270,44 @@ impl Cli {
     }
 
     fn login(&mut self, args: &[String]) -> Option<Outcome> {
-        let opts = Opts::parse(args, &[], &[])?;
+        let opts = Opts::parse(args, &[], &["--allow-insecure-http"])?;
         let [url, user] = opts.positional.as_slice() else {
             return None;
         };
+        let allow_insecure_http = opts.has("--allow-insecure-http");
+        // Refuse before asking for the password.
+        if let Ok(normalized) = rcad_cloud::client::normalize_server_url(url)
+            && rcad_cloud::client::needs_insecure_consent(&normalized)
+        {
+            if !allow_insecure_http {
+                errln!(
+                    "error (sign_in): {normalized} is not encrypted. {} Pass \
+                     --allow-insecure-http to connect anyway.",
+                    rcad_cloud::client::INSECURE_HTTP_WARNING
+                );
+                return Some(Outcome::Error);
+            }
+            errln!(
+                "warning: {normalized} is not encrypted. {}",
+                rcad_cloud::client::INSECURE_HTTP_WARNING
+            );
+        }
         let password = match std::env::var("RCAD_PASSWORD") {
             Ok(p) => p,
-            Err(_) => {
-                let stdin = std::io::stdin();
-                if stdin.is_terminal() {
-                    eprint!("Password for {user} (input is echoed; prefer $RCAD_PASSWORD): ");
-                    let _ = std::io::stderr().flush();
+            Err(_) if std::io::stdin().is_terminal() => {
+                // Reads from the terminal with echo off.
+                match rpassword::prompt_password(format!("Password for {}: ", term_safe(user))) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        errln!("cannot read the password: {e}");
+                        return Some(Outcome::Error);
+                    }
                 }
+            }
+            Err(_) => {
                 let mut line = String::new();
-                if stdin.lock().read_line(&mut line).is_err() {
-                    eprintln!("cannot read the password from stdin");
+                if std::io::stdin().lock().read_line(&mut line).is_err() {
+                    errln!("cannot read the password from stdin");
                     return Some(Outcome::Error);
                 }
                 line.trim_end_matches(['\r', '\n']).to_string()
@@ -247,6 +318,7 @@ impl Cli {
                 server_url: url.clone(),
                 username: user.clone(),
                 password,
+                allow_insecure_http,
             },
             false,
         ))
@@ -267,14 +339,15 @@ impl Cli {
                 } if !self.json => {
                     if orgs_only {
                         for o in &me.orgs {
-                            println!("{}\t{}\t{:?}", o.id, o.name, o.my_role);
+                            outln!("{}\t{}\t{:?}", o.id, o.name, o.my_role);
                         }
                     } else {
-                        println!(
+                        outln!(
                             "{} ({}) on {server_name} <{server_url}>",
-                            me.user.username, me.user.display_name
+                            me.user.username,
+                            me.user.display_name
                         );
-                        println!("pending versions: {pending}");
+                        outln!("pending versions: {pending}");
                     }
                 }
                 other => self.print(other),
@@ -347,11 +420,11 @@ impl Cli {
                 Some(src) => match std::fs::copy(&src, &out) {
                     Ok(_) => {
                         if !self.json {
-                            println!("copied to {out} (not linked)");
+                            outln!("copied to {out} (not linked)");
                         }
                     }
                     Err(e) => {
-                        eprintln!("cannot write {out}: {e}");
+                        errln!("cannot write {out}: {e}");
                         outcome = Outcome::Error;
                     }
                 },
@@ -443,7 +516,7 @@ impl Cli {
                     if self.json {
                         self.emit_json(json!({"event": "project_created", "project": to_json(&p)}));
                     } else {
-                        println!("{}\t{}\t{}", p.id, p.name, role_name(p.my_role));
+                        outln!("{}\t{}\t{}", p.id, p.name, role_name(p.my_role));
                     }
                     Outcome::Ok
                 }
@@ -467,7 +540,7 @@ impl Cli {
                         }));
                     } else {
                         for m in &members {
-                            println!(
+                            outln!(
                                 "{}\t{}\t{}",
                                 m.user.username,
                                 role_name(m.role),
@@ -506,11 +579,7 @@ impl Cli {
                                     "member": to_json(&m)
                                 }));
                             } else {
-                                println!(
-                                    "{} is {} of {project}",
-                                    m.user.username,
-                                    role_name(m.role)
-                                );
+                                outln!("{} is {} of {project}", m.user.username, role_name(m.role));
                             }
                             Outcome::Ok
                         }
@@ -529,7 +598,7 @@ impl Cli {
                                 "username": username
                             }));
                         } else {
-                            println!("removed {username} from {project}");
+                            outln!("removed {username} from {project}");
                         }
                         Outcome::Ok
                     }
@@ -555,7 +624,7 @@ impl Cli {
                     if self.json {
                         self.emit_json(json!({"event": "folder_created", "folder": to_json(&f)}));
                     } else {
-                        println!("{}\t{}", f.id, f.name);
+                        outln!("{}\t{}", f.id, f.name);
                     }
                     Outcome::Ok
                 }
@@ -580,7 +649,7 @@ impl Cli {
             .and_then(|c| c.pending().ok())
             .and_then(|q| q.get(index).cloned());
         let Some(entry) = entry else {
-            eprintln!(
+            errln!(
                 "error (discard_pending): no queued version {index} (see `rcad-cli cloud queue`)"
             );
             return Some(Outcome::Error);
@@ -608,7 +677,7 @@ impl Cli {
                             json!({"event": "document_restored", "document": to_json(&d)}),
                         );
                     } else {
-                        println!("restored {} ({})", d.name, d.id);
+                        outln!("restored {} ({})", d.name, d.id);
                     }
                     Outcome::Ok
                 }
@@ -620,7 +689,7 @@ impl Cli {
                     if self.json {
                         self.emit_json(json!({"event": "document_trashed", "document": doc}));
                     } else {
-                        println!(
+                        outln!(
                             "moved {doc} to the trash (restore with `rcad-cli cloud restore {doc}`)"
                         );
                     }
@@ -646,18 +715,18 @@ impl Cli {
                 server_name,
                 me,
             } => {
-                println!(
+                outln!(
                     "signed in to {server_name} <{server_url}> as {}",
                     me.user.username
                 );
                 for o in &me.orgs {
-                    println!("  org {}\t{}\t{:?}", o.id, o.name, o.my_role);
+                    outln!("  org {}\t{}\t{:?}", o.id, o.name, o.my_role);
                 }
             }
-            Event::SignedOut => println!("signed out"),
+            Event::SignedOut => outln!("signed out"),
             Event::Projects { projects, .. } => {
                 for p in projects {
-                    println!("{}\t{}\t{:?}", p.id, p.name, p.my_role);
+                    outln!("{}\t{}\t{:?}", p.id, p.name, p.my_role);
                 }
             }
             Event::Tree(t) => print_tree(t),
@@ -679,14 +748,14 @@ impl Cli {
                 } else {
                     format!(" ({})", notes.join(", "))
                 };
-                println!(
+                outln!(
                     "{} version {}: {}{notes}",
                     link.document_name,
                     link.base_version,
                     path.display()
                 );
             }
-            Event::VersionSaved { link, version } => println!(
+            Event::VersionSaved { link, version } => outln!(
                 "saved {} version {} ({} bytes) from {}",
                 link.document_name,
                 version.number,
@@ -698,42 +767,42 @@ impl Cli {
                 base_version,
                 head_version,
                 ..
-            } => eprintln!(
+            } => errln!(
                 "conflict: {} is based on version {base_version} but the server is at version {head_version}; \
                  save with --force to save anyway, or push it as a new document",
                 local_path.display()
             ),
             Event::Locked { lock, .. } => {
-                eprintln!(
+                errln!(
                     "locked: {} holds the edit lock (expires {})",
                     lock.holder,
                     time(lock.expires_at)
                 )
             }
             Event::LockAcquired { lock, .. } => {
-                println!("lock held until {}", time(lock.expires_at))
+                outln!("lock held until {}", time(lock.expires_at))
             }
-            Event::LockReleased { .. } => println!("lock released"),
+            Event::LockReleased { .. } => outln!("lock released"),
             Event::Detail(d) => print_detail(d),
             Event::ShareCreated(s) => {
-                println!("{}", s.url);
+                outln!("{}", s.url);
                 if let Some(t) = s.link.expires_at {
-                    println!("expires {}", time(t));
+                    outln!("expires {}", time(t));
                 }
             }
             Event::Comments { comments, .. } => {
                 for c in comments {
                     let done = if c.resolved { " [resolved]" } else { "" };
-                    println!("{}\tv{}\t{}: {}{done}", c.id, c.version, c.author, c.body);
+                    outln!("{}\tv{}\t{}: {}{done}", c.id, c.version, c.author, c.body);
                 }
             }
-            Event::Offline { pending } => eprintln!(
+            Event::Offline { pending } => errln!(
                 "server unreachable; {pending} version(s) queued (run `rcad-cli cloud sync` later)"
             ),
-            Event::Synced { pending } => println!("pending versions: {pending}"),
+            Event::Synced { pending } => outln!("pending versions: {pending}"),
             Event::PendingQueue { saves } => {
                 for (i, p) in saves.iter().enumerate() {
-                    println!(
+                    outln!(
                         "{i}\t{}\t{}\t{}",
                         p.document,
                         time(p.queued_at),
@@ -743,15 +812,15 @@ impl Cli {
             }
             Event::ProjectMembers { members, .. } => {
                 for m in members {
-                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                    outln!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
                 }
             }
             Event::OrgMembers { members, .. } => {
                 for m in members {
-                    println!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
+                    outln!("{}\t{:?}\t{}", m.user.username, m.role, m.user.display_name);
                 }
             }
-            Event::Usage { usage, .. } => println!(
+            Event::Usage { usage, .. } => outln!(
                 "{} bytes used of {}; {} documents, {} versions",
                 usage.used_bytes,
                 usage
@@ -762,7 +831,7 @@ impl Cli {
             ),
             Event::Error {
                 request, message, ..
-            } => eprintln!("error ({request}): {message}"),
+            } => errln!("error ({request}): {message}"),
         }
     }
 }
@@ -805,11 +874,11 @@ fn default_name(path: &Path) -> String {
 }
 
 fn print_tree(t: &proto::ProjectTree) {
-    println!("project {}\t{}", t.project.id, t.project.name);
+    outln!("project {}\t{}", t.project.id, t.project.name);
     fn docs_in(t: &proto::ProjectTree, folder: Option<&str>, depth: usize) {
         let pad = "  ".repeat(depth);
         for f in t.folders.iter().filter(|f| f.parent.as_deref() == folder) {
-            println!("{pad}{}/\t{}", f.name, f.id);
+            outln!("{pad}{}/\t{}", f.name, f.id);
             if depth < 64 {
                 docs_in(t, Some(&f.id), depth + 1);
             }
@@ -820,22 +889,24 @@ fn print_tree(t: &proto::ProjectTree) {
                 .as_ref()
                 .map(|l| format!("\tlocked by {}", l.holder))
                 .unwrap_or_default();
-            println!("{pad}{}\t{}\tv{}{lock}", d.name, d.id, d.head_version);
+            outln!("{pad}{}\t{}\tv{}{lock}", d.name, d.id, d.head_version);
         }
     }
     docs_in(t, None, 1);
     if !t.trash.is_empty() {
-        println!("  trash:");
+        outln!("  trash:");
         for d in &t.trash {
-            println!("    {}\t{}", d.name, d.id);
+            outln!("    {}\t{}", d.name, d.id);
         }
     }
 }
 
 fn print_detail(d: &proto::DocumentDetail) {
-    println!(
+    outln!(
         "{}\t{}\thead v{}",
-        d.document.name, d.document.id, d.document.head_version
+        d.document.name,
+        d.document.id,
+        d.document.head_version
     );
     for v in &d.versions {
         let star = v
@@ -847,7 +918,7 @@ fn print_detail(d: &proto::DocumentDetail) {
             .promoted_from
             .map(|n| format!("\t(from v{n})"))
             .unwrap_or_default();
-        println!(
+        outln!(
             "v{}\t{}\t{}\t{}{star}{from}",
             v.number,
             time(v.created_at),
@@ -959,6 +1030,34 @@ fn event_json(e: &Event) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hostile_server_text_cannot_reach_the_terminal() {
+        let cases = [
+            ("plain name\twith tab", "plain name\twith tab"),
+            ("\u{1b}]52;c;ZXZpbA==\u{7}", "\\u{1b}]52;c;ZXZpbA==\\u{7}"),
+            ("red\u{1b}[31m", "red\\u{1b}[31m"),
+            ("line\nforged: saved", "line\\u{a}forged: saved"),
+            ("cr\roverwrite", "cr\\u{d}overwrite"),
+            ("csi\u{9b}2J", "csi\\u{9b}2J"),
+            ("del\u{7f}", "del\\u{7f}"),
+            ("evil\u{202E}fdp.exe", "evil\\u{202e}fdp.exe"),
+            ("iso\u{2066}x\u{2069}", "iso\\u{2066}x\\u{2069}"),
+            ("mark\u{200F}", "mark\\u{200f}"),
+            ("日本語の部品 🔩", "日本語の部品 🔩"),
+        ];
+        for (input, want) in cases {
+            let got = term_safe(input);
+            assert_eq!(got, want, "{input:?}");
+            assert!(
+                !got.chars().any(|c| (c.is_control() && c != '\t')
+                    || ('\u{202A}'..='\u{202E}').contains(&c)
+                    || ('\u{2066}'..='\u{2069}').contains(&c)),
+                "{got:?}"
+            );
+        }
+        assert!(matches!(term_safe("clean"), std::borrow::Cow::Borrowed(_)));
+    }
 
     #[test]
     fn dates_are_civil_utc() {

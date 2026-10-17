@@ -11,7 +11,13 @@
 //!   use the final URL), or downloaded bytes whose BLAKE3 hash does not match.
 //!
 //! TLS uses rustls with the operating system's certificate verifier. Plain `http://` URLs are
-//! accepted for trusted networks (the token then travels unencrypted; see docs/CLOUD.md).
+//! for trusted networks (the password and token then travel unencrypted; see docs/CLOUD.md):
+//! signing in over `http://` to a host [`plain_http_is_local`] does not recognise needs the
+//! user's explicit consent ([`crate::service::Request::SignIn`]'s `allow_insecure_http`).
+//!
+//! Downloads are bounded: content streams stop at the size the server declared for the
+//! version (and never exceed [`DEFAULT_MAX_DOWNLOAD_BYTES`] or the server's advertised
+//! `max_blob_bytes`), so a hostile server cannot fill the disk or memory.
 use crate::proto::{self, ApiError, ErrorCode};
 use crate::{CloudError, fsutil};
 use serde::Serialize;
@@ -29,8 +35,74 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// Largest JSON response body accepted.
 const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
-/// Largest in-memory content download (`shared_content`, `download_content_bytes`).
-const MAX_CONTENT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Largest download when the server's `max_blob_bytes` is not known, and the cap of the
+/// in-memory downloads (`shared_content`, `download_content_bytes`).
+pub const DEFAULT_MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// Shown wherever a sign-in over plain `http://` needs consent.
+pub const INSECURE_HTTP_WARNING: &str = "This server address uses http://, so your password, \
+     your access token and your documents travel unencrypted and anyone on the network path \
+     can read or change them. Use https:// unless this is a network you trust.";
+
+/// The host part of a normalized server URL, without port or IPv6 brackets.
+fn url_host(server_url: &str) -> &str {
+    let rest = server_url.split_once("://").map_or(server_url, |(_, r)| r);
+    let authority = rest.split('/').next().unwrap_or("");
+    if let Some(v6) = authority.strip_prefix('[') {
+        return v6.split(']').next().unwrap_or("");
+    }
+    match authority.rsplit_once(':') {
+        Some((h, port)) if port.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => authority,
+    }
+}
+
+/// Whether plain `http://` to `server_url` stays on a local or private network: a loopback
+/// name or address, a private, link-local or carrier-grade NAT (100.64.0.0/10, used by
+/// Tailscale) IPv4 address, a unique-local or link-local IPv6 address, or a name under
+/// `.local`, `.lan`, `.internal`, `.home.arpa`, `.localhost` or `.ts.net`. Anything else
+/// (including single-label names, which a search domain can resolve publicly) is not.
+pub fn plain_http_is_local(server_url: &str) -> bool {
+    use std::net::{IpAddr, Ipv4Addr};
+    fn v4_local(ip: Ipv4Addr) -> bool {
+        let [a, b, ..] = ip.octets();
+        ip.is_loopback() || ip.is_private() || ip.is_link_local() || (a == 100 && (b & 0xC0) == 64)
+    }
+    let host = url_host(server_url)
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => v4_local(ip),
+        Ok(IpAddr::V6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.to_ipv4_mapped().is_some_and(v4_local)
+        }
+        Err(_) => {
+            host == "localhost"
+                || [
+                    ".localhost",
+                    ".local",
+                    ".lan",
+                    ".internal",
+                    ".home.arpa",
+                    ".ts.net",
+                ]
+                .iter()
+                .any(|suffix| host.ends_with(suffix) && host.len() > suffix.len())
+        }
+    }
+}
+
+/// Whether signing in to `server_url` (normalized) needs consent to an unencrypted
+/// connection: plain `http://` to a host that is not [`plain_http_is_local`].
+pub fn needs_insecure_consent(server_url: &str) -> bool {
+    server_url
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+        && !plain_http_is_local(server_url)
+}
 
 /// Validate and normalize a server URL: `http://` or `https://`, a host, no query or
 /// fragment, no trailing slash. A bare host gets `https://`.
@@ -550,18 +622,20 @@ impl Client {
     }
 
     /// Stream version `number`'s bytes into `dest` (replaced atomically). When `expected` is
-    /// given, bytes whose BLAKE3 hash differs are rejected and `dest` is left unchanged.
-    /// Returns the hash and size of what was written.
+    /// given, bytes whose BLAKE3 hash differs are rejected and `dest` is left unchanged. A
+    /// body longer than `max_bytes` (the version's declared size) is cut off and rejected,
+    /// and the partial file is deleted. Returns the hash and size of what was written.
     pub fn download_content(
         &self,
         doc: &str,
         number: u64,
         expected: Option<&str>,
+        max_bytes: u64,
         dest: &Path,
     ) -> Result<(proto::BlobHash, u64), CloudError> {
         let path = format!("/documents/{}/versions/{number}/content", seg(doc));
         let resp = self.send(&self.transfer, "GET", &path, None)?;
-        stream_to_file(resp, expected, dest)
+        stream_to_file(resp, expected, max_bytes, dest)
     }
 
     /// Version `number`'s bytes in memory, checked against `expected` when given.
@@ -652,7 +726,7 @@ fn read_checked(mut resp: Resp, expected: Option<&str>) -> Result<Vec<u8>, Cloud
     let bytes = resp
         .body_mut()
         .with_config()
-        .limit(MAX_CONTENT_BYTES)
+        .limit(DEFAULT_MAX_DOWNLOAD_BYTES)
         .read_to_vec()
         .map_err(map_transport)?;
     if let Some(want) = expected {
@@ -666,11 +740,26 @@ fn read_checked(mut resp: Resp, expected: Option<&str>) -> Result<Vec<u8>, Cloud
     Ok(bytes)
 }
 
+fn too_large(max_bytes: u64) -> CloudError {
+    CloudError::Protocol(format!(
+        "the server sent more than the {max_bytes} bytes it declared; download discarded"
+    ))
+}
+
 fn stream_to_file(
     resp: Resp,
     expected: Option<&str>,
+    max_bytes: u64,
     dest: &Path,
 ) -> Result<(proto::BlobHash, u64), CloudError> {
+    let declared = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    if declared.is_some_and(|n| n > max_bytes) {
+        return Err(too_large(max_bytes));
+    }
     fsutil::ensure_parent(dest)?;
     let tmp = fsutil::temp_path_for(dest);
     let result = (|| {
@@ -686,9 +775,12 @@ fn stream_to_file(
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(CloudError::Offline(format!("download interrupted: {e}"))),
             };
+            size += n as u64;
+            if size > max_bytes {
+                return Err(too_large(max_bytes));
+            }
             hasher.update(&buf[..n]);
             file.write_all(&buf[..n])?;
-            size += n as u64;
         }
         file.sync_all()?;
         drop(file);
@@ -741,6 +833,57 @@ mod tests {
         ] {
             assert!(normalize_server_url(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn plain_http_hosts_are_classified() {
+        for local in [
+            "http://localhost:8080",
+            "http://app.localhost",
+            "http://127.0.0.1",
+            "http://127.9.9.9:1/x",
+            "http://10.0.0.2:8080",
+            "http://172.16.0.1",
+            "http://172.31.255.255",
+            "http://192.168.1.10/rcad",
+            "http://169.254.3.4",
+            "http://100.64.0.1",
+            "http://100.127.255.254:8443",
+            "http://[::1]:8080",
+            "http://[fd12:3456::1]",
+            "http://[fe80::1]",
+            "http://[::ffff:192.168.0.5]",
+            "http://nas.local",
+            "http://NAS.LOCAL.:80",
+            "http://cad.lan",
+            "http://cad.corp.internal",
+            "http://cad.home.arpa",
+            "http://box.tail1234.ts.net",
+        ] {
+            assert!(plain_http_is_local(local), "{local}");
+            assert!(!needs_insecure_consent(local), "{local}");
+        }
+        for public in [
+            "http://cad.example",
+            "http://8.8.8.8",
+            "http://172.32.0.1",
+            "http://100.128.0.1",
+            "http://100.63.255.255",
+            "http://[2001:db8::1]",
+            "http://[::ffff:8.8.8.8]",
+            "http://nas",
+            "http://local",
+            "http://evil.local.example.com",
+            "http://localhost.example.com",
+            "http://ts.net",
+            "http://192.168.1.10.nip.io",
+        ] {
+            assert!(!plain_http_is_local(public), "{public}");
+            assert!(needs_insecure_consent(public), "{public}");
+        }
+        // https never needs consent, whatever the host.
+        assert!(!needs_insecure_consent("https://cad.example"));
+        assert!(!needs_insecure_consent("https://8.8.8.8"));
     }
 
     #[test]

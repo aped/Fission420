@@ -359,3 +359,129 @@ fn members_and_trash_reach_their_routes() {
     let o = env.cli(&["restore", &doc], None);
     assert_eq!(code(&o), 1, "{}", text(&o));
 }
+
+#[test]
+fn hostile_server_text_is_escaped_in_text_output() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let file = env.file("part.rcad.json", b"v1");
+    let doc = push(&env, &file);
+    let evil_name = "Bracket\u{1b}]52;c;ZXZpbA==\u{7}\u{202E}fdp";
+    let evil_text = "ok\u{1b}[2J\nsaved: forged line\u{9b}31m";
+    {
+        let mut st = server.state.lock().unwrap();
+        let d = st.doc_mut(&doc).unwrap();
+        d.summary.name = evil_name.into();
+        d.versions[0].description = evil_text.into();
+        d.versions[0].author = "mallory\u{1b}[8m".into();
+        d.lock = Some(rcad_cloud::proto::Lock {
+            holder: "eve\u{1b}]0;pwned\u{7}".into(),
+            since: 1,
+            expires_at: 2,
+        });
+    }
+    let outputs = [
+        env.cli(&["tree", PROJECT], None),
+        env.cli(&["versions", &doc], None),
+        env.cli(&["save", file.to_str().unwrap()], None),
+    ];
+    for o in &outputs {
+        let all = [o.stdout.as_slice(), o.stderr.as_slice()].concat();
+        let s = String::from_utf8_lossy(&all);
+        assert!(
+            !s.chars().any(|c| (c.is_control() && c != '\n' && c != '\t')
+                || ('\u{202A}'..='\u{202E}').contains(&c)),
+            "{s:?}"
+        );
+        assert!(s.contains("\\u{1b}"), "{s:?}");
+    }
+    let tree = text(&outputs[0]);
+    assert!(tree.contains("\\u{202e}fdp"), "{tree}");
+    let versions = text(&outputs[1]);
+    assert!(
+        versions.contains("\\u{a}saved: forged line"),
+        "the newline is escaped, not a new line: {versions}"
+    );
+    assert_eq!(code(&outputs[2]), 4, "{}", text(&outputs[2]));
+    // JSON output carries the exact strings (escaped by the JSON encoder).
+    let o = env.cli(&["--json", "versions", &doc], None);
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().next().unwrap()).unwrap();
+    assert_eq!(v["detail"]["document"]["name"], evil_name);
+    assert_eq!(v["detail"]["versions"][0]["description"], evil_text);
+}
+
+#[test]
+fn plain_http_login_to_a_public_host_needs_the_flag() {
+    let env = Env::new();
+    // Refused before the password is read (stdin is closed) or any request is made.
+    let o = env.cli(&["login", "http://cad.example", USER], None);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("--allow-insecure-http"), "{}", text(&o));
+    assert!(text(&o).contains("unencrypted"), "{}", text(&o));
+    assert!(!env.dir.path().join("config").exists());
+    // With the flag: a warning, then the request goes out (`.invalid` never resolves).
+    let o = env.cli(
+        &[
+            "login",
+            "http://rcad.invalid",
+            USER,
+            "--allow-insecure-http",
+        ],
+        Some("pw\n"),
+    );
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("warning:"), "{}", text(&o));
+    assert!(text(&o).contains("unreachable"), "{}", text(&o));
+    // Loopback needs no flag.
+    let server = FakeServer::start();
+    login(&env, &server.url);
+}
+
+#[test]
+fn concurrent_cli_processes_queue_every_save() {
+    let server = FakeServer::start();
+    let env = Env::new();
+    login(&env, &server.url);
+    let files: Vec<PathBuf> = (0..4)
+        .map(|i| {
+            let f = env.file(&format!("p{i}.rcad.json"), format!("v1-{i}").as_bytes());
+            push(&env, &f);
+            f
+        })
+        .collect();
+    drop(server.stop());
+    // Twelve `save` processes at once (three per file), all offline: each queues.
+    let rounds = 3;
+    let children: Vec<_> = (0..rounds)
+        .flat_map(|r| files.iter().map(move |f| (r, f.clone())))
+        .map(|(r, f)| {
+            std::fs::write(&f, format!("round {r} {}", f.display())).unwrap();
+            Command::new(env!("CARGO_BIN_EXE_rcad-cli"))
+                .args(["cloud", "save", f.to_str().unwrap(), "-m"])
+                .arg(format!("round {r}"))
+                .env("HOME", env.dir.path())
+                .env("XDG_CONFIG_HOME", env.dir.path().join("config"))
+                .env("XDG_CACHE_HOME", env.dir.path().join("cache"))
+                .env_remove("RCAD_PASSWORD")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let o = child.wait_with_output().unwrap();
+        assert_eq!(code(&o), 5, "{}", text(&o));
+    }
+    let o = env.cli(&["--json", "queue"], None);
+    let v: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().next().unwrap()).unwrap();
+    assert_eq!(
+        v["saves"].as_array().unwrap().len(),
+        files.len() * rounds,
+        "{v}"
+    );
+}

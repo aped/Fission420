@@ -43,6 +43,7 @@ impl Harness {
             server_url: url.into(),
             username: USER.into(),
             password: PASSWORD.into(),
+            allow_insecure_http: false,
         });
         assert!(matches!(ev.as_slice(), [Event::SignedIn { .. }]), "{ev:?}");
     }
@@ -116,6 +117,7 @@ fn sign_in_stores_the_account_and_wrong_password_does_not() {
         server_url: server.url.clone(),
         username: USER.into(),
         password: "wrong".into(),
+        allow_insecure_http: false,
     });
     assert!(
         matches!(
@@ -139,6 +141,7 @@ fn sign_in_stores_the_account_and_wrong_password_does_not() {
         server_url: format!("{}/", server.url),
         username: USER.into(),
         password: PASSWORD.into(),
+        allow_insecure_http: false,
     });
     match ev.as_slice() {
         [
@@ -199,6 +202,7 @@ fn protocol_or_product_mismatch_is_refused_before_login() {
         server_url: server.url.clone(),
         username: USER.into(),
         password: PASSWORD.into(),
+        allow_insecure_http: false,
     });
     match ev.as_slice() {
         [
@@ -219,6 +223,7 @@ fn protocol_or_product_mismatch_is_refused_before_login() {
         server_url: server.url.clone(),
         username: USER.into(),
         password: PASSWORD.into(),
+        allow_insecure_http: false,
     });
     assert!(
         matches!(
@@ -249,6 +254,7 @@ fn sign_in_to_an_unreachable_server_is_an_error() {
         server_url: format!("http://127.0.0.1:{}", fake_server::dead_port()),
         username: USER.into(),
         password: PASSWORD.into(),
+        allow_insecure_http: false,
     });
     assert!(
         matches!(
@@ -919,6 +925,7 @@ fn background_service_thread_answers_requests() {
         server_url: server.url.clone(),
         username: USER.into(),
         password: PASSWORD.into(),
+        allow_insecure_http: false,
     });
     assert!(matches!(wait(&svc), Event::SignedIn { .. }));
     svc.send(Request::LoadTree {
@@ -1254,4 +1261,230 @@ fn a_blocked_queue_entry_can_be_discarded() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn plain_http_to_a_public_host_needs_explicit_consent() {
+    let mut h = Harness::new();
+    // Refused before any request: the name is never even resolved.
+    let ev = h.run(Request::SignIn {
+        server_url: "http://cad.example".into(),
+        username: USER.into(),
+        password: PASSWORD.into(),
+        allow_insecure_http: false,
+    });
+    match ev.as_slice() {
+        [
+            Event::Error {
+                request: "sign_in",
+                message,
+                ..
+            },
+        ] => {
+            assert!(message.contains("without encryption"), "{message}");
+            assert!(!message.contains(PASSWORD));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!h.config_path().exists());
+    // With consent the request goes out (and here fails to resolve: `.invalid` never does).
+    let ev = h.run(Request::SignIn {
+        server_url: "http://rcad.invalid".into(),
+        username: USER.into(),
+        password: PASSWORD.into(),
+        allow_insecure_http: true,
+    });
+    match ev.as_slice() {
+        [
+            Event::Error {
+                request: "sign_in",
+                message,
+                ..
+            },
+        ] => assert!(message.contains("unreachable"), "{message}"),
+        other => panic!("{other:?}"),
+    }
+    // Loopback needs no consent (the harness signs in to 127.0.0.1 without it).
+    let server = FakeServer::start();
+    h.sign_in(&server.url);
+    let account = h.worker.active_account().unwrap().unwrap();
+    assert_eq!(
+        account.max_blob_bytes,
+        Some(1 << 30),
+        "limit kept from /info"
+    );
+}
+
+#[test]
+fn a_download_longer_than_declared_is_cut_off_and_deleted() {
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let doc = server_doc(&server, "Inflated", b"declared bytes");
+    server.state.lock().unwrap().inflate_content = 256 * 1024;
+    let ev = h.run(Request::OpenDocument {
+        document: doc.clone(),
+    });
+    match ev.as_slice() {
+        [
+            Event::Error {
+                request: "open_document",
+                message,
+                ..
+            },
+        ] => assert!(message.contains("more than the 14 bytes"), "{message}"),
+        other => panic!("{other:?}"),
+    }
+    let cache = h.cache();
+    let hash = rcad_cloud::blob_hash(b"declared bytes");
+    assert!(!cache.has_blob(&hash));
+    // No partial or temporary file is left in the blob directory.
+    let blob_dir = cache.blob_path(&hash).unwrap();
+    let leftovers: Vec<_> = std::fs::read_dir(blob_dir.parent().unwrap())
+        .map(|d| d.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    assert!(cache.link_for_document(&doc).unwrap().is_none());
+    // An honest answer downloads normally.
+    server.state.lock().unwrap().inflate_content = 0;
+    let ev = h.run(Request::OpenDocument { document: doc });
+    assert!(
+        matches!(ev.as_slice(), [Event::DocumentReady { .. }]),
+        "{ev:?}"
+    );
+}
+
+#[test]
+fn a_version_above_the_server_limit_is_not_downloaded() {
+    let server = FakeServer::start();
+    server.state.lock().unwrap().info.max_blob_bytes = 8;
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let doc = server_doc(&server, "Big", b"more than eight bytes");
+    let ev = h.run(Request::OpenDocument { document: doc });
+    match ev.as_slice() {
+        [Event::Error { message, .. }] => assert!(message.contains("8-byte limit"), "{message}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        !server.log().iter().any(|l| l.ends_with("/content")),
+        "{:?}",
+        server.log()
+    );
+}
+
+#[test]
+fn a_blob_lost_before_the_save_is_uploaded_again() {
+    let server = FakeServer::start();
+    let port = server.port;
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let (path, doc) = h.upload("Bracket", b"v1");
+
+    // Direct save: the server drops the blob once between the upload check and the save.
+    std::fs::write(&path, b"v2").unwrap();
+    server.state.lock().unwrap().drop_blob_on_save = 1;
+    let ev = h.save(&path, false);
+    assert!(
+        matches!(ev.as_slice(), [Event::VersionSaved { version, .. }] if version.number == 2),
+        "{ev:?}"
+    );
+    let puts = |s: &FakeServer| {
+        s.log()
+            .iter()
+            .filter(|l| l.starts_with("PUT ") && l.contains("/blobs/"))
+            .count()
+    };
+    // v1, v2, and v2 again.
+    assert_eq!(puts(&server), 3);
+
+    // Queued save: replayed after the same race, not dropped.
+    let state = server.stop();
+    std::fs::write(&path, b"v3").unwrap();
+    assert_eq!(h.save(&path, false), vec![Event::Offline { pending: 1 }]);
+    state.lock().unwrap().drop_blob_on_save = 1;
+    let server = FakeServer::start_on(port, state);
+    let ev = h.run(Request::SyncPending);
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [Event::VersionSaved { version, .. }, Event::Synced { pending: 0 }]
+                if version.number == 3
+        ),
+        "{ev:?}"
+    );
+
+    // A blob the server keeps losing is retried once only, then the queued save is dropped
+    // (its snapshot stays in the cache).
+    let state = server.stop();
+    std::fs::write(&path, b"v4").unwrap();
+    assert_eq!(h.save(&path, false), vec![Event::Offline { pending: 1 }]);
+    state.lock().unwrap().drop_blob_on_save = 2;
+    let server = FakeServer::start_on(port, state);
+    let ev = h.run(Request::SyncPending);
+    assert!(
+        matches!(
+            ev.as_slice(),
+            [
+                Event::Error {
+                    code: Some(ErrorCode::HashMismatch),
+                    ..
+                },
+                Event::Synced { pending: 0 }
+            ]
+        ),
+        "{ev:?}"
+    );
+    assert!(h.cache().has_blob(&rcad_cloud::blob_hash(b"v4")));
+    let st = server.state.lock().unwrap();
+    assert_eq!(
+        st.docs
+            .iter()
+            .find(|d| d.summary.id == doc)
+            .unwrap()
+            .versions
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn two_workers_queueing_at_once_lose_no_save() {
+    // The app's worker and a CLI worker share the account file and cache.
+    let server = FakeServer::start();
+    let mut h = Harness::new();
+    h.sign_in(&server.url);
+    let files: Vec<PathBuf> = (0..6)
+        .map(|i| {
+            h.upload(&format!("Part{i}"), format!("v1-{i}").as_bytes())
+                .0
+        })
+        .collect();
+    drop(server);
+    let (config, cache) = (h.config_path(), h.cache_root());
+    std::thread::scope(|scope| {
+        for (i, chunk) in files.chunks(3).enumerate() {
+            let (config, cache) = (config.clone(), cache.clone());
+            scope.spawn(move || {
+                let mut w = Worker::new(config, cache);
+                for round in 0..5 {
+                    for f in chunk {
+                        std::fs::write(f, format!("{i}-{round}-{}", f.display())).unwrap();
+                        let mut ev = Vec::new();
+                        w.handle(
+                            Request::SaveVersion {
+                                local_path: f.clone(),
+                                description: String::new(),
+                                milestone: None,
+                                force: false,
+                            },
+                            &mut |e| ev.push(e),
+                        );
+                        assert!(matches!(ev.as_slice(), [Event::Offline { .. }]), "{ev:?}");
+                    }
+                }
+            });
+        }
+    });
+    assert_eq!(h.cache().pending().unwrap().len(), 6 * 5);
 }

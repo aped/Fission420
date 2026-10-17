@@ -14,6 +14,8 @@ rcad-commands.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rcad-cloud = { path = "../rcad-cloud" }
+# Password prompt without echo on a terminal (Apache-2.0; libc / windows-sys underneath).
+rpassword = "7.4"
 
 [dev-dependencies]
 tempfile.workspace = true

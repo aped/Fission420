@@ -151,6 +151,7 @@ CDLA-Permissive-2.0) is off.
 | rustls | 0.23.46 (`default-features = false`, features `ring`, `std`, `tls12`, `logging`) | Apache-2.0 OR ISC OR MIT | https://crates.io/crates/rustls | TLS; named directly to select the ring crypto provider |
 | blake3 | 1.8.7 (`default-features = false`, features `std`, `pure`) | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | https://crates.io/crates/blake3 | blob hashes (protocol `BlobHash`); `pure` = no assembly or C |
 | tiny_http | 0.12.0 (dev) | MIT OR Apache-2.0 | https://crates.io/crates/tiny_http | in-memory fake server in tests (127.0.0.1 only) |
+| rpassword | 7.5.4 (`rcad-cli` only) | Apache-2.0 | https://crates.io/crates/rpassword | `rcad-cli cloud login` password prompt with echo off on a terminal |
 
 Transitive crates new to the build on the shipped targets: ureq-proto 0.6.4, http 1.5.0,
 httparse 1.10.1, base64 0.23.1, utf8-zero 0.8.1, rustls-pki-types 1.15.1 (MIT OR Apache-2.0);
@@ -159,7 +160,10 @@ rustls-webpki 0.103.15 and untrusted 0.9.0 (ISC); ring 0.17.14 (Apache-2.0 AND I
 Apache-2.0) with rustls-native-certs 0.8.5 and openssl-probe 0.2.1 on Linux (certificate paths
 only; OpenSSL is not linked), security-framework 3.7.0 on macOS and schannel 0.1.30 (MIT) on
 Windows; constant_time_eq 0.4.2 (CC0-1.0 OR MIT-0 OR Apache-2.0), cpufeatures 0.3.1. Dev only:
-ascii 1.1.0, chunked_transfer 1.5.0, httpdate 1.0.3 (MIT OR Apache-2.0).
+ascii 1.1.0, chunked_transfer 1.5.0, httpdate 1.0.3 (MIT OR Apache-2.0). With rpassword:
+rtoolbox 0.0.6 (Apache-2.0); its other dependencies, libc on Unix and windows-sys 0.61 on
+Windows, were already in the graph. rpassword's terminal handling uses `unsafe` FFI inside the
+dependency; R-CAD's own code has none.
 `rustls-platform-verifier` depends on `webpki-root-certs` (CDLA-Permissive-2.0) and `jni` only
 on Android, which R-CAD does not build for; neither is in the Linux, Windows or macOS graph.
 

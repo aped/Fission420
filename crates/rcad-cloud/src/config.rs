@@ -3,6 +3,10 @@
 //! The file is versioned JSON (`"version": 1`). It holds each account's bearer token, so it
 //! is created with mode 0600 on Unix, replaced atomically, and the token never appears in
 //! `Debug` output or in any message this crate produces.
+//!
+//! The app and `rcad-cli` share the file, so changes go through [`CloudConfig::update`],
+//! which holds an exclusive advisory lock (`.cloud.json.lock` next to the file) while it
+//! re-reads, changes and writes the list: a sign-in in one never undoes one in the other.
 use crate::{CloudError, fsutil};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -20,6 +24,10 @@ pub struct Account {
     pub username: String,
     /// Bearer token (session or personal access token). Secret.
     pub token: String,
+    /// The server's [`crate::proto::ServerInfo::max_blob_bytes`] at sign-in: downloads larger
+    /// than this are refused. Absent in files written by earlier builds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_blob_bytes: Option<u64>,
 }
 
 impl std::fmt::Debug for Account {
@@ -29,6 +37,7 @@ impl std::fmt::Debug for Account {
             .field("server_name", &self.server_name)
             .field("username", &self.username)
             .field("token", &"<redacted>")
+            .field("max_blob_bytes", &self.max_blob_bytes)
             .finish()
     }
 }
@@ -96,6 +105,20 @@ impl CloudConfig {
         Ok(())
     }
 
+    /// Change the file at `path` under its lock: re-read it, apply `f`, write it back. The
+    /// lock is held only for the local read and write, never across a network request.
+    pub fn update<R>(path: &Path, f: impl FnOnce(&mut CloudConfig) -> R) -> Result<R, CloudError> {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let _lock = crate::cache::FileLock::acquire(&path.with_file_name(format!(".{name}.lock")))?;
+        let mut config = CloudConfig::load(path)?;
+        let r = f(&mut config);
+        config.save(path)?;
+        Ok(r)
+    }
+
     /// The account in use, if any.
     pub fn active_account(&self) -> Option<&Account> {
         self.active.and_then(|i| self.accounts.get(i))
@@ -118,6 +141,23 @@ impl CloudConfig {
             }
         };
         self.active = Some(i);
+    }
+
+    /// Forget the account of `username` on `server_url`. When it was the active one, the
+    /// first remaining account (if any) becomes active.
+    pub fn remove_account(&mut self, server_url: &str, username: &str) -> Option<Account> {
+        let i = self
+            .accounts
+            .iter()
+            .position(|a| a.server_url == server_url && a.username == username)?;
+        let gone = self.accounts.remove(i);
+        self.active = match self.active {
+            _ if self.accounts.is_empty() => None,
+            Some(a) if a == i => Some(0),
+            Some(a) if a > i => Some(a - 1),
+            other => other.filter(|&a| a < self.accounts.len()),
+        };
+        Some(gone)
     }
 
     /// Forget the active account; the first remaining account (if any) becomes active.
@@ -153,6 +193,7 @@ mod tests {
             server_name: "Example".into(),
             username: user.into(),
             token: "rcs_secret_value".into(),
+            max_blob_bytes: None,
         }
     }
 
@@ -222,5 +263,60 @@ mod tests {
         // An out-of-range active index is dropped, not trusted.
         std::fs::write(&path, r#"{"version":1,"accounts":[],"active":3}"#).unwrap();
         assert_eq!(CloudConfig::load(&path).unwrap().active, None);
+    }
+
+    #[test]
+    fn remove_account_keeps_the_active_one_current() {
+        let mut c = CloudConfig::default();
+        c.upsert(account("ada"));
+        c.upsert(account("bob"));
+        c.upsert(account("cy"));
+        c.active = Some(2);
+        assert_eq!(
+            c.remove_account("https://cad.example", "ada")
+                .unwrap()
+                .username,
+            "ada"
+        );
+        assert_eq!(c.active_account().unwrap().username, "cy");
+        assert!(c.remove_account("https://cad.example", "nobody").is_none());
+        assert_eq!(
+            c.remove_account("https://cad.example", "cy")
+                .unwrap()
+                .username,
+            "cy"
+        );
+        assert_eq!(c.active_account().unwrap().username, "bob");
+    }
+
+    #[test]
+    fn concurrent_updates_lose_no_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cloud.json");
+        std::thread::scope(|scope| {
+            for t in 0..8 {
+                let path = path.clone();
+                scope.spawn(move || {
+                    for i in 0..10 {
+                        CloudConfig::update(&path, |c| c.upsert(account(&format!("u{t}-{i}"))))
+                            .unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(CloudConfig::load(&path).unwrap().accounts.len(), 80);
+    }
+
+    #[test]
+    fn files_of_earlier_builds_load_without_the_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cloud.json");
+        std::fs::write(
+            &path,
+            r#"{"version":1,"accounts":[{"server_url":"https://x","server_name":"X","username":"ada","token":"t"}],"active":0}"#,
+        )
+        .unwrap();
+        let c = CloudConfig::load(&path).unwrap();
+        assert_eq!(c.active_account().unwrap().max_blob_bytes, None);
     }
 }

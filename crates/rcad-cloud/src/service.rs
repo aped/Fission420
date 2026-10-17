@@ -13,6 +13,14 @@
 //!   from `rcad-cli cloud login` is picked up by a running app.
 //! * `SignIn` checks `GET /info` (product and protocol version) before sending the password;
 //!   an unreachable server is reported as `Error` (there is no account to be offline with).
+//!   Over plain `http://` to a host that is not on a local or private network
+//!   ([`crate::client::plain_http_is_local`]) it refuses unless `allow_insecure_http` is set,
+//!   before any request is made.
+//! * The account file and each account's cache directory are shared with `rcad-cli`; every
+//!   read-modify-write of them holds an advisory lock, and the offline queue is re-read
+//!   before each step of a replay and changed by entry, never rewritten from a stale copy.
+//! * Downloads stop at the size the server declared for the version, and versions larger
+//!   than the server's advertised `max_blob_bytes` (1 GiB when unknown) are refused.
 //! * `OpenDocument` never overwrites a working copy with local modifications (its bytes
 //!   differ from the link's `base_blob`): it reports `DocumentReady` for the existing copy and,
 //!   when the server head moved past the copy's base version, a `Conflict` as well.
@@ -24,6 +32,9 @@
 //!   untouched. `SaveVersion { force: true }` forces the document's queued saves too.
 //! * A conflict whose server head already holds exactly the bytes being saved (a save whose
 //!   answer was lost to a dropped connection) is treated as saved.
+//! * When creating a version fails with `HashMismatch` (the server no longer has the blob,
+//!   e.g. its garbage collection removed it between the upload check and the save), the blob
+//!   is uploaded again from the local cache and the save retried once before it fails.
 //! * `LoadPending` and `DiscardPending` work on the local queue only (no network); both answer
 //!   with `PendingQueue`. Discarding never touches the file or the blob cache.
 //! * Member and organization changes answer with the reloaded list (`ProjectMembers`,
@@ -44,6 +55,9 @@ pub enum Request {
         server_url: String,
         username: String,
         password: String,
+        /// The user confirmed signing in over unencrypted `http://` to a host that is not on
+        /// a local network (see [`crate::client::needs_insecure_consent`]).
+        allow_insecure_http: bool,
     },
     /// Revoke the token on the server (best effort) and forget the account.
     SignOut,
@@ -203,11 +217,13 @@ impl std::fmt::Debug for Request {
                 server_url,
                 username,
                 password: _,
+                allow_insecure_http,
             } => f
                 .debug_struct("SignIn")
                 .field("server_url", server_url)
                 .field("username", username)
                 .field("password", &"<redacted>")
+                .field("allow_insecure_http", allow_insecure_http)
                 .finish(),
             Request::SignOut => f.write_str("SignOut"),
             Request::Refresh => f.write_str("Refresh"),
@@ -702,13 +718,13 @@ impl Worker {
     pub fn cache(&self) -> Result<Option<ServerCache>, CloudError> {
         Ok(self
             .active_account()?
-            .map(|a| ServerCache::new(&self.cache_root, &a.server_url)))
+            .map(|a| ServerCache::open(&self.cache_root, &a.server_url, &a.username)))
     }
 
     fn session(&self) -> Result<Session, CloudError> {
         let account = self.active_account()?.ok_or(CloudError::NotSignedIn)?;
         let client = Client::new(&account.server_url)?.with_token(account.token.clone());
-        let cache = ServerCache::new(&self.cache_root, &account.server_url);
+        let cache = ServerCache::open(&self.cache_root, &account.server_url, &account.username);
         Ok(Session {
             account,
             client,
@@ -759,7 +775,8 @@ impl Worker {
                 server_url,
                 username,
                 password,
-            } => self.sign_in(&server_url, &username, &password, emit),
+                allow_insecure_http,
+            } => self.sign_in(&server_url, &username, &password, allow_insecure_http, emit),
             Request::SignOut => self.sign_out(emit),
             Request::Refresh => {
                 let s = self.session()?;
@@ -963,20 +980,20 @@ impl Worker {
                 blob,
             } => {
                 let cache = self.cache()?.ok_or(CloudError::NotSignedIn)?;
-                let mut queue = cache.pending()?;
-                match queue.get(index) {
-                    Some(p) if p.document == document && p.blob == blob => {
+                let (removed, queue) = cache.update_pending(|queue| {
+                    let ok = matches!(queue.get(index),
+                        Some(p) if p.document == document && p.blob == blob);
+                    if ok {
                         queue.remove(index);
-                        cache.set_pending(&queue)?;
                     }
-                    _ => {
-                        emit(Event::PendingQueue { saves: queue });
-                        return Err(CloudError::Invalid(
-                            "the queue changed since it was listed; nothing was discarded".into(),
-                        ));
-                    }
-                }
+                    (ok, queue.clone())
+                })?;
                 emit(Event::PendingQueue { saves: queue });
+                if !removed {
+                    return Err(CloudError::Invalid(
+                        "the queue changed since it was listed; nothing was discarded".into(),
+                    ));
+                }
                 Ok(())
             }
             Request::LoadProjectMembers { project } => {
@@ -1121,9 +1138,18 @@ impl Worker {
         server_url: &str,
         username: &str,
         password: &str,
+        allow_insecure_http: bool,
         emit: &mut dyn FnMut(Event),
     ) -> Result<(), CloudError> {
         let client = Client::new(server_url)?;
+        if !allow_insecure_http && crate::client::needs_insecure_consent(client.server_url()) {
+            return Err(CloudError::Invalid(format!(
+                "refusing to sign in to {} without encryption: {} To connect anyway, allow \
+                 the unencrypted connection explicitly.",
+                client.server_url(),
+                crate::client::INSECURE_HTTP_WARNING
+            )));
+        }
         let info = client.info()?;
         if info.product != proto::PRODUCT {
             return Err(CloudError::Invalid(format!(
@@ -1161,10 +1187,9 @@ impl Worker {
             server_name: info.name.clone(),
             username: login.user.username.clone(),
             token: login.token,
+            max_blob_bytes: Some(info.max_blob_bytes).filter(|&n| n > 0),
         };
-        let mut config = CloudConfig::load(&self.config_path)?;
-        config.upsert(account);
-        config.save(&self.config_path)?;
+        CloudConfig::update(&self.config_path, |c| c.upsert(account))?;
         emit(Event::SignedIn {
             server_url: client.server_url().to_string(),
             server_name: info.name,
@@ -1174,27 +1199,30 @@ impl Worker {
     }
 
     fn sign_out(&mut self, emit: &mut dyn FnMut(Event)) -> Result<(), CloudError> {
-        let mut config = CloudConfig::load(&self.config_path)?;
-        if let Some(account) = config.active_account() {
+        if let Some(account) = self.active_account()? {
             // Best effort: an unreachable server still forgets the account locally.
             if let Ok(c) = Client::new(&account.server_url) {
                 let _ = c.with_token(account.token.clone()).logout();
             }
-            config.remove_active();
-            config.save(&self.config_path)?;
+            // By identity: the active index may have changed while the logout ran.
+            CloudConfig::update(&self.config_path, |c| {
+                c.remove_account(&account.server_url, &account.username)
+            })?;
         }
         emit(Event::SignedOut);
         Ok(())
     }
 
-    /// Bytes of version `number` (hash `blob`): from the blob cache, else downloaded into it.
+    /// Bytes of `version` of `document`: from the blob cache, else downloaded into it. The
+    /// download is refused when the declared size exceeds the account's limit, and cut off
+    /// when the server sends more than it declared.
     fn ensure_blob(
         &self,
         s: &Session,
         document: &str,
-        number: u64,
-        blob: &str,
+        version: &proto::Version,
     ) -> Result<Vec<u8>, CloudError> {
+        let blob = version.blob.as_str();
         if !proto::is_blob_hash(blob) {
             return Err(CloudError::Protocol(format!(
                 "server sent an invalid blob hash {blob:.80}"
@@ -1205,9 +1233,20 @@ impl Worker {
         {
             return Ok(bytes);
         }
+        let limit = s
+            .account
+            .max_blob_bytes
+            .unwrap_or(crate::client::DEFAULT_MAX_DOWNLOAD_BYTES);
+        if version.size > limit {
+            return Err(CloudError::Invalid(format!(
+                "version {} is {} bytes, more than the {limit}-byte limit for downloads from \
+                 this server",
+                version.number, version.size
+            )));
+        }
         let dest = s.cache.blob_path(blob)?;
         s.client
-            .download_content(document, number, Some(blob), &dest)?;
+            .download_content(document, version.number, Some(blob), version.size, &dest)?;
         s.cache.read_blob(blob)
     }
 
@@ -1290,7 +1329,7 @@ impl Worker {
             }
         }
 
-        let bytes = self.ensure_blob(s, document, head, &version.blob)?;
+        let bytes = self.ensure_blob(s, document, version)?;
         let target = match live {
             Some(l) => l.local_path.clone(),
             None => s.cache.working_copy_path(document, &detail.document.name),
@@ -1383,7 +1422,7 @@ impl Worker {
                     lock: None,
                 })
             })?;
-        let bytes = self.ensure_blob(s, document, number, &version.blob)?;
+        let bytes = self.ensure_blob(s, document, version)?;
         let path = s
             .cache
             .version_copy_path(document, number, &detail.document.name);
@@ -1556,7 +1595,16 @@ impl Worker {
             force,
             generator: crate::generator(),
         };
-        let version = match s.client.create_version(&link.document, &req) {
+        let mut created = s.client.create_version(&link.document, &req);
+        if matches!(&created, Err(CloudError::Api(e)) if e.code == ErrorCode::HashMismatch)
+            && let Ok(bytes) = s.cache.read_blob(blob)
+        {
+            // The server lost the blob between the upload check and the save (for example
+            // to garbage collection): upload it again and retry once.
+            s.client.upload_blob(&link.org, blob, &bytes)?;
+            created = s.client.create_version(&link.document, &req);
+        }
+        let version = match created {
             Ok(v) => v,
             Err(CloudError::Api(e)) if e.code == ErrorCode::VersionConflict => {
                 // A save whose answer was lost: the head already holds these bytes.
@@ -1584,15 +1632,20 @@ impl Worker {
         Ok(Pushed::Saved(Box::new((updated, version))))
     }
 
-    /// Replay the offline queue in order (see the module documentation).
+    /// Replay the offline queue in order (see the module documentation). The queue is
+    /// re-read before each entry and entries are removed by value, so saves another process
+    /// queues meanwhile are kept (and sent too).
     fn sync_pending(
         &self,
         s: &Session,
         force_doc: Option<&str>,
         emit: &mut dyn FnMut(Event),
     ) -> Result<(), CloudError> {
-        let mut queue = s.cache.pending()?;
-        while let Some(item) = queue.first().cloned() {
+        // Bound the loop even if another process keeps adding entries.
+        for _ in 0..100_000 {
+            let Some(item) = s.cache.pending()?.into_iter().next() else {
+                break;
+            };
             let link = s
                 .cache
                 .link_for_path(&item.local_path)?
@@ -1608,8 +1661,7 @@ impl Worker {
                 Some(_) => None,
             };
             let Some(link) = link.filter(|_| problem.is_none()) else {
-                queue.remove(0);
-                s.cache.set_pending(&queue)?;
+                s.cache.remove_pending(&item)?;
                 emit(Event::Error {
                     request: "sync_pending",
                     code: None,
@@ -1630,8 +1682,7 @@ impl Worker {
             match self.push_version(s, &link, &item, base, force) {
                 Ok(Pushed::Saved(saved)) => {
                     let (link, version) = *saved;
-                    queue.remove(0);
-                    s.cache.set_pending(&queue)?;
+                    s.cache.remove_pending(&item)?;
                     emit(Event::VersionSaved { link, version });
                 }
                 Ok(Pushed::Conflict { head_version }) => {
@@ -1652,13 +1703,12 @@ impl Worker {
                 }
                 Err(CloudError::Offline(_)) => {
                     emit(Event::Offline {
-                        pending: queue.len(),
+                        pending: s.cache.pending()?.len(),
                     });
                     return Ok(());
                 }
                 Err(CloudError::Api(e)) if permanent(e.code) => {
-                    queue.remove(0);
-                    s.cache.set_pending(&queue)?;
+                    s.cache.remove_pending(&item)?;
                     emit(Event::Error {
                         request: "sync_pending",
                         code: Some(e.code),
@@ -1680,7 +1730,7 @@ impl Worker {
             }
         }
         emit(Event::Synced {
-            pending: queue.len(),
+            pending: s.cache.pending()?.len(),
         });
         Ok(())
     }
@@ -1696,6 +1746,7 @@ mod tests {
             server_url: "https://x".into(),
             username: "ada".into(),
             password: "hunter2".into(),
+            allow_insecure_http: false,
         };
         let text = format!("{r:?}");
         assert!(!text.contains("hunter2"), "{text}");

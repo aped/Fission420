@@ -78,6 +78,9 @@ pub enum CloudDialog {
         server_url: String,
         username: String,
         password: String,
+        /// "Allow unencrypted connection": consent to plain http:// to a host that is not
+        /// on a local network (only offered for such a URL).
+        allow_insecure: bool,
         error: Option<String>,
         sent: bool,
     },
@@ -480,6 +483,13 @@ fn field(ui: &mut egui::Ui, label: &str, buf: &mut String, password: bool) -> eg
         .probe(label)
     })
     .inner
+}
+
+/// Whether signing in to `url` (as typed) would send the password over plain http:// to a
+/// host that is not on a local or private network.
+fn insecure_url(url: &str) -> bool {
+    rcad_cloud::client::normalize_server_url(url)
+        .is_ok_and(|u| rcad_cloud::client::needs_insecure_consent(&u))
 }
 
 /// Requests whose failure is not shown as a banner (background work).
@@ -1320,6 +1330,7 @@ impl RcadApp {
             server_url,
             username: String::new(),
             password: String::new(),
+            allow_insecure: false,
             error: None,
             sent: false,
         });
@@ -1331,6 +1342,7 @@ impl RcadApp {
             server_url,
             username,
             password,
+            allow_insecure,
             error,
             sent,
         }) = &mut self.cloud.dialog
@@ -1346,6 +1358,15 @@ impl RcadApp {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             *error =
                 Some("The server URL starts with https:// (or http:// on a local network).".into());
+            return;
+        }
+        let allow_insecure_http = *allow_insecure;
+        if insecure_url(&url) && !allow_insecure_http {
+            *error = Some(
+                "This connection would not be encrypted. Use https://, or tick \
+                 \u{201c}Allow unencrypted connection\u{201d}."
+                    .into(),
+            );
             return;
         }
         let password = std::mem::take(password);
@@ -1376,6 +1397,7 @@ impl RcadApp {
             server_url: url,
             username: user,
             password,
+            allow_insecure_http,
         });
     }
 
@@ -2281,6 +2303,7 @@ impl RcadApp {
                         server_url,
                         username,
                         password,
+                        allow_insecure,
                         error,
                         sent,
                     } => {
@@ -2290,6 +2313,24 @@ impl RcadApp {
                         }
                         field(ui, "Username", username, false);
                         field(ui, "Password", password, true);
+                        if insecure_url(server_url.trim()) {
+                            let bad = crate::theme::of(ui).bad;
+                            ui.scope(|ui| {
+                                ui.set_max_width(360.0);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(rcad_cloud::client::INSECURE_HTTP_WARNING)
+                                            .color(bad),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                            let _ = ui
+                                .checkbox(allow_insecure, "Allow unencrypted connection")
+                                .probe("Allow unencrypted connection");
+                        } else {
+                            *allow_insecure = false;
+                        }
                         if let Some(e) = error {
                             ui.colored_label(crate::theme::of(ui).bad, e.as_str());
                         }

@@ -3,7 +3,9 @@
 //! Layout under the cache root (`$XDG_CACHE_HOME/r-cad/cloud` or `~/.cache/r-cad/cloud`):
 //!
 //! ```text
-//! <server-key>/                 server-key = sanitized host[:port] of the server URL
+//! <server-key>/                 server-key: see [`server_key`] (scheme, host, port, path
+//!                               and username, so accounts and servers never share a dir)
+//!   .lock                       advisory lock taken around every read-modify-write
 //!   links.json                  Vec<Link>: local working file -> cloud document + base version
 //!   pending.json                versions saved while offline, in order
 //!   blobs/<aa>/<hash>           content-addressed copies of downloaded/uploaded versions
@@ -11,7 +13,13 @@
 //!   versions/<document-id>/v<N>-<name>.rcad.json  read-only copies of older versions
 //! ```
 //!
-//! Every file is replaced atomically (temporary file + rename). Names that come from the
+//! Every file is replaced atomically (temporary file + rename). The desktop app and
+//! `rcad-cli` may run at the same time, so every read-modify-write of `links.json` and
+//! `pending.json` holds an exclusive advisory lock on `.lock` ([`std::fs::File::lock`]): an
+//! update made by one process is never overwritten by a stale copy in the other. Plain reads
+//! take no lock (a rename is atomic, so a reader sees either the old or the new file).
+//!
+//! Names that come from the
 //! server (document names and ids) pass through [`sanitize_file_name`] before they touch the
 //! filesystem, so a hostile name cannot escape the cache directory.
 use crate::proto::{self, BlobHash};
@@ -105,8 +113,46 @@ pub fn sanitize_file_name(name: &str) -> String {
     out
 }
 
-/// Directory name of a server in the cache: `host[_port][_path]`, sanitized.
-pub fn server_key(server_url: &str) -> String {
+/// Directory name of an account's cache: `<host>[_<port>][_<path>]-<user>-<hash>`.
+///
+/// The readable part is sanitized and shortened; `hash` is 16 hex digits of BLAKE3 over the
+/// normalized URL (scheme included, scheme and host lowercased) and the lowercased username.
+/// So `http://h` and `https://h` get different directories, as do two accounts on one
+/// server, and no two URLs collide through sanitizing.
+pub fn server_key(server_url: &str, username: &str) -> String {
+    let (scheme, rest) = server_url.split_once("://").unwrap_or(("", server_url));
+    let rest = rest.trim_end_matches('/');
+    let (host, path) = match rest.find('/') {
+        Some(i) => rest.split_at(i),
+        None => (rest, ""),
+    };
+    let canonical = format!(
+        "{}://{}{path}\n{}",
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase(),
+        username.to_lowercase()
+    );
+    let hash = blake3::hash(canonical.as_bytes()).to_hex();
+    let readable = shorten(
+        &sanitize_file_name(&rest.to_ascii_lowercase().replace([':', '/'], "_")),
+        48,
+    );
+    let user = shorten(&sanitize_file_name(&username.to_lowercase()), 32);
+    format!("{readable}-{user}-{}", &hash[..16])
+}
+
+/// The first `max` bytes of `s` (on a character boundary).
+fn shorten(s: &str, max: usize) -> String {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
+/// Directory name earlier builds used for a server (host, port and path only; no scheme,
+/// no username). Read once, to adopt an existing cache.
+pub fn legacy_server_key(server_url: &str) -> String {
     let rest = server_url
         .split_once("://")
         .map(|(_, r)| r)
@@ -122,10 +168,45 @@ fn stem_of(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-/// The cache directory of one server.
+/// Create `dir` and missing parents; new directories get mode 0700 on Unix.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(dir)
+}
+
+/// The cache directory of one account on one server.
 #[derive(Clone, Debug)]
 pub struct ServerCache {
     dir: PathBuf,
+    server_url: String,
+}
+
+/// An exclusive advisory lock on a cache or account file, released on drop.
+pub(crate) struct FileLock {
+    _file: std::fs::File,
+}
+
+impl FileLock {
+    /// Block until the exclusive lock on `path` (created if absent) is held.
+    pub(crate) fn acquire(path: &Path) -> Result<FileLock, CloudError> {
+        fsutil::ensure_parent(path)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let file = opts.open(path)?;
+        file.lock()?;
+        Ok(FileLock { _file: file })
+    }
 }
 
 /// Normalize a local path for link lookups: canonical when it exists, else absolute.
@@ -159,25 +240,80 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), CloudError> {
 }
 
 impl ServerCache {
-    /// The cache of `server_url` under `root` (directories are created when first written).
-    pub fn new(root: &Path, server_url: &str) -> ServerCache {
+    /// The cache of `username` on `server_url` under `root`. Nothing is read or created
+    /// (directories are created when first written).
+    pub fn new(root: &Path, server_url: &str, username: &str) -> ServerCache {
         ServerCache {
-            dir: root.join(server_key(server_url)),
+            dir: root.join(server_key(server_url, username)),
+            server_url: server_url.to_string(),
         }
+    }
+
+    /// [`ServerCache::new`], adopting the directory an earlier build kept for this server
+    /// (keyed by host only) when this account has no directory yet and every link in the
+    /// old one belongs to `server_url`. The first account opened on that server takes it
+    /// over; a directory that also holds links to another scheme's server stays where it
+    /// is (its documents download again).
+    ///
+    /// The directory (and missing parents) is created private to the user (mode 0700 on
+    /// Unix), so the cached documents do not depend on the umask.
+    pub fn open(root: &Path, server_url: &str, username: &str) -> ServerCache {
+        let cache = ServerCache::new(root, server_url, username);
+        let legacy = root.join(legacy_server_key(server_url));
+        if !cache.dir.exists() && legacy.is_dir() && legacy != cache.dir {
+            let links: Result<Vec<Link>, _> = read_json(&legacy.join("links.json"));
+            if let Ok(links) = links
+                && links.iter().all(|l| l.server_url == server_url)
+            {
+                // Atomic: if another process adopted it first, this rename fails harmlessly.
+                let _ = std::fs::rename(&legacy, &cache.dir);
+            }
+        }
+        // Best effort: a failure here shows up as an error on the first write.
+        let _ = create_private_dir(&cache.dir);
+        cache
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
+    /// The server URL this cache belongs to.
+    pub fn server_url(&self) -> &str {
+        &self.server_url
+    }
+
+    /// Run `f` holding the cache's exclusive lock (see the module documentation).
+    fn locked<R>(&self, f: impl FnOnce() -> Result<R, CloudError>) -> Result<R, CloudError> {
+        let _lock = FileLock::acquire(&self.dir.join(".lock"))?;
+        f()
+    }
+
     // -- Links ----------------------------------------------------------------------------------
 
-    pub fn links(&self) -> Result<Vec<Link>, CloudError> {
+    fn all_links(&self) -> Result<Vec<Link>, CloudError> {
         read_json(&self.dir.join("links.json"))
     }
 
-    fn save_links(&self, links: &[Link]) -> Result<(), CloudError> {
-        write_json(&self.dir.join("links.json"), &links)
+    /// Links to documents on this cache's server.
+    pub fn links(&self) -> Result<Vec<Link>, CloudError> {
+        let mut links = self.all_links()?;
+        links.retain(|l| l.server_url == self.server_url);
+        Ok(links)
+    }
+
+    /// Change the link list under the lock: re-read, apply `f`, write back.
+    fn update_links<R>(&self, f: impl FnOnce(&mut Vec<Link>) -> R) -> Result<R, CloudError> {
+        self.locked(|| {
+            let path = self.dir.join("links.json");
+            let mut links: Vec<Link> = read_json(&path)?;
+            let before = links.clone();
+            let r = f(&mut links);
+            if links != before {
+                write_json(&path, &links)?;
+            }
+            Ok(r)
+        })
     }
 
     /// The link whose working copy is `path`.
@@ -198,23 +334,26 @@ impl ServerCache {
     /// normalized. Returns the stored link.
     pub fn upsert_link(&self, mut link: Link) -> Result<Link, CloudError> {
         link.local_path = normalize_local(&link.local_path);
-        let mut links = self.links()?;
-        links.retain(|l| normalize_local(&l.local_path) != link.local_path);
-        links.push(link.clone());
-        self.save_links(&links)?;
-        Ok(link)
+        let stored = link.clone();
+        self.update_links(move |links| {
+            links.retain(|l| {
+                l.server_url != link.server_url || normalize_local(&l.local_path) != link.local_path
+            });
+            links.push(link);
+        })?;
+        Ok(stored)
     }
 
     /// Forget the link of `path` (the file itself is untouched).
     pub fn remove_link(&self, path: &Path) -> Result<bool, CloudError> {
         let want = normalize_local(path);
-        let mut links = self.links()?;
-        let before = links.len();
-        links.retain(|l| normalize_local(&l.local_path) != want);
-        if links.len() != before {
-            self.save_links(&links)?;
-        }
-        Ok(links.len() != before)
+        self.update_links(|links| {
+            let before = links.len();
+            links.retain(|l| {
+                l.server_url != self.server_url || normalize_local(&l.local_path) != want
+            });
+            links.len() != before
+        })
     }
 
     // -- Working and version copies --------------------------------------------------------------
@@ -279,27 +418,46 @@ impl ServerCache {
         read_json(&self.dir.join("pending.json"))
     }
 
-    pub fn set_pending(&self, queue: &[PendingSave]) -> Result<(), CloudError> {
-        write_json(&self.dir.join("pending.json"), &queue)
+    /// Change the queue under the lock: re-read, apply `f`, write back if it changed.
+    pub fn update_pending<R>(
+        &self,
+        f: impl FnOnce(&mut Vec<PendingSave>) -> R,
+    ) -> Result<R, CloudError> {
+        self.locked(|| {
+            let path = self.dir.join("pending.json");
+            let mut queue: Vec<PendingSave> = read_json(&path)?;
+            let before = queue.clone();
+            let r = f(&mut queue);
+            if queue != before {
+                write_json(&path, &queue)?;
+            }
+            Ok(r)
+        })
     }
 
     /// Append to the queue; returns the queue length.
     pub fn enqueue(&self, save: PendingSave) -> Result<usize, CloudError> {
-        let mut q = self.pending()?;
-        q.push(save);
-        self.set_pending(&q)?;
-        Ok(q.len())
+        self.update_pending(|q| {
+            q.push(save);
+            q.len()
+        })
+    }
+
+    /// Remove the queued save equal to `save` (by value, not position, so entries added or
+    /// removed meanwhile by another process are kept). Returns whether it was still queued.
+    pub fn remove_pending(&self, save: &PendingSave) -> Result<bool, CloudError> {
+        self.update_pending(|q| match q.iter().position(|p| p == save) {
+            Some(i) => {
+                q.remove(i);
+                true
+            }
+            None => false,
+        })
     }
 
     /// Remove and return the first queued save.
     pub fn dequeue(&self) -> Result<Option<PendingSave>, CloudError> {
-        let mut q = self.pending()?;
-        if q.is_empty() {
-            return Ok(None);
-        }
-        let first = q.remove(0);
-        self.set_pending(&q)?;
-        Ok(Some(first))
+        self.update_pending(|q| (!q.is_empty()).then(|| q.remove(0)))
     }
 }
 
@@ -357,8 +515,10 @@ mod tests {
     #[test]
     fn cache_paths_stay_inside_the_server_dir() {
         let root = Path::new("/cache");
-        let c = ServerCache::new(root, "https://cad.example:8443/rcad");
-        assert_eq!(c.dir(), Path::new("/cache/cad.example_8443_rcad"));
+        let c = ServerCache::new(root, "https://cad.example:8443/rcad", "ada");
+        assert_eq!(c.dir().parent(), Some(root));
+        let name = c.dir().file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("cad.example_8443_rcad-ada-"), "{name}");
         let w = c.working_copy_path("../../..", "../../etc/passwd");
         assert!(w.starts_with(c.dir().join("work")), "{w:?}");
         assert!(
@@ -384,7 +544,7 @@ mod tests {
     #[test]
     fn links_blobs_and_queue() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ServerCache::new(dir.path(), "http://127.0.0.1:9");
+        let c = ServerCache::new(dir.path(), "http://127.0.0.1:9", "ada");
         let file = dir.path().join("part.rcad.json");
         std::fs::write(&file, b"{}").unwrap();
         let link = Link {
@@ -431,5 +591,147 @@ mod tests {
         assert_eq!(c.enqueue(save("b")).unwrap(), 2);
         assert_eq!(c.dequeue().unwrap().unwrap().document, "a");
         assert_eq!(c.pending().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn cache_dirs_separate_schemes_accounts_and_lookalike_urls() {
+        let root = Path::new("/cache");
+        let dir = |url: &str, user: &str| ServerCache::new(root, url, user).dir().to_path_buf();
+        let a = dir("https://h.example", "ada");
+        assert_ne!(
+            a,
+            dir("http://h.example", "ada"),
+            "scheme is part of the key"
+        );
+        assert_ne!(
+            a,
+            dir("https://h.example", "bob"),
+            "username is part of the key"
+        );
+        assert_eq!(
+            a,
+            dir("https://H.EXAMPLE", "Ada"),
+            "host and username are case-blind"
+        );
+        // These sanitize to the same readable text; the hash keeps them apart.
+        assert_ne!(
+            dir("https://h.example:8443", "ada"),
+            dir("https://h.example/8443", "ada")
+        );
+        assert_ne!(
+            dir("https://h.example/a_b", "ada"),
+            dir("https://h.example/a/b", "ada")
+        );
+        // A hostile username stays one short component.
+        let evil = dir("https://h.example", "../../x\u{202E}");
+        assert_eq!(evil.parent(), Some(root));
+        assert!(evil.file_name().unwrap().len() <= 48 + 32 + 18);
+    }
+
+    fn link_to(server: &str, file: &Path, doc: &str) -> Link {
+        Link {
+            local_path: file.to_path_buf(),
+            server_url: server.into(),
+            org: "o".into(),
+            project: "p".into(),
+            document: doc.into(),
+            document_name: "Part".into(),
+            base_version: 1,
+            base_blob: None,
+        }
+    }
+
+    #[test]
+    fn links_of_another_server_are_not_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ServerCache::new(dir.path(), "https://h.example", "ada");
+        let file = dir.path().join("part.rcad.json");
+        std::fs::write(&file, b"{}").unwrap();
+        // A link written for http://h.example into this directory (as an old shared cache
+        // could hold) is invisible to the https account.
+        write_json(
+            &c.dir().join("links.json"),
+            &vec![link_to("http://h.example", &file, "d")],
+        )
+        .unwrap();
+        assert!(c.link_for_path(&file).unwrap().is_none());
+        assert!(c.link_for_document("d").unwrap().is_none());
+        assert!(c.links().unwrap().is_empty());
+        // Upserting keeps the foreign entry in the file (it is not this cache's to drop).
+        c.upsert_link(link_to("https://h.example", &file, "e"))
+            .unwrap();
+        assert_eq!(c.all_links().unwrap().len(), 2);
+        assert_eq!(c.link_for_path(&file).unwrap().unwrap().document, "e");
+    }
+
+    #[test]
+    fn an_old_host_keyed_cache_is_adopted_only_when_it_matches() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("part.rcad.json");
+        std::fs::write(&file, b"{}").unwrap();
+        let legacy = root.path().join(legacy_server_key("https://h.example"));
+        write_json(
+            &legacy.join("links.json"),
+            &vec![link_to("https://h.example", &file, "d")],
+        )
+        .unwrap();
+        // The http server of the same host does not take the https server's cache.
+        let http = ServerCache::open(root.path(), "http://h.example", "ada");
+        assert!(http.links().unwrap().is_empty());
+        assert!(legacy.is_dir());
+        let c = ServerCache::open(root.path(), "https://h.example", "ada");
+        assert!(!legacy.exists());
+        assert_eq!(c.link_for_path(&file).unwrap().unwrap().document, "d");
+        // A second account on that server starts empty.
+        let bob = ServerCache::open(root.path(), "https://h.example", "bob");
+        assert!(bob.links().unwrap().is_empty());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(bob.dir()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+    }
+
+    #[test]
+    fn concurrent_writers_lose_no_update() {
+        // Several handles (as the app and the CLI would hold) enqueue and upsert at once.
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://h.example";
+        let threads = 8;
+        let per = 25;
+        std::thread::scope(|scope| {
+            for t in 0..threads {
+                let root = dir.path().to_path_buf();
+                scope.spawn(move || {
+                    let c = ServerCache::new(&root, url, "ada");
+                    for i in 0..per {
+                        let file = root.join(format!("f{t}-{i}.rcad.json"));
+                        c.upsert_link(link_to(url, &file, &format!("d{t}-{i}")))
+                            .unwrap();
+                        c.enqueue(PendingSave {
+                            local_path: file,
+                            document: format!("d{t}-{i}"),
+                            blob: "0".repeat(64),
+                            description: String::new(),
+                            milestone: None,
+                            base_version: 0,
+                            chained: false,
+                            force: false,
+                            queued_at: i as i64,
+                        })
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        let c = ServerCache::new(dir.path(), url, "ada");
+        assert_eq!(c.links().unwrap().len(), threads * per);
+        let q = c.pending().unwrap();
+        assert_eq!(q.len(), threads * per);
+        // Removal by value keeps everything else.
+        assert!(c.remove_pending(&q[7]).unwrap());
+        assert!(!c.remove_pending(&q[7]).unwrap());
+        assert_eq!(c.pending().unwrap().len(), threads * per - 1);
     }
 }
