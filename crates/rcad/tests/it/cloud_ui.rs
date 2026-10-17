@@ -73,6 +73,15 @@ fn drain(rx: &Receiver<Request>) -> Vec<Request> {
     rx.try_iter().collect()
 }
 
+/// [`drain`] without the sign-in dialog's server info fetches (sent once the
+/// typed URL has been stable for a moment, so their timing depends on the
+/// machine's speed).
+fn drain_no_info(rx: &Receiver<Request>) -> Vec<Request> {
+    rx.try_iter()
+        .filter(|r| !matches!(r, Request::LoadServerInfo { .. }))
+        .collect()
+}
+
 fn me() -> proto::Me {
     proto::Me {
         user: proto::User {
@@ -257,7 +266,7 @@ fn sign_in_dialog_sends_the_entered_fields_and_shows_errors() {
     h.key_press(Key::Enter);
     settle(&mut h);
     assert_eq!(
-        drain(&req),
+        drain_no_info(&req),
         vec![Request::SignIn {
             server_url: "http://127.0.0.1:18640".into(),
             username: "alice".into(),
@@ -298,7 +307,7 @@ fn sign_in_dialog_sends_the_entered_fields_and_shows_errors() {
     assert!(h.state().cloud_dialog().is_none());
     assert!(h.query_by_label("Sign out").is_some());
     assert_eq!(
-        drain(&req),
+        drain_no_info(&req),
         vec![Request::ListProjects { org: "o1".into() }]
     );
     click(&mut h, "Sign out");
@@ -328,7 +337,7 @@ fn plain_http_to_a_public_host_needs_the_unencrypted_checkbox() {
     );
     // Without the tick nothing is sent.
     click(&mut h, "Connect");
-    assert!(drain(&req).is_empty());
+    assert!(drain_no_info(&req).is_empty());
     assert!(
         h.query_by_label_contains("would not be encrypted")
             .is_some(),
@@ -337,7 +346,7 @@ fn plain_http_to_a_public_host_needs_the_unencrypted_checkbox() {
     click(&mut h, "Allow unencrypted connection");
     click(&mut h, "Connect");
     assert_eq!(
-        drain(&req),
+        drain_no_info(&req),
         vec![Request::SignIn {
             server_url: "http://cad.example".into(),
             username: "alice".into(),
@@ -345,6 +354,177 @@ fn plain_http_to_a_public_host_needs_the_unencrypted_checkbox() {
             allow_insecure_http: true,
         }]
     );
+}
+
+fn server_info(local_login: bool, sso: bool) -> proto::ServerInfo {
+    proto::ServerInfo {
+        product: proto::PRODUCT.into(),
+        version: "test".into(),
+        protocol: proto::PROTOCOL_VERSION,
+        name: "Home lab".into(),
+        local_login,
+        org_creation: false,
+        max_blob_bytes: 1 << 30,
+        oidc: sso.then(|| proto::OidcInfo {
+            display_name: "Pocket ID".into(),
+            authorization_endpoint: "https://id.example/authorize".into(),
+            client_id: "rcad".into(),
+            scopes: "openid profile".into(),
+        }),
+    }
+}
+
+/// The sign-in dialog with `url` typed and its info fetch answered.
+fn sign_in_with_info(
+    info: proto::ServerInfo,
+) -> (Harness<'static, RcadApp>, Receiver<Request>, Sender<Event>) {
+    let (svc, req, ev) = CloudService::detached();
+    let mut h = harness([1400.0, 900.0]);
+    h.state_mut().attach_cloud_service(svc);
+    h.state_mut().set_cloud_info_debounce(Duration::ZERO);
+    drain(&req);
+    click(&mut h, "Data panel");
+    click(&mut h, "Connect to server…");
+    type_into(&mut h, "Server URL", "https://cad.example");
+    settle(&mut h);
+    let sent = drain(&req);
+    assert_eq!(
+        sent.last(),
+        Some(&Request::LoadServerInfo {
+            server_url: "https://cad.example".into()
+        }),
+        "{sent:?}"
+    );
+    // Each URL is asked once, not on every frame.
+    assert!(
+        sent.iter()
+            .filter(|r| **r
+                == Request::LoadServerInfo {
+                    server_url: "https://cad.example".into()
+                })
+            .count()
+            == 1,
+        "{sent:?}"
+    );
+    ev.send(Event::ServerInfo {
+        server_url: "https://cad.example".into(),
+        info,
+    })
+    .unwrap();
+    settle(&mut h);
+    (h, req, ev)
+}
+
+#[test]
+fn a_server_with_single_sign_on_offers_its_button_and_the_browser_flow() {
+    let (mut h, req, ev) = sign_in_with_info(server_info(true, true));
+    assert!(h.query_by_label("Sign in with Pocket ID").is_some());
+    assert!(
+        h.query_by_label("Password").is_some(),
+        "password sign-in stays"
+    );
+    assert_eq!(h.state().cloud_probe()["sso_available"], true);
+    click(&mut h, "Sign in with Pocket ID");
+    assert_eq!(
+        drain(&req),
+        vec![Request::SignInSso {
+            server_url: "https://cad.example".into(),
+            allow_insecure_http: false,
+        }]
+    );
+    assert!(h.query_by_label("Waiting for the browser…").is_some());
+    let url = "https://id.example/authorize?response_type=code&state=abc";
+    ev.send(Event::OpenBrowser { url: url.into() }).unwrap();
+    settle(&mut h);
+    // Recorded and shown for copying; no browser is spawned in tests.
+    assert_eq!(h.state().cloud_sso_url(), Some(url));
+    assert_eq!(h.state().cloud_probe()["sso_waiting"], true);
+    assert!(h.query_by_label("Open the page again").is_some());
+    // A refusal shows in the dialog and ends the wait.
+    ev.send(Event::Error {
+        request: "sign_in_sso",
+        code: None,
+        message: "the identity provider refused the sign-in: access_denied".into(),
+    })
+    .unwrap();
+    settle(&mut h);
+    assert!(
+        h.query_by_label("the identity provider refused the sign-in: access_denied")
+            .is_some()
+    );
+    assert!(h.query_by_label("Waiting for the browser…").is_none());
+    assert_eq!(h.state().cloud_probe()["sso_waiting"], false);
+    // Again, and this time it works.
+    click(&mut h, "Sign in with Pocket ID");
+    drain(&req);
+    ev.send(Event::OpenBrowser { url: url.into() }).unwrap();
+    ev.send(Event::SignedIn {
+        server_url: "https://cad.example".into(),
+        server_name: "Home lab".into(),
+        me: me(),
+    })
+    .unwrap();
+    settle(&mut h);
+    assert!(h.state().cloud_dialog().is_none());
+    assert_eq!(h.state().cloud_probe()["sso_waiting"], false);
+}
+
+#[test]
+fn cancelling_a_single_sign_on_tells_the_service() {
+    let (mut h, req, ev) = sign_in_with_info(server_info(true, true));
+    click(&mut h, "Sign in with Pocket ID");
+    drain(&req);
+    ev.send(Event::OpenBrowser {
+        url: "https://id.example/authorize?x=1".into(),
+    })
+    .unwrap();
+    settle(&mut h);
+    click(&mut h, "Cancel");
+    assert_eq!(drain(&req), vec![Request::CancelSso]);
+    assert!(h.state().cloud_dialog().is_none());
+    // Closing the dialog when nothing is waiting sends nothing.
+    click(&mut h, "Connect to server…");
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    assert!(drain_no_info(&req).is_empty());
+}
+
+#[test]
+fn a_server_without_password_sign_in_shows_only_single_sign_on() {
+    let (h, _req, _ev) = sign_in_with_info(server_info(false, true));
+    assert!(h.query_by_label("Password").is_none());
+    assert!(h.query_by_label("Username").is_none());
+    assert!(h.query_by_label("Connect").is_none());
+    assert!(h.query_by_label("Sign in with Pocket ID").is_some());
+    assert_eq!(h.state().cloud_probe()["password_sign_in"], false);
+}
+
+#[test]
+fn a_server_without_single_sign_on_shows_the_password_form_only() {
+    let (mut h, req, ev) = sign_in_with_info(server_info(true, false));
+    assert!(h.query_by_label_contains("Sign in with").is_none());
+    assert!(h.query_by_label("Password").is_some());
+    // An unreachable server leaves a quiet note, not a banner.
+    type_into(&mut h, "Server URL", "https://other.example");
+    settle(&mut h);
+    assert_eq!(
+        drain(&req).last(),
+        Some(&Request::LoadServerInfo {
+            server_url: "https://other.example".into()
+        })
+    );
+    ev.send(Event::Error {
+        request: "load_server_info",
+        code: None,
+        message: "server unreachable: dns".into(),
+    })
+    .unwrap();
+    settle(&mut h);
+    assert!(
+        h.query_by_label_contains("Could not read this server's sign-in options")
+            .is_some()
+    );
+    assert!(h.query_by_label("Password").is_some());
 }
 
 #[test]

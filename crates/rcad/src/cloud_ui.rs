@@ -364,7 +364,26 @@ pub struct CloudUi {
     /// Window focus last frame (a regained focus polls at once; None before
     /// the first frame).
     focused: Option<bool>,
+    /// Sign-in dialog: the server URL as last typed and when it changed (the
+    /// server's info is fetched once it has been stable for [`INFO_DEBOUNCE`]).
+    url_edit: Option<(String, std::time::Instant)>,
+    /// Normalized URL whose info was last asked for (never asked twice in a row).
+    info_asked: Option<String>,
+    /// Server info by normalized URL, as last loaded (sign-in methods).
+    server_info: Option<(String, proto::ServerInfo)>,
+    /// Why the info of a URL could not be loaded: (normalized URL, message).
+    info_error: Option<(String, String)>,
+    /// A single sign-on in progress (Some), with the browser address once known.
+    sso: Option<Option<String>>,
+    /// Open the system browser for single sign-on (interactive app only; tests
+    /// only record the address).
+    open_browser: bool,
+    /// Debounce of the server info fetch (tests shorten it).
+    info_debounce: Option<std::time::Duration>,
 }
+
+/// How long the server URL must stay unchanged before its info is fetched.
+pub const INFO_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// A version of a document: (document id, version number).
 type ThumbKey = (String, u64);
@@ -575,6 +594,7 @@ fn background(request: &str) -> bool {
             | "load_shares"
             | "load_activity"
             | "load_org_activity"
+            | "load_server_info"
     )
 }
 
@@ -585,6 +605,7 @@ impl RcadApp {
     /// configured (reads the account file; nothing else).
     pub fn enable_cloud(&mut self) {
         self.cloud.capture_thumbnails = true;
+        self.cloud.open_browser = true;
         if let (Some(c), Some(r)) = (adapter::config_path(), adapter::cache_root()) {
             self.enable_cloud_at(c, r);
         }
@@ -790,7 +811,158 @@ impl RcadApp {
         probe["shares_listed"] = c.shares.as_ref().map_or(0, |(_, l)| l.len()).into();
         probe["activity_listed"] = c.activity.as_ref().map_or(0, |(_, l)| l.len()).into();
         probe["org_activity_listed"] = c.org_activity.as_ref().map_or(0, |(_, l)| l.len()).into();
+        let info = self.cloud_dialog_info();
+        probe["sso_available"] = info.is_some_and(|i| i.oidc.is_some()).into();
+        probe["password_sign_in"] = info.is_none_or(|i| i.local_login).into();
+        probe["sso_waiting"] = c.sso.is_some().into();
+        probe["sso_url"] = c.sso.clone().flatten().into();
         probe
+    }
+
+    /// The single sign-on address the browser was sent to (tests).
+    pub fn cloud_sso_url(&self) -> Option<&str> {
+        self.cloud.sso.as_ref().and_then(|u| u.as_deref())
+    }
+
+    /// Shorten the wait before the sign-in dialog fetches the server's info
+    /// (tests: `Duration::ZERO`).
+    pub fn set_cloud_info_debounce(&mut self, d: std::time::Duration) {
+        self.cloud.info_debounce = Some(d);
+    }
+
+    /// The loaded info of the server URL in the open sign-in dialog, if any.
+    fn cloud_dialog_info(&self) -> Option<&proto::ServerInfo> {
+        let Some(CloudDialog::SignIn { server_url, .. }) = &self.cloud.dialog else {
+            return None;
+        };
+        let url = rcad_cloud::client::normalize_server_url(server_url.trim()).ok()?;
+        self.cloud
+            .server_info
+            .as_ref()
+            .filter(|(u, _)| *u == url)
+            .map(|(_, i)| i)
+    }
+
+    /// Start the service thread for signing in (no account yet). False when
+    /// this build cannot.
+    fn cloud_ensure_service(&mut self) -> bool {
+        if self.cloud.service.is_some() {
+            return true;
+        }
+        let started = match (
+            self.cloud.config_path.clone(),
+            self.cloud.cache_root.clone(),
+        ) {
+            (Some(c), Some(r)) => adapter::start(c, r),
+            _ => adapter::config_path()
+                .zip(adapter::cache_root())
+                .and_then(|(c, r)| adapter::start(c, r)),
+        };
+        match started {
+            Some(s) => {
+                self.cloud.service = Some(s);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sign-in dialog: fetch the server's info (only `GET /info`, no
+    /// credentials) once the typed URL has been stable for the debounce, so
+    /// the dialog can offer single sign-on and hide password fields a server
+    /// does not take.
+    fn cloud_info_tick(&mut self, ctx: &egui::Context) {
+        let Some(CloudDialog::SignIn { server_url, .. }) = &self.cloud.dialog else {
+            self.cloud.url_edit = None;
+            return;
+        };
+        let typed = server_url.trim().to_string();
+        let now = std::time::Instant::now();
+        match &self.cloud.url_edit {
+            Some((u, _)) if *u == typed => {}
+            _ => self.cloud.url_edit = Some((typed.clone(), now)),
+        }
+        let Some((_, since)) = self.cloud.url_edit.clone() else {
+            return;
+        };
+        let Ok(url) = rcad_cloud::client::normalize_server_url(&typed) else {
+            return;
+        };
+        if typed.is_empty() || self.cloud.info_asked.as_deref() == Some(url.as_str()) {
+            return;
+        }
+        let wait = self.cloud.info_debounce.unwrap_or(INFO_DEBOUNCE);
+        if now.duration_since(since) < wait {
+            ctx.request_repaint_after(wait - now.duration_since(since));
+            return;
+        }
+        if !self.cloud_ensure_service() {
+            return;
+        }
+        self.cloud.info_asked = Some(url.clone());
+        self.cloud.info_error = None;
+        self.cloud_send(Request::LoadServerInfo { server_url: url });
+    }
+
+    /// The sign-in dialog's single sign-on button.
+    fn cloud_sign_in_sso(&mut self) {
+        let Some(CloudDialog::SignIn {
+            server_url,
+            allow_insecure,
+            error,
+            sent,
+            ..
+        }) = &mut self.cloud.dialog
+        else {
+            return;
+        };
+        let url = server_url.trim().to_string();
+        let allow_insecure_http = *allow_insecure;
+        if insecure_url(&url) && !allow_insecure_http {
+            *error = Some(
+                "This connection would not be encrypted. Use https://, or tick \
+                 \u{201c}Allow unencrypted connection\u{201d}."
+                    .into(),
+            );
+            return;
+        }
+        *error = None;
+        *sent = true;
+        if !self.cloud_ensure_service() {
+            if let Some(CloudDialog::SignIn { error, sent, .. }) = &mut self.cloud.dialog {
+                *error = Some("This build has no sync client.".into());
+                *sent = false;
+            }
+            return;
+        }
+        self.cloud.sso = Some(None);
+        self.cloud_send(Request::SignInSso {
+            server_url: url,
+            allow_insecure_http,
+        });
+    }
+
+    /// Stop a single sign-on in progress (dialog Cancel or closed).
+    fn cloud_cancel_sso(&mut self) {
+        if self.cloud.sso.take().is_some() {
+            self.cloud_send(Request::CancelSso);
+        }
+        if let Some(CloudDialog::SignIn { sent, .. }) = &mut self.cloud.dialog {
+            *sent = false;
+        }
+    }
+
+    /// Open the single sign-on page in the browser (interactive app only).
+    fn cloud_open_sso_page(&mut self) {
+        let Some(Some(url)) = self.cloud.sso.clone() else {
+            return;
+        };
+        if self.cloud.open_browser && rcad_cloud::sso::open_browser(&url).is_err() {
+            self.cloud_log(
+                false,
+                "no browser could be opened; open the address shown in the sign-in dialog".into(),
+            );
+        }
     }
 
     pub(crate) fn cloud_modal_open(&self) -> bool {
@@ -948,6 +1120,7 @@ impl RcadApp {
     /// Poll service events and follow the open document's edit state
     /// (auto-lock, unlock when leaving a locked document).
     pub(crate) fn cloud_tick(&mut self, ctx: &egui::Context) {
+        self.cloud_info_tick(ctx);
         let Some(service) = &self.cloud.service else {
             return;
         };
@@ -1013,7 +1186,16 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
-            Event::OpenBrowser { .. } | Event::ServerInfo { .. } => {}
+            Event::OpenBrowser { url } => {
+                if c.sso.is_some() {
+                    c.sso = Some(Some(url));
+                    self.cloud_open_sso_page();
+                }
+            }
+            Event::ServerInfo { server_url, info } => {
+                c.info_error = None;
+                c.server_info = Some((server_url, info));
+            }
             Event::Shares { document, shares } => {
                 if let Some(CloudDialog::Share { revoke, .. }) = &mut c.dialog
                     && revoke
@@ -1052,6 +1234,7 @@ impl RcadApp {
                 if matches!(c.dialog, Some(CloudDialog::SignIn { .. })) {
                     c.dialog = None;
                 }
+                c.sso = None;
                 let first = c.account.is_none();
                 if c.org
                     .as_ref()
@@ -1264,6 +1447,7 @@ impl RcadApp {
                     *sent = false;
                     *error = Some("The server could not be reached.".into());
                 }
+                c.sso = None;
                 if !was {
                     self.cloud_log(
                         false,
@@ -1312,11 +1496,19 @@ impl RcadApp {
                 code,
                 message,
             } => {
-                if request == "sign_in"
+                if matches!(request, "sign_in" | "sign_in_sso")
                     && let Some(CloudDialog::SignIn { sent, error, .. }) = &mut c.dialog
                 {
                     *sent = false;
                     *error = Some(message.clone());
+                }
+                if request == "sign_in_sso" {
+                    c.sso = None;
+                }
+                if request == "load_server_info"
+                    && let Some(url) = c.info_asked.clone()
+                {
+                    c.info_error = Some((url, message.clone()));
                 }
                 if request == "create_share"
                     && let Some(CloudDialog::Share { sent, .. }) = &mut c.dialog
@@ -1592,26 +1784,12 @@ impl RcadApp {
         let password = std::mem::take(password);
         *error = None;
         *sent = true;
-        if self.cloud.service.is_none() {
-            let started = match (
-                self.cloud.config_path.clone(),
-                self.cloud.cache_root.clone(),
-            ) {
-                (Some(c), Some(r)) => adapter::start(c, r),
-                _ => adapter::config_path()
-                    .zip(adapter::cache_root())
-                    .and_then(|(c, r)| adapter::start(c, r)),
-            };
-            match started {
-                Some(s) => self.cloud.service = Some(s),
-                None => {
-                    if let Some(CloudDialog::SignIn { error, sent, .. }) = &mut self.cloud.dialog {
-                        *error = Some("This build has no sync client.".into());
-                        *sent = false;
-                    }
-                    return;
-                }
+        if !self.cloud_ensure_service() {
+            if let Some(CloudDialog::SignIn { error, sent, .. }) = &mut self.cloud.dialog {
+                *error = Some("This build has no sync client.".into());
+                *sent = false;
             }
+            return;
         }
         self.cloud_send(Request::SignIn {
             server_url: url,
@@ -2701,6 +2879,20 @@ impl RcadApp {
             .filter(|(doc, _)| Some(doc) == self.cloud_target_doc().as_ref())
             .map(|(_, l)| l.clone());
         let mut revoke_send: Option<String> = None;
+        let info = self.cloud_dialog_info().cloned();
+        let info_note = match (&d, &self.cloud.info_error) {
+            (CloudDialog::SignIn { server_url, .. }, Some((u, m)))
+                if rcad_cloud::client::normalize_server_url(server_url.trim())
+                    .ok()
+                    .as_ref()
+                    == Some(u) =>
+            {
+                Some(m.clone())
+            }
+            _ => None,
+        };
+        let sso_wait = self.cloud.sso.clone();
+        let (mut sso_click, mut sso_reopen) = (false, false);
         let title = match &d {
             CloudDialog::SignIn { .. } => "Connect to server",
             CloudDialog::NewProject { .. } => "New project",
@@ -2754,8 +2946,16 @@ impl RcadApp {
                         if server_url.is_empty() && !url.has_focus() && username.is_empty() {
                             url.request_focus();
                         }
-                        field(ui, "Username", username, false);
-                        field(ui, "Password", password, true);
+                        let password_login = info.as_ref().is_none_or(|i| i.local_login);
+                        if password_login {
+                            field(ui, "Username", username, false);
+                            field(ui, "Password", password, true);
+                        }
+                        if let Some(note) = &info_note {
+                            ui.weak(format!(
+                                "Could not read this server's sign-in options: {note}"
+                            ));
+                        }
                         if insecure_url(server_url.trim()) {
                             let bad = crate::theme::of(ui).bad;
                             ui.scope(|ui| {
@@ -2777,17 +2977,46 @@ impl RcadApp {
                         if let Some(e) = error {
                             ui.colored_label(crate::theme::of(ui).bad, e.as_str());
                         }
-                        if *sent {
+                        if let Some(wait) = &sso_wait {
+                            ui.label("Waiting for the browser…");
+                            ui.small(
+                                "Finish signing in in your browser. If no browser opened, open \
+                                 this address:",
+                            );
+                            if let Some(u) = wait {
+                                let mut shown = u.clone();
+                                let _ = ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut shown).desired_width(360.0),
+                                    )
+                                    .probe("Sign-in address");
+                                sso_reopen |= ui
+                                    .link("Open the page again")
+                                    .probe("Open the page again")
+                                    .clicked();
+                            }
+                        } else if *sent {
                             ui.weak("Connecting…");
                         }
-                        ui.small("Your password is sent once; R-CAD keeps a revocable token.");
+                        if password_login {
+                            ui.small("Your password is sent once; R-CAD keeps a revocable token.");
+                        }
                         ui.horizontal(|ui| {
-                            ok |= ui
-                                .add_enabled(!*sent, egui::Button::new("Connect"))
-                                .probe("Connect")
-                                .clicked()
-                                || (enter && !*sent);
-                            cancel |= ui.button("Cancel").clicked();
+                            if password_login {
+                                ok |= ui
+                                    .add_enabled(!*sent, egui::Button::new("Connect"))
+                                    .probe("Connect")
+                                    .clicked()
+                                    || (enter && !*sent);
+                            }
+                            if let Some(oidc) = info.as_ref().and_then(|i| i.oidc.as_ref()) {
+                                let label = format!("Sign in with {}", oidc.display_name);
+                                sso_click |= ui
+                                    .add_enabled(!*sent, egui::Button::new(label))
+                                    .probe("Sign in with single sign-on")
+                                    .clicked();
+                            }
+                            cancel |= ui.button("Cancel").probe("Cancel sign-in").clicked();
                         });
                     }
                     CloudDialog::NewProject { name } => {
@@ -3050,7 +3279,14 @@ impl RcadApp {
         if let (Some(share), Some(document)) = (revoke_send, self.cloud_target_doc()) {
             self.cloud_send(Request::RevokeShare { document, share });
         }
+        if sso_reopen {
+            self.cloud_open_sso_page();
+        }
+        if sso_click {
+            self.cloud_sign_in_sso();
+        }
         if cancel {
+            self.cloud_cancel_sso();
             self.cloud.dialog = None;
             return;
         }

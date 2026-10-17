@@ -172,7 +172,18 @@ The workflow follows Fusion's Data Panel where that fits a local-first app.
 * **Data panel** (application bar **Data**, left of File): a column left of the browser.
   Signed out, it explains what a server adds and offers **Connect to server…** (server URL,
   username, password; the password field is masked, Enter connects, Esc cancels, errors show in
-  the dialog and the message log). Signed in: server name, user, **Refresh**, **Sign out**, the
+  the dialog and the message log). Once the typed server URL has been unchanged for about
+  0.6 s, the dialog reads the server's public information (`GET /info` only, no credentials;
+  this starts the cloud service thread) to learn its sign-in methods. A server with single
+  sign-on gets a **Sign in with <provider>** button; a server without password sign-in shows
+  only that button, without username and password fields. If the information cannot be read,
+  a quiet note says so and the password form stays. The single sign-on button opens the
+  provider's page in the system browser (`xdg-open`, `open` or the Windows URL handler) and
+  the dialog shows **Waiting for the browser…** with the address (selectable, for when no
+  browser opens), **Open the page again** and **Cancel**, which stops the wait. A refusal,
+  a timeout (five minutes) or a mismatched answer shows in the dialog; success closes it as
+  a password sign-in does. The unencrypted-connection consent applies to both methods.
+  Signed in: server name, user, **Refresh**, **Sign out**, the
   organization selector (with **Organization…** for organization administrators), then four
   sections. **Browse** lists projects (**New project…**), and a selected project's folders and
   documents with their latest version, who saved it and a lock mark (**New folder…**,
