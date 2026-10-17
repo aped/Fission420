@@ -39,6 +39,27 @@ const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 /// in-memory downloads (`shared_content`, `download_content_bytes`).
 pub const DEFAULT_MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 
+/// The eight-byte signature every PNG file starts with.
+pub const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+
+/// Check a thumbnail before upload or after download: a PNG (by signature) of at most
+/// [`proto::MAX_THUMBNAIL_BYTES`].
+pub fn check_thumbnail(png: &[u8]) -> Result<(), CloudError> {
+    if png.len() as u64 > proto::MAX_THUMBNAIL_BYTES {
+        return Err(CloudError::Invalid(format!(
+            "the thumbnail is {} bytes, more than the {}-byte limit",
+            png.len(),
+            proto::MAX_THUMBNAIL_BYTES
+        )));
+    }
+    if !png.starts_with(PNG_SIGNATURE) {
+        return Err(CloudError::Invalid(
+            "the thumbnail is not a PNG image".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Shown wherever a sign-in over plain `http://` needs consent.
 pub const INSECURE_HTTP_WARNING: &str = "This server address uses http://, so your password, \
      your access token and your documents travel unencrypted and anyone on the network path \
@@ -648,6 +669,30 @@ impl Client {
         let path = format!("/documents/{}/versions/{number}/content", seg(doc));
         let resp = self.send(&self.transfer, "GET", &path, None)?;
         read_checked(resp, expected)
+    }
+
+    /// Version `number`'s PNG thumbnail, or None when it has none (404). The body is capped
+    /// at [`proto::MAX_THUMBNAIL_BYTES`] and must carry the PNG signature.
+    pub fn download_thumbnail(
+        &self,
+        doc: &str,
+        number: u64,
+    ) -> Result<Option<Vec<u8>>, CloudError> {
+        let path = format!("/documents/{}/versions/{number}/thumbnail", seg(doc));
+        let mut resp = match self.send(&self.agent, "GET", &path, None) {
+            Ok(r) => r,
+            Err(CloudError::Api(e)) if e.code == ErrorCode::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let png = resp
+            .body_mut()
+            .with_config()
+            .limit(proto::MAX_THUMBNAIL_BYTES)
+            .read_to_vec()
+            .map_err(map_transport)?;
+        check_thumbnail(&png)
+            .map_err(|e| CloudError::Protocol(format!("server thumbnail: {e}")))?;
+        Ok(Some(png))
     }
 
     // -- Locks ----------------------------------------------------------------------------------

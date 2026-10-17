@@ -66,6 +66,7 @@ impl Harness {
             project: PROJECT.into(),
             folder: None,
             name: name.into(),
+            thumbnail: None,
         });
         match ev.as_slice() {
             [Event::VersionSaved { link, version }] => {
@@ -83,6 +84,7 @@ impl Harness {
             description: "edit".into(),
             milestone: None,
             force,
+            thumbnail: None,
         })
     }
 }
@@ -291,6 +293,7 @@ fn upload_new_then_save_versions_update_the_link() {
         description: "thicker".into(),
         milestone: Some("Prototype A".into()),
         force: false,
+        thumbnail: None,
     });
     match ev.as_slice() {
         [Event::VersionSaved { link, version }] => {
@@ -1478,6 +1481,7 @@ fn two_workers_queueing_at_once_lose_no_save() {
                                 description: String::new(),
                                 milestone: None,
                                 force: false,
+                                thumbnail: None,
                             },
                             &mut |e| ev.push(e),
                         );

@@ -76,8 +76,10 @@ usage: rcad-cli cloud [--json] COMMAND
   orgs
   projects ORG-ID
   tree PROJECT-ID
-  push FILE --project ID [--folder ID] [--name NAME]     upload as a new document
-  save FILE [-m MESSAGE] [--milestone NAME] [--force]   save a linked file as a new version
+  push FILE --project ID [--folder ID] [--name NAME] [--thumbnail PNG]
+                                   upload as a new document
+  save FILE [-m MESSAGE] [--milestone NAME] [--force] [--thumbnail PNG]
+                                   save a linked file as a new version (PNG: at most 1 MiB)
   pull DOCUMENT-ID [--version N] [--out FILE]
   versions DOCUMENT-ID
   share DOCUMENT-ID [--version N] [--days N] [--download]
@@ -361,7 +363,11 @@ impl Cli {
     }
 
     fn push(&mut self, args: &[String]) -> Option<Outcome> {
-        let opts = Opts::parse(args, &["--project", "--folder", "--name"], &[])?;
+        let opts = Opts::parse(
+            args,
+            &["--project", "--folder", "--name", "--thumbnail"],
+            &[],
+        )?;
         let [file] = opts.positional.as_slice() else {
             return None;
         };
@@ -370,21 +376,34 @@ impl Cli {
         let name = opts
             .value(&["--name"])
             .unwrap_or_else(|| default_name(&path));
+        let thumbnail = match read_thumbnail(&opts) {
+            Ok(t) => t,
+            Err(o) => return Some(o),
+        };
         Some(self.report(
             Request::UploadNew {
                 local_path: path,
                 project,
                 folder: opts.value(&["--folder"]),
                 name,
+                thumbnail,
             },
             true,
         ))
     }
 
     fn save(&mut self, args: &[String]) -> Option<Outcome> {
-        let opts = Opts::parse(args, &["-m", "--message", "--milestone"], &["--force"])?;
+        let opts = Opts::parse(
+            args,
+            &["-m", "--message", "--milestone", "--thumbnail"],
+            &["--force"],
+        )?;
         let [file] = opts.positional.as_slice() else {
             return None;
+        };
+        let thumbnail = match read_thumbnail(&opts) {
+            Ok(t) => t,
+            Err(o) => return Some(o),
         };
         Some(self.report(
             Request::SaveVersion {
@@ -392,6 +411,7 @@ impl Cli {
                 description: opts.value(&["-m", "--message"]).unwrap_or_default(),
                 milestone: opts.value(&["--milestone"]),
                 force: opts.has("--force"),
+                thumbnail,
             },
             true,
         ))
@@ -784,6 +804,18 @@ impl Cli {
             }
             Event::LockReleased { .. } => outln!("lock released"),
             Event::Detail(d) => print_detail(d),
+            Event::Thumbnail {
+                document,
+                version,
+                png,
+            } => match png {
+                Some(p) => outln!("{document} v{version}: thumbnail, {} bytes", p.len()),
+                None => outln!("{document} v{version}: no thumbnail"),
+            },
+            Event::Head {
+                document,
+                head_version,
+            } => outln!("{document} head v{head_version}"),
             Event::ShareCreated(s) => {
                 outln!("{}", s.url);
                 if let Some(t) = s.link.expires_at {
@@ -834,6 +866,28 @@ impl Cli {
             } => errln!("error ({request}): {message}"),
         }
     }
+}
+
+/// The `--thumbnail` PNG, checked (signature, size) before anything is sent.
+fn read_thumbnail(opts: &Opts) -> Result<Option<Vec<u8>>, Outcome> {
+    let Some(path) = opts.value(&["--thumbnail"]) else {
+        return Ok(None);
+    };
+    let fail = |m: String| {
+        errln!("error (thumbnail): {m}");
+        Outcome::Error
+    };
+    let meta = std::fs::metadata(&path).map_err(|e| fail(format!("cannot read {path}: {e}")))?;
+    if meta.len() > proto::MAX_THUMBNAIL_BYTES {
+        return Err(fail(format!(
+            "{path} is {} bytes, more than the {}-byte limit",
+            meta.len(),
+            proto::MAX_THUMBNAIL_BYTES
+        )));
+    }
+    let png = std::fs::read(&path).map_err(|e| fail(format!("cannot read {path}: {e}")))?;
+    rcad_cloud::client::check_thumbnail(&png).map_err(|e| fail(format!("{path}: {e}")))?;
+    Ok(Some(png))
 }
 
 /// A project role from its name, case-insensitively.
@@ -1001,6 +1055,18 @@ fn event_json(e: &Event) -> serde_json::Value {
         }
         Event::LockReleased { document } => json!({"event": "lock_released", "document": document}),
         Event::Detail(d) => json!({"event": "detail", "detail": to_json(d)}),
+        Event::Thumbnail {
+            document,
+            version,
+            png,
+        } => json!({
+            "event": "thumbnail", "document": document, "version": version,
+            "bytes": png.as_ref().map(Vec::len)
+        }),
+        Event::Head {
+            document,
+            head_version,
+        } => json!({"event": "head", "document": document, "head_version": head_version}),
         Event::ShareCreated(s) => json!({"event": "share_created", "share": to_json(s)}),
         Event::Comments { document, comments } => {
             json!({"event": "comments", "document": document, "comments": to_json(comments)})

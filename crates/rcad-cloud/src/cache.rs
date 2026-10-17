@@ -62,6 +62,9 @@ pub struct PendingSave {
     pub force: bool,
     /// Unix seconds.
     pub queued_at: i64,
+    /// Blob cache hash of the version's PNG thumbnail, snapshotted with the document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<BlobHash>,
 }
 
 /// `$XDG_CACHE_HOME/r-cad/cloud`, else `~/.cache/r-cad/cloud`.
@@ -586,6 +589,7 @@ mod tests {
             chained: false,
             force: false,
             queued_at: 0,
+            thumbnail: None,
         };
         assert_eq!(c.enqueue(save("a")).unwrap(), 1);
         assert_eq!(c.enqueue(save("b")).unwrap(), 2);
@@ -719,6 +723,7 @@ mod tests {
                             chained: false,
                             force: false,
                             queued_at: i as i64,
+                            thumbnail: None,
                         })
                         .unwrap();
                     }

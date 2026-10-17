@@ -888,6 +888,7 @@ impl RcadApp {
     fn cloud_event(&mut self, e: Event) {
         let c = &mut self.cloud;
         match e {
+            Event::Thumbnail { .. } | Event::Head { .. } => {}
             Event::SignedIn {
                 server_url,
                 server_name,
@@ -1202,6 +1203,7 @@ impl RcadApp {
                 description,
                 milestone,
                 force: false,
+                thumbnail: None,
             }),
             AfterSave::Upload {
                 path,
@@ -1213,6 +1215,7 @@ impl RcadApp {
                 project,
                 folder,
                 name,
+                thumbnail: None,
             }),
         }
     }
@@ -1524,6 +1527,7 @@ impl RcadApp {
                 project,
                 folder,
                 name,
+                thumbnail: None,
             });
         }
     }
@@ -1550,6 +1554,7 @@ impl RcadApp {
                 description,
                 milestone,
                 force: false,
+                thumbnail: None,
             });
         }
     }
@@ -2776,6 +2781,7 @@ impl RcadApp {
                     description,
                     milestone,
                     force: true,
+                    thumbnail: None,
                 });
             }
             Choice::Copy => {
@@ -2790,6 +2796,7 @@ impl RcadApp {
                     project: link.project,
                     folder,
                     name: format!("{} (copy)", link.document_name),
+                    thumbnail: None,
                 });
             }
         }

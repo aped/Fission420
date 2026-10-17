@@ -384,6 +384,7 @@ fn document_ready_opens_and_edits_lock_then_save_version_unlocks() {
             description: "wider flange".into(),
             milestone: Some("Prototype A".into()),
             force: false,
+            thumbnail: None,
         }]
     );
     c.ev.send(Event::VersionSaved {
@@ -443,6 +444,7 @@ fn conflict_modal_buttons_send_the_right_requests() {
             description: "mine".into(),
             milestone: None,
             force: true,
+            thumbnail: None,
         }]
     );
     assert!(c.h.state().cloud_conflict().is_none());
@@ -455,6 +457,7 @@ fn conflict_modal_buttons_send_the_right_requests() {
             project: "p1".into(),
             folder: None,
             name: "Bracket (copy)".into(),
+            thumbnail: None,
         }]
     );
     conflict(&mut c);
@@ -687,6 +690,7 @@ fn browse_projects_open_and_upload() {
             project: "p1".into(),
             folder: None,
             name: "Bracket".into(),
+            thumbnail: None,
         }]
     );
     click(&mut c.h, "New folder…");
@@ -1080,6 +1084,7 @@ fn folders_are_upload_targets_and_documents_rename_move_and_trash() {
             project: "p1".into(),
             folder: Some("f1".into()),
             name: "Bracket".into(),
+            thumbnail: None,
         }]
     );
     click(&mut c.h, "Rename folder…");
@@ -1193,6 +1198,7 @@ fn queued_versions_are_listed_and_discarded_after_confirmation() {
         chained: n > 1,
         force: false,
         queued_at: 1_792_224_300,
+        thumbnail: None,
     };
     c.ev.send(Event::PendingQueue {
         saves: vec![save(1, "thicker"), save(2, "")],
@@ -1275,6 +1281,7 @@ fn save_to_cloud_project_uploads_an_unlinked_document() {
             project: "p1".into(),
             folder: Some("f1".into()),
             name: "Bracket".into(),
+            thumbnail: None,
         }]
     );
     // Once linked, Save Version is the way to save it.

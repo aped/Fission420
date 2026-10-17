@@ -94,6 +94,8 @@ pub enum Request {
         project: String,
         folder: Option<String>,
         name: String,
+        /// PNG thumbnail of the document (at most [`proto::MAX_THUMBNAIL_BYTES`]), if any.
+        thumbnail: Option<Vec<u8>>,
     },
     /// Save the linked file as a new version. Queued if offline.
     SaveVersion {
@@ -101,8 +103,21 @@ pub enum Request {
         description: String,
         milestone: Option<String>,
         force: bool,
+        /// PNG thumbnail of the version (at most [`proto::MAX_THUMBNAIL_BYTES`]), if any.
+        /// Snapshotted into the blob cache with the document, so a queued save keeps it.
+        thumbnail: Option<Vec<u8>>,
     },
     LoadDetail {
+        document: String,
+    },
+    /// The thumbnail of `version` of `document` (answer: [`Event::Thumbnail`]).
+    LoadThumbnail {
+        document: String,
+        version: u64,
+    },
+    /// The document's current head version (answer: [`Event::Head`]); a light poll for
+    /// "a newer version is available".
+    CheckHead {
         document: String,
     },
     SetMilestone {
@@ -263,27 +278,40 @@ impl std::fmt::Debug for Request {
                 project,
                 folder,
                 name,
+                thumbnail,
             } => f
                 .debug_struct("UploadNew")
                 .field("local_path", local_path)
                 .field("project", project)
                 .field("folder", folder)
                 .field("name", name)
+                .field("thumbnail_bytes", &thumbnail.as_ref().map(Vec::len))
                 .finish(),
             Request::SaveVersion {
                 local_path,
                 description,
                 milestone,
                 force,
+                thumbnail,
             } => f
                 .debug_struct("SaveVersion")
                 .field("local_path", local_path)
                 .field("description", description)
                 .field("milestone", milestone)
                 .field("force", force)
+                .field("thumbnail_bytes", &thumbnail.as_ref().map(Vec::len))
                 .finish(),
             Request::LoadDetail { document } => f
                 .debug_struct("LoadDetail")
+                .field("document", document)
+                .finish(),
+            Request::LoadThumbnail { document, version } => f
+                .debug_struct("LoadThumbnail")
+                .field("document", document)
+                .field("version", version)
+                .finish(),
+            Request::CheckHead { document } => f
+                .debug_struct("CheckHead")
                 .field("document", document)
                 .finish(),
             Request::SetMilestone {
@@ -448,6 +476,8 @@ impl Request {
             Request::UploadNew { .. } => "upload_new",
             Request::SaveVersion { .. } => "save_version",
             Request::LoadDetail { .. } => "load_detail",
+            Request::LoadThumbnail { .. } => "load_thumbnail",
+            Request::CheckHead { .. } => "check_head",
             Request::SetMilestone { .. } => "set_milestone",
             Request::Promote { .. } => "promote",
             Request::Lock { .. } => "lock",
@@ -522,6 +552,18 @@ pub enum Event {
         document: String,
     },
     Detail(proto::DocumentDetail),
+    /// Answer to [`Request::LoadThumbnail`]: the verified PNG bytes, or None when the
+    /// version has no thumbnail.
+    Thumbnail {
+        document: String,
+        version: u64,
+        png: Option<Vec<u8>>,
+    },
+    /// Answer to [`Request::CheckHead`].
+    Head {
+        document: String,
+        head_version: u64,
+    },
     ShareCreated(proto::CreateShareResponse),
     Comments {
         document: String,
@@ -836,18 +878,47 @@ impl Worker {
                 project,
                 folder,
                 name,
+                thumbnail,
             } => {
                 let s = self.session()?;
-                self.upload_new(&s, &local_path, &project, folder, &name, emit)
+                self.upload_new(&s, &local_path, &project, folder, &name, thumbnail, emit)
             }
             Request::SaveVersion {
                 local_path,
                 description,
                 milestone,
                 force,
+                thumbnail,
             } => {
                 let s = self.session()?;
-                self.save_version(&s, &local_path, description, milestone, force, emit)
+                self.save_version(
+                    &s,
+                    &local_path,
+                    description,
+                    milestone,
+                    force,
+                    thumbnail,
+                    emit,
+                )
+            }
+            Request::LoadThumbnail { document, version } => {
+                let s = self.session()?;
+                let png = self.thumbnail(&s, &document, version)?;
+                emit(Event::Thumbnail {
+                    document,
+                    version,
+                    png,
+                });
+                Ok(())
+            }
+            Request::CheckHead { document } => {
+                let s = self.session()?;
+                let head_version = s.client.document(&document)?.document.head_version;
+                emit(Event::Head {
+                    document,
+                    head_version,
+                });
+                Ok(())
             }
             Request::LoadDetail { document } => {
                 let s = self.session()?;
@@ -1250,6 +1321,46 @@ impl Worker {
         s.cache.read_blob(blob)
     }
 
+    /// The PNG thumbnail of `version` of `document`, if it has one: from the blob cache
+    /// (keyed by the thumbnail's hash, which the document detail names), else downloaded,
+    /// checked (size, PNG signature, hash) and cached.
+    fn thumbnail(
+        &self,
+        s: &Session,
+        document: &str,
+        version: u64,
+    ) -> Result<Option<Vec<u8>>, CloudError> {
+        let detail = s.client.document(document)?;
+        let Some(hash) = detail
+            .versions
+            .iter()
+            .find(|v| v.number == version)
+            .and_then(|v| v.thumbnail.clone())
+        else {
+            return Ok(None);
+        };
+        if !proto::is_blob_hash(&hash) {
+            return Err(CloudError::Protocol(format!(
+                "server sent an invalid thumbnail hash {hash:.80}"
+            )));
+        }
+        if s.cache.has_blob(&hash)
+            && let Ok(png) = s.cache.read_blob(&hash)
+        {
+            return Ok(Some(png));
+        }
+        let Some(png) = s.client.download_thumbnail(document, version)? else {
+            return Ok(None);
+        };
+        if crate::blob_hash(&png) != hash {
+            return Err(CloudError::Protocol(
+                "downloaded thumbnail does not match its hash".into(),
+            ));
+        }
+        s.cache.store_blob(&png)?;
+        Ok(Some(png))
+    }
+
     fn org_of(
         &self,
         s: &Session,
@@ -1454,11 +1565,15 @@ impl Worker {
         project: &str,
         folder: Option<String>,
         name: &str,
+        thumbnail: Option<Vec<u8>>,
         emit: &mut dyn FnMut(Event),
     ) -> Result<(), CloudError> {
         let bytes = std::fs::read(local_path).map_err(|e| {
             CloudError::Invalid(format!("cannot read {}: {e}", local_path.display()))
         })?;
+        if let Some(png) = &thumbnail {
+            crate::client::check_thumbnail(png)?;
+        }
         let org = s.client.project(project)?.org;
         let summary = s.client.create_document(
             project,
@@ -1468,6 +1583,7 @@ impl Worker {
             },
         )?;
         let hash = s.cache.store_blob(&bytes)?;
+        let thumbnail = thumbnail.map(|t| s.cache.store_blob(&t)).transpose()?;
         // Link first: if the first version cannot be saved now, a later SaveVersion (or the
         // offline queue) retries it against base version 0.
         let link = s.cache.upsert_link(Link {
@@ -1490,6 +1606,7 @@ impl Worker {
             chained: false,
             force: false,
             queued_at: now(),
+            thumbnail,
         };
         self.push_or_queue(s, &link, save, emit)
     }
@@ -1501,8 +1618,12 @@ impl Worker {
         description: String,
         milestone: Option<String>,
         force: bool,
+        thumbnail: Option<Vec<u8>>,
         emit: &mut dyn FnMut(Event),
     ) -> Result<(), CloudError> {
+        if let Some(png) = &thumbnail {
+            crate::client::check_thumbnail(png)?;
+        }
         let link = s.cache.link_for_path(local_path)?.ok_or_else(|| {
             CloudError::Invalid(format!(
                 "{} is not linked to a cloud document on {}",
@@ -1512,6 +1633,7 @@ impl Worker {
         })?;
         let bytes = std::fs::read(&link.local_path)?;
         let hash = s.cache.store_blob(&bytes)?;
+        let thumbnail = thumbnail.map(|t| s.cache.store_blob(&t)).transpose()?;
         let queued = s
             .cache
             .pending()?
@@ -1527,6 +1649,7 @@ impl Worker {
             chained: queued,
             force,
             queued_at: now(),
+            thumbnail,
         };
         if queued {
             // Keep the order: this save goes behind the document's queued ones.
@@ -1580,12 +1703,14 @@ impl Worker {
         force: bool,
     ) -> Result<Pushed, CloudError> {
         let blob = &save.blob;
-        let missing = s
-            .client
-            .missing_blobs(&link.org, std::slice::from_ref(blob))?;
-        if missing.iter().any(|m| m == blob) {
-            let bytes = s.cache.read_blob(blob)?;
-            s.client.upload_blob(&link.org, blob, &bytes)?;
+        // The thumbnail is optional: if its snapshot is gone from the cache, save without it.
+        let thumbnail = save.thumbnail.clone().filter(|t| s.cache.has_blob(t));
+        let mut wanted = vec![blob.clone()];
+        wanted.extend(thumbnail.clone());
+        let missing = s.client.missing_blobs(&link.org, &wanted)?;
+        for hash in wanted.iter().filter(|h| missing.contains(h)) {
+            let bytes = s.cache.read_blob(hash)?;
+            s.client.upload_blob(&link.org, hash, &bytes)?;
         }
         let req = proto::CreateVersionRequest {
             blob: blob.clone(),
@@ -1594,15 +1719,18 @@ impl Worker {
             milestone: save.milestone.clone(),
             force,
             generator: crate::generator(),
-            thumbnail: None,
+            thumbnail,
         };
         let mut created = s.client.create_version(&link.document, &req);
         if matches!(&created, Err(CloudError::Api(e)) if e.code == ErrorCode::HashMismatch)
-            && let Ok(bytes) = s.cache.read_blob(blob)
+            && s.cache.has_blob(blob)
         {
-            // The server lost the blob between the upload check and the save (for example
-            // to garbage collection): upload it again and retry once.
-            s.client.upload_blob(&link.org, blob, &bytes)?;
+            // The server lost a blob between the upload check and the save (for example
+            // to garbage collection): upload them again and retry once.
+            for hash in &wanted {
+                let bytes = s.cache.read_blob(hash)?;
+                s.client.upload_blob(&link.org, hash, &bytes)?;
+            }
             created = s.client.create_version(&link.document, &req);
         }
         let version = match created {
