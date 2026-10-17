@@ -122,6 +122,8 @@ rcad-cli cloud logout
   (rustls with `rustls-platform-verifier`), so a locally trusted CA works too.
 - Plain `http://` is accepted for trusted networks only. The password at sign-in and the
   bearer token on every request then travel unencrypted.
+- The client honours the standard proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`,
+  `NO_PROXY`).
 - The client follows no redirects. A server that redirects, for example from http to https,
   must be added with its final URL.
 - The token is a secret: mode 0600 file, redacted from `Debug` output, never printed by the
