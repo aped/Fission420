@@ -119,7 +119,7 @@ const EXAMPLES: &[(&str, &str)] = &[
 /// Groups of stages, selectable with `--stage`; always run in this order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Stage {
-    /// Layout, public text, `fmt --check`, `clippy -D warnings`.
+    /// Layout, public text, `fmt --check`, `clippy -D warnings` (also the app without its cloud feature).
     Lint,
     /// Workspace tests in release (nextest when installed, plus doc tests).
     Test,
@@ -194,6 +194,20 @@ fn lint() -> bool {
             &[
                 "clippy",
                 "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )
+        // The desktop app without the optional cloud client (docs/CLOUD.md guarantees).
+        && cargo(
+            "clippy (no cloud)",
+            &[
+                "clippy",
+                "-p",
+                "rcad",
+                "--no-default-features",
                 "--all-targets",
                 "--",
                 "-D",
