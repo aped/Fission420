@@ -738,3 +738,507 @@ fn layout_at_1280_with_the_data_panel_and_chip() {
         "panel content overflows into the browser"
     );
 }
+
+fn user(name: &str) -> proto::User {
+    proto::User {
+        id: format!("u-{name}"),
+        username: name.into(),
+        display_name: name.into(),
+        server_admin: false,
+    }
+}
+
+fn folder(id: &str, name: &str, parent: Option<&str>) -> proto::Folder {
+    proto::Folder {
+        id: id.into(),
+        project: "p1".into(),
+        parent: parent.map(String::from),
+        name: name.into(),
+    }
+}
+
+/// Panel open on project Parts (with `role`) and `tree` shown.
+fn browsing(c: &mut Cloud, role: proto::ProjectRole, tree: proto::ProjectTree) {
+    click(&mut c.h, "Data panel");
+    let p = proto::Project {
+        my_role: role,
+        ..project()
+    };
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![p.clone()],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Project Parts");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadTree {
+            project: "p1".into()
+        }]
+    );
+    c.ev.send(Event::Tree(proto::ProjectTree { project: p, ..tree }))
+        .unwrap();
+    settle(&mut c.h);
+}
+
+fn tree(folders: Vec<proto::Folder>, docs: Vec<proto::DocumentSummary>) -> proto::ProjectTree {
+    proto::ProjectTree {
+        project: project(),
+        folders,
+        documents: docs,
+        trash: vec![],
+    }
+}
+
+fn probe(c: &Cloud) -> serde_json::Value {
+    c.h.state().cloud_probe()
+}
+
+#[test]
+fn members_dialog_edits_roles_and_explains_refusals_inline() {
+    let mut c = signed_in([1400.0, 900.0]);
+    browsing(&mut c, proto::ProjectRole::Admin, tree(vec![], vec![]));
+    click(&mut c.h, "Members…");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadProjectMembers {
+            project: "p1".into()
+        }]
+    );
+    assert_eq!(probe(&c)["dialog_kind"], "members");
+    c.ev.send(Event::ProjectMembers {
+        project: "p1".into(),
+        members: vec![proto::ProjectMember {
+            user: user("bob"),
+            role: proto::ProjectRole::Editor,
+        }],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["members_listed"], 1);
+    assert_eq!(probe(&c)["members"][0]["role"], "Editor");
+
+    // Adding someone outside the organization: the server's 404 is explained in the window.
+    type_into(&mut c.h, "Member username", "carol");
+    click(&mut c.h, "Add member");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::SetProjectMember {
+            project: "p1".into(),
+            username: "carol".into(),
+            role: proto::ProjectRole::Editor,
+        }]
+    );
+    c.ev.send(Event::Error {
+        request: "set_project_member",
+        code: Some(proto::ErrorCode::NotFound),
+        message: "no such user in the organization".into(),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    let err = probe(&c)["admin_error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(err.contains("member of the organization first"), "{err}");
+    assert!(
+        c.h.query_by_label_contains("member of the organization first")
+            .is_some()
+    );
+    assert!(
+        !c.h.state().diagnostics().iter().any(|d| d.error),
+        "shown in the window, not as an error banner"
+    );
+
+    // Change bob's role and remove him.
+    click(&mut c.h, "Role of bob");
+    click(&mut c.h, "Viewer");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::SetProjectMember {
+            project: "p1".into(),
+            username: "bob".into(),
+            role: proto::ProjectRole::Viewer,
+        }]
+    );
+    assert!(probe(&c)["admin_error"].is_null(), "a new change clears it");
+    click(&mut c.h, "Remove bob");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RemoveProjectMember {
+            project: "p1".into(),
+            username: "bob".into(),
+        }]
+    );
+    click(&mut c.h, "Close members");
+    assert!(c.h.state().cloud_dialog().is_none());
+}
+
+#[test]
+fn members_are_read_only_below_project_admin() {
+    let mut c = signed_in([1400.0, 900.0]);
+    browsing(&mut c, proto::ProjectRole::Editor, tree(vec![], vec![]));
+    click(&mut c.h, "Members…");
+    c.ev.send(Event::ProjectMembers {
+        project: "p1".into(),
+        members: vec![proto::ProjectMember {
+            user: user("bob"),
+            role: proto::ProjectRole::Editor,
+        }],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(c.h.query_by_label("Role of bob").is_none());
+    assert!(c.h.query_by_label("Remove bob").is_none());
+    assert!(c.h.query_by_label("Add member").is_none());
+    assert!(
+        c.h.query_by_label_contains("Only project administrators")
+            .is_some()
+    );
+    // An organization member who is not an admin sees no Organization window.
+    assert!(c.h.query_by_label("Organization…").is_none());
+}
+
+#[test]
+fn organization_window_for_owners_lists_members_and_storage() {
+    let mut c = signed_in([1400.0, 900.0]);
+    let mut owner = me();
+    owner.orgs[0].my_role = proto::OrgRole::Owner;
+    c.ev.send(Event::SignedIn {
+        server_url: "http://127.0.0.1:18640".into(),
+        server_name: "Home lab".into(),
+        me: owner,
+    })
+    .unwrap();
+    settle(&mut c.h);
+    click(&mut c.h, "Data panel");
+    drain(&c.req);
+    click(&mut c.h, "Organization…");
+    assert_eq!(
+        drain(&c.req),
+        vec![
+            Request::LoadOrgMembers { org: "o1".into() },
+            Request::LoadUsage { org: "o1".into() }
+        ]
+    );
+    c.ev.send(Event::OrgMembers {
+        org: "o1".into(),
+        members: vec![
+            proto::OrgMember {
+                user: user("alice"),
+                role: proto::OrgRole::Owner,
+            },
+            proto::OrgMember {
+                user: user("bob"),
+                role: proto::OrgRole::Member,
+            },
+        ],
+    })
+    .unwrap();
+    c.ev.send(Event::Usage {
+        org: "o1".into(),
+        usage: proto::OrgUsage {
+            used_bytes: 2_500_000,
+            quota_bytes: Some(10_000_000),
+            documents: 3,
+            versions: 9,
+        },
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["org_members_listed"], 2);
+    assert_eq!(probe(&c)["usage_bytes"], 2_500_000);
+    assert!(c.h.query_by_label("Storage usage").is_some());
+    assert!(
+        c.h.query_by_label_contains("3 documents, 9 versions")
+            .is_some()
+    );
+    click(&mut c.h, "Organization role of bob");
+    click(&mut c.h, "Admin");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::SetOrgMember {
+            org: "o1".into(),
+            username: "bob".into(),
+            role: proto::OrgRole::Admin,
+        }]
+    );
+    type_into(&mut c.h, "Organization username", "dave");
+    click(&mut c.h, "Add to organization");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::SetOrgMember {
+            org: "o1".into(),
+            username: "dave".into(),
+            role: proto::OrgRole::Member,
+        }]
+    );
+    c.ev.send(Event::Error {
+        request: "set_org_member",
+        code: Some(proto::ErrorCode::NotFound),
+        message: "no such user".into(),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(
+        probe(&c)["admin_error"]
+            .as_str()
+            .is_some_and(|e| e.contains("account on this server"))
+    );
+    click(&mut c.h, "Remove bob from the organization");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RemoveOrgMember {
+            org: "o1".into(),
+            username: "bob".into(),
+        }]
+    );
+}
+
+#[test]
+fn folders_are_upload_targets_and_documents_rename_move_and_trash() {
+    let mut c = signed_in([1400.0, 900.0]);
+    browsing(
+        &mut c,
+        proto::ProjectRole::Editor,
+        tree(vec![folder("f1", "Brackets", None)], vec![summary(3)]),
+    );
+    // Selecting a folder makes it the target of New folder and Upload.
+    click(&mut c.h, "Folder Brackets");
+    assert_eq!(probe(&c)["selected_folder"], "f1");
+    click(&mut c.h, "New folder…");
+    type_into(&mut c.h, "Folder name", "Clips");
+    click(&mut c.h, "Create folder");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::CreateFolder {
+            project: "p1".into(),
+            parent: Some("f1".into()),
+            name: "Clips".into(),
+        }]
+    );
+    c.h.state_mut().request(Command::Open {
+        path: c.doc.clone(),
+        safe_mode: false,
+    });
+    settle(&mut c.h);
+    click(&mut c.h, "Upload current document…");
+    click(&mut c.h, "Upload");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::UploadNew {
+            local_path: c.doc.clone(),
+            project: "p1".into(),
+            folder: Some("f1".into()),
+            name: "Bracket".into(),
+        }]
+    );
+    click(&mut c.h, "Rename folder…");
+    type_into(&mut c.h, "New folder name", "Mounts");
+    click(&mut c.h, "Rename folder");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RenameFolder {
+            project: "p1".into(),
+            folder: "f1".into(),
+            name: "Mounts".into(),
+        }]
+    );
+    click(&mut c.h, "Delete folder…");
+    click(&mut c.h, "Delete folder");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::DeleteFolder {
+            project: "p1".into(),
+            folder: "f1".into(),
+        }]
+    );
+    // Clicking the selected folder again clears the target.
+    click(&mut c.h, "Folder Brackets");
+    assert!(probe(&c)["selected_folder"].is_null());
+
+    click(&mut c.h, "Document Bracket");
+    click(&mut c.h, "Rename…");
+    type_into(&mut c.h, "New name", "Wall bracket");
+    click(&mut c.h, "Rename");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RenameDocument {
+            document: "d1".into(),
+            name: "Wall bracket".into(),
+        }]
+    );
+    click(&mut c.h, "Move…");
+    click(&mut c.h, "Move to");
+    click(&mut c.h, "Brackets");
+    click(&mut c.h, "Move");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::MoveDocument {
+            document: "d1".into(),
+            folder: Some("f1".into()),
+        }]
+    );
+    click(&mut c.h, "Move to trash…");
+    assert_eq!(probe(&c)["dialog_kind"], "trash_document");
+    click(&mut c.h, "Move to trash");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::TrashDocument {
+            project: "p1".into(),
+            document: "d1".into(),
+        }]
+    );
+    // The reload shows it in the trash; Restore brings it back.
+    c.ev.send(Event::Tree(proto::ProjectTree {
+        trash: vec![summary(3)],
+        ..tree(vec![folder("f1", "Brackets", None)], vec![])
+    }))
+    .unwrap();
+    settle(&mut c.h);
+    assert!(probe(&c)["selected_document"].is_null());
+    assert_eq!(probe(&c)["trash_listed"], 1);
+    click(&mut c.h, "Trash");
+    click(&mut c.h, "Restore Bracket");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::RestoreDocument {
+            document: "d1".into()
+        }]
+    );
+}
+
+#[test]
+fn viewers_get_no_document_management() {
+    let mut c = signed_in([1400.0, 900.0]);
+    browsing(
+        &mut c,
+        proto::ProjectRole::Viewer,
+        tree(vec![folder("f1", "Brackets", None)], vec![summary(3)]),
+    );
+    click(&mut c.h, "Document Bracket");
+    for l in ["Rename…", "Move…", "Move to trash…", "New folder…"] {
+        assert!(
+            c.h.get_by_label(l).accesskit_node().is_disabled(),
+            "{l} is enabled for a viewer"
+        );
+    }
+    // Members are visible to everyone with view rights.
+    assert!(!c.h.get_by_label("Members…").accesskit_node().is_disabled());
+}
+
+#[test]
+fn queued_versions_are_listed_and_discarded_after_confirmation() {
+    let mut c = signed_in([1400.0, 900.0]);
+    click(&mut c.h, "Data panel");
+    c.ev.send(Event::Offline { pending: 2 }).unwrap();
+    settle(&mut c.h);
+    assert_eq!(drain(&c.req), vec![Request::LoadPending]);
+    let save = |n: u8, d: &str| rcad_cloud::cache::PendingSave {
+        local_path: c.doc.clone(),
+        document: "d1".into(),
+        blob: format!("{n}").repeat(64),
+        description: d.into(),
+        milestone: None,
+        base_version: 3,
+        chained: n > 1,
+        force: false,
+        queued_at: 1_792_224_300,
+    };
+    c.ev.send(Event::PendingQueue {
+        saves: vec![save(1, "thicker"), save(2, "")],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["queue_listed"], 2);
+    assert!(c.h.query_by_label_contains("thicker").is_some());
+    // Not asked again while the count is unchanged.
+    assert!(drain(&c.req).is_empty());
+    click(&mut c.h, "Discard queued version 1");
+    assert_eq!(probe(&c)["dialog_kind"], "discard_pending");
+    assert!(
+        drain(&c.req).is_empty(),
+        "nothing is discarded before confirming"
+    );
+    click(&mut c.h, "Confirm discard");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::DiscardPending {
+            index: 0,
+            document: "d1".into(),
+            blob: "1".repeat(64),
+        }]
+    );
+    c.ev.send(Event::PendingQueue {
+        saves: vec![save(2, "")],
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(probe(&c)["pending"], 1);
+    assert!(drain(&c.req).is_empty());
+}
+
+#[test]
+fn save_to_cloud_project_uploads_an_unlinked_document() {
+    let mut c = signed_in([1400.0, 900.0]);
+    // Not offered for a document that is not open, or without projects to pick.
+    assert!(
+        c.h.state()
+            .command_enabled(rcad::shell::CmdId::SaveToCloud)
+            .is_err()
+    );
+    c.ev.send(Event::Projects {
+        org: "o1".into(),
+        projects: vec![project()],
+    })
+    .unwrap();
+    c.h.state_mut().request(Command::Open {
+        path: c.doc.clone(),
+        safe_mode: false,
+    });
+    settle(&mut c.h);
+    file_menu(&mut c.h, "Save to Cloud Project…");
+    assert_eq!(probe(&c)["dialog_kind"], "save_to_cloud");
+    // The first editable project is chosen and its folders are loaded.
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::LoadTree {
+            project: "p1".into()
+        }]
+    );
+    c.ev.send(Event::Tree(tree(
+        vec![folder("f1", "Brackets", None)],
+        vec![],
+    )))
+    .unwrap();
+    settle(&mut c.h);
+    assert_eq!(
+        c.h.get_by_label("Document name").value().as_deref(),
+        Some("Bracket")
+    );
+    click(&mut c.h, "Folder");
+    click(&mut c.h, "Brackets");
+    click(&mut c.h, "Save to Cloud");
+    assert_eq!(
+        drain(&c.req),
+        vec![Request::UploadNew {
+            local_path: c.doc.clone(),
+            project: "p1".into(),
+            folder: Some("f1".into()),
+            name: "Bracket".into(),
+        }]
+    );
+    // Once linked, Save Version is the way to save it.
+    c.ev.send(Event::VersionSaved {
+        link: link(&c.doc, 1),
+        version: version(1, None),
+    })
+    .unwrap();
+    settle(&mut c.h);
+    assert!(
+        c.h.state()
+            .command_enabled(rcad::shell::CmdId::SaveToCloud)
+            .is_err()
+    );
+}

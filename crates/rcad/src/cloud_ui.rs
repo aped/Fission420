@@ -30,6 +30,9 @@ use rcad_commands::Command;
 use crate::app::{Guarded, RcadApp};
 use crate::probe::Probe as _;
 
+mod admin;
+pub use admin::{fmt_bytes, member_error_text, org_role_name, project_role_name};
+
 /// The calls into `rcad-cloud` that construct things (account file, cache
 /// directory, service thread), kept in one place.
 pub mod adapter {
@@ -108,6 +111,79 @@ pub enum CloudDialog {
         version: u64,
         name: String,
     },
+    /// Project members (everyone with view rights; editing for project admins).
+    Members {
+        project: String,
+        username: String,
+        role: proto::ProjectRole,
+        error: Option<String>,
+    },
+    /// Organization members and storage (organization admins and owners).
+    Organization {
+        org: String,
+        username: String,
+        role: proto::OrgRole,
+        error: Option<String>,
+    },
+    RenameDocument {
+        document: String,
+        name: String,
+    },
+    MoveDocument {
+        document: String,
+        folder: Option<String>,
+    },
+    TrashDocument {
+        project: String,
+        document: String,
+        name: String,
+    },
+    RenameFolder {
+        folder: String,
+        name: String,
+    },
+    DeleteFolder {
+        folder: String,
+        name: String,
+    },
+    /// Confirm discarding a queued version.
+    DiscardPending {
+        index: usize,
+        document: String,
+        blob: String,
+        what: String,
+    },
+    /// File ▸ Save to Cloud Project… for a document that is not on the server.
+    SaveToCloud {
+        project: Option<String>,
+        folder: Option<String>,
+        name: String,
+    },
+}
+
+impl CloudDialog {
+    /// Short machine name (live-test probe).
+    pub fn key(&self) -> &'static str {
+        match self {
+            CloudDialog::SignIn { .. } => "sign_in",
+            CloudDialog::NewProject { .. } => "new_project",
+            CloudDialog::NewFolder { .. } => "new_folder",
+            CloudDialog::Upload { .. } => "upload",
+            CloudDialog::SaveVersion { .. } => "save_version",
+            CloudDialog::Share { .. } => "share",
+            CloudDialog::Promote { .. } => "promote",
+            CloudDialog::Milestone { .. } => "milestone",
+            CloudDialog::Members { .. } => "members",
+            CloudDialog::Organization { .. } => "organization",
+            CloudDialog::RenameDocument { .. } => "rename_document",
+            CloudDialog::MoveDocument { .. } => "move_document",
+            CloudDialog::TrashDocument { .. } => "trash_document",
+            CloudDialog::RenameFolder { .. } => "rename_folder",
+            CloudDialog::DeleteFolder { .. } => "delete_folder",
+            CloudDialog::DiscardPending { .. } => "discard_pending",
+            CloudDialog::SaveToCloud { .. } => "save_to_cloud",
+        }
+    }
 }
 
 /// A version save refused because the head moved.
@@ -226,6 +302,19 @@ pub struct CloudUi {
     /// Screenshot scenes: the detached service's request receiver (kept so
     /// sends succeed).
     scene: Option<std::sync::mpsc::Receiver<Request>>,
+    /// Folder selected in the tree: the target of New folder and Upload.
+    selected_folder: Option<String>,
+    /// Browse shows the project's trash instead of its tree.
+    show_trash: bool,
+    /// Explicit members of a project, as last loaded.
+    members: Option<(String, Vec<proto::ProjectMember>)>,
+    org_members: Option<(String, Vec<proto::OrgMember>)>,
+    usage: Option<(String, proto::OrgUsage)>,
+    /// The offline queue, as last listed, and the pending count it was asked for.
+    queue: Vec<rcad_cloud::cache::PendingSave>,
+    queue_asked: Option<usize>,
+    /// Save to Cloud Project… waits for a first local save (Save As).
+    save_to_cloud_after_save: bool,
 }
 
 /// Panel actions collected while drawing and applied afterwards.
@@ -243,6 +332,10 @@ enum Action {
     Connect,
     ClosePanel,
     AddComment,
+    SelectFolder(Option<String>),
+    ToggleTrash,
+    Members(String),
+    Organization(String),
 }
 
 impl CloudUi {
@@ -399,6 +492,10 @@ fn background(request: &str) -> bool {
             | "load_comments"
             | "load_tree"
             | "list_projects"
+            | "load_pending"
+            | "load_project_members"
+            | "load_org_members"
+            | "load_usage"
     )
 }
 
@@ -529,7 +626,29 @@ impl RcadApp {
             "share_url": c.share_url,
             "has_share_url": c.share_url.is_some(),
             "dialog": c.dialog.is_some(),
+            "dialog_kind": c.dialog.as_ref().map(|d| d.key()),
             "conflict": c.conflict.is_some(),
+            "selected_document": c.selected_doc,
+            "selected_folder": c.selected_folder,
+            "documents_listed": c.tree.as_ref().map_or(0, |t| t.documents.len()),
+            "folders_listed": c.tree.as_ref().map_or(0, |t| t.folders.len()),
+            "trash_listed": c.tree.as_ref().map_or(0, |t| t.trash.len()),
+            "show_trash": c.show_trash,
+            "members_listed": c.members.as_ref().map_or(0, |(_, m)| m.len()),
+            "members": c.members.as_ref().map(|(_, m)| m
+                .iter()
+                .map(|x| serde_json::json!({
+                    "user": x.user.username,
+                    "role": project_role_name(x.role),
+                }))
+                .collect::<Vec<_>>()),
+            "org_members_listed": c.org_members.as_ref().map_or(0, |(_, m)| m.len()),
+            "usage_bytes": c.usage.as_ref().map(|(_, u)| u.used_bytes),
+            "admin_error": match &c.dialog {
+                Some(CloudDialog::Members { error, .. } | CloudDialog::Organization { error, .. }) => error.clone(),
+                _ => None,
+            },
+            "queue_listed": c.queue.len(),
         })
     }
 
@@ -696,6 +815,14 @@ impl RcadApp {
         for e in events {
             self.cloud_event(e);
         }
+        if self.cloud.save_to_cloud_after_save
+            && self.dialog.is_none()
+            && self.idle()
+            && self.summary.path.is_none()
+        {
+            // Save As was cancelled.
+            self.cloud.save_to_cloud_after_save = false;
+        }
         let path = self.summary.path.clone().filter(|_| self.summary.open);
         let dirty = self.has_unsaved_changes();
         if path != self.cloud.last_path {
@@ -792,6 +919,29 @@ impl RcadApp {
             }
             Event::Tree(t) => {
                 if c.project.as_deref() == Some(t.project.id.as_str()) {
+                    // Forget selections the reload removed (trashed, deleted).
+                    if c.selected_folder
+                        .as_ref()
+                        .is_some_and(|f| !t.folders.iter().any(|x| x.id == *f))
+                    {
+                        c.selected_folder = None;
+                    }
+                    if c.selected_doc
+                        .as_ref()
+                        .is_some_and(|d| !t.documents.iter().any(|x| x.id == *d))
+                    {
+                        c.selected_doc = None;
+                    }
+                    // Keep the project's role current in the project list.
+                    if let Some(p) = c.projects.iter_mut().find(|p| p.id == t.project.id) {
+                        *p = t.project.clone();
+                    }
+                    // Renamed documents keep their working-copy links current.
+                    for l in &mut c.links {
+                        if let Some(d) = t.documents.iter().find(|d| d.id == l.document) {
+                            l.document_name.clone_from(&d.name);
+                        }
+                    }
                     c.tree = Some(t);
                 }
             }
@@ -930,14 +1080,31 @@ impl RcadApp {
                 let was = c.offline;
                 c.offline = false;
                 c.pending = pending;
+                if pending == 0 {
+                    c.queue.clear();
+                    c.queue_asked = None;
+                }
                 if was {
                     self.cloud_log(false, format!("back online ({pending} version(s) waiting)"));
                 }
             }
-            Event::PendingQueue { .. }
-            | Event::ProjectMembers { .. }
-            | Event::OrgMembers { .. }
-            | Event::Usage { .. } => {}
+            Event::PendingQueue { saves } => {
+                c.pending = saves.len();
+                c.queue_asked = Some(saves.len());
+                c.queue = saves;
+            }
+            Event::ProjectMembers { project, members } => {
+                if let Some(CloudDialog::Members { error, .. }) = &mut c.dialog {
+                    *error = None;
+                }
+                c.members = Some((project, members));
+            }
+            Event::OrgMembers { org, members } => {
+                c.org_members = Some((org, members));
+            }
+            Event::Usage { org, usage } => {
+                c.usage = Some((org, usage));
+            }
             Event::Error {
                 request,
                 code,
@@ -957,13 +1124,14 @@ impl RcadApp {
                 if request == "lock" {
                     c.lock_sent.clear();
                 }
+                let inline = self.cloud_admin_error(request, code, &message);
                 let hint =
                     if code == Some(proto::ErrorCode::Unauthenticated) && request != "sign_in" {
                         " (sign in again from the Data panel)"
                     } else {
                         ""
                     };
-                self.cloud_log(!background(request), format!("{message}{hint}"));
+                self.cloud_log(!background(request) && !inline, format!("{message}{hint}"));
             }
         }
     }
@@ -974,6 +1142,12 @@ impl RcadApp {
         let Command::Save { path } = command else {
             return;
         };
+        if self.cloud.save_to_cloud_after_save {
+            self.cloud.save_to_cloud_after_save = false;
+            if ok {
+                self.cloud_save_to_cloud_dialog();
+            }
+        }
         let waiting = match &self.cloud.after_save {
             Some(AfterSave::Version { path: p, .. } | AfterSave::Upload { path: p, .. }) => {
                 p == path
@@ -1207,13 +1381,92 @@ impl RcadApp {
         };
         self.cloud.dialog = Some(CloudDialog::Upload {
             name: file_stem(&path),
-            folder: None,
+            folder: self.cloud.selected_folder.clone(),
         });
     }
 
+    /// File ▸ Save to Cloud Project…: put the open, unlinked document in a
+    /// project. A document never saved locally goes through Save As first.
+    pub(crate) fn cloud_save_to_cloud(&mut self) {
+        if let Err(why) = self.cloud_save_to_cloud_blocker() {
+            self.notify(why);
+            return;
+        }
+        if self.summary.path.is_none() {
+            self.cloud.save_to_cloud_after_save = true;
+            self.save();
+            return;
+        }
+        self.cloud_save_to_cloud_dialog();
+    }
+
+    fn cloud_save_to_cloud_dialog(&mut self) {
+        let Some(path) = self.summary.path.clone() else {
+            return;
+        };
+        let editable = |p: &proto::Project| p.my_role >= proto::ProjectRole::Editor;
+        let project = self
+            .cloud
+            .project
+            .clone()
+            .filter(|id| {
+                self.cloud
+                    .projects
+                    .iter()
+                    .any(|p| p.id == *id && editable(p))
+            })
+            .or_else(|| {
+                self.cloud
+                    .projects
+                    .iter()
+                    .find(|p| editable(p))
+                    .map(|p| p.id.clone())
+            });
+        if project.is_some() && project != self.cloud.project {
+            self.cloud_apply(vec![Action::SelectProject(
+                project.clone().unwrap_or_default(),
+            )]);
+        }
+        if self.cloud.projects.is_empty()
+            && let Some(org) = self.cloud.org.clone()
+        {
+            self.cloud_send(Request::ListProjects { org });
+        }
+        let folder = self
+            .cloud
+            .selected_folder
+            .clone()
+            .filter(|_| project.is_some() && project == self.cloud.project);
+        self.cloud.dialog = Some(CloudDialog::SaveToCloud {
+            project,
+            folder,
+            name: file_stem(&path),
+        });
+    }
+
+    pub(crate) fn cloud_save_to_cloud_blocker(&self) -> Result<(), String> {
+        self.need_cloud()?;
+        self.need_open()?;
+        if self.cloud_link().is_some() {
+            return Err(
+                "This document is already on the server; use Save Version to Cloud…".into(),
+            );
+        }
+        if self.sketch.is_some() {
+            return Err("Finish or cancel the sketch first".into());
+        }
+        Ok(())
+    }
+
     fn cloud_upload(&mut self, name: String, folder: Option<String>) {
-        let (Some(path), Some(project)) = (self.summary.path.clone(), self.cloud.project.clone())
-        else {
+        let Some(project) = self.cloud.project.clone() else {
+            return;
+        };
+        self.cloud_upload_to(project, name, folder);
+    }
+
+    fn cloud_upload_to(&mut self, project: String, name: String, folder: Option<String>) {
+        let Some(path) = self.summary.path.clone() else {
             return;
         };
         if self.sketch.is_some() {
@@ -1323,6 +1576,16 @@ impl RcadApp {
             });
         });
         ui.separator();
+        // List the offline queue when its size changed since it was listed.
+        let pending = self.cloud.pending;
+        if self.cloud.account.is_some()
+            && self.cloud.service.is_some()
+            && pending > 0
+            && self.cloud.queue_asked != Some(pending)
+        {
+            self.cloud.queue_asked = Some(pending);
+            self.cloud_send(Request::LoadPending);
+        }
         if let Some(account) = self.cloud.account.clone() {
             self.cloud_signed_in_ui(ui, &account, &mut actions);
         } else {
@@ -1380,6 +1643,7 @@ impl RcadApp {
                     actions.push(Action::Send(Request::SyncPending));
                 }
             });
+            self.cloud_queue_ui(ui, actions);
         }
         let orgs = &account.me.orgs;
         let current = c
@@ -1406,6 +1670,16 @@ impl RcadApp {
                 })
                 .response
                 .labelled_by(l.id);
+            if let Some(org) = c.org.clone()
+                && self.cloud_org_role(&org) >= Some(proto::OrgRole::Admin)
+                && ui
+                    .small_button("Organization…")
+                    .probe("Organization…")
+                    .on_hover_text("Members, roles and storage of this organization")
+                    .clicked()
+            {
+                actions.push(Action::Organization(org));
+            }
         });
         ui.horizontal(|ui| {
             for (s, label) in [
@@ -1465,43 +1739,150 @@ impl RcadApp {
             return;
         };
         ui.separator();
+        let editor = tree.project.my_role >= proto::ProjectRole::Editor;
+        let target = c
+            .selected_folder
+            .clone()
+            .filter(|f| tree.folders.iter().any(|x| x.id == *f));
         ui.horizontal_wrapped(|ui| {
             ui.strong(&tree.project.name);
             if ui
-                .small_button("New folder…")
+                .small_button("Members…")
+                .probe("Members…")
+                .on_hover_text("People with access to this project and their roles")
+                .clicked()
+            {
+                actions.push(Action::Members(tree.project.id.clone()));
+            }
+            if ui
+                .add_enabled(editor, egui::Button::new("New folder…").small())
                 .probe("New folder…")
+                .on_hover_text("A new folder inside the selected folder (or the project root)")
+                .on_disabled_hover_text("Editors create folders")
                 .clicked()
             {
                 actions.push(Action::Dialog(CloudDialog::NewFolder {
                     name: String::new(),
-                    parent: None,
+                    parent: target.clone(),
                 }));
             }
+            if ui
+                .add(egui::Button::selectable(
+                    c.show_trash,
+                    format!("Trash ({})", tree.trash.len()),
+                ))
+                .named("Trash")
+                .on_hover_text("Documents moved to the trash; editors restore them")
+                .clicked()
+            {
+                actions.push(Action::ToggleTrash);
+            }
         });
-        let can_upload = self.summary.open && self.sketch.is_none();
+        if c.show_trash {
+            self.cloud_trash_ui(ui, &tree, actions);
+            return;
+        }
+        let can_upload = self.summary.open && self.sketch.is_none() && editor;
         if ui
             .add_enabled(can_upload, egui::Button::new("Upload current document…"))
             .probe("Upload current document…")
-            .on_hover_text("Upload the open document to this project as a new cloud document")
-            .on_disabled_hover_text("Open or create a document first")
+            .on_hover_text(
+                "Upload the open document to this project (into the selected folder) \
+                 as a new cloud document",
+            )
+            .on_disabled_hover_text("Open or create a document first (editors upload)")
             .clicked()
         {
             actions.push(Action::Upload);
         }
+        if let Some(f) = &target {
+            let path = self
+                .cloud
+                .folder_paths()
+                .into_iter()
+                .find(|(id, _)| id == f)
+                .map_or_else(String::new, |(_, p)| p);
+            let name = tree
+                .folders
+                .iter()
+                .find(|x| x.id == *f)
+                .map_or_else(String::new, |x| x.name.clone());
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(format!("Folder: {path}"));
+                if ui
+                    .add_enabled(editor, egui::Button::new("Rename folder…").small())
+                    .probe("Rename folder…")
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(CloudDialog::RenameFolder {
+                        folder: f.clone(),
+                        name: name.clone(),
+                    }));
+                }
+                if ui
+                    .add_enabled(editor, egui::Button::new("Delete folder…").small())
+                    .probe("Delete folder…")
+                    .on_hover_text("Delete this folder (it must be empty)")
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(CloudDialog::DeleteFolder {
+                        folder: f.clone(),
+                        name,
+                    }));
+                }
+            });
+        }
         let now = now_secs();
         self.cloud_folder_ui(ui, &tree, None, now, actions, 0);
         if let Some(doc) = self.cloud.selected_doc.clone()
-            && tree.documents.iter().any(|d| d.id == doc)
+            && let Some(d) = tree.documents.iter().find(|d| d.id == doc)
         {
             ui.add_space(4.0);
-            if ui
-                .button("Open")
-                .probe("Open")
-                .on_hover_text("Download the latest version and open it")
-                .clicked()
-            {
-                actions.push(Action::Open(doc));
-            }
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button("Open")
+                    .probe("Open")
+                    .on_hover_text("Download the latest version and open it")
+                    .clicked()
+                {
+                    actions.push(Action::Open(doc.clone()));
+                }
+                if ui
+                    .add_enabled(editor, egui::Button::new("Rename…"))
+                    .probe("Rename…")
+                    .on_disabled_hover_text("Editors rename documents")
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(CloudDialog::RenameDocument {
+                        document: doc.clone(),
+                        name: d.name.clone(),
+                    }));
+                }
+                if ui
+                    .add_enabled(editor, egui::Button::new("Move…"))
+                    .probe("Move…")
+                    .on_hover_text("Move to another folder of this project")
+                    .on_disabled_hover_text("Editors move documents")
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(CloudDialog::MoveDocument {
+                        document: doc.clone(),
+                        folder: d.folder.clone(),
+                    }));
+                }
+                if ui
+                    .add_enabled(editor, egui::Button::new("Move to trash…"))
+                    .probe("Move to trash…")
+                    .on_disabled_hover_text("Editors move documents to the trash")
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(CloudDialog::TrashDocument {
+                        project: tree.project.id.clone(),
+                        document: doc.clone(),
+                        name: d.name.clone(),
+                    }));
+                }
+            });
         }
     }
 
@@ -1523,10 +1904,22 @@ impl RcadApp {
             .iter()
             .filter(|f| f.parent.as_deref() == parent)
         {
-            egui::CollapsingHeader::new(f.name.as_str())
-                .id_salt(("cloud_folder", &f.id))
-                .default_open(true)
-                .show(ui, |ui| {
+            let id = ui.make_persistent_id(("cloud_folder", &f.id));
+            let sel = self.cloud.selected_folder.as_deref() == Some(f.id.as_str());
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+                .show_header(ui, |ui| {
+                    if ui
+                        .add(egui::Button::selectable(sel, f.name.as_str()))
+                        .named(&format!("Folder {}", f.name))
+                        .on_hover_text(
+                            "Select: new folders and uploads go into the selected folder",
+                        )
+                        .clicked()
+                    {
+                        actions.push(Action::SelectFolder((!sel).then(|| f.id.clone())));
+                    }
+                })
+                .body(|ui| {
                     self.cloud_folder_ui(ui, tree, Some(&f.id), now, actions, depth + 1);
                 });
         }
@@ -1739,6 +2132,8 @@ impl RcadApp {
                     self.cloud.project = Some(p.clone());
                     self.cloud.tree = None;
                     self.cloud.selected_doc = None;
+                    self.cloud.selected_folder = None;
+                    self.cloud.show_trash = false;
                     self.cloud_send(Request::LoadTree { project: p });
                 }
                 Action::SelectDoc(d) => self.cloud.selected_doc = Some(d),
@@ -1771,6 +2166,10 @@ impl RcadApp {
                     }
                 }
                 Action::Connect => self.cloud_connect_dialog(),
+                Action::SelectFolder(f) => self.cloud.selected_folder = f,
+                Action::ToggleTrash => self.cloud.show_trash = !self.cloud.show_trash,
+                Action::Members(p) => self.cloud_open_members(p),
+                Action::Organization(o) => self.cloud_open_organization(o),
                 Action::ClosePanel => self.cloud.panel_open = false,
                 Action::AddComment => {
                     let body = std::mem::take(&mut self.cloud.comment_draft);
@@ -1790,9 +2189,27 @@ impl RcadApp {
     /// Cloud dialogs and the conflict window.
     pub(crate) fn cloud_windows(&mut self, ctx: &egui::Context) {
         self.cloud_conflict_ui(ctx);
+        match &self.cloud.dialog {
+            Some(CloudDialog::Members { .. }) => return self.cloud_members_window(ctx),
+            Some(CloudDialog::Organization { .. }) => return self.cloud_org_window(ctx),
+            _ => {}
+        }
         let Some(mut d) = self.cloud.dialog.clone() else {
             return;
         };
+        let before_project = match &d {
+            CloudDialog::SaveToCloud { project, .. } => project.clone(),
+            _ => None,
+        };
+        let projects: Vec<(String, String)> = self
+            .cloud
+            .projects
+            .iter()
+            .filter(|p| p.my_role >= proto::ProjectRole::Editor)
+            .map(|p| (p.id.clone(), p.name.clone()))
+            .collect();
+        let tree_project = self.cloud.tree.as_ref().map(|t| t.project.id.clone());
+        let saved_at = self.summary.path.clone();
         let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
         let mut ok = false;
@@ -1820,6 +2237,14 @@ impl RcadApp {
             CloudDialog::Share { .. } => "Share link",
             CloudDialog::Promote { .. } => "Promote version",
             CloudDialog::Milestone { .. } => "Set milestone",
+            CloudDialog::Members { .. } | CloudDialog::Organization { .. } => "",
+            CloudDialog::RenameDocument { .. } => "Rename a document",
+            CloudDialog::MoveDocument { .. } => "Move a document",
+            CloudDialog::TrashDocument { .. } => "Move a document to the trash",
+            CloudDialog::RenameFolder { .. } => "Rename a folder",
+            CloudDialog::DeleteFolder { .. } => "Delete a folder",
+            CloudDialog::DiscardPending { .. } => "Discard queued version",
+            CloudDialog::SaveToCloud { .. } => "Save to Cloud Project",
         };
         let folder_combo = |ui: &mut egui::Ui, label: &str, value: &mut Option<String>| {
             let current = value
@@ -1967,8 +2392,117 @@ impl RcadApp {
                             cancel |= ui.button("Cancel").clicked();
                         });
                     }
+                    CloudDialog::Members { .. } | CloudDialog::Organization { .. } => {}
+                    CloudDialog::RenameDocument { name, .. } => {
+                        field(ui, "New name", name, false);
+                        ui.small("Names are unique within a project.");
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Rename").probe("Rename").clicked() || enter;
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::MoveDocument { folder, .. } => {
+                        folder_combo(ui, "Move to", folder);
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Move").probe("Move").clicked() || enter;
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::TrashDocument { name, .. } => {
+                        ui.label(format!(
+                            "Move {name} to the project's trash? Editors can restore it \
+                             from Trash; its versions are kept."
+                        ));
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Move to trash").probe("Move to trash").clicked()
+                                || enter;
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::RenameFolder { name, .. } => {
+                        field(ui, "New folder name", name, false);
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Rename folder").probe("Rename folder").clicked()
+                                || enter;
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::DeleteFolder { name, .. } => {
+                        ui.label(format!(
+                            "Delete the folder {name}? Only an empty folder can be deleted \
+                             (documents in the trash still count)."
+                        ));
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Delete folder").probe("Delete folder").clicked()
+                                || enter;
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::DiscardPending { what, .. } => {
+                        ui.label(format!(
+                            "Discard the queued version \"{what}\"? It will not be sent to the \
+                             server. Your local file is not changed."
+                        ));
+                        ui.horizontal(|ui| {
+                            ok |= ui.button("Discard").named("Confirm discard").clicked();
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
+                    CloudDialog::SaveToCloud {
+                        project,
+                        folder,
+                        name,
+                    } => {
+                        field(ui, "Document name", name, false);
+                        let current = project
+                            .as_ref()
+                            .and_then(|p| projects.iter().find(|(id, _)| id == p))
+                            .map_or("Choose…".to_string(), |(_, n)| n.clone());
+                        crate::form::combo(ui, "Project", current, |ui| {
+                            for (id, n) in &projects {
+                                ui.selectable_value(project, Some(id.clone()), n);
+                            }
+                        });
+                        if projects.is_empty() {
+                            ui.weak("No project you can edit; create one in the Data panel.");
+                        }
+                        if project.is_some() && *project == tree_project {
+                            folder_combo(ui, "Folder", folder);
+                        } else if project.is_some() {
+                            ui.weak("Loading folders…");
+                        }
+                        if let Some(p) = &saved_at {
+                            ui.small(format!(
+                                "The cloud document links to {}; unsaved changes are saved \
+                                 there first.",
+                                p.display()
+                            ));
+                        }
+                        ui.horizontal(|ui| {
+                            ok |= ui
+                                .add_enabled(
+                                    project.is_some() && !name.trim().is_empty(),
+                                    egui::Button::new("Save to Cloud"),
+                                )
+                                .probe("Save to Cloud")
+                                .clicked();
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    }
                 });
             });
+        // Choosing another project in Save to Cloud loads its folders.
+        if let CloudDialog::SaveToCloud {
+            project: Some(p),
+            folder,
+            ..
+        } = &mut d
+            && before_project.as_ref() != Some(&*p)
+        {
+            *folder = None;
+            let p = p.clone();
+            self.cloud_apply(vec![Action::SelectProject(p)]);
+        }
         // Keep edits made this frame unless the dialog was replaced meanwhile.
         if self.cloud.dialog.is_some() {
             self.cloud.dialog = Some(d.clone());
@@ -2072,6 +2606,67 @@ impl RcadApp {
                     });
                 }
             }
+            CloudDialog::Members { .. } | CloudDialog::Organization { .. } => {}
+            CloudDialog::RenameDocument { document, name } => {
+                if !name.trim().is_empty() {
+                    self.cloud.dialog = None;
+                    self.cloud_send(Request::RenameDocument {
+                        document,
+                        name: name.trim().to_string(),
+                    });
+                }
+            }
+            CloudDialog::MoveDocument { document, folder } => {
+                self.cloud.dialog = None;
+                self.cloud_send(Request::MoveDocument { document, folder });
+            }
+            CloudDialog::TrashDocument {
+                project, document, ..
+            } => {
+                self.cloud.dialog = None;
+                self.cloud_send(Request::TrashDocument { project, document });
+            }
+            CloudDialog::RenameFolder { folder, name } => {
+                if let (Some(project), false) = (self.cloud.project.clone(), name.trim().is_empty())
+                {
+                    self.cloud.dialog = None;
+                    self.cloud_send(Request::RenameFolder {
+                        project,
+                        folder,
+                        name: name.trim().to_string(),
+                    });
+                }
+            }
+            CloudDialog::DeleteFolder { folder, .. } => {
+                if let Some(project) = self.cloud.project.clone() {
+                    self.cloud.dialog = None;
+                    self.cloud_send(Request::DeleteFolder { project, folder });
+                }
+            }
+            CloudDialog::DiscardPending {
+                index,
+                document,
+                blob,
+                ..
+            } => {
+                self.cloud.dialog = None;
+                self.cloud_send(Request::DiscardPending {
+                    index,
+                    document,
+                    blob,
+                });
+            }
+            CloudDialog::SaveToCloud {
+                project: Some(project),
+                folder,
+                name,
+            } => {
+                if !name.trim().is_empty() {
+                    self.cloud.dialog = None;
+                    self.cloud_upload_to(project, name.trim().to_string(), folder);
+                }
+            }
+            CloudDialog::SaveToCloud { project: None, .. } => {}
         }
     }
 

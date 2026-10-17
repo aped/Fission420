@@ -354,6 +354,7 @@ impl RcadApp {
         {
             ui.separator();
             for id in [
+                C::SaveToCloud,
                 C::SaveVersion,
                 C::VersionHistory,
                 C::ShareLink,

@@ -41,6 +41,8 @@ pub enum CmdId {
     #[cfg(feature = "cloud")]
     SaveVersion,
     #[cfg(feature = "cloud")]
+    SaveToCloud,
+    #[cfg(feature = "cloud")]
     VersionHistory,
     #[cfg(feature = "cloud")]
     ShareLink,
@@ -473,6 +475,12 @@ pub static COMMANDS: &[CommandDef] = &[
         fusion: [], classic: [],
         places: [Place::File], mm: None,
         enabled: |a| a.cloud_save_version_blocker(), run: |a| a.cloud_save_version_dialog()),
+    #[cfg(feature = "cloud")]
+    def!(SaveToCloud, "Save to Cloud Project…", Save,
+        "Put the open document in a project on the server (saves locally first)",
+        fusion: [], classic: [],
+        places: [Place::File], mm: None,
+        enabled: |a| a.cloud_save_to_cloud_blocker(), run: |a| a.cloud_save_to_cloud()),
     #[cfg(feature = "cloud")]
     def!(VersionHistory, "Version History", Generic,
         "Versions of the open cloud document: open read-only, promote, milestones",
@@ -931,6 +939,8 @@ mod tests {
         CmdId::DataPanel,
         #[cfg(feature = "cloud")]
         CmdId::SaveVersion,
+        #[cfg(feature = "cloud")]
+        CmdId::SaveToCloud,
         #[cfg(feature = "cloud")]
         CmdId::VersionHistory,
         #[cfg(feature = "cloud")]
