@@ -2419,16 +2419,8 @@ impl RcadApp {
         egui::CentralPanel::no_frame().show(ui, |ui| {
             // The timeline runs along the bottom of the canvas (the browser
             // and inspector columns keep their height).
-            egui::Panel::bottom("rcad_timeline").show(ui, |ui| {
-                // Navigation bar at the right end, the timeline in the rest.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.horizontal(|ui| self.nav_bar(ui));
-                    ui.separator();
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        self.timeline_ui(ui)
-                    });
-                });
-            });
+            // Navigation bar at the right end, the timeline in the rest.
+            egui::Panel::bottom("rcad_timeline").show(ui, |ui| self.bottom_strip(ui));
             self.view_ui(ui)
         });
         if self.dialog.is_none() {
