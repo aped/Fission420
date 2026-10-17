@@ -7,6 +7,8 @@
 # Exit status is non-zero if any script or expectation fails.
 #
 # usage: tools/live_walkthrough.sh [out-dir] [script-name-filter]
+# LIVE_DIR selects another script directory, e.g. LIVE_DIR=tools/live/cloud for the
+# scripts that need a running sync server (docs/CLOUD.md).
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/artifacts/live_walkthrough}
@@ -14,7 +16,8 @@ FILTER=${2:-}
 APP=${CARGO_TARGET_DIR:-$ROOT/target}/release/rcad
 [ -x "$APP" ] || { echo "build first: cargo build --release -p rcad"; exit 2; }
 rc=0
-for script in "$ROOT"/tools/live/*.txt; do
+LIVE_DIR=$(cd "${LIVE_DIR:-$ROOT/tools/live}" && pwd)
+for script in "$LIVE_DIR"/*.txt; do
   name=$(basename "$script" .txt)
   case "$name" in *"$FILTER"*) ;; *) continue ;; esac
   dir=$OUT/$name
@@ -26,7 +29,7 @@ for script in "$ROOT"/tools/live/*.txt; do
   # preferences live in the script's own directory (never the user's).
   keymap=classic
   grep -qx '# keymap: fusion' "$script" && keymap=fusion
-  RCAD_KEYMAP=$keymap XDG_CONFIG_HOME="$dir/config" \
+  RCAD_KEYMAP=$keymap XDG_CONFIG_HOME="$dir/config" XDG_CACHE_HOME="$dir/cache" \
   RCAD_TRACE_INPUT=1 RCAD_PROBE="$dir/probe.json" RCAD_RECOVERY_DIR="$dir/recovery" \
     "$ROOT/tools/headless_session.sh" "$dir" 1280x800 "$APP" --maximized --shot-dir "$dir/shots" \
     > "$dir/session.log" 2>&1 &
